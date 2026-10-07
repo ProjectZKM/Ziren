@@ -33,44 +33,29 @@ use zkm_pcs::ZKMCoreOpts;
 /// ran `cargo run -p fibonacci-host`).
 #[test]
 fn real_fibonacci_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci",
-        Some(5u32.to_le_bytes().to_vec()),
-    );
+    real_elf_parity(&example_elf("fibonacci"), Some(5u32.to_le_bytes().to_vec()));
 }
 
 /// fib(1000) — exercises ~40k cycles, so any opcode that fires only
 /// in extended runs will surface here.
 #[test]
 fn real_fibonacci_n1000_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci",
-        Some(1000u32.to_le_bytes().to_vec()),
-    );
+    real_elf_parity(&example_elf("fibonacci"), Some(1000u32.to_le_bytes().to_vec()));
 }
 
 #[test]
 fn real_large_sum_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/large-sum",
-        None,
-    );
+    real_elf_parity(&example_elf("large-sum"), None);
 }
 
 #[test]
 fn real_json_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/json",
-        None,
-    );
+    real_elf_parity(&example_elf("json"), None);
 }
 
 #[test]
 fn real_keccak_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/keccak",
-        None,
-    );
+    real_elf_parity(&example_elf("keccak"), None);
 }
 
 // shape-bin / external-fixture parity tests removed — use the
@@ -265,6 +250,14 @@ fn multu_mfhi_mflo_jit_matches_interpreter() {
 /// Shared driver for "real ELF" parity tests.  `input_bytes` is an
 /// optional pre-allocated stdin chunk for SYSHINTREAD; pass `None`
 /// when the guest doesn't read input.
+/// An example guest ELF as `cargo build` in `examples/` leaves it.
+fn example_elf(name: &str) -> String {
+    format!(
+        "{}/../../../examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
 fn real_elf_parity(elf_path: &str, input_bytes: Option<Vec<u8>>) {
     let bytes = match std::fs::read(elf_path) {
         Ok(b) => b,

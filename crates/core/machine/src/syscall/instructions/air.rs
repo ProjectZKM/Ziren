@@ -219,6 +219,41 @@ impl SyscallInstrsChip {
             local.is_hint_len.result
         };
 
+        for (code, op) in [
+            (SyscallCode::EXIT_UNCONSTRAINED, local.is_exit_unconstrained),
+            (SyscallCode::SYSHINTREAD, local.is_hint_read),
+            (SyscallCode::SYSVERIFY, local.is_sysverify),
+            (SyscallCode::WRITE, local.is_write),
+            (SyscallCode::VERIFY_ZKM_PROOF, local.is_verify_zkm_proof),
+        ] {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id.clone() - AB::Expr::from_u32(code.syscall_id()),
+                op,
+                local.is_real.into(),
+            );
+        }
+        // A real row that is not sent to a table is one of the ten calls handled here; any
+        // other number has no satisfying row, so the chip refuses what the executor refuses.
+        builder.when(local.is_real).assert_eq(
+            local.is_known_local,
+            local.is_halt_check.result
+                + local.is_enter_unconstrained.result
+                + local.is_exit_unconstrained.result
+                + local.is_hint_len.result
+                + local.is_hint_read.result
+                + local.is_sysverify.result
+                + local.is_write.result
+                + local.is_commit.result
+                + local.is_commit_deferred_proofs.result
+                + local.is_verify_zkm_proof.result,
+        );
+        builder.assert_bool(local.is_known_local);
+        builder
+            .when(local.is_real)
+            .when_not(is_send_table::<AB>(local))
+            .assert_one(local.is_known_local);
+
         builder.mark_gadget("hint_input", || {
             (
                 local.is_real * is_hint_len,

@@ -31,26 +31,21 @@ fn main() {
     };
 
     let keeper_dir = geth_dir.join("cmd/keeper");
-    assert!(
-        keeper_dir.exists(),
-        "keeper directory not found: {}",
-        keeper_dir.display()
-    );
+    assert!(keeper_dir.exists(), "keeper directory not found: {}", keeper_dir.display());
 
-    let overlay_path = zkm_build::generate_go_overlay(&out_dir);
+    let envs = [
+        ("GOOS", "linux"),
+        ("GOARCH", "mipsle"),
+        ("GOMIPS", "softfloat"),
+        ("GOTOOLCHAIN", "go1.25.4"),
+    ];
+    let overlay_path = zkm_build::generate_go_overlay_for(&out_dir, &keeper_dir, &envs);
     let mut cmd = Command::new("go");
-    cmd.arg("build")
-        .arg("-tags")
-        .arg("ziren");
+    cmd.arg("build").arg("-tags").arg("ziren");
     if let Some(overlay) = &overlay_path {
         cmd.arg("-overlay").arg(overlay);
     }
-    cmd.arg(".")
-        .current_dir(&keeper_dir)
-        .env("GOOS", "linux")
-        .env("GOARCH", "mipsle")
-        .env("GOMIPS", "softfloat")
-        .env("GOTOOLCHAIN", "go1.25.4");
+    cmd.arg(".").current_dir(&keeper_dir).envs(envs);
     let status = cmd.status().expect("failed to run go build");
 
     if !status.success() {

@@ -80,10 +80,22 @@ where
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
             local.decode_write,
             local.is_real.into(),
         );
+        let mut nop_sum = AB::Expr::ZERO;
+        for (op, code) in local.decode_nop.iter().zip(super::NOP_SYSCALLS) {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                sid.clone() - AB::Expr::from_u32(code as u32),
+                *op,
+                local.is_real.into(),
+            );
+            nop_sum = nop_sum + op.result;
+        }
+        builder.when(local.is_real).assert_eq(local.is_nop_known, nop_sum);
+        builder.assert_bool(local.is_nop_known);
 
         let is_clone = local.decode_clone.result;
         let is_exit_group = local.decode_exit_group.result;
@@ -104,8 +116,11 @@ where
             + is_fnctl
             + is_read
             + is_write;
-        let is_nop: AB::Expr = local.is_real.into() - recognized_sum;
-        builder.when(local.is_real).assert_bool(is_nop.clone());
+        // Every real row is a call the executor accepts: one with semantics, or one of the
+        // no-ops it lists. Any other number has no satisfying row, so the chip refuses
+        // exactly what the executor refuses.
+        builder.when(local.is_real).assert_one(recognized_sum + local.is_nop_known);
+        let is_nop: AB::Expr = local.is_nop_known.into();
 
         let a0_reduce = local.a0.reduce::<AB>();
         IsZeroOperation::<AB::F>::eval(
@@ -424,16 +439,10 @@ impl SysLinuxChip {
         builder.when(is_write).assert_word_zero(*local.output.value());
     }
 
-    /// A Linux syscall none of the decoders recognizes is a no-op: `eval` sets
-    /// `is_nop = is_real − (is_mmap + is_clone + is_exit_group + is_brk + is_fnctl + is_read +
-    /// is_write)`, so every other syscall number, and not only the no-op handlers the executor
-    /// registers, is accepted here with a zero result and a zero output word.
-    ///
-    /// This is wider than the executor, which returns `ExecutionError::UnsupportedSyscall` for a
-    /// number it has no handler for, so an honest trace never contains such a row.  A proof with
-    /// one proves only that the syscall returned 0 and wrote nothing, which is the no-op
-    /// semantics, so the statement stays sound; pinning the accepted numbers to the executor's
-    /// set would make the chip reject what the executor rejects.
+    /// A no-op call (one of `NOP_SYSCALLS`, decoded in `eval`) has a zero result and a zero
+    /// output word, and touches no memory. A number that is neither a no-op nor one of the
+    /// calls with semantics has no satisfying row, so the chip accepts exactly the calls the
+    /// executor accepts.
     fn eval_nop<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,

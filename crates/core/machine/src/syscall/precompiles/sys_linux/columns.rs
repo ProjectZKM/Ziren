@@ -12,6 +12,9 @@ use crate::{
 
 pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
 
+/// How many no-op calls the chip decodes.
+pub const NUM_NOP_SYSCALLS: usize = super::NOP_SYSCALLS.len();
+
 /// Linux Syscall AIR columns.
 ///
 /// All branch selectors are **derived** from `syscall_id` / `a0` / `a1` via `IsZeroOperation`.
@@ -35,7 +38,7 @@ pub struct SysLinuxCols<T> {
     /// A3 output register write.
     pub output: MemoryReadWriteCols<T>,
 
-    // Canonical syscall decoder (17 cols)
+    // Canonical syscall decoder (52 cols)
     pub decode_mmap: IsZeroOperation<T>,
     pub decode_mmap2: IsZeroOperation<T>,
     pub decode_clone: IsZeroOperation<T>,
@@ -46,6 +49,10 @@ pub struct SysLinuxCols<T> {
     pub decode_write: IsZeroOperation<T>,
     /// Stored: decode_mmap.result + decode_mmap2.result (for degree).
     pub is_mmap: T,
+    /// One decode per no-op call (`NOP_SYSCALLS`, in that order).
+    pub decode_nop: [IsZeroOperation<T>; NUM_NOP_SYSCALLS],
+    /// Stored: the sum of the no-op decodes (for degree).
+    pub is_nop_known: T,
 
     // Canonical a0 / a1 decoder (10 cols)
     pub decode_a0_0: IsZeroOperation<T>,

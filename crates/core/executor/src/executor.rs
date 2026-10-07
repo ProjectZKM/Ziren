@@ -3218,13 +3218,14 @@ impl<'a> Executor<'a> {
 
             let pc_start = self.state.pc;
             let pc_base = self.program.pc_base;
+            const CLK_BUMP: u64 = 1;
             let params = BuildParams {
                 program_size: self.program.instructions.len(),
                 memory_size: 4096,
                 max_trace_size: 4096,
                 pc_start,
                 pc_base,
-                clk_bump: 1,
+                clk_bump: CLK_BUMP,
                 mem_read_recorder: None,
             };
             let jit_fn_arc = match crate::jit_runner::cached_jit_function(
@@ -3294,6 +3295,10 @@ impl<'a> Executor<'a> {
 
             let raw_exit = ctx.exit_code;
             let normalised_exit = if raw_exit == 0x8000_0000 { 0 } else { raw_exit };
+            if raw_exit == 0xDEAD_C0E0 || raw_exit == 0xDEAD_C0E1 {
+                // teq (register / immediate form) trapped: what the interpreter reports
+                return Err(ExecutionError::ExceptionOrTrap());
+            }
             if raw_exit == 0xDEAD_C0DE {
                 return Err(ExecutionError::UnsupportedInstruction(0));
             }
@@ -3327,7 +3332,8 @@ impl<'a> Executor<'a> {
             self.state.global_clk = ctx.global_clk;
 
             if self.print_report && self.report.opcode_counts.values().all(|&v| v == 0) {
-                let cycles = (ctx.global_clk / 5).max(1);
+                // the JIT counts no opcodes: report its clock, one bump per instruction
+                let cycles = (ctx.global_clk / CLK_BUMP).max(1);
                 self.report.opcode_counts[crate::Opcode::ADD] = cycles;
             }
             if raw_exit != 0 && raw_exit & 0xC000_0000 == 0 {

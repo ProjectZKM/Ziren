@@ -138,6 +138,11 @@ impl SysLinuxChip {
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_READ as u32));
         cols.decode_write
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_WRITE as u32));
+        for (op, code) in cols.decode_nop.iter_mut().zip(super::NOP_SYSCALLS) {
+            op.populate_from_field_element(sid - F::from_u32(code as u32));
+        }
+        cols.is_nop_known =
+            F::from_bool(super::NOP_SYSCALLS.iter().any(|&c| event.syscall_code == c as u32));
 
         let is_mmap = event.syscall_code == SyscallCode::SYS_MMAP as u32
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;

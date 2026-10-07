@@ -81,7 +81,9 @@ func main() {
 }
 ```
 
-A Go guest is compiled with the standard Go toolchain for `GOOS=linux GOARCH=mipsle GOMIPS=softfloat`, with the `ziren` build tag and the overlay that `zkm_build::generate_go_overlay` produces. The example's [`host/build.rs`](https://github.com/ProjectZKM/Ziren/blob/main/examples/simple-go/host/build.rs) shows the full command; the host then embeds the resulting binary with `include_bytes!`.
+A Go guest is compiled with the standard Go toolchain for `GOOS=linux GOARCH=mipsle GOMIPS=softfloat`, with the `ziren` build tag and the overlay that `zkm_build::generate_go_overlay_for` produces. The example's [`host/build.rs`](https://github.com/ProjectZKM/Ziren/blob/main/examples/simple-go/host/build.rs) shows the full command; the host then embeds the resulting binary with `include_bytes!`.
+
+The overlay replaces the runtime's `sys_linux_mipsx.s`, so that `exit` commits the public values and the clock calls never reach the zkVM. It must name the runtime file of the Go installation that actually builds the guest: pass `generate_go_overlay_for` the guest's module directory and the same environment as the `go build` command, so a `toolchain` line in `go.mod` or a `GOTOOLCHAIN` value resolves to the same installation. That version of Go (1.25.4 for the examples) must be installed, with its `go` first on `PATH`. A toolchain that `go` downloads by itself lives in the module cache, where `go build` refuses an overlay, and the build stops with an error that says so. A guest built without the overlay still runs, but its committed digest is zero and no proof of it verifies.
 
 ### C/C++ Example: [Fibonacci_C](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/guest/src/main.rs)
 

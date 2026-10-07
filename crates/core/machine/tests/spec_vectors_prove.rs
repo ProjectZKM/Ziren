@@ -97,7 +97,7 @@ fn spec_vectors_prove_and_verify() {
 fn cannon_programs_prove_and_verify() {
     setup_logger();
     let dir = std::env::var("CANNON_MIPS_TESTS").unwrap_or_else(|_| {
-        "/data/stephen/cannon-mips/mipsevm/open_mips_tests/test/bin".to_string()
+        std::env::temp_dir().join("open_mips_tests/test/bin").to_string_lossy().into_owned()
     });
     let Ok(entries) = std::fs::read_dir(&dir) else {
         tracing::info!("CANNON_MIPS_TESTS not found at {dir}; skipping");

@@ -42,10 +42,14 @@
 //! resulting PC.  The interpreter thus owns every error path, the
 //! unconstrained blocks' bookkeeping, and the precompiles.
 //!
-//! Delay slots are resolved statically: the program is rejected (host
-//! falls back to the interpreter) when a branch/jump is followed by
-//! another branch/jump or ends the program, so only the instruction
-//! after a branch/jump reads the delayed target.  It rolls
+//! Delay slots are resolved statically: a branch/jump followed by another
+//! branch/jump, a branch/jump that ends the program and a branch form the
+//! lowering does not model are *bail sites* (see [`producer_bail_sites`]),
+//! which the host lowers as trap sites whose handler hands the rest of the
+//! run to the interpreter, so only the instruction after a lowered
+//! branch/jump reads the delayed target. A compiler never emits these
+//! forms, but the executable segment of an ELF also holds data (a Go
+//! binary's headers and notes, for one) whose words can decode as them.  It rolls
 //! `delayed_jump_target` into `pending_jump_at_start` at its start and
 //! dispatches through the jump table at its end; the pending slot is
 //! never cleared, so nothing else may read it.
@@ -143,8 +147,7 @@ pub struct ProducerConfig {
     pub syscall_handler: SyscallHandler,
 }
 
-/// Why a program cannot run on the producer (the host uses the
-/// interpreter instead).
+/// Why a branch/jump cannot be lowered by the delay-slot scheme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProducerReject {
     /// A branch/jump is followed by another branch/jump.
@@ -224,6 +227,30 @@ pub fn producer_reject(instrs: &[DriverInstruction]) -> Option<ProducerReject> {
         }
     }
     None
+}
+
+/// The instructions the producer must not run natively, ascending: every
+/// branch/jump [`producer_reject`] would report, and the branch/jump in the
+/// delay slot of a [`ProducerReject::BranchInDelaySlot`], which a jump could
+/// reach directly. With these replaced by trap sites, `producer_reject`
+/// accepts the program.
+pub fn producer_bail_sites(instrs: &[DriverInstruction]) -> Vec<u32> {
+    let mut sites = Vec::new();
+    let mut start = 0;
+    while let Some(reject) = producer_reject(&instrs[start..]) {
+        let (i, delay_slot_too) = match reject {
+            ProducerReject::BranchInDelaySlot(i) => (i, true),
+            ProducerReject::BranchAtEnd(i) | ProducerReject::BranchForm(i) => (i, false),
+        };
+        let i = start as u32 + i;
+        sites.push(i);
+        if delay_slot_too {
+            sites.push(i + 1);
+        }
+        start = i as usize + 1;
+    }
+    sites.dedup();
+    sites
 }
 
 /// The instruction runs in the interpreter (trap site) rather than

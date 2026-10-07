@@ -36,7 +36,11 @@ namespace zkm_core_machine_sys::syscall_instrs {
         cols.is_sys_linux = F::from_bool((event.a_record.prev_value & 0x0ff00u) != 0);
 
         auto prev_a_bytes = u32_to_le_bytes(event.a_record.prev_value);
-        bool send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        // Only a precompile call range-checks its arguments, as in
+        // `SyscallInstrsChip::event_to_row`: the byte lookups the check sends are
+        // counted from the host rows, so a Linux call (nonzero byte 1) must not
+        // set the flags.
+        bool send_to_precompile = prev_a_bytes[2] == 1;
         bool is_halt_val = cols.is_halt == F::one();
 
         // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
@@ -81,6 +85,48 @@ namespace zkm_core_machine_sys::syscall_instrs {
             syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS))
         );
 
+        // The other calls handled without a table, and whether the row is one of the ten:
+        // mirrors `SyscallInstrsChip::event_to_row` (instructions/trace.rs).
+        populate_is_zero_operation(
+            cols.is_exit_unconstrained,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::EXIT_UNCONSTRAINED))
+        );
+        populate_is_zero_operation(
+            cols.is_hint_read,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::SYSHINTREAD))
+        );
+        populate_is_zero_operation(
+            cols.is_sysverify,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::SYSVERIFY))
+        );
+        populate_is_zero_operation(
+            cols.is_write,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::WRITE))
+        );
+        populate_is_zero_operation(
+            cols.is_verify_zkm_proof,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::VERIFY_ZKM_PROOF))
+        );
+        {
+            const SyscallCode local_calls[] = {
+                SyscallCode::HALT,
+                SyscallCode::WRITE,
+                SyscallCode::ENTER_UNCONSTRAINED,
+                SyscallCode::EXIT_UNCONSTRAINED,
+                SyscallCode::SYSHINTLEN,
+                SyscallCode::SYSHINTREAD,
+                SyscallCode::SYSVERIFY,
+                SyscallCode::COMMIT,
+                SyscallCode::COMMIT_DEFERRED_PROOFS,
+                SyscallCode::VERIFY_ZKM_PROOF,
+            };
+            bool known_local = false;
+            for (const SyscallCode c : local_calls) {
+                known_local = known_local || syscall_id == F::from_canonical_u32(to_syscall_id(c));
+            }
+            cols.is_known_local = known_local ? F::one() : F::zero();
+        }
+
         // If the syscall is `COMMIT` or `COMMIT_DEFERRED_PROOFS`, set the index bitmap and
         // digest word.
         if (syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT))
@@ -92,8 +138,8 @@ namespace zkm_core_machine_sys::syscall_instrs {
         // Populate unified KoalaBear range check flags and columns.
         bool is_commit_deferred =
             syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS));
-        bool op_b_needs_check = send_to_table || is_halt_val;
-        bool op_c_needs_check = send_to_table || is_commit_deferred;
+        bool op_b_needs_check = send_to_precompile || is_halt_val;
+        bool op_c_needs_check = send_to_precompile || is_commit_deferred;
 
         if (op_b_needs_check) {
             cols.op_b_check = F::one();

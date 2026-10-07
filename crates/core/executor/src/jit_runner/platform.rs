@@ -470,6 +470,8 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
             .registers
             .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
     }
+    // the clock too: a syscall that reads it (a cycle-tracker scope) sees the JIT's
+    executor.state.global_clk = ctx.global_clk;
 
     let syscall_id_peek = ctx.registers[Register::V0 as usize];
     let syscall_peek = SyscallCode::from_u32(syscall_id_peek);

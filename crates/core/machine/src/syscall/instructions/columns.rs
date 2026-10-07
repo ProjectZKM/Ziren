@@ -46,6 +46,16 @@ pub struct SyscallInstrColumns<T> {
     pub is_exit_group_check: IsZeroOperation<T>,
     pub is_commit: IsZeroOperation<T>,
     pub is_commit_deferred_proofs: IsZeroOperation<T>,
+    /// The other calls handled here, without a table: decoded so that a real row that is
+    /// not sent to a table is one of the ten local calls (halt, write, enter / exit
+    /// unconstrained, hint len / read, sysverify, commit, commit deferred, verify proof).
+    pub is_exit_unconstrained: IsZeroOperation<T>,
+    pub is_hint_read: IsZeroOperation<T>,
+    pub is_sysverify: IsZeroOperation<T>,
+    pub is_write: IsZeroOperation<T>,
+    pub is_verify_zkm_proof: IsZeroOperation<T>,
+    /// Stored: the sum of the ten local decodes (for degree).
+    pub is_known_local: T,
 
     pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],
 
