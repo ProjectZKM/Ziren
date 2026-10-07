@@ -36,7 +36,11 @@ namespace zkm_core_machine_sys::syscall_instrs {
         cols.is_sys_linux = F::from_bool((event.a_record.prev_value & 0x0ff00u) != 0);
 
         auto prev_a_bytes = u32_to_le_bytes(event.a_record.prev_value);
-        bool send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        // Only a precompile call range-checks its arguments, as in
+        // `SyscallInstrsChip::event_to_row`: the byte lookups the check sends are
+        // counted from the host rows, so a Linux call (nonzero byte 1) must not
+        // set the flags.
+        bool send_to_precompile = prev_a_bytes[2] == 1;
         bool is_halt_val = cols.is_halt == F::one();
 
         // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
@@ -134,8 +138,8 @@ namespace zkm_core_machine_sys::syscall_instrs {
         // Populate unified KoalaBear range check flags and columns.
         bool is_commit_deferred =
             syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS));
-        bool op_b_needs_check = send_to_table || is_halt_val;
-        bool op_c_needs_check = send_to_table || is_commit_deferred;
+        bool op_b_needs_check = send_to_precompile || is_halt_val;
+        bool op_c_needs_check = send_to_precompile || is_commit_deferred;
 
         if (op_b_needs_check) {
             cols.op_b_check = F::one();
