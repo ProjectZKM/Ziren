@@ -172,7 +172,7 @@ export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `ZKM_GPU_IMAGE` | none | The image, as `repo:tag@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413`, with the tag of the SDK's version: `ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413` for Ziren 2.0.0. |
+| `ZKM_GPU_IMAGE` | none | The image, as `repo:tag@sha256:<digest>`, with the tag of the SDK's version: `ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413` for Ziren 2.0.0. |
 | `ZKM_ALLOW_MUTABLE_GPU_IMAGE` | unset | `1` accepts a tag without a digest, such as `:v2.0.0` alone; for local development only. |
 | `CUDA_VISIBLE_DEVICE_INDEX` | all GPUs | The one GPU the container uses (`--gpus device=<index>`). |
 | `CUDA_PORT` | `3000` | Host port the container's server is published on. Give each concurrent client its own port. |
