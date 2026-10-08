@@ -46,3 +46,6 @@ module, its table naming the generator, module and arguments of each, and then t
   `DivRem`, `LoadNarrow`, `LoadWord`, `MemoryUnaligned`), where the generated proof runs out of its
   tactic budget and would be admitted; the generator uses a proof only
   when its statement is exactly the generated one.
+- `padding_postconditions.lean` does the same for a chip's `padding` module (`CloClz`: a
+  padding row cannot set `is_bb_zero`, because the shift amount it would force, `31 − 32`, is
+  not a byte).
