@@ -127,7 +127,11 @@ how the `SysLinux` padding rows were found to carry `has_comparison` and the dec
 `M.constraints`, `M.inputs`, `M.outputs`, `M.assumed`, the relation `M.rel`, and a theorem
 `M.deterministic` saying that two satisfying rows agreeing on their inputs agree on their
 outputs, and `M.postconditions` for the multiplicity bits; the `padding` module's
-`postconditions` theorem states that every multiplicity is zero on a padding row.  Determinism
+`postconditions` theorem states that every multiplicity is zero on a padding row.  A
+postcondition is a fact about one witness, so its proof projects the few conjuncts that reach its
+columns out of `constraints w` and closes with `grind`, splitting the goal's bits when needed; a
+multiplicity that is a bit only because a bus input is one takes that as a hypothesis
+(`hbit_vN`), the same assumption the triage reports as `ASSUMED`.  Determinism
 of the abstract byte-table helpers enters as a hypothesis, never an axiom, and the closing
 tactic leaves a `sorry` when it cannot finish, so files always elaborate and open obligations
 are the `declaration uses 'sorry'` warnings.

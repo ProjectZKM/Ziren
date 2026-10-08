@@ -152,6 +152,12 @@ fn report_obligations(tag: &str, label: &str, module: &PicusModule) {
             ZeroVerdict::Nonzero(c) => unproved.push(format!("{origin} {shown} = {c}")),
             ZeroVerdict::Unproved(why) => unproved.push(format!("{origin} {shown}: {why}")),
             ZeroVerdict::OnInputs(vs) => {
+                zkm_picus::lean::ASSUMED_BITS
+                    .lock()
+                    .unwrap()
+                    .entry(module.name.clone())
+                    .or_default()
+                    .extend(vs.iter().copied());
                 let vs: Vec<String> =
                     vs.iter().map(|v| zkm_picus::propagate::var_name(*v)).collect();
                 assumed.push(format!("{origin} {shown} if bus inputs {} are bits", vs.join(", ")));

@@ -1810,6 +1810,11 @@ fn snippet(ident: &str, vars: &BTreeSet<usize>, chunks: &[usize]) -> Option<Stri
     )
 }
 
+/// Input variables a module's bit postconditions assume to be bits, by module name: filled by
+/// the CLI's triage from the obligations the engine could close only on that assumption.
+pub static ASSUMED_BITS: std::sync::Mutex<BTreeMap<String, BTreeSet<usize>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
 /// A hand-written proof of module `ident`'s `postconditions`, read from
 /// `<ident>_postconditions.lean` in the snippet directory.  The file holds whole theorems, one per
 /// chip whose module has that name; a proof is used only when its statement is exactly the one
@@ -2535,7 +2540,19 @@ fn write_module(
         };
         writeln!(w, "/-- {what} -/")?;
         let posts: Vec<String> = m.postconditions.iter().map(render_constraint).collect();
-        let mut stmt = String::from("theorem postconditions (w : W) (hw : constraints w) :\n");
+        // Multiplicities that are bits only because an input the row receives from another
+        // table is one (an opcode flag of the program table) take that as a hypothesis.
+        let assumed_bits: Vec<usize> = ASSUMED_BITS
+            .lock()
+            .unwrap()
+            .get(&m.name)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+        let mut stmt = String::from("theorem postconditions (w : W) (hw : constraints w)");
+        for v in &assumed_bits {
+            stmt.push_str(&format!("\n    (hbit_v{v} : w.v{v} * (w.v{v} - (1 : F)) = 0)"));
+        }
+        stmt.push_str(" :\n");
         for (i, p) in posts.iter().enumerate() {
             let sep = if i + 1 == posts.len() { " := by" } else { " ∧" };
             stmt.push_str(&format!("    {p}{sep}\n"));
@@ -2578,14 +2595,68 @@ fn write_module(
         let used_chunks: BTreeSet<usize> = used.iter().map(|i| i / CHUNK).collect();
         let used_conj = used_chunks.iter().map(|k| chunks[*k].len()).sum::<usize>();
         let used_splits = used.iter().any(|i| m.constraints.get(*i).is_some_and(has_case_split));
-        let post_tactic = if used_chunks.is_empty() {
-            "picus_safe picus_det".to_string()
-        } else if used_conj <= AUTOMATION_MAX_CONJUNCTS && !used_splits {
-            let names: Vec<String> = used_chunks.iter().map(|k| chunk_names[*k].clone()).collect();
-            format!("picus_safe (picus_det [{}])", names.join(", "))
-        } else {
-            tactic.clone()
+        // A postcondition is a fact about one witness.  The proof projects the chunks that
+        // reach its columns out of `hw`, names their conjuncts, keeps only those that mention
+        // the reached columns (first the small polynomial ones, then all of them, when `grind`
+        // needs a case split on the bits the goal mentions) and lets `grind` find the
+        // consequence; `picus_safe` admits the goal if every attempt fails.
+        let chunk_of = |i: usize| i / CHUNK;
+        let projection = |k: usize| -> String {
+            let last = chunks.len() - 1;
+            let mut p = String::from("hw");
+            for _ in 0..k.min(last) {
+                p.push_str(".2");
+            }
+            if k < last {
+                p.push_str(".1");
+            }
+            p
         };
+        let extract = |keep: &BTreeSet<usize>| -> String {
+            let ks: BTreeSet<usize> = keep.iter().map(|i| chunk_of(*i)).collect();
+            let mut t = String::new();
+            for k in &ks {
+                let n = chunks[*k].len();
+                t.push_str(&format!("have hk{k} : constraints_{k} w := {}; ", projection(*k)));
+                t.push_str(&format!("simp only [constraints_{k}] at hk{k}; "));
+                if n == 1 {
+                    t.push_str(&format!("have c{k}_0 := hk{k}; clear hk{k}; "));
+                } else {
+                    let names: Vec<String> = (0..n).map(|i| format!("c{k}_{i}")).collect();
+                    t.push_str(&format!("obtain ⟨{}⟩ := hk{k}; ", names.join(", ")));
+                }
+                let drop: Vec<String> = (0..n)
+                    .filter(|i| !keep.contains(&(k * CHUNK + i)))
+                    .map(|i| format!("c{k}_{i}"))
+                    .collect();
+                if !drop.is_empty() {
+                    t.push_str(&format!("clear {}; ", drop.join(" ")));
+                }
+            }
+            t.push_str("clear hw");
+            t
+        };
+        let small: BTreeSet<usize> = used
+            .iter()
+            .copied()
+            .filter(|i| {
+                conj[*i].len() <= 200 && !conj[*i].contains(".val") && !conj[*i].contains("⁻¹")
+            })
+            .collect();
+        let post_tactic = if m.name == "top" {
+            tactic.clone()
+        } else if used.is_empty() {
+            "picus_safe grind".to_string()
+        } else {
+            let mut alts = Vec::new();
+            if !small.is_empty() && small.len() < used.len() {
+                alts.push(format!("({}; grind)", extract(&small)));
+            }
+            alts.push(format!("({}; grind)", extract(&used)));
+            alts.push(format!("({}; picus_split_bits 4; all_goals grind)", extract(&used)));
+            format!("picus_safe (first\n    | {})", alts.join("\n    | "))
+        };
+        let _ = (used_chunks, used_conj, used_splits);
         match postconditions_snippet(&ident, &stmt) {
             Some(proof) => writeln!(w, "{proof}\n")?,
             None => writeln!(w, "  {post_tactic}\n")?,
