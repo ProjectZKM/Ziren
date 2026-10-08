@@ -2683,7 +2683,36 @@ fn write_module(
                     conj[*i].len() <= 200 && !conj[*i].contains(".val") && !conj[*i].contains("⁻¹")
                 })
                 .collect();
+            // Fewest conjuncts first.  The tiny set: the narrow conjuncts that define a goal
+            // column by at most one other column, then the narrow facts over the columns so
+            // reached (their bit facts), so a column used as a gate or in port bindings does
+            // not pull those conjuncts in.  Then the small polynomial ones, then all of them.
+            let narrow = |i: usize| {
+                conj_vars[i].len() <= 4
+                    && conj[i].len() <= 200
+                    && !conj[i].contains(".val")
+                    && !conj[i].contains("⁻¹")
+            };
+            let mut tiny: BTreeSet<usize> = BTreeSet::new();
+            let mut treach = seed.clone();
+            for hop in 0..2 {
+                let fresh = if hop == 0 { 1 } else { 0 };
+                for (i, vs) in conj_vars.iter().enumerate() {
+                    if narrow(i)
+                        && !vs.is_disjoint(&treach)
+                        && vs.difference(&treach).count() <= fresh
+                    {
+                        tiny.insert(i);
+                    }
+                }
+                for i in &tiny {
+                    treach.extend(&conj_vars[*i]);
+                }
+            }
             let mut alts = Vec::new();
+            if !tiny.is_empty() && tiny.len() < small.len() {
+                alts.push(format!("({}; grind)", extract(&tiny)));
+            }
             if !small.is_empty() && small.len() < used.len() {
                 alts.push(format!("({}; grind)", extract(&small)));
             }
