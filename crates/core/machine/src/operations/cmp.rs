@@ -113,8 +113,8 @@ impl<F: Field> GtColsBytes<F> {
             sum_flags = sum_flags.clone() + flag.into();
         }
         builder.when(is_real).assert_bool(sum_flags.clone());
-        builder.when(is_real).assert_eq(cols.has_comparison, sum_flags);
-        builder.when(is_real).assert_bool(cols.has_comparison);
+        // `has_comparison` is a lookup multiplicity, so it must vanish off real rows.
+        builder.assert_eq(cols.has_comparison, sum_flags * is_real);
 
         let mut is_inequality_visited = AB::Expr::ZERO;
 
