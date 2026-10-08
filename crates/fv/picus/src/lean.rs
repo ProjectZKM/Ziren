@@ -731,8 +731,9 @@ impl Replay<'_> {
     /// The `GtColsBytes` result through `gt_bytes_det`, found by the shapes of its conjuncts
     /// (gate `g` already the constant `1`): the two lookups `r·g − 1 = 0 ↔ bc·g < ac·g` and
     /// `(1 − r)·h − 1 = 0 ↔ ac·h < bc·h`, the selections `g·(ac − Σ aᵢ·fᵢ)` and
-    /// `g·(bc − Σ bᵢ·fᵢ)`, the equalities above each flag, and the bits.  Returns the
-    /// hypotheses and the proof of `y_v = x_v`.
+    /// `g·(bc − Σ bᵢ·fᵢ)`, the equalities above each flag, and the bits; `h` is boolean by its
+    /// own bit constraint or, when the chip only pins `h = g·Σ fᵢ`, by the sum's bit constraint
+    /// through `hh`.  Returns the hypotheses and the proof of `y_v = x_v`.
     fn gt_bytes_step(&self, v: usize) -> Option<(Vec<String>, String)> {
         type Terms = BTreeMap<Vec<(usize, u32)>, u64>;
         let terms = |p: &Poly| -> Terms { p.terms().map(|(m, c)| (m.to_vec(), c)).collect() };
@@ -869,13 +870,38 @@ impl Replay<'_> {
                 ok.then_some(*o)
             })
         };
+        // `h = Σ fᵢ` either under the gate, `g·(h − Σ fᵢ)`, or with `h` itself ungated,
+        // `h − g·Σ fᵢ`, the form that also pins the lookup multiplicity to zero off real rows.
         let hh = eqs.iter().find_map(|(o, tm)| {
             let ok = tm.len() == 5
-                && tm.get(&mono(&[(g, 1), (h, 1)])) == Some(&1)
+                && (tm.get(&mono(&[(g, 1), (h, 1)])) == Some(&1)
+                    || tm.get(&mono(&[(h, 1)])) == Some(&1))
                 && flags.iter().all(|&f| tm.get(&mono(&[(g, 1), (f, 1)])) == Some(&(P - 1)));
             ok.then_some(*o)
         })?;
-        let (hhb, hr) = (quad(h)?, quad(v)?);
+        let hr = quad(v)?;
+        // `h` boolean: either its own bit constraint `g·(h² − h)`, or derived from the sum's,
+        // `g·(Σ fᵢ)·(Σ fᵢ − 1)` (4 squares, 6 doubled cross terms, 4 linear), together with `hh`.
+        let sum_bool = || -> Option<usize> {
+            let fl: Vec<usize> = flags.iter().copied().collect();
+            eqs.iter().find_map(|(o, tm)| {
+                let ok = tm.len() == 14
+                    && fl.iter().all(|&f| {
+                        tm.get(&mono(&[(g, 1), (f, 2)])) == Some(&1)
+                            && tm.get(&mono(&[(g, 1), (f, 1)])) == Some(&(P - 1))
+                    })
+                    && fl.iter().enumerate().all(|(i, &f1)| {
+                        fl.iter()
+                            .skip(i + 1)
+                            .all(|&f2| tm.get(&mono(&[(g, 1), (f1, 1), (f2, 1)])) == Some(&2))
+                    });
+                ok.then_some(*o)
+            })
+        };
+        let (hhb, hhb_from_sum) = match quad(h) {
+            Some(o) => (o, false),
+            None => (sum_bool()?, true),
+        };
         let fbits: Vec<usize> = ranked.iter().map(|r| quad(r.2 .0)).collect::<Option<_>>()?;
         let order: Vec<(usize, usize, usize)> = ranked.iter().map(|r| r.2).collect();
         let eo: Vec<usize> = ranked.iter().map(|r| r.0).collect();
@@ -892,7 +918,18 @@ impl Replay<'_> {
         let hyps = |p: char| -> String {
             let mut hs: Vec<String> = fbits.iter().map(|&o| lc(p, o)).collect();
             hs.push(lc(p, hh));
-            hs.push(lc(p, hhb));
+            if hhb_from_sum {
+                // h(h − 1) = S(S − 1) + (h + S − 1)(h − S) with S = Σ fᵢ
+                let n = |x: usize| if p == 'c' { self.xn(x) } else { self.yn(x) };
+                let s: Vec<String> = flags.iter().map(|&f| n(f)).collect();
+                hs.push(format!(
+                    "(by linear_combination {p}{hhb} + ({} + {} - 1) * {p}{hh})",
+                    n(h),
+                    s.join(" + ")
+                ));
+            } else {
+                hs.push(lc(p, hhb));
+            }
             hs.extend(eo.iter().rev().map(|&o| lc(p, o)));
             hs.push(lc(p, oa));
             hs.push(lc(p, ob));
