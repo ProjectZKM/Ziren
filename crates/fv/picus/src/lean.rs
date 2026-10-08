@@ -2541,9 +2541,54 @@ fn write_module(
             stmt.push_str(&format!("    {p}{sep}\n"));
         }
         write!(w, "{stmt}")?;
+        // The postconditions speak about a few columns, so the proof unfolds only the chunks
+        // that mention them or their definitions (two hops), not the whole module.
+        let mut post_vars = BTreeSet::new();
+        for c in &m.postconditions {
+            collect_vars_constraint(c, &mut post_vars);
+        }
+        let conj_vars: Vec<BTreeSet<usize>> = m
+            .constraints
+            .iter()
+            .map(|c| {
+                let mut vs = BTreeSet::new();
+                collect_vars_constraint(c, &mut vs);
+                vs
+            })
+            .chain(m.calls.iter().map(|call| {
+                let mut vs = BTreeSet::new();
+                for e in call.inputs.iter().chain(&call.outputs) {
+                    collect_vars_expr(e, &mut vs);
+                }
+                vs
+            }))
+            .collect();
+        let mut reach = post_vars.clone();
+        let mut used: BTreeSet<usize> = BTreeSet::new();
+        for _ in 0..2 {
+            for (i, vs) in conj_vars.iter().enumerate() {
+                if !vs.is_disjoint(&reach) {
+                    used.insert(i);
+                }
+            }
+            for i in &used {
+                reach.extend(&conj_vars[*i]);
+            }
+        }
+        let used_chunks: BTreeSet<usize> = used.iter().map(|i| i / CHUNK).collect();
+        let used_conj = used_chunks.iter().map(|k| chunks[*k].len()).sum::<usize>();
+        let used_splits = used.iter().any(|i| m.constraints.get(*i).is_some_and(has_case_split));
+        let post_tactic = if used_chunks.is_empty() {
+            "picus_safe picus_det".to_string()
+        } else if used_conj <= AUTOMATION_MAX_CONJUNCTS && !used_splits {
+            let names: Vec<String> = used_chunks.iter().map(|k| chunk_names[*k].clone()).collect();
+            format!("picus_safe (picus_det [{}])", names.join(", "))
+        } else {
+            tactic.clone()
+        };
         match postconditions_snippet(&ident, &stmt) {
             Some(proof) => writeln!(w, "{proof}\n")?,
-            None => writeln!(w, "  {tactic}\n")?,
+            None => writeln!(w, "  {post_tactic}\n")?,
         }
     }
 
