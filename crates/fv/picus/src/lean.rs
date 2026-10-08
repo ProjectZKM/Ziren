@@ -2557,8 +2557,7 @@ fn write_module(
             let sep = if i + 1 == posts.len() { " := by" } else { " ∧" };
             stmt.push_str(&format!("    {p}{sep}\n"));
         }
-        write!(w, "{stmt}")?;
-        // The postconditions speak about a few columns, so the proof unfolds only the chunks
+        // The postconditions speak about a few columns, so a proof unfolds only the chunks
         // that mention them or their definitions (two hops), not the whole module.
         let mut post_vars = BTreeSet::new();
         for c in &m.postconditions {
@@ -2580,26 +2579,21 @@ fn write_module(
                 vs
             }))
             .collect();
-        let mut reach = post_vars.clone();
-        let mut used: BTreeSet<usize> = BTreeSet::new();
-        for _ in 0..2 {
-            for (i, vs) in conj_vars.iter().enumerate() {
-                if !vs.is_disjoint(&reach) {
-                    used.insert(i);
+        let reach_of = |seed: &BTreeSet<usize>| -> BTreeSet<usize> {
+            let mut reach = seed.clone();
+            let mut used: BTreeSet<usize> = BTreeSet::new();
+            for _ in 0..2 {
+                for (i, vs) in conj_vars.iter().enumerate() {
+                    if !vs.is_disjoint(&reach) {
+                        used.insert(i);
+                    }
+                }
+                for i in &used {
+                    reach.extend(&conj_vars[*i]);
                 }
             }
-            for i in &used {
-                reach.extend(&conj_vars[*i]);
-            }
-        }
-        let used_chunks: BTreeSet<usize> = used.iter().map(|i| i / CHUNK).collect();
-        let used_conj = used_chunks.iter().map(|k| chunks[*k].len()).sum::<usize>();
-        let used_splits = used.iter().any(|i| m.constraints.get(*i).is_some_and(has_case_split));
-        // A postcondition is a fact about one witness.  The proof projects the chunks that
-        // reach its columns out of `hw`, names their conjuncts, keeps only those that mention
-        // the reached columns (first the small polynomial ones, then all of them, when `grind`
-        // needs a case split on the bits the goal mentions) and lets `grind` find the
-        // consequence; `picus_safe` admits the goal if every attempt fails.
+            used
+        };
         let chunk_of = |i: usize| i / CHUNK;
         let projection = |k: usize| -> String {
             let last = chunks.len() - 1;
@@ -2636,18 +2630,22 @@ fn write_module(
             t.push_str("clear hw");
             t
         };
-        let small: BTreeSet<usize> = used
-            .iter()
-            .copied()
-            .filter(|i| {
-                conj[*i].len() <= 200 && !conj[*i].contains(".val") && !conj[*i].contains("⁻¹")
-            })
-            .collect();
-        let post_tactic = if m.name == "top" {
-            tactic.clone()
-        } else if used.is_empty() {
-            "picus_safe grind".to_string()
-        } else {
+        // The proof of one conjunct: project the conjuncts that reach its columns out of
+        // `hw` (first the small polynomial ones, then all of them, then with the goal's bits
+        // split) and let `grind` find the consequence; `picus_safe` admits it if every
+        // attempt fails.
+        let post_proof = |seed: &BTreeSet<usize>| -> String {
+            let used = reach_of(seed);
+            if used.is_empty() {
+                return "picus_safe grind".to_string();
+            }
+            let small: BTreeSet<usize> = used
+                .iter()
+                .copied()
+                .filter(|i| {
+                    conj[*i].len() <= 200 && !conj[*i].contains(".val") && !conj[*i].contains("⁻¹")
+                })
+                .collect();
             let mut alts = Vec::new();
             if !small.is_empty() && small.len() < used.len() {
                 alts.push(format!("({}; grind)", extract(&small)));
@@ -2656,10 +2654,42 @@ fn write_module(
             alts.push(format!("({}; picus_split_bits 4; all_goals grind)", extract(&used)));
             format!("picus_safe (first\n    | {})", alts.join("\n    | "))
         };
-        let _ = (used_chunks, used_conj, used_splits);
+        let _ = post_vars;
+        let hyps: String = assumed_bits.iter().map(|v| format!(" hbit_v{v}")).collect();
         match postconditions_snippet(&ident, &stmt) {
-            Some(proof) => writeln!(w, "{proof}\n")?,
-            None => writeln!(w, "  {post_tactic}\n")?,
+            Some(proof) => {
+                write!(w, "{stmt}")?;
+                writeln!(w, "{proof}\n")?
+            }
+            None if m.name == "top" => {
+                write!(w, "{stmt}")?;
+                writeln!(w, "  {tactic}\n")?
+            }
+            None => {
+                // One lemma per conjunct, each over the conjuncts that reach its columns.
+                let mut lemmas = String::new();
+                let mut terms = Vec::new();
+                for (i, c) in m.postconditions.iter().enumerate() {
+                    let mut seed = BTreeSet::new();
+                    collect_vars_constraint(c, &mut seed);
+                    let mut head =
+                        format!("theorem postcondition_{i} (w : W) (hw : constraints w)");
+                    for v in &assumed_bits {
+                        head.push_str(&format!(
+                            "\n    (hbit_v{v} : w.v{v} * (w.v{v} - (1 : F)) = 0)"
+                        ));
+                    }
+                    lemmas.push_str(&format!(
+                        "{head} :\n    {} := by\n  {}\n\n",
+                        posts[i],
+                        post_proof(&seed)
+                    ));
+                    terms.push(format!("postcondition_{i} w hw{hyps}"));
+                }
+                write!(w, "{lemmas}")?;
+                write!(w, "{stmt}")?;
+                writeln!(w, "  exact ⟨{}⟩\n", terms.join(", "))?;
+            }
         }
     }
 
