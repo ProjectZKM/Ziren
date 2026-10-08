@@ -1,7 +1,8 @@
 use chips::poseidon2_wide::WIDTH;
 use core::fmt::Debug;
 use instruction::{
-    FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrintInstr,
+    FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr,
+    PrefixSumChecksInstr, PrintInstr,
 };
 use itertools::Itertools;
 use p3_field::{
@@ -469,6 +470,39 @@ where
         })
     }
 
+    fn prefix_sum_checks(
+        &mut self,
+        zero: Felt<C::F>,
+        one: Ext<C::F, C::EF>,
+        accs: Vec<Ext<C::F, C::EF>>,
+        field_accs: Vec<Felt<C::F>>,
+        x1: Vec<Felt<C::F>>,
+        x2: Vec<Ext<C::F, C::EF>>,
+    ) -> Instruction<C::F> {
+        // The chain's outputs are written first; then every output but the
+        // last is read back by the next row, which the backfill counts.
+        let acc_write_addrs: Vec<_> = accs.iter().map(|r| r.write(self)).collect();
+        let field_acc_write_addrs: Vec<_> = field_accs.iter().map(|r| r.write(self)).collect();
+        for r in accs.iter().take(accs.len().saturating_sub(1)) {
+            r.read(self);
+        }
+        for r in field_accs.iter().take(field_accs.len().saturating_sub(1)) {
+            r.read(self);
+        }
+        Instruction::PrefixSumChecks(Box::new(PrefixSumChecksInstr {
+            addrs: PrefixSumChecksIo {
+                zero: zero.read(self),
+                one: one.read(self),
+                x1: x1.iter().map(|r| r.read(self)).collect(),
+                x2: x2.iter().map(|r| r.read(self)).collect(),
+                accs: acc_write_addrs,
+                field_accs: field_acc_write_addrs,
+            },
+            acc_mults: vec![C::F::ZERO; accs.len()],
+            field_acc_mults: vec![C::F::ZERO; field_accs.len()],
+        }))
+    }
+
     /// Compiles one instruction, passing one or more instructions to `consumer`.
     ///
     /// We do not simply return a `Vec` for performance reasons --- results would be immediately fed
@@ -578,6 +612,10 @@ where
             DslIr::CircuitV2HintExts(output) => f(self.hint(&output)),
             DslIr::CircuitExt2Felt(felts, ext) => f(self.ext2felts(felts, ext)),
             DslIr::CircuitV2Ext2Felt(felts, ext) => f(self.ext2felts_constrained(felts, ext)),
+            DslIr::CircuitV2PrefixSumChecks(data) => {
+                let (zero, one, accs, field_accs, x1, x2) = *data;
+                f(self.prefix_sum_checks(zero, one, accs, field_accs, x1, x2))
+            }
             DslIr::CycleTrackerV2Enter(name) => {
                 consumer(Err(CompileOneErr::CycleTrackerEnter(name)))
             }
@@ -673,6 +711,15 @@ where
                         output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
+                    }
+                    Instruction::PrefixSumChecks(instr) => {
+                        let PrefixSumChecksInstr {
+                            addrs: PrefixSumChecksIo { accs, field_accs, .. },
+                            acc_mults,
+                            field_acc_mults,
+                        } = instr.as_mut();
+                        acc_mults.iter_mut().zip(accs.iter()).for_each(&mut backfill);
+                        field_acc_mults.iter_mut().zip(field_accs.iter()).for_each(&mut backfill);
                     }
                     Instruction::HintAddCurve(instr) => {
                         instr
@@ -837,6 +884,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
         Instruction::Ext2Felts(_) => "Ext2Felts",
         Instruction::Hint(_) => "Hint",
+        Instruction::PrefixSumChecks(_) => "PrefixSumChecks",
         Instruction::HintAddCurve(_) => "HintAddCurve",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",
     }

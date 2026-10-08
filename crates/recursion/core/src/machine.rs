@@ -17,6 +17,7 @@ use crate::{
             MemoryConstChip, MemoryVarChip,
         },
         poseidon2_wide::Poseidon2WideChip,
+        prefix_sum_checks::PrefixSumChecksChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
@@ -40,6 +41,7 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
     Select(SelectChip),
     Ext2Felt(Ext2FeltChip<F>),
+    PrefixSumChecks(PrefixSumChecksChip),
     PublicValues(PublicValuesChip),
 }
 
@@ -58,6 +60,8 @@ pub struct RecursionAirEventCount {
     pub exp_reverse_bits_len_events: usize,
     /// One per `Ext2Felts` instruction (the constrained decomposition chip).
     pub ext2felt_events: usize,
+    /// One per bit of every `PrefixSumChecks` instruction (one chip row each).
+    pub prefix_sum_checks_events: usize,
     /// Counter for commit_pv_hash events (CommitPublicValues match arm
     /// in `Runtime::run`). Populated by
     /// `AddAssign<&Instruction>` so `UnsafeRecord::new` can pre-size
@@ -77,6 +81,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::Ext2Felt(Ext2FeltChip::default()),
+            RecursionAir::PrefixSumChecks(PrefixSumChecksChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
         .map(Chip::new)
@@ -163,6 +168,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
             (Self::Select(SelectChip), heights.select_events),
             (Self::Ext2Felt(Ext2FeltChip::default()), heights.ext2felt_events),
+            (Self::PrefixSumChecks(PrefixSumChecksChip), heights.prefix_sum_checks_events),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
         ]
         .map(|(chip, log_height)| (chip.name(), log_height))
@@ -188,6 +194,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 input_addr: _,
             }) => self.mem_var_events += output_addrs_mults.len(),
             Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
+            Instruction::PrefixSumChecks(instr) => {
+                self.prefix_sum_checks_events += instr.addrs.x1.len()
+            }
             Instruction::HintAddCurve(instr) => {
                 self.mem_var_events += instr.output_x_addrs_mults.len();
                 self.mem_var_events += instr.output_y_addrs_mults.len();

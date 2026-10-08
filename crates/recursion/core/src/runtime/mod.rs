@@ -14,7 +14,9 @@ use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
 use instruction::HintAddCurveInstr;
 pub use instruction::Instruction;
-use instruction::{FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrintInstr};
+use instruction::{
+    FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrefixSumChecksInstr, PrintInstr,
+};
 use itertools::Itertools;
 use memory::*;
 pub use opcode::*;
@@ -385,7 +387,7 @@ where
         if timing {
             let walk_secs = t_walk.elapsed().as_secs_f64();
             let instrs = analyzed_program.iter().count();
-            let mut mix = [0usize; 12];
+            let mut mix = [0usize; 13];
             for ai in analyzed_program.iter() {
                 let k = match ai.inner() {
                     Instruction::BaseAlu(_) => 0,
@@ -400,6 +402,7 @@ where
                     Instruction::Ext2Felts(_) => 9,
                     Instruction::CommitPublicValues(_) => 10,
                     Instruction::Hint(_) => 11,
+                    Instruction::PrefixSumChecks(_) => 12,
                 };
                 mix[k] += 1;
             }
@@ -416,6 +419,7 @@ where
                 "Ext2Felts",
                 "CommitPublicValues",
                 "Hint",
+                "PrefixSumChecks",
             ];
             let mix_str: String = names
                 .iter()
@@ -788,6 +792,54 @@ where
                 }
                 unsafe {
                     Self::raw_write_ev(&rec.ext2felt_events[_offset], MemEvent { inner: fs });
+                }
+            }
+            Instruction::PrefixSumChecks(instr) => {
+                let PrefixSumChecksInstr {
+                    addrs: PrefixSumChecksIo { zero, one, x1, x2, accs, field_accs },
+                    acc_mults,
+                    field_acc_mults,
+                } = instr.as_ref();
+                // The seeds are read for their memory multiplicities; the chains start
+                // from the constants they hold.
+                let _ = self.mr_us(*zero);
+                let _ = self.mr_us(*one);
+                let mut acc = EF::ONE;
+                let mut field_acc = F::ZERO;
+                for (m, (((&x1_addr, &x2_addr), (&acc_addr, &acc_mult)), (&fa_addr, &fa_mult))) in
+                    x1.iter()
+                        .zip(x2.iter())
+                        .zip(accs.iter().zip(acc_mults.iter()))
+                        .zip(field_accs.iter().zip(field_acc_mults.iter()))
+                        .enumerate()
+                {
+                    let x1_f = self.mr_us(x1_addr).val[0];
+                    let x2_block = self.mr_us(x2_addr).val;
+                    let x2_ef = EF::from_basis_coefficients_slice(&x2_block.0).unwrap();
+                    // eq(x1, x2) = (1 - x1)(1 - x2) + x1 x2 = 1 - x1 - x2 + 2 x1 x2
+                    let product = x2_ef * x1_f;
+                    let lagrange_term = EF::ONE - x1_f - x2_ef + product + product;
+                    let new_acc = acc * lagrange_term;
+                    let new_field_acc = x1_f + field_acc * F::TWO;
+                    let acc_block = Block::from(acc.as_basis_coefficients_slice());
+                    let new_acc_block = Block::from(new_acc.as_basis_coefficients_slice());
+                    self.mw_us(acc_addr, new_acc_block, acc_mult);
+                    self.mw_us(fa_addr, Block::from(new_field_acc), fa_mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.prefix_sum_checks_events[_offset + m],
+                            PrefixSumChecksEvent {
+                                x1: x1_f,
+                                x2: x2_block,
+                                acc: acc_block,
+                                new_acc: new_acc_block,
+                                field_acc,
+                                new_field_acc,
+                            },
+                        );
+                    }
+                    acc = new_acc;
+                    field_acc = new_field_acc;
                 }
             }
             Instruction::Hint(HintInstr { output_addrs_mults }) => {

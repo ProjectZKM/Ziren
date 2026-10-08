@@ -93,6 +93,9 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
             incr(&mut counts.mem_var_events, output_addrs_mults.len())
         }
         Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
+        Instruction::PrefixSumChecks(instr) => {
+            incr(&mut counts.prefix_sum_checks_events, instr.addrs.x1.len())
+        }
         Instruction::HintAddCurve(instr) => incr(
             &mut counts.mem_var_events,
             instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),

@@ -9,7 +9,8 @@ use crate::machine::RecursionAirEventCount;
 
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
-    FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
+    FriFoldEvent, MemEvent, Poseidon2Event, PrefixSumChecksEvent, RecursionProgram,
+    RecursionPublicValues, SelectEvent,
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ pub struct ExecutionRecord<F> {
     pub mem_var_events: Vec<MemEvent<F>>,
     /// One event per `Ext2Felts` instruction; `inner` is the input block.
     pub ext2felt_events: Vec<MemEvent<F>>,
+    /// One event per bit of every `PrefixSumChecks` instruction.
+    pub prefix_sum_checks_events: Vec<PrefixSumChecksEvent<F>>,
     /// The public values.
     pub public_values: RecursionPublicValues<F>,
 
@@ -56,6 +59,10 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         stats.insert("ext_alu_events".to_string(), self.ext_alu_events.len());
         stats.insert("mem_var_events".to_string(), self.mem_var_events.len());
         stats.insert("ext2felt_events".to_string(), self.ext2felt_events.len());
+        stats.insert(
+            "prefix_sum_checks_events".to_string(),
+            self.prefix_sum_checks_events.len(),
+        );
 
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
@@ -73,6 +80,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             mem_const_count,
             mem_var_events,
             ext2felt_events,
+            prefix_sum_checks_events,
             public_values: _,
             poseidon2_events,
             select_events,
@@ -86,6 +94,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         *mem_const_count += other.mem_const_count;
         mem_var_events.append(&mut other.mem_var_events);
         ext2felt_events.append(&mut other.ext2felt_events);
+        prefix_sum_checks_events.append(&mut other.prefix_sum_checks_events);
         poseidon2_events.append(&mut other.poseidon2_events);
         select_events.append(&mut other.select_events);
         exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
@@ -136,6 +145,7 @@ pub struct UnsafeRecord<F> {
     pub mem_const_count: usize,
     pub mem_var_events: Vec<MaybeUninit<UnsafeCell<MemEvent<F>>>>,
     pub ext2felt_events: Vec<MaybeUninit<UnsafeCell<MemEvent<F>>>>,
+    pub prefix_sum_checks_events: Vec<MaybeUninit<UnsafeCell<PrefixSumChecksEvent<F>>>>,
     pub public_values: MaybeUninit<UnsafeCell<RecursionPublicValues<F>>>,
     pub poseidon2_events: Vec<MaybeUninit<UnsafeCell<Poseidon2Event<F>>>>,
     pub select_events: Vec<MaybeUninit<UnsafeCell<SelectEvent<F>>>>,
@@ -172,6 +182,7 @@ impl<F> UnsafeRecord<F> {
             mem_const_count: event_counts.mem_const_events,
             mem_var_events: create_uninit_vec(event_counts.mem_var_events),
             ext2felt_events: create_uninit_vec(event_counts.ext2felt_events),
+            prefix_sum_checks_events: create_uninit_vec(event_counts.prefix_sum_checks_events),
             public_values: MaybeUninit::uninit(),
             poseidon2_events: create_uninit_vec(event_counts.poseidon2_wide_events),
             select_events: create_uninit_vec(event_counts.select_events),
@@ -218,6 +229,10 @@ impl<F> UnsafeRecord<F> {
                 Vec<MaybeUninit<UnsafeCell<MemEvent<F>>>>,
                 Vec<MemEvent<F>>,
             >(self.ext2felt_events),
+            prefix_sum_checks_events: std::mem::transmute::<
+                Vec<MaybeUninit<UnsafeCell<PrefixSumChecksEvent<F>>>>,
+                Vec<PrefixSumChecksEvent<F>>,
+            >(self.prefix_sum_checks_events),
             public_values: self.public_values.assume_init().into_inner(),
             poseidon2_events: std::mem::transmute::<
                 Vec<MaybeUninit<UnsafeCell<Poseidon2Event<F>>>>,

@@ -165,6 +165,35 @@ pub struct SelectInstr<F> {
 /// The event encoding the inputs and outputs of a select operation.
 pub type SelectEvent<F> = SelectIo<F>;
 
+/// The inputs and outputs of a prefix-sum-checks operation (the
+/// `PrefixSumChecks` chip): `x1` holds a column's prefix-sum bits followed by
+/// the next column's, most significant first, `x2` the sumcheck point, one
+/// coordinate per bit; `accs[i]` is the running product of
+/// `eq(x1[j], x2[j])` over `j <= i` and `field_accs[i]` the running Horner
+/// sum `x1[i] + 2 * field_accs[i-1]`, so `field_accs[len/2 - 1]` is the
+/// current column's prefix sum. `one` and `zero` seed the two chains.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrefixSumChecksIo<V> {
+    pub zero: V,
+    pub one: V,
+    pub x1: Vec<V>,
+    pub x2: Vec<V>,
+    pub accs: Vec<V>,
+    pub field_accs: Vec<V>,
+}
+
+/// One row of the `PrefixSumChecks` chip: one bit against one coordinate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct PrefixSumChecksEvent<F> {
+    pub x1: F,
+    pub x2: Block<F>,
+    pub acc: Block<F>,
+    pub new_acc: Block<F>,
+    pub field_acc: F,
+    pub new_field_acc: F,
+}
+
 /// The inputs and outputs to an exp-reverse-bits operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExpReverseBitsIo<V> {

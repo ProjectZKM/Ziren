@@ -208,10 +208,13 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
 /// The full-Lagrange half of [`emit_prefix_sum_check`], without the Horner
 /// recompose.
 ///
-/// ⚠ THIS IS THE COMPOSE CIRCUIT'S ONLY PER-COLUMN COST — it runs once per real
-/// column (557 of them), and the jagged-eval region measures `584 · num_cols +
-/// ~100K` emitted instructions, a quarter of the whole child.  Anything added
-/// here is paid 557 times; anything removed is saved 557 times.
+/// Programs proved on the compress machine no longer emit this: their
+/// per-column check runs on the `PrefixSumChecks` chip
+/// (`Builder::prefix_sum_checks_v2`), one row per bit.  It remains the
+/// per-column cost of the shrink and wrap programs, whose machines lack the
+/// chip: once per real column (557 of them), `584 · num_cols + ~100K` emitted
+/// instructions, a quarter of the whole child.  Anything added here is paid
+/// 557 times; anything removed is saved 557 times.
 ///
 /// `eq(bits, point) = Π_k ((1-bit_k)(1-p_k) + bit_k·p_k)`, matching
 /// [`crate::zerocheck::eq_eval`]'s convention, but emitted in the factored form

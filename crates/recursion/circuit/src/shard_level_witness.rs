@@ -1922,10 +1922,24 @@ where
         }
     };
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
-        let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>| -> Vec<Felt<C::F>> {
+        // Every per-column prefix sum goes through a `PrefixSumChecks` chain
+        // on the compress machine, which asserts its bits boolean and pins its
+        // value, so those bits are hinted unchecked; the first, the padding
+        // and the last entries keep the per-bit check.
+        let chip_checks_bits = matches!(
+            builder.program_type,
+            zkm_primitives::types::RecursionProgramType::Core
+                | zkm_primitives::types::RecursionProgramType::Deferred
+                | zkm_primitives::types::RecursionProgramType::Compress
+        );
+        let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>, checked: bool| -> Vec<Felt<C::F>> {
             let dec_bits = bits_per_entry.min(31);
             let mut bits = if dec_bits <= 30 {
-                b.hint_bits_boolean_v2(v, dec_bits)
+                if checked {
+                    b.hint_bits_boolean_v2(v, dec_bits)
+                } else {
+                    b.hint_bits_v2(v, dec_bits)
+                }
             } else {
                 b.num2bits_v2_f(v, dec_bits)
             };
@@ -1943,7 +1957,7 @@ where
         };
         let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
-        let bits0 = num2bits_be(builder, acc);
+        let bits0 = num2bits_be(builder, acc, true);
         col_prefix_sums.push(bits0);
         let mut current_offset_felt: Felt<C::F> = acc;
         let mut height_idx = 0usize;
@@ -1969,20 +1983,20 @@ where
                         break 'outer;
                     }
                     current_offset_felt = acc;
-                    let bits = num2bits_be(builder, acc);
+                    let bits = num2bits_be(builder, acc, !chip_checks_bits);
                     col_prefix_sums.push(bits);
                     acc = builder.eval(acc + h);
                 }
             }
         }
         if col_prefix_sums.len() < col_prefix_sums_len - 1 {
-            let pad_bits = num2bits_be(builder, current_offset_felt);
+            let pad_bits = num2bits_be(builder, current_offset_felt, true);
             while col_prefix_sums.len() < col_prefix_sums_len - 1 {
                 col_prefix_sums.push(pad_bits.clone());
             }
         }
         if col_prefix_sums.len() < col_prefix_sums_len {
-            let bits = num2bits_be(builder, acc);
+            let bits = num2bits_be(builder, acc, true);
             col_prefix_sums.push(bits);
         }
         JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }

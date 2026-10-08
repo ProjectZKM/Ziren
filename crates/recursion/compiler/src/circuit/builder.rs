@@ -34,6 +34,12 @@ pub trait CircuitV2Builder<C: Config> {
     ) -> [Felt<C::F>; DIGEST_SIZE];
     fn fri_fold_v2(&mut self, input: CircuitV2FriFoldInput<C>) -> CircuitV2FriFoldOutput<C>;
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D];
+    fn prefix_sum_checks_v2(
+        &mut self,
+        bits: Vec<Felt<C::F>>,
+        point: Vec<Ext<C::F, C::EF>>,
+    ) -> (Ext<C::F, C::EF>, Felt<C::F>);
+    fn hint_bits_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
     fn add_curve_v2(
         &mut self,
         point1: SepticCurve<Felt<C::F>>,
@@ -103,6 +109,55 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         self.assert_felt_eq(x, num);
 
         output
+    }
+
+    /// Hint the low `num_bits` bits of `num` with no constraint at all: the
+    /// caller must hand every bit to something that asserts it boolean (the
+    /// `PrefixSumChecks` chip does) and pins the vector's value.
+    fn hint_bits_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>> {
+        let output = std::iter::from_fn(|| Some(self.uninit())).take(num_bits).collect::<Vec<_>>();
+        self.push_op(DslIr::CircuitV2HintBitsF(output.clone(), num));
+        output
+    }
+
+    /// The jagged verifier's per-column prefix-sum check on the
+    /// `PrefixSumChecks` chip: returns `eq(bits, point)` over every bit and
+    /// the Horner sum of the first half of `bits`, most significant bit first
+    /// (the column's prefix sum).  The chip asserts every bit boolean.  Only
+    /// valid for programs proven on the compress machine; shrink and wrap
+    /// programs keep emitting the arithmetic.
+    fn prefix_sum_checks_v2(
+        &mut self,
+        bits: Vec<Felt<C::F>>,
+        point: Vec<Ext<C::F, C::EF>>,
+    ) -> (Ext<C::F, C::EF>, Felt<C::F>) {
+        let len = bits.len();
+        assert_eq!(len, point.len(), "prefix_sum_checks_v2: one point coordinate per bit");
+        assert!(len >= 2 && len % 2 == 0, "prefix_sum_checks_v2: two prefix sums of equal width");
+        assert!(
+            matches!(
+                self.program_type,
+                RecursionProgramType::Core
+                    | RecursionProgramType::Deferred
+                    | RecursionProgramType::Compress
+            ),
+            "prefix_sum_checks_v2: the PrefixSumChecks chip is in the compress machine only"
+        );
+        let accs: Vec<Ext<C::F, C::EF>> =
+            std::iter::from_fn(|| Some(self.uninit())).take(len).collect();
+        let field_accs: Vec<Felt<C::F>> =
+            std::iter::from_fn(|| Some(self.uninit())).take(len).collect();
+        let one: Ext<C::F, C::EF> = self.constant(C::EF::ONE);
+        let zero: Felt<C::F> = self.constant(C::F::ZERO);
+        self.push_op(DslIr::CircuitV2PrefixSumChecks(Box::new((
+            zero,
+            one,
+            accs.clone(),
+            field_accs.clone(),
+            bits,
+            point,
+        ))));
+        (accs[len - 1], field_accs[len / 2 - 1])
     }
 
     /// Hint the low `num_bits` bits of `num` WITHOUT binding them back to
