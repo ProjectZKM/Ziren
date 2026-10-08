@@ -59,10 +59,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         stats.insert("ext_alu_events".to_string(), self.ext_alu_events.len());
         stats.insert("mem_var_events".to_string(), self.mem_var_events.len());
         stats.insert("ext2felt_events".to_string(), self.ext2felt_events.len());
-        stats.insert(
-            "prefix_sum_checks_events".to_string(),
-            self.prefix_sum_checks_events.len(),
-        );
+        stats.insert("prefix_sum_checks_events".to_string(), self.prefix_sum_checks_events.len());
 
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());

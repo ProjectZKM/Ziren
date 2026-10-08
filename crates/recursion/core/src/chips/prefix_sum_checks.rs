@@ -263,9 +263,7 @@ mod tests {
                 let len = 2 * rng.gen_range(1..=8usize);
                 let bits: Vec<F> = (0..len).map(|_| F::from_bool(rng.gen_bool(0.5))).collect();
                 let point: Vec<EF> = (0..len)
-                    .map(|_| {
-                        EF::from_basis_coefficients_fn(|_| F::from_u64(rng.gen::<u64>()))
-                    })
+                    .map(|_| EF::from_basis_coefficients_fn(|_| F::from_u64(rng.gen::<u64>())))
                     .collect();
                 let mut acc = EF::ONE;
                 let mut felt_acc = F::ZERO;
