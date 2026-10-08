@@ -1,17 +1,15 @@
-//! Core shape types (the task phase 1 — types only).
+//! Core shape types.
 //!
-//! No construction helpers / enumeration helpers yet; those arrive in
-//! phase 2 (`enumerate.rs`).  This phase adds the data types themselves
-//! so downstream code (recursion circuit, prover) can pin VK map keys
-//! against them.
+//! Data types only; construction and enumeration live in `enumerate.rs`.
+//! Downstream code (recursion circuit, prover) pins VK map keys against
+//! them.
 //!
 //! ## Identification strategy: chip names, not `Chip<F, A>`
 //!
 //! The upstream design uses `BTreeSet<Chip<F, A>>` for `shard_chips`.  Ziren's
 //! [`crate::Chip<F, A>`] doesn't implement `Ord`/`Hash` (it wraps an
 //! AIR that's only `MachineAir`-bounded), and adding those bounds
-//! would ripple through every MIPS chip AIR — out of scope per task
-//! "no zkVM circuit changes" constraint.
+//! would ripple through every MIPS chip AIR.
 //!
 //! Switching identification to `BTreeSet<String>` (chip names) sidesteps
 //! the issue with no information loss: for the purpose of shape-indexed

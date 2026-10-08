@@ -154,11 +154,11 @@ impl<F: Field> Lookup<F> {
     /// per-value weights (the partial-lagrange table over the beta seed,
     /// `eq_mle_table`).  `prep`/`main`
     /// are the per-chip preprocessed/main trace evaluations at the
-    /// LogUp-GKR opening point (`Var = EF` for the host verifier today,
-    /// `Var = Ext<_>` for the recursion circuit in Phase 2).
+    /// LogUp-GKR opening point (`Var = EF` for the host verifier,
+    /// `Var = Ext<_>` for the recursion circuit).
     ///
-    /// Generic so a single definition serves the host reconstruction now
-    /// and the in-circuit reconstruction later.
+    /// Generic so a single definition serves the host and the in-circuit
+    /// reconstruction.
     pub fn eval<Expr, Var>(
         &self,
         prep: Option<&[Var]>,

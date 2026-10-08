@@ -1,5 +1,4 @@
-//! Layer transition for the row-only GKR backend
-//! (the task, A.2 step 3).
+//! Layer transition for the row-only GKR backend.
 //!
 //! Port of
 //! `layer_transition`

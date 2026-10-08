@@ -1,8 +1,5 @@
-//! Per-MIPS-opcode native lowering for the x86_64 backend.
-//!
-//! P2: ALU lowering implemented inline using dynasm-rt.  Loads,
-//! stores, branches, jumps, multiply/divide and SYSCALL still
-//! `unimplemented!` and land in P3+.
+//! Per-MIPS-opcode native lowering for the x86_64 backend, emitted
+//! inline with dynasm-rt.
 
 #![allow(unused_variables)]
 

@@ -1,9 +1,8 @@
 //! Stacked shape types for Ziren recursion.
 //!
-//! Tactic chosen (per scoping report at docs/task_22_plan.md): **size-class
-//! quantization**.  Instead of enumerating every per-chip log-height
-//! combination (~1.25M shapes), we enumerate representative shapes
-//! parameterized by
+//! Tactic: **size-class quantization**.  Instead of enumerating every
+//! per-chip log-height combination (~1.25M shapes), we enumerate
+//! representative shapes parameterized by
 //!
 //!   (shard_chips, preprocessed_area, main_area, preprocessed_padding_cols, main_padding_cols)
 //!

@@ -1976,8 +1976,8 @@ mod tests {
     /// path (same value: `claim_gkr · embed_factor`).  Returns `(inv1, inv2)`
     /// where inv2 is checked against the UNCHANGED verifier identity
     /// `eq_pt(zeta_ORIGINAL, z) · (C+batch)@z` — i.e. the verifier eq-bridge
-    /// stays anchored on the ORIGINAL `zeta`.  GREEN here proves the rev(zeta)
-    /// convention is value- AND verifier-identity-preserving,
+    /// stays anchored on the ORIGINAL `zeta`.  Both invariants holding means
+    /// the rev(zeta) convention is value- AND verifier-identity-preserving,
     /// so dropping bitrev_rows + feeding rev(zeta)
     /// in the production prover keeps the existing verifier correct.
     fn run_sweep_case_z_rev(
@@ -2116,7 +2116,7 @@ mod tests {
     /// The rev(zeta) convention keeps invariant (2) — the
     /// reduced value equals the UNCHANGED verifier identity `eq(zeta,z)·(C+
     /// batch)@z` — across the same mixed-height sweep the bitrev convention
-    /// passes.  If GREEN, feeding rev(zeta)+dropping bitrev_rows in the
+    /// passes, so feeding rev(zeta)+dropping bitrev_rows in the
     /// production prover is value- and verifier-preserving.
     #[test]
     fn orientation_sweep_revzeta() {

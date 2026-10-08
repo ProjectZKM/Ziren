@@ -1,9 +1,8 @@
 //! JIT memory traits and impls.
 //!
-//! P1 (skeleton): trait declarations and a non-shared anon-mmap
-//! `OwnedMemory` impl for in-process testing.  P2 will add the
-//! memfd-backed `ShmMemory` impl needed for fork-based crash isolation
-//! (see [`crate::shm`]).
+//! Trait declarations and a non-shared anon-mmap `OwnedMemory` impl for
+//! in-process testing.  The memfd-backed `ShmMemory` used by fork-based
+//! crash isolation lives in [`crate::shm`].
 
 use std::ops::{Deref, DerefMut};
 #[cfg(unix)]
@@ -36,9 +35,8 @@ pub trait JitResetableMemory: JitMemory {
     fn reset(&mut self);
 }
 
-/// In-process anon-mmap memory backing.  Used as the default in v1 —
-/// the memfd-backed [`crate::shm::ShmMemory`] becomes the production
-/// default once P6 (crash isolation) lands.
+/// In-process anon-mmap memory backing (not shared across a fork; see
+/// [`crate::shm::ShmMemory`] for the memfd-backed one).
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub struct OwnedMemory {
     map: memmap2::MmapMut,

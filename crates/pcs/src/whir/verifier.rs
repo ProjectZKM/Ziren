@@ -1,4 +1,4 @@
-//! WHIR verifier — phase 3 (sumcheck + OOD + terminal identity).
+//! WHIR tower verifier (sumcheck + OOD + terminal identity).
 //!
 //! [`WhirVerifier::verify_rounds`] validates the folding tower ([`crate::whir::
 //! round_prover`]) end to end by replaying the Fiat–Shamir transcript: it
@@ -12,12 +12,12 @@
 //! which is the verifier-side reconstruction of `Σ_x weight[x]·final_poly[x]`
 //! from the transcript-derived constraint points alone (no `2^n` weight table).
 //!
-//! What this does NOT yet check is the STIR query authentication — opening each
+//! This verifier does NOT check the STIR query authentication — opening each
 //! committed codeword at the sampled indices, verifying its Merkle path, and
-//! folding the opened coset into a `stir_value` constraint.  That is the
-//! remaining phase-3 work (it needs the interleaved-encode + monomial
-//! point-map); the full prover ([`crate::whir::full_prover`]) already produces
-//! those openings.
+//! folding the opened coset into a `stir_value` constraint.  That needs the
+//! interleaved encoding + monomial point-map and is done by the interleaved
+//! verifier ([`crate::whir::interleaved`]) and the stacked production
+//! verifier.
 
 use alloc::vec::Vec;
 

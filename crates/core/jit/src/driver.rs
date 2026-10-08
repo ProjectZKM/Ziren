@@ -1,4 +1,4 @@
-//! P10: end-to-end driver that translates a `zkm-core-executor`
+//! End-to-end driver that translates a `zkm-core-executor`
 //! `Instruction` stream to `MipsTranspiler` calls and produces a
 //! callable [`crate::JitFunction`].
 //!

@@ -1,4 +1,4 @@
-//! P10: end-to-end JIT runner that bridges the executor's
+//! End-to-end JIT runner that bridges the executor's
 //! [`Instruction`] stream and runtime state to the JIT crate's
 //! [`zkm_core_jit::driver`] dispatch + [`zkm_core_jit::JitFunction`]
 //! execution.

@@ -1,10 +1,8 @@
 //! WHIR proof types, mirroring `slop_whir::WhirProof` / `ParsedCommitment` on
 //! Ziren's field types.
 //!
-//! The shape a shard proof would carry once WHIR replaces BaseFold as the core
-//! PCS.  Phase 1 populates only `ParsedCommitment` (the OOD commit); the
-//! per-round sumcheck / query fields are filled by the folding prover (phase
-//! 2).
+//! `ParsedCommitment` is the OOD commit; the per-round sumcheck / query fields
+//! of `WhirProof` are filled by the full and interleaved provers.
 
 use p3_commit::Mmcs;
 use p3_field::{ExtensionField, Field};
@@ -47,9 +45,9 @@ pub struct ParsedCommitment<F, EF, C> {
 
 /// The full WHIR opening proof.  Mirrors `slop_whir::WhirProof`.
 ///
-/// Phase-1 status: the type is complete for parity with the upstream `WhirProof`; the folding
-/// prover (phase 2) populates `round_sumcheck_polys` / `round_commitments` /
-/// query openings, and the verifier (phase 3) consumes them.
+/// The full and interleaved provers populate `round_sumcheck_polys` /
+/// `round_commitments` / query openings, and the interleaved verifier consumes
+/// them.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct WhirProof<F: Field, EF: ExtensionField<F>, MT: Mmcs<F>> {

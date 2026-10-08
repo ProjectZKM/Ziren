@@ -1,7 +1,5 @@
-//! POSIX shared-memory wrappers (memfd + mmap).
-//!
-//! P1 (skeleton): types only.  Functional impls land in P5 (trace ring)
-//! and P6 (fork-based crash isolation).
+//! POSIX shared-memory wrappers (memfd + mmap): the crash-details block,
+//! the trace ring, and the shared-memory region behind them.
 
 #![cfg(all(target_arch = "x86_64", target_os = "linux"))]
 
@@ -9,7 +7,7 @@ use std::os::fd::{AsRawFd, RawFd};
 
 /// Crash details propagated from a forked child JIT process to the
 /// parent.  Lives in shared memory so even a SIGSEGV'd child can leave
-/// useful info behind.  Filled in P6.
+/// useful info behind.
 #[repr(C)]
 pub struct CrashDetails {
     /// Signal that killed the child (e.g. SIGSEGV = 11).
@@ -165,9 +163,8 @@ impl<'a> ConsumerGuard<'a> {
     }
 }
 
-/// A handle to a POSIX shared-memory object.  P5 will use this for the
-/// trace ring; P6 will use it for guest memory shared with the forked
-/// child.
+/// A handle to a POSIX shared-memory object.  [`crate::isolation`] uses
+/// one for the crash details shared with the forked child.
 pub struct ShmMemory {
     fd: RawFd,
     map_ptr: *mut libc::c_void,

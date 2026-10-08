@@ -39,8 +39,8 @@ pub enum JaggedShardVerifyError {
     Zerocheck(String),
     /// Jagged-PCS opening verification failed.
     JaggedPcs(String),
-    /// Reserved for staged verifier ports and defensive call sites that
-    /// intentionally reject an unsupported proof sub-flow.
+    /// An unsupported proof sub-flow, named by the payload.  No verifier
+    /// path constructs it.
     Unimplemented(&'static str),
 }
 
@@ -1754,13 +1754,13 @@ mod tests {
         assert_eq!(base, 22);
     }
 
-    /// The three-variant error Display ends with the exact phase hint
-    /// text so users can grep for it.
+    /// The `Unimplemented` Display carries the unsupported sub-flow's name
+    /// so users can grep for it.
     #[test]
-    fn unimplemented_error_displays_phase_hint() {
-        let e = JaggedShardVerifyError::Unimplemented("Phase 2 (LogUp-GKR verification)");
+    fn unimplemented_error_displays_subflow() {
+        let e = JaggedShardVerifyError::Unimplemented("LogUp-GKR verification");
         let s = format!("{e}");
-        assert!(s.contains("Phase 2"));
+        assert!(s.contains("LogUp-GKR verification"));
         assert!(s.contains(""));
     }
 

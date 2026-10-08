@@ -512,9 +512,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             let main: &[Ext<C::F, C::EF>] = chip_eval
                 .main_trace_evaluations_full
                 .as_deref()
-                .expect(
-                "logup reconstruction requires main_trace_evaluations_full (FIX-off core proof)",
-            );
+                .expect("logup reconstruction requires main_trace_evaluations_full");
             let prep: Option<&[Ext<C::F, C::EF>]> =
                 chip_eval.preprocessed_trace_evaluations_full.as_deref();
 

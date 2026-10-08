@@ -179,7 +179,7 @@ mod tests {
         let _evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 1, &r);
     }
 
-    /// Phase 1 height-agnostic parity: evaluating a height-2 trace over a
+    /// Height-agnostic parity: evaluating a height-2 trace over a
     /// 2-d cube (domain=4) treating rows [2,4) as implicit zero padding
     /// must equal evaluating the EXPLICITLY zero-padded height-4 trace.
     #[test]

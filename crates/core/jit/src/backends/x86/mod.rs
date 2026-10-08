@@ -1,7 +1,7 @@
-//! x86_64 backend (P1 skeleton).
+//! x86_64 backend.
 //!
-//! Hand-pinned register layout per [`docs/jit_design.md`](../../../../../docs/jit_design.md)
-//! §4.  Method bodies are filled in across P2–P7.
+//! The register layout is hand-pinned by the constants below; the
+//! per-opcode lowering lives in `instruction_impl`.
 
 use std::mem::offset_of;
 
@@ -198,8 +198,8 @@ pub(crate) const LOCATION: [Location; 36] = {
     t
 };
 
-/// The dynasm-rt assembler backend (P1 skeleton; methods are stubbed
-/// in instruction_impl).
+/// The dynasm-rt assembler backend; the per-opcode methods live in
+/// `instruction_impl`.
 pub struct TranspilerBackend {
     /// Underlying assembler.
     pub(crate) assembler: dynasmrt::x64::Assembler,

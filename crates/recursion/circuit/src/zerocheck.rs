@@ -504,7 +504,7 @@ where
             .map(|(chip_evaluation, _opening)| {
                 let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
                     "rev claim-collapse requires main_trace_evaluations_full \
-                             (FIX-off core proof)",
+                             (the shard prover always sets it)",
                 );
                 let prep_full =
                     chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]);

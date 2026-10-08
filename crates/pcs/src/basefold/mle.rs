@@ -58,10 +58,9 @@ impl<F: Copy, A: Backend> Clone for Mle<F, A> {
 /// (from which a [`Tensor`]/[`Mle`] is a zero-copy move; see
 /// [`Tensor::as_slice`] / `From<RowMajorMatrix>`).
 ///
-/// Additive (the unified main-trace store): the type + accessors exist so
-/// later phases can source commit/open cells from the single shared
-/// `Arc<Mle>` store; nothing it produces reaches the Fiat-Shamir
-/// transcript on its own.
+/// The commit/open paths source their cells from the single shared
+/// `Arc<Mle>` main-trace store through it; nothing it produces reaches the
+/// Fiat-Shamir transcript on its own.
 #[derive(Clone, Copy, Debug)]
 pub struct TraceRef<'a, F> {
     /// Flat row-major `[height, width]` cells (`row * width + col`).

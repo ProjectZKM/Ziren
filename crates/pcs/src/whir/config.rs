@@ -9,9 +9,8 @@
 //! queries.  The OOD samples are what let WHIR run fewer in-domain Merkle
 //! queries than BaseFold at equal soundness.
 //!
-//! Phase 1 (this module) is the config + proof types + OOD commit, validated
-//! standalone.  The folding prover and verifier are the next phases; see
-//! `mod.rs` for the phase map.
+//! This module holds the round parameters; the wire types are in `proof` and
+//! the OOD commitment in `prover`.  See `mod.rs` for how the pieces fit.
 
 use serde::{Deserialize, Serialize};
 

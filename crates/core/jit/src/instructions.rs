@@ -3,9 +3,6 @@
 //! Each capability trait covers one MIPS instruction class.  Backends
 //! (currently `backends/x86`) implement them by emitting native code
 //! through `dynasm-rt`.
-//!
-//! P1 (skeleton) supplies the trait shapes only; method bodies live in
-//! the backends.
 
 use crate::risc::{MipsOperand, MipsRegister};
 use crate::{DebugFn, ExternFn, SyscallHandler};
@@ -253,8 +250,7 @@ pub trait SystemInstructions {
 
 /// Trace event recording — emitted alongside each instruction so the
 /// AIR trace generator sees the same events the interpreter would
-/// produce.  P5 wires this to a producer/consumer ring; until then
-/// the methods are no-ops.
+/// produce.  The x86 backend implements the methods as no-ops.
 pub trait TraceCollector {
     /// Snapshot the full register file at the start of a trace chunk.
     fn trace_registers(&mut self);

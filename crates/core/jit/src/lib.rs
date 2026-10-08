@@ -1,12 +1,8 @@
 //! JIT compiler for the Ziren MIPS guest executor (Linux x86_64).
 //!
-//! Skeleton implementation.  This crate compiles on every platform but
-//! only exposes a working JIT on Linux x86_64.  Other platforms get a
-//! `JitUnavailable` error from the entry points so callers can
-//! transparently fall back to the interpreter.
-//!
-//! See [`docs/jit_design.md`](../../../../docs/jit_design.md) for the full
-//! design.
+//! This crate compiles on every platform but only exposes a working JIT
+//! on Linux x86_64.  Other platforms get a `JitUnavailable` error from the
+//! entry points so callers can transparently fall back to the interpreter.
 //!
 //! # Build-time gate
 //!
@@ -23,16 +19,6 @@
 //! - [`shm`] — POSIX shared-memory wrappers (memfd + mmap)
 //! - [`risc`] — MIPS register / operand types used by the lowering API
 //! - [`instructions`] — `MipsTranspiler` traits for the per-opcode lowering API
-//!
-//! # Phasing status
-//!
-//! - [x] **P1** — skeleton + cfg gate
-//! - [ ] **P2** — memory + ALU lowering
-//! - [ ] **P3** — loads / stores / branches / jumps
-//! - [ ] **P4** — multiply / divide / SYSCALL
-//! - [ ] **P5** — producer / consumer trace ring
-//! - [ ] **P6** — fork-based crash isolation
-//! - [ ] **P7** — default-on + benchmarks
 
 #![warn(missing_docs)]
 #![cfg_attr(not(all(target_arch = "x86_64", target_os = "linux")), allow(unused))]
@@ -185,7 +171,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn skeleton_loads() {
+    fn jit_context_is_sized() {
         let _ = std::mem::size_of::<JitContext>();
     }
 }
