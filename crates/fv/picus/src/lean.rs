@@ -2725,7 +2725,11 @@ fn write_module(
                 }
                 write!(w, "{lemmas}")?;
                 write!(w, "{stmt}")?;
-                writeln!(w, "  exact ⟨{}⟩\n", terms.join(", "))?;
+                if terms.len() == 1 {
+                    writeln!(w, "  exact {}\n", terms[0])?;
+                } else {
+                    writeln!(w, "  exact ⟨{}⟩\n", terms.join(", "))?;
+                }
             }
         }
     }
