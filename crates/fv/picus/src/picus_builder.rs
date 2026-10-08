@@ -243,6 +243,9 @@ struct Emitter<'a> {
     output_origins: Vec<String>,
     mem_reads: usize,
     mem_writes: usize,
+    /// Every lookup's multiplicity after specialization, as `(origin, multiplicity)` with the
+    /// origin `send.byte[3]` / `recv.memory[0]`, …; consumed by the padding and bit obligations.
+    multiplicities: Vec<(String, PicusExpr)>,
 }
 
 impl<'a> Emitter<'a> {
@@ -729,6 +732,14 @@ impl<'a> Emitter<'a> {
     }
 
     fn handle_lookup(&mut self, lookup: &AirLookup<PicusExpr>, is_send: bool) {
+        let kind = format!("{:?}", lookup.kind).to_lowercase();
+        let dir = if is_send { "send" } else { "recv" };
+        let n = self
+            .multiplicities
+            .iter()
+            .filter(|(o, _)| o.starts_with(&format!("{dir}.{kind}[")))
+            .count();
+        self.multiplicities.push((format!("{dir}.{kind}[{n}]"), lookup.multiplicity.clone()));
         if self.cfg.submodule_mode == SubmoduleMode::Ignore {
             return;
         }
@@ -790,6 +801,20 @@ pub fn build_selector_env(
     env
 }
 
+/// Column-index environment of a padding row: `is_real = 0` when the chip has such a column and
+/// every declared selector at zero.  A chip with neither has no padding rows the environment
+/// can name.
+pub fn build_padding_env(picus_info: &PicusInfo) -> BTreeMap<usize, u64> {
+    let mut env = BTreeMap::new();
+    if let Some(id) = picus_info.is_real_index {
+        env.insert(id, 0);
+    }
+    for (col, _) in &picus_info.selector_indices {
+        env.insert(*col, 0);
+    }
+    env
+}
+
 /// Evaluates `chip` once and lowers the result into a module named `module_name`.
 ///
 /// Returns the module and the abstract helper modules it calls.
@@ -845,6 +870,7 @@ where
         output_origins: Vec::new(),
         mem_reads: 0,
         mem_writes: 0,
+        multiplicities: Vec::new(),
     };
 
     for c in constraints {
@@ -944,8 +970,14 @@ where
         })
         .collect();
     GADGET_MARKS.lock().unwrap().insert(em.module.name.clone(), marks);
+    MULTIPLICITIES.lock().unwrap().insert(em.module.name.clone(), em.multiplicities);
     (em.module, em.aux_modules)
 }
+
+/// The specialized multiplicity of every lookup of every module extracted in this process, by
+/// module name, as `(origin, multiplicity)` (see [`Emitter::multiplicities`]).
+pub static MULTIPLICITIES: std::sync::Mutex<BTreeMap<String, Vec<(String, PicusExpr)>>> =
+    std::sync::Mutex::new(BTreeMap::new());
 
 /// Port origins of every module extracted in this process, by module name (see
 /// [`Emitter::input_origins`]).  The CLI hands them to the Lean backend.

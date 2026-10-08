@@ -28,6 +28,13 @@ forced by its constraints.
    the others at zero and `is_real` at one (`Chip__is_xxx`); a chip without selectors gets one
    module.  A `top` module proves the selector shape (boolean, mutually exclusive, or a partition
    of the real rows when the chip declares `selectors_partition_real_rows`).
+   Two more obligations cover the lookup multiplicities, because a determinism theorem takes
+   every lookup of the row as a fact about that row, and the lookup argument only justifies that
+   reading when no row sends with a negative multiplicity: a `padding` module, specialized with
+   `is_real = 0` and every selector at zero, has the postcondition `m = 0` for every lookup
+   multiplicity `m` (a padding row takes part in no bus and no table), and every real-row module
+   has the postcondition `bit(m)` for each of its non-constant multiplicities.  A chip with
+   neither `is_real` nor selectors gets no `padding` module.
 6. `--format picus|lean|both` writes `<picus-out-dir>/<Chip>.picus` and
    `<lean-out-dir>/ZirenDet/Chips/<Chip>.lean` (plus `ZirenDet.lean` and the prelude
    `ZirenDet/Basic.lean`).
@@ -91,15 +98,39 @@ Options: `--assume-selectors-deterministic`, `--shrcarry-summary abstract|precis
 `--column-output-mode interactions-only|all-non-inputs-are-outputs`, `--reify-threshold N`
 (0 disables), `--keep-padding` (do not specialize `is_real = 1`).
 
+## Triage
+
+`--analyze` runs the propagation engine on every module and prints one `ANALYZE` line per
+determinism module, then for the multiplicity obligations:
+
+```
+PADDING SysLinux proved 0/42 assumed 0
+PADDING-UNPROVED SysLinux send.byte[0] decode_brk_50: stuck (1 unknown)
+MULTBITS Bitwise__is_and proved 0/4 assumed 4
+MULTBITS-ASSUMED Bitwise__is_and send.byte[0] lookup_gate_2 if bus inputs frame_14 are bits
+```
+
+`PADDING` counts the multiplicities proved zero on a padding row, `MULTBITS` those proved bits
+on a real row; each is tried first by the engine (the expression bound to a fresh output with no
+inputs, so its value must follow from the constraints), then by cases on the variables the
+constraints bound to `{0, 1}`, re-specializing the constraints under each case so a flag that
+is a bit only under a gate is found once the gate is set.  `ASSUMED` lines are multiplicities
+that are bits if an input the row receives from another table is one (an opcode flag of the
+program table): a hypothesis of the statement, not a hole.  `UNPROVED` lines name the
+multiplicity by its column; an unconstrained one there is a free lookup multiplicity, which is
+how the `SysLinux` padding rows were found to carry `has_comparison` and the decode flags.
+
 ## Lean
 
 `--format lean` writes into [`crates/fv/lean4`](../lean4), a Lake project pinned to Mathlib
 `v4.33.1`. For every module `M` the generated file contains a witness structure `M.W`,
 `M.constraints`, `M.inputs`, `M.outputs`, `M.assumed`, the relation `M.rel`, and a theorem
 `M.deterministic` saying that two satisfying rows agreeing on their inputs agree on their
-outputs. Determinism of the abstract byte-table helpers enters as a hypothesis, never an
-axiom, and the closing tactic leaves a `sorry` when it cannot finish, so files always
-elaborate and open obligations are the `declaration uses 'sorry'` warnings.
+outputs, and `M.postconditions` for the multiplicity bits; the `padding` module's
+`postconditions` theorem states that every multiplicity is zero on a padding row.  Determinism
+of the abstract byte-table helpers enters as a hypothesis, never an axiom, and the closing
+tactic leaves a `sorry` when it cannot finish, so files always elaborate and open obligations
+are the `declaration uses 'sorry'` warnings.
 
 That project's [README](../lean4/README.md) covers the theorem shape, the proof automation,
 how to build it on the GPU box, and how to read the open obligations. Builds never run on the

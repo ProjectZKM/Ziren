@@ -15,11 +15,149 @@ use zkm_picus::{
         PicusExpr, PicusModule, PicusProgram,
     },
     picus_builder::{
-        build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig, PicusBuilder,
-        ShrCarrySummaryMode, SubmoduleMode,
+        build_padding_env, build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig,
+        PicusBuilder, ShrCarrySummaryMode, SubmoduleMode, MULTIPLICITIES,
     },
-    propagate::{analyze, Verdict},
+    propagate::{analyze, prove_bit, prove_zero, Verdict, ZeroVerdict},
 };
+
+/// What the triage proves about a lookup multiplicity.
+#[derive(Clone, Debug)]
+enum Obligation {
+    /// The multiplicity is zero (padding rows).
+    Zero(PicusExpr),
+    /// The multiplicity is a bit (real rows).
+    Bit(PicusExpr),
+}
+
+/// The obligations behind a module's postconditions, by module name, as `(origin, obligation)`.
+static OBLIGATIONS: std::sync::Mutex<BTreeMap<String, Vec<(String, Obligation)>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
+/// Adds `bit(m)` for every lookup multiplicity `m` of a real-row module that is not a constant
+/// after specialization (a constant other than 0 or 1 is kept as an unprovable postcondition, so
+/// the triage reports it).
+fn add_bit_postconditions(m: &mut PicusModule) {
+    let mults = MULTIPLICITIES.lock().unwrap().get(&m.name).cloned().unwrap_or_default();
+    let mut obligations = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (origin, mult) in mults {
+        if matches!(mult, PicusExpr::Const(0) | PicusExpr::Const(1)) {
+            continue;
+        }
+        if seen.insert(mult.to_string()) {
+            m.postconditions.push(PicusConstraint::new_bit(mult.clone()));
+        }
+        obligations.push((origin, Obligation::Bit(mult)));
+    }
+    OBLIGATIONS.lock().unwrap().insert(m.name.clone(), obligations);
+}
+
+/// The inert-padding module: with `is_real` and every selector at zero, every lookup
+/// multiplicity must be zero, so a padding row takes part in no bus and no table.  This is the
+/// side condition under which a lookup may be read as a fact about the row that sends it.
+fn build_padding_module<A>(
+    chip: &Chip<Felt, A>,
+    picus_info: &PicusInfo,
+    cfg: ExtractionConfig,
+) -> Option<(PicusModule, BTreeMap<String, PicusModule>)>
+where
+    A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder>,
+{
+    let env = build_padding_env(picus_info);
+    if env.is_empty() {
+        println!("  padding: skipped ({} has neither is_real nor selectors)", chip.name());
+        return None;
+    }
+    let cfg = ExtractionConfig { submodule_mode: SubmoduleMode::Ignore, ..cfg };
+    let (mut pad, aux) = extract_module(chip, "padding".to_string(), &env, cfg);
+    pad.inputs.clear();
+    pad.outputs.clear();
+    pad.assume_deterministic.clear();
+    let mults = MULTIPLICITIES.lock().unwrap().get("padding").cloned().unwrap_or_default();
+    let mut obligations = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (origin, mult) in mults {
+        if matches!(mult, PicusExpr::Const(0)) {
+            continue;
+        }
+        if seen.insert(mult.to_string()) {
+            pad.postconditions
+                .push(PicusConstraint::new_equality(mult.clone(), PicusExpr::Const(0)));
+        }
+        obligations.push((origin, Obligation::Zero(mult)));
+    }
+    if pad.postconditions.is_empty() {
+        println!("  padding: every multiplicity is the constant 0");
+        return None;
+    }
+    OBLIGATIONS.lock().unwrap().insert("padding".to_string(), obligations);
+    Some((pad, aux))
+}
+
+/// Renders an expression with column names in place of `x_N`.
+fn named(e: &PicusExpr) -> String {
+    let text = e.to_string();
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(i) = rest.find("x_") {
+        out.push_str(&rest[..i]);
+        let digits: String = rest[i + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        match digits.parse::<usize>() {
+            Ok(v) if !digits.is_empty() => {
+                out.push_str(&zkm_picus::propagate::var_name(v));
+                rest = &rest[i + 2 + digits.len()..];
+            }
+            _ => {
+                out.push_str("x_");
+                rest = &rest[i + 2..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Runs the zero obligations of `module` and prints `TAG <label> proved N/M` plus one
+/// `TAG-UNPROVED` line per obligation the engine could not close.
+fn report_obligations(tag: &str, label: &str, module: &PicusModule) {
+    let obligations = OBLIGATIONS.lock().unwrap().get(&module.name).cloned().unwrap_or_default();
+    let mut proved = 0;
+    let mut unproved = Vec::new();
+    let mut assumed = Vec::new();
+    let mut cache: BTreeMap<String, ZeroVerdict> = BTreeMap::new();
+    for (origin, o) in &obligations {
+        let (key, e) = match o {
+            Obligation::Zero(e) => (format!("zero {e}"), e),
+            Obligation::Bit(e) => (format!("bit {e}"), e),
+        };
+        let verdict = cache
+            .entry(key)
+            .or_insert_with(|| match o {
+                Obligation::Zero(e) => prove_zero(module, e),
+                Obligation::Bit(e) => prove_bit(module, e),
+            })
+            .clone();
+        let shown = named(e);
+        match verdict {
+            ZeroVerdict::Proved => proved += 1,
+            ZeroVerdict::Nonzero(c) => unproved.push(format!("{origin} {shown} = {c}")),
+            ZeroVerdict::Unproved(why) => unproved.push(format!("{origin} {shown}: {why}")),
+            ZeroVerdict::OnInputs(vs) => {
+                let vs: Vec<String> =
+                    vs.iter().map(|v| zkm_picus::propagate::var_name(*v)).collect();
+                assumed.push(format!("{origin} {shown} if bus inputs {} are bits", vs.join(", ")));
+            }
+        }
+    }
+    println!("{tag} {label} proved {proved}/{} assumed {}", obligations.len(), assumed.len());
+    for a in assumed {
+        println!("{tag}-ASSUMED {label} {a}");
+    }
+    for u in unproved {
+        println!("{tag}-UNPROVED {label} {u}");
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -211,7 +349,8 @@ where
     if allowed.is_empty() {
         let env = build_selector_env(&picus_info, None, specialize_is_real);
         println!("  module {} (env {})", chip.name(), format_env(&env, &names));
-        let (m, mut aux) = extract_module(chip, chip.name(), &env, cfg);
+        let (mut m, mut aux) = extract_module(chip, chip.name(), &env, cfg);
+        add_bit_postconditions(&mut m);
         aux_modules.append(&mut aux);
         modules.insert(m.name.clone(), m);
     } else {
@@ -219,7 +358,8 @@ where
             let env = build_selector_env(&picus_info, Some(*col), specialize_is_real);
             let name = format!("{}__{}", chip.name(), sel_name);
             println!("  module {name} (env {})", format_env(&env, &names));
-            let (m, mut aux) = extract_module(chip, name, &env, cfg);
+            let (mut m, mut aux) = extract_module(chip, name, &env, cfg);
+            add_bit_postconditions(&mut m);
             aux_modules.append(&mut aux);
             modules.insert(m.name.clone(), m);
         }
@@ -232,6 +372,11 @@ where
         println!("  module top (selector shape)");
         program.add_modules(&mut aux);
         program.add_module("top", top);
+    }
+    if let Some((pad, mut aux)) = build_padding_module(chip, &picus_info, cfg) {
+        println!("  module padding (inert padding rows)");
+        program.add_modules(&mut aux);
+        program.add_module("padding", pad);
     }
     (program, names)
 }
@@ -299,9 +444,15 @@ fn main() {
         };
         zkm_picus::propagate::set_names(names.clone());
         if args.analyze || args.derive {
+            if let Some(pad) = program.modules().get("padding") {
+                report_obligations("PADDING", &chip.name(), pad);
+            }
             for (name, m) in program.modules() {
                 if name == "top" || !name.starts_with(&chip.name()) {
                     continue;
+                }
+                if !m.postconditions.is_empty() {
+                    report_obligations("MULTBITS", name, m);
                 }
                 let verdict = analyze(m);
                 let line = match &verdict {

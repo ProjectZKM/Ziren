@@ -335,7 +335,8 @@ pub fn set_names(names: HashMap<usize, String>) {
     *NAMES.lock().unwrap() = Some(names);
 }
 
-fn var_name(v: usize) -> String {
+/// The column name of variable `v` (set by [`set_names`]), or `x_v` / `t_k` for a fresh one.
+pub fn var_name(v: usize) -> String {
     if v >= 1 << 40 {
         return format!("t{}", v - (1 << 40));
     }
@@ -646,6 +647,252 @@ pub enum DerivEnd {
     /// pivot, else one branch per variable of its single monomial set to zero), `nonzero` the
     /// nonzero case.
     Coef { poly: Poly, pivot: bool, zero: Vec<Derivation>, nonzero: Box<Derivation> },
+}
+
+/// Whether an expression is zero on every witness of a module.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ZeroVerdict {
+    /// Every feasible branch assigns the expression the value zero.
+    Proved,
+    /// Some feasible branch assigns it a nonzero constant: a counterexample.
+    Nonzero(u64),
+    /// The engine could not evaluate it (a branch left open, no value learned, or the budget).
+    Unproved(String),
+    /// It holds if these module inputs are bits, which another table delivers: not a fact of
+    /// the row, so the statement records it as an assumption.
+    OnInputs(Vec<usize>),
+}
+
+/// Proves `e = 0` on every witness of `m` by the propagation engine: `e` is bound to a fresh
+/// output of a copy of `m` with no inputs, so the engine must derive its value from the
+/// constraints alone, and every feasible leaf of the derivation must learn that value as zero.
+pub fn prove_zero(m: &PicusModule, e: &PicusExpr) -> ZeroVerdict {
+    match substitute_definitions(m, e, &bit_vars(m)) {
+        PicusExpr::Const(0) => return ZeroVerdict::Proved,
+        PicusExpr::Const(c) => return ZeroVerdict::Nonzero(c),
+        _ => {}
+    }
+    let mut probe = m.clone();
+    probe.inputs.clear();
+    probe.assume_deterministic.clear();
+    probe.postconditions.clear();
+    let v = crate::pcl::fresh_picus_expr();
+    let PicusExpr::Var(vid) = v else { unreachable!("fresh_picus_expr returns a variable") };
+    probe.constraints.push(PicusConstraint::new_equality(v.clone(), e.clone()));
+    probe.outputs = vec![v];
+    let budget = module_budget().min(std::time::Duration::from_secs(10));
+    let r = match analyze_budget(&probe, budget) {
+        Verdict::Determined { derivation, .. } => leaves_zero(&derivation, vid, None),
+        Verdict::Stuck { stuck_outputs, .. } => {
+            ZeroVerdict::Unproved(format!("stuck ({} unknown)", stuck_outputs.len()))
+        }
+        Verdict::TooManyBranches => ZeroVerdict::Unproved("too many branches".into()),
+        Verdict::Timeout => ZeroVerdict::Unproved("timeout".into()),
+    };
+    if r == ZeroVerdict::Proved {
+        return r;
+    }
+    let mut cases = CASE_BUDGET;
+    if by_cases(m, e, &|c| c == 0, &mut cases) {
+        return ZeroVerdict::Proved;
+    }
+    r
+}
+
+/// Proves `e ∈ {0, 1}` on every witness of `m`.  When every variable of `e` is a bit by the
+/// constraints and there are at most six of them, `e` is evaluated on every assignment of
+/// those bits; otherwise `e·(e − 1) = 0` goes to [`prove_zero`].
+pub fn prove_bit(m: &PicusModule, e: &PicusExpr) -> ZeroVerdict {
+    let mut budget = CASE_BUDGET;
+    if by_cases(m, e, &|c| c <= 1, &mut budget) {
+        return ZeroVerdict::Proved;
+    }
+    let r = prove_zero(m, &(e.clone() * (e.clone() - PicusExpr::Const(1))));
+    if r == ZeroVerdict::Proved {
+        return r;
+    }
+    let bits = bit_vars(m);
+    let e = substitute_definitions(m, e, &bits);
+    let mut vars = BTreeSet::new();
+    crate::lean::collect_vars_expr(&e, &mut vars);
+    let free: Vec<usize> = vars.iter().copied().filter(|v| !bits.contains(v)).collect();
+    let inputs: BTreeSet<usize> = m
+        .inputs
+        .iter()
+        .filter_map(|i| if let PicusExpr::Var(v) = i { Some(*v) } else { None })
+        .collect();
+    if !free.is_empty() && free.iter().all(|v| inputs.contains(v)) {
+        return ZeroVerdict::OnInputs(free);
+    }
+    r
+}
+
+/// Assignments [`by_cases`] may explore for one obligation.
+const CASE_BUDGET: usize = 4096;
+
+/// Proves `ok(e)` by cases on the bits of `e`: the variables of `e` (after substituting
+/// definitions) that the constraints bound to `{0, 1}` are assigned every way, each assignment
+/// is pushed into the constraints, assignments that make a constraint a nonzero constant are
+/// infeasible and skipped, and the rest recurse, since the specialized constraints may bound
+/// further variables (a flag asserted a bit only under a gate that the case set to one).
+fn by_cases(m: &PicusModule, e: &PicusExpr, ok: &dyn Fn(u64) -> bool, budget: &mut usize) -> bool {
+    let bits = bit_vars(m);
+    let e = substitute_definitions(m, e, &bits);
+    if let PicusExpr::Const(c) = e {
+        return ok(c);
+    }
+    let mut vars = BTreeSet::new();
+    crate::lean::collect_vars_expr(&e, &mut vars);
+    let pick: Vec<usize> = vars.iter().copied().filter(|v| bits.contains(v)).take(6).collect();
+    if pick.is_empty() || *budget < 1 << pick.len() {
+        return false;
+    }
+    for k in 0..1u64 << pick.len() {
+        *budget -= 1;
+        let env: BTreeMap<usize, u64> =
+            pick.iter().enumerate().map(|(i, v)| (*v, (k >> i) & 1)).collect();
+        let constraints = crate::pcl::partial_evaluate(&m.constraints, &env);
+        let infeasible = constraints.iter().any(
+            |c| matches!(c, PicusConstraint::Eq(r) if matches!(**r, PicusExpr::Const(c) if c != 0)),
+        );
+        if infeasible {
+            continue;
+        }
+        let e = crate::pcl::partial_evaluate_expr(&e, &env);
+        if let PicusExpr::Const(c) = e {
+            if !ok(c) {
+                return false;
+            }
+            continue;
+        }
+        let mut sub = m.clone();
+        sub.constraints = constraints;
+        if !by_cases(&sub, &e, ok, budget) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `e` with every variable outside `keep` that a constraint defines (`x − f = 0` or
+/// `f − x = 0`, `x` not in `f`) replaced by its definition, a few rounds deep.
+fn substitute_definitions(m: &PicusModule, e: &PicusExpr, keep: &BTreeSet<usize>) -> PicusExpr {
+    let mut defs: BTreeMap<usize, PicusExpr> = BTreeMap::new();
+    for c in &m.constraints {
+        let PicusConstraint::Eq(z) = c else { continue };
+        let (x, f) = match &**z {
+            PicusExpr::Sub(l, r) => match (&**l, &**r) {
+                (PicusExpr::Var(x), f) => (*x, f.clone()),
+                (f, PicusExpr::Var(x)) => (*x, f.clone()),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        let mut fv = BTreeSet::new();
+        crate::lean::collect_vars_expr(&f, &mut fv);
+        if !fv.contains(&x) && !keep.contains(&x) {
+            defs.entry(x).or_insert(f);
+        }
+    }
+    let mut cur = e.clone();
+    for _ in 0..4 {
+        let mut vars = BTreeSet::new();
+        crate::lean::collect_vars_expr(&cur, &mut vars);
+        let mut changed = false;
+        for v in vars {
+            if let Some(f) = defs.get(&v) {
+                cur = replace_var(&cur, v, f);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    crate::pcl::partial_evaluate_expr(&cur, &BTreeMap::new())
+}
+
+fn replace_var(e: &PicusExpr, x: usize, f: &PicusExpr) -> PicusExpr {
+    match e {
+        PicusExpr::Var(v) if *v == x => f.clone(),
+        PicusExpr::Const(_) | PicusExpr::Var(_) => e.clone(),
+        PicusExpr::Add(a, b) => replace_var(a, x, f) + replace_var(b, x, f),
+        PicusExpr::Sub(a, b) => replace_var(a, x, f) - replace_var(b, x, f),
+        PicusExpr::Mul(a, b) => replace_var(a, x, f) * replace_var(b, x, f),
+        PicusExpr::Div(a, b) => {
+            PicusExpr::Div(Box::new(replace_var(a, x, f)), Box::new(replace_var(b, x, f)))
+        }
+        PicusExpr::Neg(a) => PicusExpr::Neg(Box::new(replace_var(a, x, f))),
+        PicusExpr::Pow(k, a) => PicusExpr::Pow(*k, Box::new(replace_var(a, x, f))),
+    }
+}
+
+/// The variables the constraints bound to `{0, 1}` after one propagation pass.
+pub fn bit_vars(m: &PicusModule) -> BTreeSet<usize> {
+    let (ctx, known) = Ctx::new(m);
+    let mut st = State {
+        facts: ctx.facts.clone(),
+        ub: ctx.ub.clone(),
+        known,
+        nonzero: vec![],
+        fresh: ctx.fresh,
+        infeasible: false,
+        values: BTreeMap::new(),
+        pivots_used: BTreeSet::new(),
+        log: vec![],
+        vlog: vec![],
+        origins: ctx.origins.clone(),
+        ub_origin: ctx.ub_origin.clone(),
+        vsupport: BTreeMap::new(),
+        infeasible_support: BTreeSet::new(),
+    };
+    let mut s = Search {
+        outputs: vec![],
+        branches: 0,
+        rules: BTreeMap::new(),
+        lemmas: BTreeSet::new(),
+        stuck: BTreeSet::new(),
+        overflow: false,
+        probing: false,
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(10),
+        phase_us: [0; 4],
+    };
+    s.propagate(&mut st);
+    st.ub.iter().filter(|(_, u)| **u == 1).map(|(v, _)| *v).collect()
+}
+
+fn leaves_zero(d: &Derivation, v: usize, inherited: Option<u64>) -> ZeroVerdict {
+    let mut val = inherited;
+    for (_, var, value, _) in &d.values {
+        if *var == v {
+            val = Some(*value);
+        }
+    }
+    let all = |ds: &[&Derivation]| {
+        for d in ds {
+            let r = leaves_zero(d, v, val);
+            if r != ZeroVerdict::Proved {
+                return r;
+            }
+        }
+        ZeroVerdict::Proved
+    };
+    match &d.end {
+        DerivEnd::Done => match val {
+            Some(0) => ZeroVerdict::Proved,
+            Some(c) => ZeroVerdict::Nonzero(c),
+            None => ZeroVerdict::Unproved("determined without a value".into()),
+        },
+        DerivEnd::Infeasible { .. } => ZeroVerdict::Proved,
+        DerivEnd::Open => ZeroVerdict::Unproved("branch left open".into()),
+        DerivEnd::Bit { zero, one, .. } => all(&[zero, one]),
+        DerivEnd::OneHot { branches, .. } => all(&branches.iter().collect::<Vec<_>>()),
+        DerivEnd::Coef { zero, nonzero, .. } => {
+            let mut ds: Vec<&Derivation> = zero.iter().collect();
+            ds.push(nonzero);
+            all(&ds)
+        }
+    }
 }
 
 /// Verdict for one module.
@@ -2653,6 +2900,11 @@ impl Search {
 
 /// Analyzes one module.
 pub fn analyze(m: &PicusModule) -> Verdict {
+    analyze_budget(m, module_budget())
+}
+
+/// [`analyze`] with an explicit time budget.
+pub fn analyze_budget(m: &PicusModule, budget: std::time::Duration) -> Verdict {
     let (ctx, known) = Ctx::new(m);
     let st = State {
         facts: ctx.facts.clone(),
@@ -2678,7 +2930,7 @@ pub fn analyze(m: &PicusModule) -> Verdict {
         stuck: BTreeSet::new(),
         overflow: false,
         probing: false,
-        deadline: std::time::Instant::now() + module_budget(),
+        deadline: std::time::Instant::now() + budget,
         phase_us: [0; 4],
     };
     let derivation = s.run(st, 0);

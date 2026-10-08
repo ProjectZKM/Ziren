@@ -38,7 +38,7 @@ program fetch and a previous memory value are *sends* on the bus but *inputs* to
 | `ZirenDet/Lib.lean` | hand-written | The field `F = ZMod (2^31 - 2^24 + 1)`, the lifting lemmas from `F` to bounded integers, and the `picus_det` tactic. |
 | `ZirenDet/Safe.lean` | hand-written | `picus_safe`, a wrapper that catches any runtime failure of the automation and admits the goal, so a generated file always elaborates. |
 | `ZirenDet/Basic.lean` | generated | The prelude every generated chip file imports. |
-| `ZirenDet/Chips/*.lean` | generated, not committed (62 files, `check/regen_all.sh`) | One file per chip; inside, one *module* per opcode selector, each with its determinism theorem. |
+| `ZirenDet/Chips/*.lean` | generated, not committed (62 files, `check/regen_all.sh`) | One file per chip; inside, one *module* per opcode selector, each with its determinism theorem and a `postconditions` theorem that its lookup multiplicities are bits, and a `padding` module whose `postconditions` theorem says a padding row's multiplicities are all zero. |
 | `ZirenDet/Chips.lean` | generated, not committed | Imports every generated chip file and the bridges built on them. |
 | `ZirenDet/Isa.lean` | hand-written | Executable MIPS32r2 semantics: `decode`, `step`, `run`. Little-endian, delay slots, `$zero` sink, separate `HI`/`LO`. |
 | `ZirenDet/IsaVectors.lean` | generated | 770 specification vectors replayed through `Isa.run`, each `by native_decide`. |
@@ -60,7 +60,17 @@ theorem M.deterministic
 ```
 
 Byte-table operations are `opaque rel`s, so their determinism enters as a *hypothesis* of the
-caller rather than an axiom. Columns are named after their provenance
+caller rather than an axiom.
+
+A determinism theorem reads every lookup of the row as a fact about that row: a byte lookup
+`(r, b, c)` becomes `r = 1 ↔ b < c`.  The lookup argument justifies that reading only when
+every multiplicity in the whole trace is non-negative, since a tuple sent with `+1` by one row
+and `−1` by another needs no table entry at all.  That side condition is the `padding`
+module's theorem, `padding.postconditions`: with `is_real` and every selector at zero, every
+lookup multiplicity of the row is zero, so no row outside the real ones takes part in any bus
+or table; and each real-row module's `postconditions` theorem, that its multiplicities are
+bits.  A multiplicity the row does not constrain off its real rows fails the first theorem,
+which is how the `SysLinux` chip's `has_comparison` and decode flags were found. Columns are named after their provenance
 (`in_mem_read_0_val`, `out_mem_write_2_val`, `in_program_op_a_0`), which is what makes the
 bridge theorems readable.
 

@@ -2109,7 +2109,8 @@ pub fn lean_ident(name: &str) -> String {
     }
 }
 
-fn collect_vars_expr(e: &PicusExpr, out: &mut BTreeSet<usize>) {
+/// Adds every variable of `e` to `out`.
+pub fn collect_vars_expr(e: &PicusExpr, out: &mut BTreeSet<usize>) {
     match e {
         PicusExpr::Const(_) => {}
         PicusExpr::Var(v) => {
@@ -2126,7 +2127,8 @@ fn collect_vars_expr(e: &PicusExpr, out: &mut BTreeSet<usize>) {
     }
 }
 
-fn collect_vars_constraint(c: &PicusConstraint, out: &mut BTreeSet<usize>) {
+/// Adds every variable of `c` to `out`.
+pub fn collect_vars_constraint(c: &PicusConstraint, out: &mut BTreeSet<usize>) {
     match c {
         PicusConstraint::Lt(a, b)
         | PicusConstraint::Leq(a, b)
@@ -2507,7 +2509,7 @@ fn write_module(
             writeln!(w, "{l}")?;
         }
     }
-    if m.name != "top" {
+    if m.name != "top" && m.name != "padding" {
         writeln!(w, "/-- Determinism: equal inputs (and equal assumed-deterministic values) force equal outputs. -/")?;
         writeln!(w, "theorem deterministic")?;
         for h in &hyps {
@@ -2524,7 +2526,14 @@ fn write_module(
     }
 
     if !m.postconditions.is_empty() {
-        writeln!(w, "/-- Selector-shape / bit postconditions implied by the constraints. -/")?;
+        let what = if m.name == "padding" {
+            "Inert padding: with `is_real` and every selector at zero, every lookup multiplicity is zero."
+        } else if m.name == "top" {
+            "Selector-shape / bit postconditions implied by the constraints."
+        } else {
+            "Every lookup multiplicity of a real row is a bit."
+        };
+        writeln!(w, "/-- {what} -/")?;
         let posts: Vec<String> = m.postconditions.iter().map(render_constraint).collect();
         let mut stmt = String::from("theorem postconditions (w : W) (hw : constraints w) :\n");
         for (i, p) in posts.iter().enumerate() {

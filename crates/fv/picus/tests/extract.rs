@@ -7,10 +7,10 @@ use p3_air::BaseAir;
 use zkm_core_machine::MipsAir;
 use zkm_pcs::MachineAir;
 use zkm_picus::{
-    pcl::{initialize_fresh_var_ctr, set_field_modulus, Felt},
+    pcl::{initialize_fresh_var_ctr, set_field_modulus, Felt, PicusExpr},
     picus_builder::{
-        build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig,
-        ShrCarrySummaryMode, SubmoduleMode,
+        build_padding_env, build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig,
+        ShrCarrySummaryMode, SubmoduleMode, MULTIPLICITIES,
     },
 };
 
@@ -56,5 +56,33 @@ fn every_chip_extracts() {
         let (m, _) = extract_module(chip, chip.name(), &env, cfg());
         let table = matches!(chip.name().as_str(), "Byte" | "Program" | "Range");
         assert_eq!(m.constraints.is_empty() && m.inputs.is_empty(), table, "chip {}", chip.name());
+    }
+}
+
+/// A padding row of `Mul` (`is_real = 0`, every selector `0`) takes part in no lookup: each
+/// multiplicity is proved zero from the constraints alone.
+#[test]
+fn mul_padding_is_inert() {
+    let _ = set_field_modulus(0x7f00_0001);
+    let chips = MipsAir::<Felt>::chips();
+    let chip = chips.iter().find(|c| c.name() == "Mul").unwrap();
+    let info = chip.picus_info();
+    initialize_fresh_var_ctr(10 * chip.air.width() + 1024);
+    let env = build_padding_env(&info);
+    assert_eq!(env.get(&info.is_real_index.unwrap()), Some(&0));
+    assert!(info.selector_indices.iter().all(|(c, _)| env.get(c) == Some(&0)));
+    let cfg = ExtractionConfig { submodule_mode: SubmoduleMode::Ignore, ..cfg() };
+    let (m, _) = extract_module(chip, "padding".to_string(), &env, cfg);
+    let mults = MULTIPLICITIES.lock().unwrap().get("padding").cloned().unwrap();
+    assert!(!mults.is_empty());
+    for (origin, mult) in mults {
+        if matches!(mult, PicusExpr::Const(0)) {
+            continue;
+        }
+        assert_eq!(
+            zkm_picus::propagate::prove_zero(&m, &mult),
+            zkm_picus::propagate::ZeroVerdict::Proved,
+            "{origin} {mult}"
+        );
     }
 }
