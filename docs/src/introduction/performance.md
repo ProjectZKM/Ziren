@@ -54,7 +54,7 @@ The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, prove
 | | p99 | 2.87 G | 518 | 242.9 | 37.8 | 12.1 | 75.8 |
 | | all 16 | 22.67 G | 4,471 | 2,102 | 373 | 10.8 | 60.8 |
 
-A shard costs about 0.47 s on one GPU under either guest, so proving time follows the number of shards, not the number of cycles. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still proves every block 2.1 to 3.8 times faster than Geth on one GPU, and 1.5 to 2.8 times faster on eight. Eight GPUs reduce the summed proving time 5.6 times for Geth and 4.3 times for Reth; the gap to linear scaling is the serial recursion tail after the last shard and the start-up interval before every GPU has a shard.
+A block costs in proportion to its shards, not its cycles: a shard takes about 0.47 s on one GPU under either guest. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still finishes every block sooner. Its blocks are also smaller, so on eight GPUs the serial recursion tail after the last shard is a larger share of each.
 
 Scaling across GPUs, for three of these blocks proved with Reth (median of three consecutive warm proofs):
 
