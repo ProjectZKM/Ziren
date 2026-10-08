@@ -376,14 +376,14 @@ pub struct Executor<'a> {
     /// (`try_run_fast_jit`) captures a whole-program
     /// [`crate::minimal_trace::TraceChunk`] via
     /// `jit_runner::run_jit_capture_trace_chunk` instead of the plain
-    /// `run_jit`. The captured chunk lands in `d4_captured_chunk`.
+    /// `run_jit`. The captured chunk lands in `captured_trace_chunk`.
     /// Default false — zero effect on the production JIT path.
-    pub d4_capture_chunk: bool,
+    pub capture_trace_chunk: bool,
 
     /// Producer: the whole-program chunk captured
-    /// by the last `run_fast` under `d4_capture_chunk`. `None` unless a
+    /// by the last `run_fast` under `capture_trace_chunk`. `None` unless a
     /// capture just ran (or the program fell back to the interpreter).
-    pub d4_captured_chunk: Option<crate::minimal_trace::TraceChunk>,
+    pub captured_trace_chunk: Option<crate::minimal_trace::TraceChunk>,
 }
 
 /// dispatch helper that picks the
@@ -666,8 +666,8 @@ impl<'a> Executor<'a> {
             flat_mem: None,
             recording_chunk_mem_reads: Vec::new(),
             replay_mem: None,
-            d4_capture_chunk: false,
-            d4_captured_chunk: None,
+            capture_trace_chunk: false,
+            captured_trace_chunk: None,
         }
     }
 
@@ -3160,15 +3160,15 @@ impl<'a> Executor<'a> {
             *slot = self.register(Register::from(i as u8));
         }
 
-        self.d4_capture_chunk = true;
-        self.d4_captured_chunk = None;
+        self.capture_trace_chunk = true;
+        self.captured_trace_chunk = None;
         let res = self.run_fast();
-        self.d4_capture_chunk = false;
+        self.capture_trace_chunk = false;
         res?;
 
         let clk_end = self.state.global_clk;
         let chunk =
-            self.d4_captured_chunk.take().unwrap_or_else(|| crate::minimal_trace::TraceChunk {
+            self.captured_trace_chunk.take().unwrap_or_else(|| crate::minimal_trace::TraceChunk {
                 input_stream_slice: None,
                 shard_index: 0,
                 shape_fingerprint: 0,
@@ -3283,10 +3283,10 @@ impl<'a> Executor<'a> {
             };
             ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
 
-            if self.d4_capture_chunk {
+            if self.capture_trace_chunk {
                 let chunk =
                     unsafe { crate::jit_runner::run_jit_capture_trace_chunk(jit_fn, &mut ctx, 0) };
-                self.d4_captured_chunk = Some(chunk);
+                self.captured_trace_chunk = Some(chunk);
             } else {
                 unsafe { run_jit(jit_fn, &mut ctx) };
             }

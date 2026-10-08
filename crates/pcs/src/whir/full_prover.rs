@@ -1,7 +1,7 @@
-//! WHIR full prover — phase 2c: the query phase + proof assembly.
+//! WHIR full prover: the query phase + proof assembly.
 //!
 //! `prove` runs the complete WHIR prover and assembles a [`WhirProof`]: it does
-//! everything the tower (phase 2b) does, plus, per round, the STIR query phase —
+//! everything the folding tower does, plus, per round, the STIR query phase —
 //! commit each folded codeword with `2^folding_factor` interleaved rows per
 //! Merkle leaf, sample `num_queries` indices into the previous codeword's
 //! domain, open those leaves, and fold each opened coset at the round's folding
@@ -11,9 +11,10 @@
 //!
 //! This is the prover whose WORK PROFILE the WHIR-vs-BaseFold benchmark times:
 //! encode + commit + re-encode + re-commit + OOD + query opens + PoW, at the
-//! real query counts and grinding bits.  The verifier (phase 3) re-derives the
-//! stir_values from the Merkle-authenticated openings; the exact stir-point
-//! sumcheck arithmetic is threaded there and does not change prover cost.
+//! real query counts and grinding bits.  No verifier consumes this flat
+//! commitment; the STIR-authenticated scheme with a verifier is the
+//! interleaved one ([`crate::whir::interleaved`]).  The stir-point sumcheck
+//! arithmetic a verifier adds does not change prover cost.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

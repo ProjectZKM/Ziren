@@ -2494,21 +2494,21 @@ pub mod tests {
         let sk_high = witness_high.shape_key();
         assert_eq!(
             sk_low, sk_high,
-            "[STEP-2] expected shape_key to be height-INDEPENDENT within a pin class",
+            "expected shape_key to be height-INDEPENDENT within a pin class",
         );
         let bytes_low = prog_bytes(&witness_low);
         let bytes_high = prog_bytes(&witness_high);
         assert_eq!(
             bytes_low.len(),
             bytes_high.len(),
-            "[STEP-2] CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) but \
+            "CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) but \
              different compose program LENGTH across bands — the compose \
              program stopped being height-agnostic; extend shape_key to cover \
              whichever field diverged",
         );
         assert!(
             bytes_low == bytes_high,
-            "[STEP-2] CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) and \
+            "CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) and \
              equal length but different compose program BYTES across bands",
         );
 
@@ -2541,7 +2541,7 @@ pub mod tests {
             if let Some((prev_rows, prev_bytes)) = seen.get(&sk) {
                 assert!(
                     *prev_bytes == bytes,
-                    "[STEP-2] CACHE-KEY UNSOUND: children at {prev_rows} and {rows} rows \
+                    "CACHE-KEY UNSOUND: children at {prev_rows} and {rows} rows \
                      share shape_key {sk:#018x} but build DIFFERENT compose programs \
                      ({} vs {} bytes).",
                     prev_bytes.len(),
@@ -2553,7 +2553,7 @@ pub mod tests {
         assert_eq!(
             seen.len(),
             1,
-            "[STEP-2] expected ONE shape_key for children at 32 / 4,096 / 65,536 rows \
+            "expected ONE shape_key for children at 32 / 4,096 / 65,536 rows \
              (the area pins make the compose program row-independent); got {} — a \
              field of the proof structure still follows the child's rows",
             seen.len(),
@@ -2562,12 +2562,12 @@ pub mod tests {
         let sk1 = w1.shape_key();
         assert!(
             !seen.contains_key(&sk1),
-            "[STEP-2] a class-1 child shares the class-0 compose program key {sk1:#018x}",
+            "a class-1 child shares the class-0 compose program key {sk1:#018x}",
         );
         let bytes1 = prog_bytes(&w1);
         assert!(
             seen.values().all(|(_, b)| *b != bytes1),
-            "[STEP-2] a class-1 child builds the class-0 compose program bytes",
+            "a class-1 child builds the class-0 compose program bytes",
         );
     }
 
@@ -4819,7 +4819,7 @@ pub mod tests {
             assert_eq!(
                 Some(vk),
                 fib_vk,
-                "[GATE1] normalize VK for same chip-set differs across heights \
+                "normalize VK for same chip-set differs across heights \
                  (tag={tag}): VK is still program-length-dependent — a baked \
                  height anchor was reintroduced",
             );
@@ -4929,8 +4929,7 @@ pub mod tests {
 
     // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient
     // input data" syscall error).  Removed; fib + keccak already
-    // characterize the per-cycle vs per-MLE-size cost.  See
-    // `docs/d2_phased_plan.md` Phase 1.5.
+    // characterize the per-cycle vs per-MLE-size cost.
 
     /// Perf-comparison fixture: prove_core only on
     /// sha2-test ELF (hashes "hello world" literal — needs no stdin).
@@ -4952,34 +4951,27 @@ pub mod tests {
         )
     }
 
-    /// MEMBERSHIP BASELINE.
+    /// VK-map membership counts.
     ///
-    /// Records the DETERMINISTIC, no-prove baselines for the VK-identity
-    /// work:
+    /// Logs the DETERMINISTIC, no-prove counts behind recursion VK
+    /// membership:
     ///
-    ///   * the CURRENT height-specific recursion `vk_map` size (the
-    ///     baseline to collapse once `VK = f(chip-SET)` instead of
-    ///     `f(chip-SET, per-chip-heights)`);
+    ///   * the height-specific recursion `vk_map` size and the
+    ///     `dummy_vk_map` size;
     ///   * the enumerated per-shard NORMALIZE shape count and the
     ///     enumerated COMPOSE (Compress) shape count per arity — the
-    ///     height-keyed enumeration cardinality;
-    ///   * a pointer to the live enum-vs-real VK comparison tests
-    ///     (`multishard_normalize_arity_faithful` /
-    ///     `arity_enum_representative_reproduces_real_vk`) whose current
-    ///     baseline is `dummy_faithful=true` (the dummy built at the
-    ///     canonical-cluster lift reproduces the real normalize VK) but
-    ///     `enum_repr_eq=false` for normalize (the enumerated UNIFORM
-    ///     representative does NOT, because the normalize VK is keyed on
-    ///     per-chip heights — the gap the hash change closes).
+    ///     height-keyed enumeration cardinality.
+    ///
+    /// Asserts that `vk_map` fits the VK Merkle tree.
     ///
     /// CHEAP (no proving): just loads the baked `vk_map.bin` and runs the
     /// shape enumeration.  Run:
     ///   CUDA_VISIBLE_DEVICES="" cargo test --release -p zkm-prover \
-    ///     stage0_membership_baseline -- --ignored --nocapture
+    ///     vk_map_membership_counts -- --ignored --nocapture
     #[test]
     #[serial]
     #[ignore = "loads vk_map.bin + enumerates shapes; run with --ignored"]
-    fn stage0_membership_baseline() {
+    fn vk_map_membership_counts() {
         use crate::shapes::ZKMProofShape;
         setup_logger();
 
@@ -4988,8 +4980,8 @@ pub mod tests {
         let dummy_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
             bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap();
         tracing::info!(
-            "[STAGE0][MEMBERSHIP] CURRENT height-specific vk_map.bin = {} entries \
-             (the collapse target for Stage 2); dummy_vk_map.bin = {} entries",
+            "[membership] height-specific vk_map.bin = {} entries; \
+             dummy_vk_map.bin = {} entries",
             real_vk_map.len(),
             dummy_vk_map.len()
         );
@@ -5019,7 +5011,7 @@ pub mod tests {
             }
         }
         tracing::info!(
-            "[STAGE0][MEMBERSHIP] enum total shapes = {} | distinct NORMALIZE per-shard shapes = {} \
+            "[membership] enum total shapes = {} | distinct NORMALIZE per-shard shapes = {} \
              | COMPOSE by arity = {:?} | Deferred = {} | Shrink = {}",
             all.len(),
             norm_shapes.len(),
@@ -5027,16 +5019,6 @@ pub mod tests {
             deferred,
             shrink
         );
-        tracing::info!(
-            "[STAGE0][MEMBERSHIP] BASELINE (pre-hash-change): normalize enum_repr_eq=FALSE \
-             (height-keyed normalize VK; the enumerated uniform representative misses the real \
-             canonical-cluster VK) — see tests::multishard_normalize_arity_faithful \
-             (dummy_faithful=true, enum_repr_eq=false) and \
-             tests::arity_enum_representative_reproduces_real_vk. Stage 2 (heights out of \
-             vk.hash) must FLIP normalize enum_repr_eq to TRUE and collapse vk_map ({} entries).",
-            real_vk_map.len()
-        );
-
         assert!(
             real_vk_map.len() <= (1 << VK_MERKLE_TREE_HEIGHT),
             "vk_map ({}) exceeds 2^{} capacity",

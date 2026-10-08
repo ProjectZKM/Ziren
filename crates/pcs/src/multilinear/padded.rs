@@ -494,14 +494,13 @@ mod tests {
         }
     }
 
-    /// Phase-0 boundary: `Mle::as_trace_ref` / `PaddedMle::real_trace_ref`
-    /// expose the raw trace as a zero-copy row-major view whose
-    /// `values` / `width` / `height` are byte-identical to the
-    /// `RowMajorMatrix` the MLE was built from — the shared-view boundary
-    /// the commit/open paths read in later phases.  A `dummy` (width-0)
-    /// padded MLE yields `None`.
+    /// `Mle::as_trace_ref` / `PaddedMle::real_trace_ref` expose the raw
+    /// trace as a zero-copy row-major view whose `values` / `width` /
+    /// `height` are byte-identical to the `RowMajorMatrix` the MLE was
+    /// built from — the shared view the commit/open paths read.  A `dummy`
+    /// (width-0) padded MLE yields `None`.
     #[test]
-    fn phase0_trace_ref_matches_raw_matrix() {
+    fn trace_ref_matches_raw_matrix() {
         let mut rng = StdRng::seed_from_u64(606);
         for &(real_log, width) in &[(0usize, 1usize), (2, 1), (3, 5), (4, 3), (5, 7)] {
             let height = 1usize << real_log;

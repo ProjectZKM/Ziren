@@ -86,7 +86,7 @@ namespace zkm_core_machine_sys::shift_right_imm {
             write_long_word_from_le_bytes_v2(cols.shr_carry_output_shifted_byte, shr_carry_output_shifted_byte);
 
             Word<F> a;
-            write_word_from_u32_v2(a, event.a);
+            write_word_from_u32(a, event.a);
             for (uint32_t i = 0; i < WORD_SIZE; i++) {
                 assert(cols.bit_shift_result[i] == a._0[i]);
             }

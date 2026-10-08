@@ -1,11 +1,11 @@
-//! WHIR prover — phase 1: the OOD commitment.
+//! WHIR prover: the OOD commitment.
 //!
 //! `commit_with_ood` is WHIR's commit: RS-encode the MLE and Merkle-commit it
 //! exactly as BaseFold does (reusing [`DftEncoder`] + the `Mmcs`), then draw
 //! `starting_ood_samples` out-of-domain points from the transcript and evaluate
 //! the committed polynomial at them.  The (points, answers) go into the
-//! transcript; the folding sumcheck later constrains them.  Phases 2/3 add the
-//! folding prover and verifier — see `mod.rs`.
+//! transcript; the folding sumcheck later constrains them.  The folding prover
+//! and verifier build on this commit — see `mod.rs`.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

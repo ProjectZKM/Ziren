@@ -87,8 +87,8 @@ __ZKM_HOSTDEV__ void event_to_row(
     }
     cols.is_branching = F::from_bool(branching);
 
-    write_word_from_u32_v2<F>(cols.next_pc, event.next_pc);
-    write_word_from_u32_v2<F>(cols.next_next_pc, event.next_next_pc);
+    write_word_from_u32<F>(cols.next_pc, event.next_pc);
+    write_word_from_u32<F>(cols.next_next_pc, event.next_next_pc);
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
     populate_range_checker(cols.next_next_pc_range_checker, event.next_next_pc);
 

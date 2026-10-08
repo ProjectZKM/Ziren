@@ -11,11 +11,11 @@ namespace zkm_core_machine_sys::memory_local {
         
         cols->initial_shard = F::from_canonical_u32(event->initial_mem_access.shard);
         cols->initial_clk = F::from_canonical_u32(event->initial_mem_access.timestamp);
-        write_word_from_u32_v2<F>(cols->initial_value, event->initial_mem_access.value);
+        write_word_from_u32<F>(cols->initial_value, event->initial_mem_access.value);
         
         cols->final_shard = F::from_canonical_u32(event->final_mem_access.shard);
         cols->final_clk = F::from_canonical_u32(event->final_mem_access.timestamp);
-        write_word_from_u32_v2<F>(cols->final_value, event->final_mem_access.value);
+        write_word_from_u32<F>(cols->final_value, event->final_mem_access.value);
 
         // Range-check limbs: the shards again, and each clk as `lo + hi * 2^16`.
         cols->initial_shard_16bit_limb = cols->initial_shard;

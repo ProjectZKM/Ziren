@@ -8,6 +8,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # github.com/consensys/gnark-ignition-verifier (imported by gnark-ffi's
+  # trusted-setup package) is gone from GitHub and from proxy.golang.org;
+  # the next mirror still serves the version go.sum pins, and go.sum
+  # checks what it serves.
+  GOPROXY: https://proxy.golang.org,https://goproxy.cn,direct
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

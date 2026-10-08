@@ -62,8 +62,8 @@ namespace zkm_core_machine_sys::misc_instrs {
             multiply,
             ((uint64_t)src2_hi << 32) + (uint64_t)src2_lo
         );
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.maddsub.src2_lo, src2_lo);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.maddsub.src2_hi, src2_hi);
+        write_word_from_u32<F>(cols.misc_specific_columns.maddsub.src2_lo, src2_lo);
+        write_word_from_u32<F>(cols.misc_specific_columns.maddsub.src2_hi, src2_hi);
 
         // For maddu/msubu instructions, pass in a dummy byte lookup vector.
         // This maddu/msubu instruction chip also has a op_hi_access field that will be
@@ -92,7 +92,7 @@ namespace zkm_core_machine_sys::misc_instrs {
         shift_right_operation::populate<F>(cols.ext_srl, Opcode::SRL, shift_left, 31 - msbd);
         cols.misc_specific_columns.ext.lsb = F::from_canonical_u32(lsb);
         cols.misc_specific_columns.ext.msbd = F::from_canonical_u32(msbd);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ext.sll_val, shift_left);
+        write_word_from_u32<F>(cols.misc_specific_columns.ext.sll_val, shift_left);
     }
 
     template<class F>
@@ -116,7 +116,7 @@ namespace zkm_core_machine_sys::misc_instrs {
         shift_right_operation::populate<F>(cols.ins_ror2, Opcode::ROR, add_val, 31 - msb);
         cols.misc_specific_columns.ins.lsb = F::from_canonical_u32(lsb);
         cols.misc_specific_columns.ins.msb = F::from_canonical_u32(msb);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.sll_val, sll_val);
+        write_word_from_u32<F>(cols.misc_specific_columns.ins.sll_val, sll_val);
     }
 
     template<class F>
@@ -132,8 +132,8 @@ namespace zkm_core_machine_sys::misc_instrs {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 
-        write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-        write_word_from_u32_v2<F>(cols.prev_a_value, event.prev_a);
+        write_word_from_u32<F>(cols.op_a_value, event.a);
+        write_word_from_u32<F>(cols.prev_a_value, event.prev_a);
 
         cols.is_sext = F::from_bool(event.opcode == Opcode::SEXT);
         cols.is_ext = F::from_bool(event.opcode == Opcode::EXT);

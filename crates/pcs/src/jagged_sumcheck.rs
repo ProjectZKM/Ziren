@@ -1,9 +1,7 @@
 //! PCS-agnostic jagged sumcheck reduction.
 //!
 //! The math here is field-typed via
-//! `InnerVal`/`InnerChallenge` from [`crate::kb31_poseidon2`].  This module
-//! exists so the BaseFold path can call the reduction without any feature
-//! gate.
+//! `InnerVal`/`InnerChallenge` from [`crate::kb31_poseidon2`].
 
 use alloc::vec::Vec;
 
@@ -297,7 +295,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     Some((z_star, proof.q_at_z, w_at_z))
 }
 
-// Acceptance gate for the jagged/zerocheck closing identity.
+// The jagged/zerocheck closing identity.
 //
 // For a MIXED-HEIGHT packing, the host jagged reduction's closing weight
 // value `w_at_z` (= the dense weight-MLE evaluated at the reduction's
@@ -306,12 +304,8 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 // verifier's closing identity, and exactly what the recursion
 // circuit checks in-circuit (`real_jagged_evaluator_fn` /
 // `emit_branching_program_eval`).
-//
-// The gate passes when `gate_weight_table_matches_branching_program`
-// holds for all mixed-height shapes AND `test_e2e_wrap_fibonacci` is
-// still green.
 #[cfg(test)]
-mod phase1_acceptance_gate {
+mod closing_identity {
     use super::*;
 
     use crate::jagged_branching_program::full_jagged_evaluation;
@@ -453,7 +447,7 @@ mod phase1_acceptance_gate {
     }
 
     #[test]
-    fn gate_weight_table_matches_branching_program() {
+    fn weight_table_matches_branching_program() {
         let cases: &[&[(usize, usize)]] = &[
             &[(4, 2), (4, 2)],
             &[(4, 1), (3, 1), (2, 1)],
@@ -464,7 +458,7 @@ mod phase1_acceptance_gate {
         for (ci, chips) in cases.iter().enumerate() {
             let (w_at_z, bp) = run_case(chips, 7000 + ci as u64);
             let ok = w_at_z == bp;
-            tracing::info!("gate case {ci} {chips:?}: w_at_z==bp = {ok}");
+            tracing::info!("case {ci} {chips:?}: w_at_z==bp = {ok}");
             if !ok {
                 tracing::info!("  w_at_z = {w_at_z:?}");
                 tracing::info!("  bp     = {bp:?}");
@@ -473,14 +467,14 @@ mod phase1_acceptance_gate {
         }
         assert!(
             all_ok,
-            "PHASE-1 gate: host reduction w_at_z must equal the branching-program \
+            "host reduction w_at_z must equal the branching-program \
              jagged evaluation for all mixed-height shapes",
         );
     }
 
-    // Host-math proxy for the in-circuit step-4 assert
+    // Host-math proxy for the in-circuit column-claim assert
     //
-    // The in-circuit recursion step-4 assert (`recursive_jagged_pcs`) is
+    // The in-circuit column-claim assert (`recursive_jagged_pcs`) is
     //   assert_ext_eq( evaluate_mle_ext(column_claims, z_col), claimed_sum )
     // where `evaluate_mle_ext` is a pure field dot-product Σ lagrange(z_col)·claim,
     // and `claimed_sum` is the host sumcheck's claimed_sum = Σ lagrange(z_col)·band_y.
@@ -492,7 +486,7 @@ mod phase1_acceptance_gate {
 
     // y for a chip stored at `log_h_store` rows (raw zero-padded), production formula:
     //   eq_c = eq_mle_table(rev(z_row)); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
-    fn s4b_y_for_height(
+    fn y_for_height(
         trace_cols: &[Vec<InnerVal>],
         log_h_store: usize,
         z_row: &[InnerChallenge],
@@ -522,7 +516,7 @@ mod phase1_acceptance_gate {
     }
 
     // partial_lagrange dot product = the in-circuit evaluate_mle_ext (LSB-first).
-    fn s4b_evaluate_mle(claims: &[InnerChallenge], z_col: &[InnerChallenge]) -> InnerChallenge {
+    fn evaluate_mle_lsb(claims: &[InnerChallenge], z_col: &[InnerChallenge]) -> InnerChallenge {
         use p3_field::PrimeCharacteristicRing;
         let mut w = vec![InnerChallenge::ONE];
         for &r in z_col {
@@ -540,7 +534,7 @@ mod phase1_acceptance_gate {
     }
 
     #[test]
-    fn stage4b_gate_scalar_embed_cannot_lift_raw_to_band() {
+    fn raw_claims_fail_band_column_claim_assert() {
         use p3_field::PrimeCharacteristicRing;
         let mut rng = StdRng::seed_from_u64(4242);
         let max_log_row = 6usize;
@@ -557,8 +551,8 @@ mod phase1_acceptance_gate {
             let raw_h = 1usize << lr;
             let trace: Vec<Vec<InnerVal>> =
                 (0..w).map(|_| (0..raw_h).map(|_| rand_kb(&mut rng)).collect()).collect();
-            let y_raw = s4b_y_for_height(&trace, lr, &z_row);
-            let y_band = s4b_y_for_height(&trace, lb, &z_row);
+            let y_raw = y_for_height(&trace, lr, &z_row);
+            let y_band = y_for_height(&trace, lb, &z_row);
             raw_claims_flat.extend_from_slice(&y_raw);
             band_claims_flat.extend_from_slice(&y_band);
             per_chip.push((lr, lb, y_raw, y_band));
@@ -571,12 +565,12 @@ mod phase1_acceptance_gate {
             let mut c = challenger();
             (0..num_col_vars).map(|_| c.sample_algebra_element()).collect()
         };
-        let claimed_sum = s4b_evaluate_mle(&band_claims_flat, &z_col);
+        let claimed_sum = evaluate_mle_lsb(&band_claims_flat, &z_col);
 
-        let raw_eval = s4b_evaluate_mle(&raw_claims_flat, &z_col);
+        let raw_eval = evaluate_mle_lsb(&raw_claims_flat, &z_col);
         let baseline_fail = raw_eval != claimed_sum;
         tracing::info!(
-            "[S4b] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
+            "[raw-vs-band] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
             if baseline_fail { "FAILS (as expected)" } else { "PASSES (unexpected!)" },
             raw_eval == claimed_sum
         );
@@ -610,17 +604,17 @@ mod phase1_acceptance_gate {
                 }
             }
             lifted.resize(padded, InnerChallenge::ZERO);
-            let lifted_eval = s4b_evaluate_mle(&lifted, &z_col);
+            let lifted_eval = evaluate_mle_lsb(&lifted, &z_col);
             tracing::info!(
-                "[S4b] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
+                "[raw-vs-band] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
                 if lifted_eval == claimed_sum { "PASSES" } else { "FAILS" },
                 lifted_eval == claimed_sum
             );
         }
 
-        let band_eval = s4b_evaluate_mle(&band_claims_flat, &z_col);
+        let band_eval = evaluate_mle_lsb(&band_claims_flat, &z_col);
         tracing::info!(
-            "[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
+            "[raw-vs-band] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
             if band_eval == claimed_sum { "PASSES" } else { "FAILS" },
             band_eval == claimed_sum
         );
@@ -639,26 +633,27 @@ mod phase1_acceptance_gate {
                     })
                     .collect();
                 let uniform = ratios.windows(2).all(|w| w[0] == w[1]);
-                tracing::info!("[S4b] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
+                tracing::info!("[raw-vs-band] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
                     y_raw.len(), uniform, ratios);
             }
         }
 
         assert!(baseline_fail, "baseline (raw, no embed) must mismatch claimed_sum");
-        assert!(band_eval == claimed_sum, "band claims must satisfy the step-4 assert");
+        assert!(band_eval == claimed_sum, "band claims must satisfy the column-claim assert");
     }
 
-    // Positive gate for the bitrev-preserving / low-placement commit.
+    // The bitrev-preserving / low-placement commit.
     // band_y (bitrev over log_band) != raw_y * scalar because
     // bitrev_lb(s) = bitrev_lr(s) << (lb-lr) puts the data bits on DIFFERENT
-    // coordinates than raw.  The fix: store each chip's RAW-bitrev'd data (bitrev
-    // over the RAW log height) in the LOW rows of a BAND-length column slot,
-    // zero-pad the high rows, and weight with eq_c[row] (literal) over the band
-    // slot.  Then the high (zero) rows contribute nothing and the low rows carry
-    // exactly the raw eq weights => band_y_new == raw_y EXACTLY, so the recursion
-    // accepts the RAW column_claims with NO embed_factor, while the offsets/total
-    // stay band-length (chip-set-keyed VK).  This gate proves that algebraically.
-    fn s5_y_lowplace(
+    // coordinates than raw.  Low placement stores each chip's RAW-bitrev'd data
+    // (bitrev over the RAW log height) in the LOW rows of a BAND-length column
+    // slot, zero-pads the high rows, and weights with eq_c[row] (literal) over
+    // the band slot.  Then the high (zero) rows contribute nothing and the low
+    // rows carry exactly the raw eq weights => band_y_new == raw_y EXACTLY, so
+    // the recursion accepts the RAW column_claims with NO embed_factor, while
+    // the offsets/total stay band-length (chip-set-keyed VK).  This test checks
+    // that algebraically.
+    fn y_low_placement(
         trace_cols: &[Vec<InnerVal>],
         lr: usize,
         lb: usize,
@@ -691,7 +686,7 @@ mod phase1_acceptance_gate {
     }
 
     #[test]
-    fn stage5_gate_lowplace_band_equals_raw() {
+    fn low_placement_band_claims_equal_raw() {
         use p3_field::PrimeCharacteristicRing;
         let mut rng = StdRng::seed_from_u64(5151);
         let max_log_row = 6usize;
@@ -707,18 +702,15 @@ mod phase1_acceptance_gate {
             let raw_h = 1usize << lr;
             let trace: Vec<Vec<InnerVal>> =
                 (0..w).map(|_| (0..raw_h).map(|_| rand_kb(&mut rng)).collect()).collect();
-            let y_raw = s4b_y_for_height(&trace, lr, &z_row);
-            let y_band_old = s4b_y_for_height(&trace, lb, &z_row);
-            let y_band_new = s5_y_lowplace(&trace, lr, lb, &z_row);
+            let y_raw = y_for_height(&trace, lr, &z_row);
+            let y_band_old = y_for_height(&trace, lb, &z_row);
+            let y_band_new = y_low_placement(&trace, lr, lb, &z_row);
             raw_flat.extend_from_slice(&y_raw);
             band_old_flat.extend_from_slice(&y_band_old);
             band_new_flat.extend_from_slice(&y_band_new);
         }
         assert_eq!(raw_flat, band_new_flat, "low-placement band_y must equal raw_y per column");
-        assert_ne!(
-            raw_flat, band_old_flat,
-            "current bitrev_lb band_y must differ from raw_y (the 4b bug)"
-        );
+        assert_ne!(raw_flat, band_old_flat, "bitrev_lb band_y must differ from raw_y");
 
         let padded = raw_flat.len().next_power_of_two();
         let mut raw_p = raw_flat.clone();
@@ -729,13 +721,16 @@ mod phase1_acceptance_gate {
             let mut c = challenger();
             (0..padded.trailing_zeros() as usize).map(|_| c.sample_algebra_element()).collect()
         };
-        let claimed_sum_new = s4b_evaluate_mle(&new_p, &z_col);
-        let recursion_lhs = s4b_evaluate_mle(&raw_p, &z_col);
+        let claimed_sum_new = evaluate_mle_lsb(&new_p, &z_col);
+        let recursion_lhs = evaluate_mle_lsb(&raw_p, &z_col);
         assert_eq!(
             claimed_sum_new, recursion_lhs,
-            "low-placement: in-circuit step-4 assert holds with raw claims + no embed_factor"
+            "low-placement: in-circuit column-claim assert holds with raw claims + no embed_factor"
         );
-        tracing::info!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
+        tracing::info!(
+            "[low-placement] band_y==raw_y per column; the column-claim assert holds with \
+             NO embed_factor; offsets/total stay band-keyed."
+        );
     }
 }
 

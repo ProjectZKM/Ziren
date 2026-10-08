@@ -10,7 +10,7 @@ template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
 populate(AddOperation<F>& op, const uint32_t a_u32, const uint32_t b_u32) {
     uint32_t expected = a_u32 + b_u32;
-    write_word_from_u32_v2<F>(op.value, expected);
+    write_word_from_u32<F>(op.value, expected);
     return expected;
 }
 

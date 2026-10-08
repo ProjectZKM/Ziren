@@ -1328,7 +1328,7 @@ mod tests {
     // residual-zero rule end-to-end through the runtime, where the
     // in-circuit `assert_bit_zero` actually fires).
 
-    // ---- Component-opening binding: the audit's regression gate 1 ----
+    // ---- Component-opening binding ----
     //
     // `verify_shard` binds each query's component opening to its round
     // commitment with exactly this chain:

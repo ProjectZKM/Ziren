@@ -1,12 +1,12 @@
-//! WHIR round orchestration — phase 2b: the folding tower.
+//! WHIR round orchestration: the folding tower.
 //!
-//! Phase 1 committed the polynomial and drew starting OOD samples; phase 2a
-//! built the eq-weighted folding sumcheck engine ([`WhirFolder`]).  This phase
-//! chains them into WHIR's multi-round structure:
+//! The OOD commitment ([`WhirProver`]) commits the polynomial and draws the
+//! starting OOD samples; the eq-weighted folding sumcheck ([`WhirFolder`])
+//! folds it.  This module chains them into WHIR's multi-round structure:
 //!
-//!   starting commit (phase 1)
+//!   starting commit (OOD commitment)
 //!   for each round:
-//!     · fold `folding_factor` variables      (phase 2a sumcheck)
+//!     · fold `folding_factor` variables      (folding sumcheck)
 //!     · re-encode the folded polynomial at the round's rate, Merkle-commit it
 //!     · draw fresh OOD on the folded polynomial and answer it
 //!     · fold those OOD constraints into the running claim/weight
@@ -17,10 +17,10 @@
 //! the [`test`] module checks that master identity end to end, plus per-round
 //! OOD correctness and that the tower folds the *original* polynomial.
 //!
-//! What phase 2b does NOT do is the STIR query openings — sampling query indices
-//! into each committed codeword, opening them, and folding the opened values in
-//! as extra constraints.  Those are only meaningfully checked by the verifier
-//! re-deriving them, so they are co-developed with phase 3 (see `mod.rs`).
+//! The tower does NOT do the STIR query openings — sampling query indices into
+//! each committed codeword, opening them, and folding the opened values in as
+//! extra constraints.  Those live in the full prover ([`crate::whir::full_prover`])
+//! and the interleaved scheme ([`crate::whir::interleaved`]).
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -40,8 +40,7 @@ use crate::whir::prover::WhirProver;
 use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
 
 /// One committed round of the tower: its parsed commitment (Merkle root + OOD)
-/// alongside the prover-side Merkle data, retained for the phase-2c/3 query
-/// openings.
+/// alongside the prover-side Merkle data, retained for the query openings.
 pub struct RoundCommitment<F: p3_field::Field, EF, MT: Mmcs<F>> {
     pub parsed: ParsedCommitment<F, EF, MT::Commitment>,
     pub prover_data: MT::ProverData<RowMajorMatrix<F>>,
@@ -49,7 +48,7 @@ pub struct RoundCommitment<F: p3_field::Field, EF, MT: Mmcs<F>> {
 
 /// The output of the folding tower.
 pub struct RoundedProof<F: p3_field::Field, EF, MT: Mmcs<F>> {
-    /// The starting commitment + its OOD (phase 1).
+    /// The starting commitment + its OOD.
     pub starting: ParsedCommitment<F, EF, MT::Commitment>,
     /// The starting codeword's Merkle data, for the first round's query opening.
     pub starting_prover_data: MT::ProverData<RowMajorMatrix<F>>,

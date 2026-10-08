@@ -49,7 +49,7 @@ pub struct JitContext {
     /// Pointer to the jump table mapping MIPS PC → native code address.
     pub jump_table: Option<NonNull<*const u8>>,
 
-    /// Pointer to the trace ring producer cursor (P5+).  Null in
+    /// Pointer to the trace ring producer cursor.  Null in
     /// non-tracing execution.
     pub trace_buf: *mut u8,
 

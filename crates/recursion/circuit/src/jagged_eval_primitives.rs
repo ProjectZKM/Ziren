@@ -393,7 +393,7 @@ mod tests {
         let (_lag, _felt) = emit_prefix_sum_check::<C>(&mut builder, bits, point);
     }
 
-    /// PHASE-2: the compile-time TRANSITIONS table MUST be byte-identical to
+    /// The compile-time TRANSITIONS table MUST be byte-identical to
     /// the host BranchingProgram DP (zkm_pcs `transition_function`).  A
     /// divergence makes the in-circuit BP compute a different function than
     /// the host, surfacing only in gnark (where asserts are real).

@@ -23,9 +23,9 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.is_jumpdirect = F::from_bool(event.opcode == Opcode::JumpDirect);
 
     populate_range_checker(cols.op_a_range_checker, event.a);
-    write_word_from_u32_v2<F>(cols.next_pc, event.next_pc);
+    write_word_from_u32<F>(cols.next_pc, event.next_pc);
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
-    write_word_from_u32_v2<F>(cols.next_next_pc, event.next_next_pc);
+    write_word_from_u32<F>(cols.next_next_pc, event.next_next_pc);
     populate_range_checker(cols.next_next_pc_range_checker, event.next_next_pc);
 
     // The inlined BAL target addition — mirrors control_flow/jump/trace.rs.

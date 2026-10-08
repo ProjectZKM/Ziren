@@ -5,8 +5,7 @@
 //! Workload: N synthetic `ADD` instructions of the form
 //! `t0 = t0 + 1` repeated, executed back-to-back with no syscalls,
 //! branches, or memory traffic.  This isolates the per-instruction
-//! dispatch cost — the metric the JIT is designed to win on
-//! (see `docs/jit_design.md`, section 1).
+//! dispatch cost — the metric the JIT is designed to win on.
 //!
 //! Both paths execute the same logical workload; the harness reports
 //! mean / min / max over `REPEATS` iterations and the JIT speedup.

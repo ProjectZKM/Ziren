@@ -1675,16 +1675,13 @@ pub mod tests {
         println!("There are {num_shapes} core shapes");
     }
 
-    /// Probe: for a FIXED chip-SET,
-    /// is the per-chip canonical-cluster BAND-CAP height INVARIANT across
-    /// different RAW height profiles (= different program lengths)?  If YES the
-    /// targeted DivEAssert fix (round raw height UP to cluster band-cap
-    /// in-circuit, keyed on the witnessed chip-set) is enumerability-safe (the
-    /// band-cap is f(chip-set) only).  If NO (the band-cap moves with raw
-    /// heights), the fix re-breaks the program-length-dependent VK and must be
-    /// abandoned for the hash-bound port.
+    /// Probe: for a FIXED chip-SET, logs whether the per-chip canonical-cluster
+    /// BAND-CAP height is INVARIANT across different RAW height profiles
+    /// (= different program lengths).  If it is, a band-cap is a function of
+    /// the chip-set alone; if not, rounding raw heights up to the band-cap
+    /// would make the VK depend on program length.  Logs only; asserts nothing.
     #[test]
-    fn step0_bandcap_invariance_for_fixed_chipset() {
+    fn test_bandcap_invariance_for_fixed_chipset() {
         use p3_koala_bear::KoalaBear;
         let cfg = CoreShapeConfig::<KoalaBear>::default();
         let names: Vec<&str> = vec![
@@ -1744,11 +1741,11 @@ pub mod tests {
                     let mut v: Vec<(String, usize)> =
                         shape.iter().map(|(id, h)| (id.to_string(), *h)).collect();
                     v.sort();
-                    tracing::info!("[STEP0] {tag}: canonical={v:?}");
+                    tracing::info!("[band-cap] {tag}: canonical={v:?}");
                     results.push((tag.to_string(), v));
                 }
                 None => {
-                    tracing::info!("[STEP0] {tag}: NO cluster fits (None)");
+                    tracing::info!("[band-cap] {tag}: NO cluster fits (None)");
                     results.push((tag.to_string(), vec![]));
                 }
             }
@@ -1771,26 +1768,23 @@ pub mod tests {
             if cs != base_cs {
                 chipset_invariant = false;
                 tracing::warn!(
-                    "[STEP0] chip-SET DIFFERS at profile {}: only_here={:?} missing_here={:?}",
+                    "[band-cap] chip-SET DIFFERS at profile {}: only_here={:?} missing_here={:?}",
                     i,
                     cs.difference(base_cs).collect::<Vec<_>>(),
                     base_cs.difference(cs).collect::<Vec<_>>(),
                 );
             }
         }
-        tracing::info!("[STEP0] chipset_invariant={chipset_invariant}");
+        tracing::info!("[band-cap] chipset_invariant={chipset_invariant}");
 
         let mut bandcap_invariant = true;
         for (n, caps) in &per_chip {
             if caps.len() > 1 {
                 bandcap_invariant = false;
-                tracing::info!("[STEP0] chip {n}: band-caps VARY across profiles = {caps:?}");
+                tracing::info!("[band-cap] chip {n}: band-caps VARY across profiles = {caps:?}");
             }
         }
-        tracing::info!(
-            "[STEP0] VERDICT: bandcap_invariant_for_fixed_chipset={bandcap_invariant} \
-             (true => fix is enumerability-safe; false => the fix regresses)"
-        );
+        tracing::info!("[band-cap] bandcap_invariant_for_fixed_chipset={bandcap_invariant}");
 
         {
             let nonempty: Vec<&(String, Vec<(String, usize)>)> =
@@ -1805,7 +1799,7 @@ pub mod tests {
                     .map(|((n, h1), (_, h2))| format!("{n}:{h1}->{h2}"))
                     .collect();
                 tracing::info!(
-                    "[STEP0] host-committed shapes DIFFER between '{}' and '{}' on {} chips: {:?}",
+                    "[band-cap] committed shapes DIFFER between '{}' and '{}' on {} chips: {:?}",
                     nonempty[0].0,
                     nonempty[nonempty.len() - 1].0,
                     differ.len(),

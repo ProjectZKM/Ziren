@@ -1,4 +1,4 @@
-//! WHIR folding sumcheck — phase 2's core.
+//! WHIR folding sumcheck.
 //!
 //! WHIR folds the committed polynomial with an eq-weighted sumcheck.  The
 //! weight combines the evaluation point's eq table with the out-of-domain (OOD)
@@ -10,7 +10,7 @@
 //! This mirrors the upstream `SumcheckProver::compute_sumcheck_polynomials`.
 //!
 //! Reducing ALL variables leaves a single field element on each side; the
-//! reduced claim then equals `weight(r) · f(r)`, which the verifier (phase 3)
+//! reduced claim then equals `weight(r) · f(r)`, which the verifier
 //! re-derives.  The `folds_reduce_the_claim` test checks that identity on the
 //! prover side.
 

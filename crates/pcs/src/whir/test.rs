@@ -1,4 +1,4 @@
-//! Phase-1 validation: the OOD commitment.
+//! Tests for the WHIR building blocks and provers/verifiers.
 //!
 //! Uses the same KoalaBear + Poseidon2-Merkle harness as the BaseFold tests.
 
@@ -61,7 +61,7 @@ fn commit_ood_answers_are_correct() {
     }
 }
 
-/// Phase 2: the folding sumcheck reduces the (batched) claim to
+/// The folding sumcheck reduces the (batched) claim to
 /// `weight(r) · f(r)` at the folding challenge point — its soundness identity.
 #[test]
 fn folds_reduce_the_claim() {
@@ -108,7 +108,7 @@ fn folds_reduce_the_claim() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2b: the folding tower.
+// The folding tower.
 // ---------------------------------------------------------------------------
 
 /// A small, internally-consistent tower config: `n` variables folded `ff` at a
@@ -369,7 +369,7 @@ fn bench_whir_vs_basefold() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3: the tower verifier (sumcheck + OOD + terminal identity).
+// The tower verifier (sumcheck + OOD + terminal identity).
 // ---------------------------------------------------------------------------
 
 /// Prove with one challenger, verify with a fresh one replaying the transcript;
