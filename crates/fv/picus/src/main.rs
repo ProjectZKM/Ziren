@@ -34,10 +34,18 @@ enum Obligation {
 static OBLIGATIONS: std::sync::Mutex<BTreeMap<String, Vec<(String, Obligation)>>> =
     std::sync::Mutex::new(BTreeMap::new());
 
+/// Chips whose rows are a table: their multiplicity is the number of rows that look the entry
+/// up, a count the prover fills in, so the bit obligation does not apply to them.
+const TABLES: &[&str] = &["Byte", "Program", "Range"];
+
 /// Adds `bit(m)` for every lookup multiplicity `m` of a real-row module that is not a constant
 /// after specialization (a constant other than 0 or 1 is kept as an unprovable postcondition, so
 /// the triage reports it).
-fn add_bit_postconditions(m: &mut PicusModule) {
+fn add_bit_postconditions(m: &mut PicusModule, chip: &str) {
+    if TABLES.contains(&chip) {
+        println!("  mult-bits: skipped ({chip} is a table; its multiplicities are counts)");
+        return;
+    }
     let mults = MULTIPLICITIES.lock().unwrap().get(&m.name).cloned().unwrap_or_default();
     let mut obligations = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -350,7 +358,7 @@ where
         let env = build_selector_env(&picus_info, None, specialize_is_real);
         println!("  module {} (env {})", chip.name(), format_env(&env, &names));
         let (mut m, mut aux) = extract_module(chip, chip.name(), &env, cfg);
-        add_bit_postconditions(&mut m);
+        add_bit_postconditions(&mut m, &chip.name());
         aux_modules.append(&mut aux);
         modules.insert(m.name.clone(), m);
     } else {
@@ -359,7 +367,7 @@ where
             let name = format!("{}__{}", chip.name(), sel_name);
             println!("  module {name} (env {})", format_env(&env, &names));
             let (mut m, mut aux) = extract_module(chip, name, &env, cfg);
-            add_bit_postconditions(&mut m);
+            add_bit_postconditions(&mut m, &chip.name());
             aux_modules.append(&mut aux);
             modules.insert(m.name.clone(), m);
         }
