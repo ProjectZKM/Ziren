@@ -167,12 +167,12 @@ The client sends each proving step over RPC to a GPU prover server. It either st
 The client pulls the image, runs it with `docker run --rm --gpus <devices> -p <port>:3000`, waits for it to come up and removes the container when the program exits or is interrupted. The images are published on the GitHub Container Registry as [`ghcr.io/projectzkm/ziren-gpu`](https://github.com/orgs/ProjectZKM/packages/container/package/ziren-gpu), which lists each tag with its digest. Use the image tagged with the SDK's version, `v2.0.0` for Ziren 2.0.0: the server must come from the same release (see below). Because the container receives the private input stream, the image must also be pinned by its digest:
 
 ```bash
-export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>   # the digest of the published v2.0.0 image
+export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413   # the digest of the published v2.0.0 image
 ```
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `ZKM_GPU_IMAGE` | none | The image, as `repo:tag@sha256:<digest>`, with the tag of the SDK's version: `ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>` for Ziren 2.0.0. |
+| `ZKM_GPU_IMAGE` | none | The image, as `repo:tag@sha256:<digest>`, with the tag of the SDK's version: `ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413` for Ziren 2.0.0. |
 | `ZKM_ALLOW_MUTABLE_GPU_IMAGE` | unset | `1` accepts a tag without a digest, such as `:v2.0.0` alone; for local development only. |
 | `CUDA_VISIBLE_DEVICE_INDEX` | all GPUs | The one GPU the container uses (`--gpus device=<index>`). |
 | `CUDA_PORT` | `3000` | Host port the container's server is published on. Give each concurrent client its own port. |
@@ -182,7 +182,7 @@ For example, to prove the Fibonacci example on GPU 0:
 
 ```bash
 export ZKM_PROVER=cuda
-export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>
+export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:b22b10a6b793d4cc96c77c90e0199d12fdfc835549ebfbb83fafed93b0433413
 export CUDA_VISIBLE_DEVICE_INDEX=0
 cd examples/fibonacci/host && cargo run --release
 ```

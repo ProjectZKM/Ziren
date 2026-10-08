@@ -94,8 +94,32 @@ where
             );
             nop_sum = nop_sum + op.result;
         }
-        builder.when(local.is_real).assert_eq(local.is_nop_known, nop_sum);
+        builder.assert_eq(local.is_nop_known, nop_sum);
         builder.assert_bool(local.is_nop_known);
+
+        // The decode results gate memory accesses and byte lookups below, so a padding row
+        // must not carry any of them: an unconstrained flag there is a free lookup multiplicity.
+        builder.assert_bool(local.is_real);
+        for decode in [
+            &local.decode_mmap,
+            &local.decode_mmap2,
+            &local.decode_clone,
+            &local.decode_exit_group,
+            &local.decode_brk,
+            &local.decode_fnctl,
+            &local.decode_read,
+            &local.decode_write,
+            &local.decode_a0_0,
+            &local.decode_a0_1,
+            &local.decode_a0_2,
+            &local.decode_a1_1,
+            &local.decode_a1_3,
+        ]
+        .into_iter()
+        .chain(local.decode_nop.iter())
+        {
+            builder.when_not(local.is_real).assert_zero(decode.result);
+        }
 
         let is_clone = local.decode_clone.result;
         let is_exit_group = local.decode_exit_group.result;
@@ -104,9 +128,7 @@ where
         let is_read = local.decode_read.result;
         let is_write = local.decode_write.result;
 
-        builder
-            .when(local.is_real)
-            .assert_eq(local.is_mmap, local.decode_mmap.result + local.decode_mmap2.result);
+        builder.assert_eq(local.is_mmap, local.decode_mmap.result + local.decode_mmap2.result);
         builder.assert_bool(local.is_mmap);
 
         let recognized_sum: AB::Expr = local.is_mmap.into()
@@ -118,8 +140,8 @@ where
             + is_write;
         // Every real row is a call the executor accepts: one with semantics, or one of the
         // no-ops it lists. Any other number has no satisfying row, so the chip refuses
-        // exactly what the executor refuses.
-        builder.when(local.is_real).assert_one(recognized_sum + local.is_nop_known);
+        // exactly what the executor refuses. A padding row is no call at all.
+        builder.assert_eq(recognized_sum + local.is_nop_known, local.is_real);
         let is_nop: AB::Expr = local.is_nop_known.into();
 
         let a0_reduce = local.a0.reduce::<AB>();
