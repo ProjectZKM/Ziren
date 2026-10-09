@@ -1,16 +1,14 @@
 use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
-use std::path::Path;
 use std::time::Instant;
 use std::{env, fs};
 
-use ethers::signers::{LocalWallet, Signer};
 use tokio::time::sleep;
 use tokio::time::Duration;
 use tonic::metadata::{Ascii, MetadataValue};
+use tonic::transport::Certificate;
 use tonic::transport::Endpoint;
-use tonic::transport::{Certificate, Identity};
 use tonic::transport::{Channel, ClientTlsConfig};
 
 use crate::network::ProverInput;
@@ -24,12 +22,6 @@ use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{ZKMProver, ZKMProvingKey, ZKMVerifyingKey};
 
-#[derive(Clone)]
-pub struct Config {
-    pub ca_cert: Option<Certificate>,
-    pub identity: Option<Identity>,
-}
-
 pub mod stage_service {
     tonic::include_proto!("stage.v1");
 }
@@ -42,10 +34,9 @@ const MIN_POLL_INTERVAL: u64 = 100; // 100ms
 
 pub struct NetworkProver {
     pub endpoint: Endpoint,
-    pub wallet: LocalWallet,
     pub local_prover: CpuProver,
-    /// `Bearer <token>` from `FLEET_TOKEN_FILE`, sent on every proof RPC.
-    pub bearer: Option<MetadataValue<Ascii>>,
+    /// `Bearer <token>`, sent on every proof RPC.
+    pub bearer: MetadataValue<Ascii>,
     // Polling interval (milliseconds) for checking proof status,
     // default is 3000 milliseconds
     pub poll_interval: u64,
@@ -57,119 +48,55 @@ impl NetworkProver {
         Self::with_overrides(None, None)
     }
 
-    /// Build from explicit credentials/endpoint, falling back to the
-    /// environment for whatever is not supplied.
+    /// Build from an explicit token file and endpoint, falling back to
+    /// `FLEET_TOKEN_FILE` and `ENDPOINT` for whichever is absent.
     ///
-    /// `ProverClientBuilder::private_key` / `rpc_url` route here, so an explicit
-    /// key and endpoint always win over the environment.
+    /// `ProverClientBuilder::token_file` / `rpc_url` route here, so explicit
+    /// values always win over the environment. The token is the only
+    /// credential: it is sent as `authorization: Bearer` on every proof RPC.
     pub fn with_overrides(
-        private_key: Option<String>,
+        token_file: Option<String>,
         rpc_url: Option<String>,
     ) -> anyhow::Result<NetworkProver> {
-        let proof_network_privkey = match private_key {
-            Some(k) => k,
-            None => env::var("ZKM_PRIVATE_KEY")
-                .map_err(|_| anyhow::anyhow!("ZKM_PRIVATE_KEY must be set for remote proving"))?,
+        let token_file = match token_file {
+            Some(path) => path,
+            None => env::var("FLEET_TOKEN_FILE")
+                .map_err(|_| anyhow::anyhow!("FLEET_TOKEN_FILE must be set for remote proving"))?,
         };
+        let token = fs::read_to_string(&token_file)
+            .map_err(|e| anyhow::anyhow!("reading the token file {token_file}: {e}"))?;
+        let token = token.trim();
+        if token.is_empty() {
+            bail!("the token file {token_file} is empty");
+        }
+        let bearer = format!("Bearer {token}")
+            .parse::<MetadataValue<Ascii>>()
+            .map_err(|_| anyhow::anyhow!("the token file {token_file} does not hold a token"))?;
+
         let endpoint = match rpc_url {
             Some(u) => u,
-            None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
+            None => env::var("ENDPOINT")
+                .map_err(|_| anyhow::anyhow!("ENDPOINT must be set for remote proving"))?,
         };
-        let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let allow_test_ca = env::var("ZKM_ALLOW_INSECURE_TEST_CA")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let ca_cert_path = match env::var("CA_CERT_PATH") {
-            Ok(p) => Some(p),
-            Err(_) if allow_test_ca => {
-                let fixture = manifest_dir.join("tool/ca.pem");
-                if !fixture.exists() {
-                    return Err(anyhow::anyhow!(
-                        "ZKM_ALLOW_INSECURE_TEST_CA is set but {} does not exist. The test PKI \
-                         is not published with this crate -- its CA private key is committed -- \
-                         so it is reachable only from a repository checkout. Set CA_CERT_PATH to \
-                         the CA that signs the proving network's certificate.",
-                        fixture.display(),
-                    ));
-                }
-                tracing::warn!(
-                    "using the bundled INSECURE test CA: its private key is public, so this \
-                     connection can be impersonated. Never send sensitive witness data over it."
-                );
-                Some(fixture.to_string_lossy().to_string())
+        // Server-authenticated TLS: the CA from CA_CERT_PATH, else the system roots; the
+        // server name from DOMAIN_NAME, else the endpoint's host.
+        let endpoint = if endpoint.starts_with("https://") {
+            let host = endpoint.parse::<tonic::codegen::http::Uri>()?.host().map(str::to_owned);
+            let server_name = env::var("DOMAIN_NAME")
+                .ok()
+                .or(host)
+                .ok_or_else(|| anyhow::anyhow!("the endpoint {endpoint} has no host"))?;
+            let mut tls_config = ClientTlsConfig::new().domain_name(server_name);
+            if let Ok(ca) = env::var("CA_CERT_PATH") {
+                let pem =
+                    fs::read(&ca).map_err(|e| anyhow::anyhow!("reading CA_CERT_PATH {ca}: {e}"))?;
+                tls_config = tls_config.ca_certificate(Certificate::from_pem(pem));
             }
-            Err(_) => None,
-        };
-        let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
-        let ssl_key_path = env::var("SSL_KEY_PATH").ok();
-        let ssl_config = match (ssl_cert_path.as_ref(), ssl_key_path.as_ref()) {
-            (Some(ssl_cert_path), Some(ssl_key_path)) => {
-                let ca = ca_cert_path.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "SSL_CERT_PATH/SSL_KEY_PATH are set but CA_CERT_PATH is not. Set it to \
-                         the CA that signs the proving network's certificate. To use the \
-                         repository's bundled test CA -- whose private key is PUBLIC, so the \
-                         connection can be impersonated -- set ZKM_ALLOW_INSECURE_TEST_CA=1."
-                    )
-                })?;
-                let (ca_cert, identity) =
-                    get_cert_and_identity(ca, ssl_cert_path.as_ref(), ssl_key_path.as_ref())?;
-                Some(Config { ca_cert, identity })
-            }
-            _ => None,
+            Endpoint::new(endpoint)?.tls_config(tls_config)?
+        } else {
+            Endpoint::new(endpoint)?
         };
 
-        let bearer = match env::var("FLEET_TOKEN_FILE") {
-            Ok(path) => {
-                let token = fs::read_to_string(&path)
-                    .map_err(|e| anyhow::anyhow!("reading FLEET_TOKEN_FILE {path}: {e}"))?;
-                let token = token.trim();
-                if token.is_empty() {
-                    anyhow::bail!("FLEET_TOKEN_FILE {path} is empty");
-                }
-                Some(
-                    format!("Bearer {token}")
-                        .parse::<MetadataValue<Ascii>>()
-                        .map_err(|_| anyhow::anyhow!("FLEET_TOKEN_FILE {path} is not a token"))?,
-                )
-            }
-            Err(_) => None,
-        };
-
-        let endpoint_para = endpoint;
-        let endpoint = match ssl_config {
-            Some(config) => {
-                let mut tls_config = ClientTlsConfig::new().domain_name(domain_name);
-                if let Some(ca_cert) = config.ca_cert {
-                    tls_config = tls_config.ca_certificate(ca_cert);
-                }
-                if let Some(identity) = config.identity {
-                    tls_config = tls_config.identity(identity);
-                }
-                Endpoint::new(endpoint_para.to_owned())?.tls_config(tls_config)?
-            }
-            // Server-authenticated TLS: the CA from CA_CERT_PATH, else the system roots.
-            None if endpoint_para.starts_with("https://") => {
-                let host =
-                    endpoint_para.parse::<tonic::codegen::http::Uri>()?.host().map(str::to_owned);
-                let server_name = env::var("DOMAIN_NAME").ok().or(host).unwrap_or(domain_name);
-                let mut tls_config = ClientTlsConfig::new().domain_name(server_name);
-                if let Some(ca) = ca_cert_path.as_ref() {
-                    let pem = fs::read(ca)
-                        .map_err(|e| anyhow::anyhow!("reading CA_CERT_PATH {ca}: {e}"))?;
-                    tls_config = tls_config.ca_certificate(Certificate::from_pem(pem));
-                }
-                Endpoint::new(endpoint_para.to_owned())?.tls_config(tls_config)?
-            }
-            None => Endpoint::new(endpoint_para.to_owned())?,
-        };
-
-        let private_key = proof_network_privkey;
-        if private_key.is_empty() {
-            anyhow::bail!("the proving-network private key is empty");
-        }
-        let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
         let mut poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
             .ok()
@@ -180,21 +107,7 @@ impl NetworkProver {
             poll_interval = MIN_POLL_INTERVAL;
         }
 
-        Ok(NetworkProver { endpoint, wallet, local_prover, bearer, poll_interval })
-    }
-
-    pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) -> Result<()> {
-        let sign_data = match request.block_no {
-            Some(block_no) => {
-                format!("{}&{}&{}", request.proof_id, block_no, request.seg_size)
-            }
-            None => {
-                format!("{}&{}", request.proof_id, request.seg_size)
-            }
-        };
-        let signature = self.wallet.sign_message(sign_data).await?;
-        request.signature = signature.to_string();
-        Ok(())
+        Ok(NetworkProver { endpoint, local_prover, bearer, poll_interval })
     }
 
     pub async fn download_file(url: &str) -> Result<Vec<u8>> {
@@ -219,9 +132,7 @@ impl NetworkProver {
 
     fn authorized<T>(&self, message: T) -> tonic::Request<T> {
         let mut request = tonic::Request::new(message);
-        if let Some(bearer) = &self.bearer {
-            request.metadata_mut().insert("authorization", bearer.clone());
-        }
+        request.metadata_mut().insert("authorization", self.bearer.clone());
         request
     }
 
@@ -246,7 +157,7 @@ impl NetworkProver {
             return Err(anyhow::anyhow!("the proving network does not produce {kind:?} proofs"));
         };
 
-        let mut request = GenerateProofRequest {
+        let request = GenerateProofRequest {
             proof_id: uuid::Uuid::new_v4().to_string(),
             elf_data: input.elf,
             elf_id: input.elf_id,
@@ -260,7 +171,6 @@ impl NetworkProver {
             ..Default::default()
         };
 
-        self.sign_ecdsa(&mut request).await?;
         let mut client = self.connect().await?;
 
         let start = tokio::time::Instant::now();
@@ -423,41 +333,12 @@ impl Prover<DefaultProverComponents> for NetworkProver {
     }
 }
 
-fn get_cert_and_identity(
-    ca_cert_path: &str,
-    ssl_cert_path: &str,
-    ssl_key_path: &str,
-) -> anyhow::Result<(Option<Certificate>, Option<Identity>)> {
-    let ca_cert_path = Path::new(ca_cert_path);
-    let cert_path = Path::new(ssl_cert_path);
-    let key_path = Path::new(ssl_key_path);
-    if !ca_cert_path.is_file() || !cert_path.is_file() || !key_path.is_file() {
-        bail!("both ca_cert_path, ssl_cert_path and ssl_key_path should be valid file")
-    }
-    let mut ca: Option<Certificate> = None;
-    let mut identity: Option<Identity> = None;
-    if ca_cert_path.is_file() {
-        let ca_cert = fs::read(ca_cert_path)
-            .unwrap_or_else(|err| panic!("Failed to read {ca_cert_path:?}, err: {err:?}"));
-        ca = Some(Certificate::from_pem(ca_cert));
-    }
-
-    if cert_path.is_file() && key_path.is_file() {
-        let cert = fs::read(cert_path)
-            .unwrap_or_else(|err| panic!("Failed to read {cert_path:?}, err: {err:?}"));
-        let key = fs::read(key_path)
-            .unwrap_or_else(|err| panic!("Failed to read {key_path:?}, err: {err:?}"));
-        identity = Some(Identity::from_pem(cert, key));
-    }
-    Ok((ca, identity))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs a proving network: ENDPOINT, FLEET_TOKEN_FILE, ZKM_PRIVATE_KEY"]
+    #[ignore = "needs a proving network: ENDPOINT and FLEET_TOKEN_FILE"]
     fn the_proving_network_accepts_the_token() {
         let prover = NetworkProver::from_env().unwrap();
         crate::block_on(async {
@@ -475,15 +356,31 @@ mod tests {
         let path = env::temp_dir().join(format!("fleet-token-{}", std::process::id()));
         let token = "ab".repeat(48);
         fs::write(&path, format!("{token}\n")).unwrap();
-        env::set_var("FLEET_TOKEN_FILE", &path);
-        let key = "0x".to_string() + &"11".repeat(32);
-        let prover =
-            NetworkProver::with_overrides(Some(key), Some("http://127.0.0.1:1".to_string()));
-        env::remove_var("FLEET_TOKEN_FILE");
+        let prover = NetworkProver::with_overrides(
+            Some(path.to_string_lossy().to_string()),
+            Some("http://127.0.0.1:1".to_string()),
+        );
         fs::remove_file(&path).unwrap();
 
         let request = prover.unwrap().authorized(GetStatusRequest { proof_id: "p".to_string() });
         let header = request.metadata().get("authorization").expect("no authorization header");
         assert_eq!(header.to_str().unwrap(), format!("Bearer {token}"));
+    }
+
+    #[test]
+    fn a_missing_or_empty_token_is_refused() {
+        let missing = env::temp_dir().join(format!("no-fleet-token-{}", std::process::id()));
+        let endpoint = Some("http://127.0.0.1:1".to_string());
+        assert!(NetworkProver::with_overrides(
+            Some(missing.to_string_lossy().to_string()),
+            endpoint.clone()
+        )
+        .is_err());
+        let empty = env::temp_dir().join(format!("empty-fleet-token-{}", std::process::id()));
+        fs::write(&empty, "\n").unwrap();
+        let built =
+            NetworkProver::with_overrides(Some(empty.to_string_lossy().to_string()), endpoint);
+        fs::remove_file(&empty).unwrap();
+        assert!(built.is_err());
     }
 }
