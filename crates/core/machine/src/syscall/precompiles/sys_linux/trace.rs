@@ -16,7 +16,7 @@ use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},
     SysLinuxChip,
 };
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{utils::pad_rows_mult32, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
     type Record = ExecutionRecord;
@@ -57,7 +57,7 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
             })
             .collect::<Vec<_>>();
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_SYS_LINUX_COLS],
             input.fixed_log2_rows::<F, _>(self),

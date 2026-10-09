@@ -162,6 +162,25 @@ pub fn pad_rows_exact<R: Clone>(
     rows.resize(next_multiple_of_32_rows(nb_rows, fixed_rows, chip), dummy_row);
 }
 
+/// [`pad_rows_fixed_with_err`] with [`next_multiple_of_32`] padding.
+pub fn pad_rows_mult32_with_err<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> Result<R, CoreChipError>,
+    size_log2: Option<usize>,
+    chip: &str,
+) -> Result<(), CoreChipError> {
+    let nb_rows = rows.len();
+    let dummy_row = match row_fn() {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!("failed to generate dummy row for padding: {}", e);
+            return Err(e);
+        }
+    };
+    rows.resize(next_multiple_of_32(nb_rows, size_log2, chip), dummy_row);
+    Ok(())
+}
+
 /// [`pad_rows_fixed`] with [`next_multiple_of_32`] padding.
 pub fn pad_rows_mult32<R: Clone>(
     rows: &mut Vec<R>,

@@ -16,7 +16,7 @@ use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},
     ShaCompressChip, SHA_COMPRESS_K,
 };
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{utils::pad_rows_mult32, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
     type Record = ExecutionRecord;
@@ -53,7 +53,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
 
         let num_real_rows = rows.len();
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_SHA_COMPRESS_COLS],
             input.fixed_log2_rows::<F, _>(self),

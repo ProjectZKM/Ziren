@@ -2,7 +2,7 @@ use crate::{
     air::MemoryAirBuilder,
     memory::{value_as_limbs, MemoryCols, MemoryReadCols, MemoryWriteCols},
     operations::{field::field_op::FieldOpCols, KoalaBearWordRangeChecker},
-    utils::{limbs_from_access, pad_rows_fixed, words_to_bytes_le},
+    utils::{limbs_from_access, pad_rows_mult32, words_to_bytes_le},
     CoreChipError,
 };
 use zkm_derive::PicusAnnotations;
@@ -212,7 +212,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
             output.append(&mut record);
         }
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || {
                 let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];

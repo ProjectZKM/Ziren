@@ -27,7 +27,7 @@ use zkm_pcs::{
     LookupKind, ZKMAirBuilder,
 };
 
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{utils::pad_rows_mult32, CoreChipError};
 
 pub const NUM_SHA_EXTEND_CONTROL_COLS: usize = size_of::<ShaExtendControlCols<u8>>();
 
@@ -87,7 +87,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendControlChip {
             rows.push(row);
         }
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS],
             input.fixed_log2_rows::<F, _>(self),

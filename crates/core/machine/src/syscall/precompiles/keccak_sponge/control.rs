@@ -60,7 +60,7 @@ use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
     KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
 };
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{utils::pad_rows_mult32, CoreChipError};
 
 pub const NUM_KECCAK_SPONGE_CONTROL_COLS: usize = size_of::<KeccakSpongeControlCols<u8>>();
 
@@ -231,7 +231,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeControlChip {
         }
         rows = wrapped.unwrap();
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_KECCAK_SPONGE_CONTROL_COLS],
             input.fixed_log2_rows::<F, _>(self),

@@ -14,7 +14,7 @@ use crate::syscall::precompiles::keccak_sponge::columns::{
     KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::KeccakSpongeChip;
-use crate::CoreChipError;
+use crate::{utils::next_multiple_of_32, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     type Record = ExecutionRecord;
@@ -108,8 +108,11 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             dummy_chunk.push(row);
         }
 
-        let num_padded_rows =
-            if num_real_rows == 0 { 0 } else { num_real_rows.next_power_of_two() };
+        let num_padded_rows = if num_real_rows == 0 {
+            0
+        } else {
+            next_multiple_of_32(num_real_rows, None, <Self as MachineAir<F>>::name(self).as_str())
+        };
         for i in num_real_rows..num_padded_rows {
             rows.push(dummy_chunk[i % NUM_ROUNDS]);
         }
