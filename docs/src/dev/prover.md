@@ -237,7 +237,7 @@ The ZKM Proof Network proves programs remotely. The SDK's network prover (the `n
 ### Requirements
 
 - [Register](https://www.zkm.io/apply) your address to gain access.
-- A client certificate and key issued for the network, and the certificate of the CA that signs the network's certificate.
+- A user token issued for the network (a file holding the token), and the certificate of the CA that signs the network's certificate when it is not in the system trust store. Older networks authenticate clients by a client certificate and key instead.
 - **SDK dependency**: add `zkm-sdk` with the `network` feature to your `Cargo.toml`:
 ```toml
 zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", features = ["network"] }
@@ -248,6 +248,12 @@ zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", features = ["network"] 
 Before running your application, export the following environment variables:
 ```bash
 export ZKM_PRIVATE_KEY=<your_private_key>       # Private key corresponding to your registered public key
+export FLEET_TOKEN_FILE=<path_to_token_file>    # Your user token, sent as `Authorization: Bearer` on every proof request
+export CA_CERT_PATH=<path_to_ca_certificate>    # The network's CA, when the system trust store does not hold it
+```
+
+A network that still authenticates clients by certificate takes a client certificate and key instead of, or as well as, the token:
+```bash
 export SSL_CERT_PATH=<path_to_ssl_certificate>  # Path to the SSL client certificate (e.g., ssl.pem)
 export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private key (e.g., ssl.key)
 export CA_CERT_PATH=<path_to_ca_certificate>    # Required when SSL_CERT_PATH/SSL_KEY_PATH are set
@@ -261,13 +267,13 @@ The repository's [`crates/sdk/tool`](https://github.com/ProjectZKM/Ziren/tree/ma
 export SHARD_SIZE=<shard_size>              # Shard (segment) size requested from the network
 export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel
 export SINGLE_NODE=<true|false>             # Whether to use a single node for proving (default: false)
-export ZKM_PROOF_POLL_INTERVAL=<seconds>    # How often to poll for the proof status
+export ZKM_PROOF_POLL_INTERVAL=<ms>         # How often to poll for the proof status (default: 3000, minimum 100)
 ```
 
 To use your own proof network endpoint:
 ```bash
 export ENDPOINT=<proof_network_endpoint>    # Proof network endpoint (default: https://152.32.186.45:20002)
-export DOMAIN_NAME=<domain_name>            # TLS domain name (default: "stage")
+export DOMAIN_NAME=<domain_name>            # TLS server name (default: the endpoint's host; "stage" with a client certificate)
 ```
 
 ### Example

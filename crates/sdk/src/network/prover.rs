@@ -8,6 +8,7 @@ use std::{env, fs};
 use ethers::signers::{LocalWallet, Signer};
 use tokio::time::sleep;
 use tokio::time::Duration;
+use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::Endpoint;
 use tonic::transport::{Certificate, Identity};
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -43,6 +44,8 @@ pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
+    /// `Bearer <token>` from `FLEET_TOKEN_FILE`, sent on every proof RPC.
+    pub bearer: Option<MetadataValue<Ascii>>,
     // Polling interval (milliseconds) for checking proof status,
     // default is 3000 milliseconds
     pub poll_interval: u64,
@@ -117,6 +120,23 @@ impl NetworkProver {
             _ => None,
         };
 
+        let bearer = match env::var("FLEET_TOKEN_FILE") {
+            Ok(path) => {
+                let token = fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("reading FLEET_TOKEN_FILE {path}: {e}"))?;
+                let token = token.trim();
+                if token.is_empty() {
+                    anyhow::bail!("FLEET_TOKEN_FILE {path} is empty");
+                }
+                Some(
+                    format!("Bearer {token}")
+                        .parse::<MetadataValue<Ascii>>()
+                        .map_err(|_| anyhow::anyhow!("FLEET_TOKEN_FILE {path} is not a token"))?,
+                )
+            }
+            Err(_) => None,
+        };
+
         let endpoint_para = endpoint;
         let endpoint = match ssl_config {
             Some(config) => {
@@ -126,6 +146,19 @@ impl NetworkProver {
                 }
                 if let Some(identity) = config.identity {
                     tls_config = tls_config.identity(identity);
+                }
+                Endpoint::new(endpoint_para.to_owned())?.tls_config(tls_config)?
+            }
+            // Server-authenticated TLS: the CA from CA_CERT_PATH, else the system roots.
+            None if endpoint_para.starts_with("https://") => {
+                let host =
+                    endpoint_para.parse::<tonic::codegen::http::Uri>()?.host().map(str::to_owned);
+                let server_name = env::var("DOMAIN_NAME").ok().or(host).unwrap_or(domain_name);
+                let mut tls_config = ClientTlsConfig::new().domain_name(server_name);
+                if let Some(ca) = ca_cert_path.as_ref() {
+                    let pem = fs::read(ca)
+                        .map_err(|e| anyhow::anyhow!("reading CA_CERT_PATH {ca}: {e}"))?;
+                    tls_config = tls_config.ca_certificate(Certificate::from_pem(pem));
                 }
                 Endpoint::new(endpoint_para.to_owned())?.tls_config(tls_config)?
             }
@@ -147,7 +180,7 @@ impl NetworkProver {
             poll_interval = MIN_POLL_INTERVAL;
         }
 
-        Ok(NetworkProver { endpoint, wallet, local_prover, poll_interval })
+        Ok(NetworkProver { endpoint, wallet, local_prover, bearer, poll_interval })
     }
 
     pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) -> Result<()> {
@@ -182,6 +215,14 @@ impl NetworkProver {
         StageServiceClient::connect(self.endpoint.clone())
             .await
             .map_err(|e| anyhow::anyhow!("could not connect to the proving network: {e}"))
+    }
+
+    fn authorized<T>(&self, message: T) -> tonic::Request<T> {
+        let mut request = tonic::Request::new(message);
+        if let Some(bearer) = &self.bearer {
+            request.metadata_mut().insert("authorization", bearer.clone());
+        }
+        request
     }
 
     async fn request_proof(&self, input: ProverInput, kind: ZKMProofKind) -> Result<String> {
@@ -223,7 +264,7 @@ impl NetworkProver {
         let mut client = self.connect().await?;
 
         let start = tokio::time::Instant::now();
-        let response = client.generate_proof(request).await?.into_inner();
+        let response = client.generate_proof(self.authorized(request)).await?.into_inner();
         tracing::info!("[request proof] get response: {:?}", start.elapsed());
 
         Ok(response.proof_id)
@@ -245,7 +286,8 @@ impl NetworkProver {
             }
 
             let get_status_request = GetStatusRequest { proof_id: proof_id.to_string() };
-            let get_status_response = client.get_status(get_status_request).await?.into_inner();
+            let get_status_response =
+                client.get_status(self.authorized(get_status_request)).await?.into_inner();
 
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
@@ -408,4 +450,26 @@ fn get_cert_and_identity(
         identity = Some(Identity::from_pem(cert, key));
     }
     Ok((ca, identity))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proof_requests_carry_the_fleet_token() {
+        let path = env::temp_dir().join(format!("fleet-token-{}", std::process::id()));
+        let token = "ab".repeat(48);
+        fs::write(&path, format!("{token}\n")).unwrap();
+        env::set_var("FLEET_TOKEN_FILE", &path);
+        let key = "0x".to_string() + &"11".repeat(32);
+        let prover =
+            NetworkProver::with_overrides(Some(key), Some("http://127.0.0.1:1".to_string()));
+        env::remove_var("FLEET_TOKEN_FILE");
+        fs::remove_file(&path).unwrap();
+
+        let request = prover.unwrap().authorized(GetStatusRequest { proof_id: "p".to_string() });
+        let header = request.metadata().get("authorization").expect("no authorization header");
+        assert_eq!(header.to_str().unwrap(), format!("Bearer {token}"));
+    }
 }
