@@ -18,7 +18,7 @@ categories = { workspace = true }
 exclude = ["tool/"]
 
 [dependencies]
-prost = { version = "0.11.0", optional = true }
+prost = { version = "0.12", optional = true }
 serde = { workspace = true, features = ["derive"] }
 twirp = { package = "twirp-rs", version = "0.13.0-succinct", optional = true }
 async-trait = "0.1.81"
@@ -57,7 +57,7 @@ zkm-pcs = { workspace = true }
 zkm-primitives = { workspace = true }
 zkm-cuda = { workspace = true }
 itertools = { workspace = true }
-tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"]}
+tonic = { version = "0.10", features = ["tls", "tls-roots", "transport"]}
 alloy-primitives = { version = "1.0", optional = true }
 num-bigint = "0.4.6"
 serde_json = "1.0.140"
@@ -88,5 +88,5 @@ vergen = { version = "8", default-features = false, features = [
   "git",
   "git2",
 ] }
-tonic-build = "0.8.0"
+tonic-build = "0.10"
 

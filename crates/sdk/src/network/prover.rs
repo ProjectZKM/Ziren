@@ -289,9 +289,9 @@ impl NetworkProver {
             let get_status_response =
                 client.get_status(self.authorized(get_status_request)).await?.into_inner();
 
-            match Status::from_i32(get_status_response.status) {
+            match Status::try_from(get_status_response.status).ok() {
                 Some(Status::Computing) => {
-                    match Step::from_i32(get_status_response.step) {
+                    match Step::try_from(get_status_response.step).ok() {
                         Some(step) => log::info!("proof_id: {proof_id}, step: {step}"),
                         None => log::info!(
                             "proof_id: {proof_id}, step: {} (unknown to this client)",
@@ -455,6 +455,20 @@ fn get_cert_and_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs a proving network: ENDPOINT, FLEET_TOKEN_FILE, ZKM_PRIVATE_KEY"]
+    fn the_proving_network_accepts_the_token() {
+        let prover = NetworkProver::from_env().unwrap();
+        crate::block_on(async {
+            let mut client = prover.connect().await.unwrap();
+            let request =
+                prover.authorized(GetStatusRequest { proof_id: uuid::Uuid::new_v4().to_string() });
+            if let Err(status) = client.get_status(request).await {
+                assert_ne!(status.code(), tonic::Code::Unauthenticated, "{status}");
+            }
+        });
+    }
 
     #[test]
     fn proof_requests_carry_the_fleet_token() {
