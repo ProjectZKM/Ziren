@@ -15,6 +15,7 @@ use crate::{
         ext2felt::Ext2FeltChip,
         mem::{MemoryConstChip, MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
+        prefix_sum_checks::PrefixSumChecksChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
@@ -123,6 +124,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             RecursionAir::<F, DEGREE>::Select(SelectChip),
             RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()),
+            RecursionAir::<F, DEGREE>::PrefixSumChecks(PrefixSumChecksChip),
             RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
         ];
         let main = airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::width(a))).collect();
@@ -268,6 +270,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let select = RecursionAir::<F, DEGREE>::Select(SelectChip).name();
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
         let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
+        let prefix_sum_checks =
+            RecursionAir::<F, DEGREE>::PrefixSumChecks(PrefixSumChecksChip).name();
 
         let rows = |n: usize| -> usize {
             assert!(n.is_multiple_of(32), "recursion shape rows must be a multiple of 32: {n}");
@@ -282,6 +286,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (ext_alu.clone(), rows(323_936)),
                 (poseidon2_wide.clone(), rows(34_816)),
                 (ext2felt.clone(), rows(34_272)),
+                (prefix_sum_checks.clone(), rows(24_576)),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
             HashMap::from([
@@ -292,6 +297,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (ext_alu.clone(), rows(647_872)),
                 (poseidon2_wide.clone(), rows(69_632)),
                 (ext2felt.clone(), rows(68_512)),
+                (prefix_sum_checks.clone(), rows(163_840)),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
         ];

@@ -317,6 +317,20 @@ pub enum DslIr<C: Config> {
     /// programs proven on the compress machine (normalize/compose/deferred);
     /// shrink/wrap programs keep `CircuitExt2Felt` + the DSL binding.
     CircuitV2Ext2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    /// The jagged verifier's per-column prefix-sum check on the
+    /// `PrefixSumChecks` CHIP: `(zero, one, accs, field_accs, bits, point)`,
+    /// see `zkm_recursion_core::PrefixSumChecksIo`.  Only valid for programs
+    /// proven on the compress machine (normalize/compose/deferred).
+    CircuitV2PrefixSumChecks(
+        Box<(
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Vec<Ext<C::F, C::EF>>,
+            Vec<Felt<C::F>>,
+            Vec<Felt<C::F>>,
+            Vec<Ext<C::F, C::EF>>,
+        )>,
+    ),
     /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
     CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
     /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.

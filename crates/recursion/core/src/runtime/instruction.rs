@@ -24,6 +24,10 @@ pub enum Instruction<F> {
     Ext2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
     Hint(HintInstr<F>),
+    /// The jagged verifier's per-column prefix-sum check on the
+    /// `PrefixSumChecks` chip (compress-machine programs only): one row per
+    /// bit, the Lagrange product and the Horner sum chained through memory.
+    PrefixSumChecks(Box<PrefixSumChecksInstr<F>>),
 }
 
 /// The executor walks millions of these per recursion node and the program
@@ -73,6 +77,16 @@ pub struct HintExt2FeltsInstr<F> {
     pub output_addrs_mults: [(Address<F>, F); D],
     /// Input value to decompose.
     pub input_addr: Address<F>,
+}
+
+/// An instruction invoking the prefix-sum-checks operation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrefixSumChecksInstr<F> {
+    pub addrs: PrefixSumChecksIo<Address<F>>,
+    /// Multiplicity of each `accs[i]` write.
+    pub acc_mults: Vec<F>,
+    /// Multiplicity of each `field_accs[i]` write.
+    pub field_acc_mults: Vec<F>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -237,6 +251,36 @@ impl<F: Copy> Instruction<F> {
             }
             Instruction::CommitPublicValues(_) => {}
             Instruction::Hint(i) => i.output_addrs_mults.iter().for_each(|(a, _)| f(*a)),
+            Instruction::PrefixSumChecks(i) => {
+                i.addrs.accs.iter().chain(i.addrs.field_accs.iter()).copied().for_each(f)
+            }
         }
     }
+}
+
+/// A prefix-sum-checks instruction over `x1.len()` bits (tests).
+#[allow(clippy::too_many_arguments)]
+pub fn prefix_sum_checks<F: PrimeCharacteristicRing>(
+    acc_mults: Vec<u32>,
+    field_acc_mults: Vec<u32>,
+    x1: Vec<u32>,
+    x2: Vec<u32>,
+    zero: u32,
+    one: u32,
+    accs: Vec<u32>,
+    field_accs: Vec<u32>,
+) -> Instruction<F> {
+    let addr = |a: u32| Address(F::from_u32(a));
+    Instruction::PrefixSumChecks(Box::new(PrefixSumChecksInstr {
+        addrs: PrefixSumChecksIo {
+            zero: addr(zero),
+            one: addr(one),
+            x1: x1.into_iter().map(addr).collect(),
+            x2: x2.into_iter().map(addr).collect(),
+            accs: accs.into_iter().map(addr).collect(),
+            field_accs: field_accs.into_iter().map(addr).collect(),
+        },
+        acc_mults: acc_mults.into_iter().map(F::from_u32).collect(),
+        field_acc_mults: field_acc_mults.into_iter().map(F::from_u32).collect(),
+    }))
 }

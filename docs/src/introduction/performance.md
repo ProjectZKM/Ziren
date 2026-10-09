@@ -45,26 +45,26 @@ The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, prove
 
 | Client | | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
 |--------|-|-------------:|-------:|----------:|-----------:|------------:|-------------:|
-| Reth | range | 43–508 M | 33–164 | 17.9–78.7 | 7.8–15.9 | 2.4–6.4 | 5.5–31.9 |
-| | median | 193 M | 87 | 42.1 | 11.2 | 4.6 | 18.0 |
-| | p99 | 484 M | 158 | 75.8 | 15.6 | 6.4 | 31.0 |
-| | all 16 | 3.45 G | 1,491 | 723 | 184 | 4.8 | 18.7 |
-| Geth | range | 0.25–2.99 G | 64–537 | 31.9–258 | 10.4–40.8 | 8.0–11.9 | 24.4–73.2 |
-| | median | 1.27 G | 268 | 127.5 | 23.6 | 10.4 | 54.1 |
-| | p99 | 2.87 G | 518 | 248.9 | 39.5 | 11.8 | 72.4 |
-| | all 16 | 22.68 G | 4,472 | 2,138 | 392 | 10.6 | 57.9 |
+| Reth | range | 43–508 M | 33–164 | 16.3–77.5 | 6.4–14.3 | 2.6–6.5 | 6.7–35.5 |
+| | median | 193 M | 87 | 40.2 | 9.5 | 4.8 | 20.6 |
+| | p99 | 484 M | 158 | 74.4 | 13.9 | 6.5 | 34.7 |
+| | all 16 | 3.45 G | 1,490 | 690 | 158 | 5.0 | 21.8 |
+| Geth | range | 0.25–2.99 G | 64–537 | 33.3–250 | 9.9–38.4 | 7.6–12.0 | 25.7–77.8 |
+| | median | 1.27 G | 268 | 124.5 | 22.3 | 10.5 | 58.1 |
+| | p99 | 2.87 G | 518 | 241.2 | 37.2 | 12.0 | 77.0 |
+| | all 16 | 22.67 G | 4,471 | 2,099 | 368 | 10.8 | 61.7 |
 
-A shard costs about 0.48 s on one GPU under either guest, so proving time follows the number of shards, not the number of cycles. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still proves every block 1.8 to 3.9 times faster than Geth on one GPU, and 1.3 to 2.6 times faster on eight. Eight GPUs reduce the summed proving time 5.5 times for Geth and 3.9 times for Reth; the gap to linear scaling is the serial recursion tail after the last shard and the start-up interval before every GPU has a shard.
+A block costs in proportion to its shards, not its cycles: a shard takes about 0.47 s on one GPU under either guest. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still finishes every block sooner. Its blocks are also smaller, so on eight GPUs the serial recursion tail after the last shard is a larger share of each.
 
 Scaling across GPUs, for three of these blocks proved with Reth (median of three consecutive warm proofs):
 
 | Block (guest cycles) | 1 GPU (s) | 2 GPUs (s) | 4 GPUs (s) | 1 GPU (MHz) | 2 GPUs (MHz) | 4 GPUs (MHz) |
 |----------------------|----------:|-----------:|-----------:|------------:|-------------:|-------------:|
-| 26,138,428 (206 M) | 41.9 | 22.3 | 13.6 | 4.9 | 9.3 | 15.2 |
-| 26,138,416 (348 M) | 57.9 | 30.5 | 17.2 | 6.0 | 11.4 | 20.2 |
-| 26,138,421 (508 M) | 77.6 | 40.4 | 22.3 | 6.5 | 12.6 | 22.8 |
+| 26,138,428 (206 M) | 40.4 | 20.9 | 12.5 | 5.1 | 9.9 | 16.5 |
+| 26,138,416 (348 M) | 54.6 | 28.9 | 15.7 | 6.4 | 12.0 | 22.2 |
+| 26,138,421 (508 M) | 74.5 | 38.5 | 20.8 | 6.8 | 13.2 | 24.4 |
 
-Two GPUs prove each block 1.9 times faster than one, and four 3.1 to 3.5 times faster.
+Two GPUs prove each block 1.9 times faster than one, and four 3.2 to 3.6 times faster.
 
 On a GPU, the lookup argument (LogUp-GKR) takes 42% of kernel time and WHIR commitment and opening 19%, in a ten-shard profile. The lookup cost scales with (row, interaction) pairs, so memory instructions, which carry 25 to 26 interactions per row, account for 47% of all pairs.
 

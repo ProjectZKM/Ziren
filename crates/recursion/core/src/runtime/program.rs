@@ -169,6 +169,17 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                 Instruction::Hint(i) => {
                     i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
                 }
+                Instruction::PrefixSumChecks(i) => {
+                    see(&i.addrs.zero);
+                    see(&i.addrs.one);
+                    i.addrs
+                        .x1
+                        .iter()
+                        .chain(i.addrs.x2.iter())
+                        .chain(i.addrs.accs.iter())
+                        .chain(i.addrs.field_accs.iter())
+                        .for_each(&mut see);
+                }
             }
         }
         max_addr.map_or(0, |m| m as usize + 1)
