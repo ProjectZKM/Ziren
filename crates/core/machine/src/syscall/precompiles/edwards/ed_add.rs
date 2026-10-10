@@ -33,7 +33,7 @@ use crate::{
         field_den::FieldDenCols, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         range::FieldLtCols,
     },
-    utils::{limbs_from_prev_access, pad_rows_fixed},
+    utils::{limbs_from_prev_access, pad_rows_mult32},
 };
 
 pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
@@ -145,7 +145,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
             })
             .collect::<Vec<_>>();
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];

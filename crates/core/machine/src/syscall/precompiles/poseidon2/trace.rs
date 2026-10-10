@@ -2,7 +2,7 @@ use crate::operations::poseidon2::trace::populate_perm_deg3;
 use crate::operations::poseidon2::WIDTH;
 use crate::syscall::precompiles::poseidon2::columns::{Poseidon2MemCols, NUM_COLS};
 use crate::syscall::precompiles::poseidon2::Poseidon2PermuteChip;
-use crate::utils::pad_rows_fixed;
+use crate::utils::pad_rows_mult32;
 use crate::CoreChipError;
 use itertools::Itertools;
 use p3_field::PrimeField32;
@@ -54,7 +54,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         let mut dummy_row = [F::ZERO; NUM_COLS];
         let dummy_cols: &mut Poseidon2MemCols<F> = dummy_row.as_mut_slice().borrow_mut();
         dummy_cols.poseidon2 = populate_perm_deg3([F::ZERO; WIDTH], None);
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || dummy_row,
             input.fixed_log2_rows::<F, _>(self),

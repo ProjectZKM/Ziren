@@ -11,7 +11,7 @@ use zkm_core_executor::{
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::PicusInfo;
 
-use crate::CoreChipError;
+use crate::{utils::next_multiple_of_32, CoreChipError};
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
 
@@ -47,10 +47,8 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
 
         let mut rows = wrapped_rows.unwrap();
         let nb_rows = rows.len();
-        let mut padded_nb_rows = nb_rows.next_power_of_two();
-        if padded_nb_rows == 2 || padded_nb_rows == 1 {
-            padded_nb_rows = 4;
-        }
+        let padded_nb_rows =
+            next_multiple_of_32(nb_rows, None, <Self as MachineAir<F>>::name(self).as_str());
         for _ in nb_rows..padded_nb_rows {
             rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
         }

@@ -10,7 +10,7 @@ use crate::{
     air::MemoryAirBuilder,
     operations::{field::range::FieldLtCols, IsZeroOperation},
     utils::{
-        limbs_from_access, limbs_from_prev_access, pad_rows_fixed, words_to_bytes_le,
+        limbs_from_access, limbs_from_prev_access, pad_rows_mult32, words_to_bytes_le,
         words_to_bytes_le_vec,
     },
 };
@@ -187,7 +187,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
             output.append(&mut record);
         }
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || {
                 let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];

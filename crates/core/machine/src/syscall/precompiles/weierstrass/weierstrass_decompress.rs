@@ -8,7 +8,7 @@ use zkm_pcs::PicusInfo;
 
 use crate::{
     air::MemoryAirBuilder,
-    utils::{pad_rows_fixed_with_err, zeroed_f_vec},
+    utils::{pad_rows_mult32_with_err, zeroed_f_vec},
     CoreChipError,
 };
 use generic_array::GenericArray;
@@ -249,7 +249,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
         output.add_byte_lookup_events(new_byte_lookup_events);
 
-        pad_rows_fixed_with_err(
+        pad_rows_mult32_with_err(
             &mut rows,
             || {
                 let mut row = zeroed_f_vec(width);

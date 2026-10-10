@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use zkm_derive::PicusAnnotations;
 use zkm_pcs::PicusInfo;
 
-use crate::{air::MemoryAirBuilder, utils::pad_rows_fixed_with_err, CoreChipError};
+use crate::{air::MemoryAirBuilder, utils::pad_rows_mult32_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
@@ -237,7 +237,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             rows.push(row);
         }
 
-        pad_rows_fixed_with_err(
+        pad_rows_mult32_with_err(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];

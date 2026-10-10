@@ -29,7 +29,7 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBu
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
     operations::field::{field_op::FieldOpCols, range::FieldLtCols},
-    utils::{limbs_from_prev_access, pad_rows_fixed, words_to_bytes_le_vec},
+    utils::{limbs_from_prev_access, pad_rows_mult32, words_to_bytes_le_vec},
 };
 
 pub const fn num_fp2_addsub_cols<P: FpOpField>() -> usize {
@@ -160,7 +160,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
 
         output.add_byte_lookup_events(new_byte_lookup_events);
 
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || {
                 let mut row = zeroed_f_vec(num_fp2_addsub_cols::<P>());
