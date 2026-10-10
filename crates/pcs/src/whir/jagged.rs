@@ -116,7 +116,7 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
 /// ```text
 ///   ρ = 2^-2 : 124 · 0.678072 + 22 = 106.08
 ///   ρ = 2^-5 :  88 · 0.955606 + 22 = 106.09
-///   ρ = 2^-8 :  85 · 0.994375 + 22 = 106.52   (and every later round)
+///   ρ = 2^-8 :  85 · 0.994375 + 22 = 106.52   (final queries)
 /// ```
 ///
 /// Each count is the least integer reaching the target, so one query fewer in
@@ -185,7 +185,8 @@ const START_LOG_INV_RATE: usize = 2;
 /// The query counts are solved, not listed: a round is worth
 /// `q · bits_per_query(rate) + pow` bits, so listing `q` while `pow` and the
 /// target are overridable would let an override weaken a round silently.  At
-/// the defaults this yields the schedule it replaces, `[124, 88, 85]`.
+/// the defaults this yields the schedule it replaces, `[124, 88]` and 85 final
+/// queries.
 fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
     const ROUND0_FF: usize = 3;
     let mut rem =
@@ -339,12 +340,11 @@ pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
 /// ```text
 ///   rho = 2^-3  : 58 · 1.3846 + 26 = 106.3
 ///   rho = 2^-6  : 28 · 2.8845 + 26 = 106.8
-///   rho = 2^-9  : 19 · 4.3845 + 26 = 109.3
-///   (final queries: the last committed oracle; the last round folds and commits nothing)
+///   rho = 2^-9  : 19 · 4.3845 + 26 = 109.3   (final queries)
 /// ```
 ///
-/// against `[124, 88, 85]` under the core schedule.  Folds are
-/// `[2, 6, 6]` with seven final variables.
+/// against `[124, 88]` and 85 under the core schedule.
+/// Folds are `[2, 6, 6]` with seven final variables.
 pub fn compress_whir_config(lsh: usize) -> WhirConfig {
     let rate = compress_log_inv_rate();
     assert!(
