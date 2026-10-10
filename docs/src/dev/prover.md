@@ -236,8 +236,8 @@ The ZKM Proof Network proves programs remotely. The SDK's network prover (the `n
 
 ### Requirements
 
-- [Register](https://www.zkm.io/apply) your address to gain access.
-- A client certificate and key issued for the network, and the certificate of the CA that signs the network's certificate.
+- Access: open a [proof network access request](https://github.com/ProjectZKM/Ziren/issues/new?template=proof_network_access.md) issue in the Ziren repository. Never post a secret in the issue; the user token is delivered to you privately.
+- The user token, in a file only you can read. It is the only credential: the SDK sends it as `Authorization: Bearer` on every proof request, over TLS that authenticates the server.
 - **SDK dependency**: add `zkm-sdk` with the `network` feature to your `Cargo.toml`:
 ```toml
 zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", features = ["network"] }
@@ -247,13 +247,14 @@ zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", features = ["network"] 
 
 Before running your application, export the following environment variables:
 ```bash
-export ZKM_PRIVATE_KEY=<your_private_key>       # Private key corresponding to your registered public key
-export SSL_CERT_PATH=<path_to_ssl_certificate>  # Path to the SSL client certificate (e.g., ssl.pem)
-export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private key (e.g., ssl.key)
-export CA_CERT_PATH=<path_to_ca_certificate>    # Required when SSL_CERT_PATH/SSL_KEY_PATH are set
+export ZKM_PROVER=network
+export ENDPOINT=<proof_network_endpoint>        # The network's proof endpoint, e.g. https://<host>:<port>
+export FLEET_TOKEN_FILE=<path_to_token_file>    # Your user token
+export CA_CERT_PATH=<path_to_ca_certificate>    # Only when the system trust store does not hold the network's CA
+export DOMAIN_NAME=<tls_server_name>            # Only when the server's name differs from the endpoint's host
 ```
 
-The repository's [`crates/sdk/tool`](https://github.com/ProjectZKM/Ziren/tree/main/crates/sdk/tool) directory contains a `certgen.sh` script and a test CA (`ca.pem`, `ca.key`). The test CA's private key is public, so it is only for local testing: the SDK uses it only when `ZKM_ALLOW_INSECURE_TEST_CA=1` is set, and never for real witness data (see `INSECURE-TEST-PKI.md` there).
+A token bundle issued with `fleetctl token issue` already sets these.
 
 **Optional**: customize the network prover's behavior:
 
@@ -261,13 +262,7 @@ The repository's [`crates/sdk/tool`](https://github.com/ProjectZKM/Ziren/tree/ma
 export SHARD_SIZE=<shard_size>              # Shard (segment) size requested from the network
 export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel
 export SINGLE_NODE=<true|false>             # Whether to use a single node for proving (default: false)
-export ZKM_PROOF_POLL_INTERVAL=<seconds>    # How often to poll for the proof status
-```
-
-To use your own proof network endpoint:
-```bash
-export ENDPOINT=<proof_network_endpoint>    # Proof network endpoint (default: https://152.32.186.45:20002)
-export DOMAIN_NAME=<domain_name>            # TLS domain name (default: "stage")
+export ZKM_PROOF_POLL_INTERVAL=<ms>         # How often to poll for the proof status (default: 3000, minimum 100)
 ```
 
 ### Example
