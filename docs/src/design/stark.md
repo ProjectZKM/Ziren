@@ -65,7 +65,7 @@ The production schedule for a core shard (`core_whir_config` in `crates/pcs/src/
 | Stacking height | \\( 2^{21} \\) |
 | Starting rate | \\( \rho = 2^{-2} \\); each committed round divides it by 8 |
 | Folding factors | 3, then 6, 6 |
-| Queries per round | 124, 88, 85 (final: 85) |
+| Queries per committed round | 124, 88 (final: 85) |
 | Out-of-domain samples | 2 per committed round |
 | Query grinding | 22 bits (`ZIREN_WHIR_QUERY_GRINDING_BITS`) |
 | Batching grinding | 14 bits (`ZIREN_WHIR_BATCH_GRINDING_BITS`) |
