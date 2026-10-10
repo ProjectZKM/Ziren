@@ -207,7 +207,7 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
     }
-    config.final_queries = min_queries(queried_log_inv_rate(num_rounds), pow);
+    config.final_queries = min_queries(queried_log_inv_rate(num_rounds - 1), pow);
     config.final_pow_bits = pow;
     config
 }
@@ -340,10 +340,10 @@ pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
 ///   rho = 2^-3  : 58 · 1.3846 + 26 = 106.3
 ///   rho = 2^-6  : 28 · 2.8845 + 26 = 106.8
 ///   rho = 2^-9  : 19 · 4.3845 + 26 = 109.3
-///   rho = 2^-12 : 14 · 5.8845 + 26 = 108.4   (final polynomial)
+///   (final queries: the last committed oracle; the last round folds and commits nothing)
 /// ```
 ///
-/// against `[124, 88, 85, 85]` under the core schedule.  Folds are
+/// against `[124, 88, 85]` under the core schedule.  Folds are
 /// `[2, 6, 6]` with seven final variables.
 pub fn compress_whir_config(lsh: usize) -> WhirConfig {
     let rate = compress_log_inv_rate();
@@ -372,7 +372,7 @@ pub fn compress_whir_config(lsh: usize) -> WhirConfig {
         rp.ood_samples = 2;
         rp.pow_bits = alloc::vec![fold_pow; rp.folding_factor];
     }
-    config.final_queries = min_queries_compress(rate + 3 * num_rounds, pow);
+    config.final_queries = min_queries_compress(rate + 3 * (num_rounds - 1), pow);
     config.final_pow_bits = pow;
     config.batch_pow_bits = compress_batch_grinding_bits();
     config
