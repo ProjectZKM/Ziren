@@ -41,14 +41,14 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm, and excludes the client's execution and verification; throughput is guest cycles divided by it. For each client, the range row gives the minimum and maximum per-block values. In the total (16) row, guest cycles, shards and proving time are sums across the 16 blocks; throughput is total guest cycles divided by total proving time. Every proof in the 11 October 2026 rerun passed native verification; the [per-run timings](https://github.com/ProjectZKM/Ziren/blob/main/docs/paper/benchmarks/table10-11-20261011.csv) and [build and runtime metadata](https://github.com/ProjectZKM/Ziren/blob/main/docs/paper/benchmarks/table10-11-20261011.json) are retained with the paper.
+The same 15 consecutive Ethereum mainnet blocks, 26,138,416 to 26,138,430, proved with both clients on the same GPUs. The initial block 26,138,415 is excluded to avoid startup effects, as are the separately flagged warm-up proofs. Proving time runs from the prove request to the compressed proof, warm, and excludes the client's execution and verification; throughput is guest cycles divided by it. For each client, the range row gives the minimum and maximum per-block values. In the total (15) row, guest cycles, shards and proving time are sums across the 15 blocks; throughput is total guest cycles divided by total proving time. Every proof in the 11 October 2026 rerun passed native verification; the [per-run timings](https://github.com/ProjectZKM/Ziren/blob/main/docs/paper/benchmarks/table10-11-20261011.csv) retain the warm-ups and excluded first-block measurements, and the [build and runtime metadata](https://github.com/ProjectZKM/Ziren/blob/main/docs/paper/benchmarks/table10-11-20261011.json) record the sample selection and reported statistics.
 
 | Client | Summary | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
 |--------|---------|-------------:|-------:|----------:|-----------:|------------:|-------------:|
 | Reth | range | 43–508 M | 33–164 | 16.4–76.6 | 6.3–14.3 | 2.6–6.6 | 6.8–35.5 |
-| | total (16) | 3.45 G | 1,490 | 699 | 162 | 4.9 | 21.3 |
+| | total (15) | 3.30 G | 1,409 | 661 | 153 | 5.0 | 21.5 |
 | Geth | range | 0.25–2.99 G | 64–537 | 33.9–257 | 10.3–39.4 | 7.5–12.0 | 24.6–75.8 |
-| | total (16) | 22.67 G | 4,471 | 2,124 | 377 | 10.7 | 60.2 |
+| | total (15) | 21.65 G | 4,251 | 2,020 | 358 | 10.7 | 60.6 |
 
 A block costs in proportion to its shards, not its cycles: a shard takes about 0.47 s on one GPU under either guest. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still finishes every block sooner. Its blocks are also smaller, so on eight GPUs the serial recursion tail after the last shard is a larger share of each.
 
