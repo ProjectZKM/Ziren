@@ -117,20 +117,20 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 
 \begin{table}[t]
 \centering
-\caption{The same 16 consecutive Ethereum mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. For each client the rows give the range over the 16 blocks and the sums over all 16, whose throughput is the summed cycles divided by the summed proving time.}
+\caption{The same 16 consecutive Ethereum mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion. For each client, the range row gives the minimum and maximum per-block values. In the total (16) row, guest cycles, shards and proving time are sums across the 16 blocks; throughput is total guest cycles divided by total proving time.}
 \label{tab:clients}
 \small
 \begin{tabular}{@{}llrrrrrr@{}}
 \toprule
  & & & & \multicolumn{2}{c}{proving time (s)} & \multicolumn{2}{c}{throughput (MHz)} \\
 \cmidrule(lr){5-6}\cmidrule(lr){7-8}
-Client & & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
+Client & Summary & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
 \midrule
 Reth (Rust) & range & 43--508\,M & 33--164 & 16.4--76.6 & 6.3--14.3 & 2.6--6.6 & 6.8--35.5 \\
- & all 16 & 3.45\,G & 1\,490 & 699 & 162 & 4.9 & 21.3 \\
+ & total (16) & 3.45\,G & 1\,490 & 699 & 162 & 4.9 & 21.3 \\
 \midrule
 Geth (Go) & range & 0.25--2.99\,G & 64--537 & 33.9--257 & 10.3--39.4 & 7.5--12.0 & 24.6--75.8 \\
- & all 16 & 22.67\,G & 4\,471 & 2\,124 & 377 & 10.7 & 60.2 \\
+ & total (16) & 22.67\,G & 4\,471 & 2\,124 & 377 & 10.7 & 60.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
