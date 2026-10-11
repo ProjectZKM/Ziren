@@ -8,11 +8,11 @@ We evaluate three quantities: \emph{instruction efficiency}, the committed area 
 
 \paragraph{Workload.} Ethereum mainnet block 25\,907\,955, executed by a MIPS32 build of the Reth execution client with an arena-represented witness trie; the guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. A word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and the arena trie reduce it from 379 to 288 million cycles. The single-GPU timing of \emph{Memory traffic and shard size} (\S\ref{sec:perf-after}) uses that cached record; the multi-GPU measurements of Table~\ref{tab:cards} use three blocks of Table~\ref{tab:clients} with the Reth guest, 26\,138\,428, 26\,138\,416 and 26\,138\,421 (206, 348 and 508\,M cycles), and the instruction-efficiency census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles) in the analysed configuration.
 
-\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the runs of Table~\ref{tab:cards} use one, two and four, and those of Table~\ref{tab:clients} one and all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
+\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the runs of Table~\ref{tab:cards} use one, two and four, and those of Table~\ref{tab:clients} one and all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU server for Tables~\ref{tab:cards} and~\ref{tab:clients} runs in a CUDA 12.8.1 container based on Ubuntu 24.04. The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
 
 \paragraph{Configurations.}\label{sec:perf-revision} Sections~\ref{sec:air}--\ref{sec:security} describe the \emph{analysed configuration}. Most timings below, and the proof-size comparison of \S\ref{sec:perf-after}, were taken on an earlier \emph{measured configuration}, which differs in five respects: the $\Poseidon{}$ permutation used 13 partial rounds rather than the corrected 20; the lookup challenge was not ground; the syscall bus carried the sum of two 16-bit half-words rather than the half-words themselves (\S\ref{sec:air-chips}); the set of three soundness fixes of Table~\ref{tab:det-findings} was not applied; and the system-call tables did not enumerate the numbers they accept (Appendix~\ref{sec:app-isa}). Each of the last two adds constraints. Comparisons between measured-configuration runs are therefore internal to that configuration, and the soundness figures of \S\ref{sec:iopp-soundness} are for the analysed one. Unless a caption or the text says otherwise, every timing below is of the measured configuration and every area of the analysed one; the exceptions are the timings of Tables~\ref{tab:cards} and~\ref{tab:clients} and the compressed-proof size of \S\ref{sec:perf-proofsize}, which are of the analysed configuration.
 
-\paragraph{Metrics and protocol.} \emph{Trace area} (\S\ref{sec:prelim-chips}) is taken from the emulator's shard-close census; Table~\ref{tab:census} takes its kernel shares from the measured configuration. \emph{Proving time}, used by Tables~\ref{tab:cards} and~\ref{tab:clients}, runs from the prove request at the prover to the compressed proof, over shard proving and recursion, and excludes the client's execution and verification; the measured-configuration timings are \emph{wall-clock}, from reading the cached input to writing the compressed proof, and include 2--3\,s of host verification. \emph{Proving throughput} is guest cycles divided by the time, and is not a clock frequency. \emph{Proof size} is the serialised compressed proof. A ten-shard \texttt{nsys} sample attributes kernel time. Table~\ref{tab:cards} reports the median of three consecutive warm proofs per configuration, warm meaning after a first proof has loaded the keys and compiled the programs; the three were within 2.0\,s of each other. No other proving ran on the host during the runs of Tables~\ref{tab:cards} and~\ref{tab:clients}.
+\paragraph{Metrics and protocol.} \emph{Trace area} (\S\ref{sec:prelim-chips}) is taken from the emulator's shard-close census; Table~\ref{tab:census} takes its kernel shares from the measured configuration. \emph{Proving time}, used by Tables~\ref{tab:cards} and~\ref{tab:clients}, runs from the prove request at the prover to the compressed proof, over shard proving and recursion, and excludes the client's execution and verification; the measured-configuration timings are \emph{wall-clock}, from reading the cached input to writing the compressed proof, and include 2--3\,s of host verification. \emph{Proving throughput} is guest cycles divided by the time, and is not a clock frequency. \emph{Proof size} is the serialised compressed proof. A ten-shard \texttt{nsys} sample attributes kernel time. Table~\ref{tab:cards} reports the mean of three consecutive warm proofs per configuration, warm meaning after a first proof has loaded the keys and compiled the programs. Every proof contributing to Tables~\ref{tab:cards} and~\ref{tab:clients} is checked by a native verifier. No other proving ran on the host during the runs of Tables~\ref{tab:cards} and~\ref{tab:clients}. The per-run timings and build and runtime metadata of the 11 October 2026 rerun are retained in \texttt{docs/paper/benchmarks/}.
 
 \subsection{Instruction efficiency}
 \label{sec:perf-estimate}
@@ -87,7 +87,7 @@ Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
 
 \paragraph{Memory traffic and shard size.}\label{sec:perf-after} A byte-level profile of the \LogUp{} circuit showed that its first layer paired fractions across the most-significant index bit, so short chips were carried through every layer of the tallest and the traffic summed over layers was 5.2$\times$ that of the first. The prover therefore pairs on the least-significant bit, so each chip folds out after $\log_2$ of its own height, and the memory this frees admits shards of twice the size. The two changes are enabled together: the old-pairing, doubled-shard configuration does not fit in memory, so their effects are not separated. With both, the cached 288\,M-cycle block 25\,907\,955 proves in 48.7\,s on one GPU ($5.9$\,MHz), against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$), with the compressed proof unchanged in size.
 
-\paragraph{Scaling across devices.}\label{sec:perf-scaling} Table~\ref{tab:cards} and Figure~\ref{fig:scaling} report proving time and throughput on one to four GPUs for three blocks of Table~\ref{tab:clients} proved with the Reth guest, of 206, 348 and 508\,M cycles. Two GPUs prove each block $1.9\times$ faster than one and four $3.2$--$3.6\times$, reaching 16--24\,MHz. The gap to linear scaling is the serial recursion tail and the start-up interval before the emulator has produced a shard for every GPU; both are fixed per block, so the larger the block, the closer the scaling is to linear.
+\paragraph{Scaling across devices.}\label{sec:perf-scaling} Table~\ref{tab:cards} and Figure~\ref{fig:scaling} report proving time and throughput on one to four GPUs for three blocks of Table~\ref{tab:clients} proved with the Reth guest, of 206, 348 and 508\,M cycles. Two GPUs prove each block $1.9$--$2.0\times$ faster than one and four $3.3$--$3.5\times$, reaching 16.5--23.6\,MHz. The gap to linear scaling is the serial recursion tail and the start-up interval before the emulator has produced a shard for every GPU; both are fixed per block, so the larger the block, the closer the scaling is to linear.
 
 \begin{figure}[t]
 \centering
@@ -98,7 +98,7 @@ Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
 
 \begin{table}[t]
 \centering
-\caption{Proving time and throughput on one, two and four GPUs for three Ethereum mainnet blocks of Table~\ref{tab:clients} proved with the Reth guest, analysed configuration; median of three consecutive warm proofs.}
+\caption{Proving time and throughput on one, two and four GPUs for three Ethereum mainnet blocks of Table~\ref{tab:clients} proved with the Reth guest, analysed configuration; mean of three consecutive warm proofs.}
 \label{tab:cards}
 \begin{tabular}{lrrrrrr}
 \toprule
@@ -106,9 +106,9 @@ Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 \midrule
-26\,138\,428 (206\,M) & 40.4 & 20.9 & 12.5 & 5.1 & 9.9 & 16.5 \\
-26\,138\,416 (348\,M) & 54.6 & 28.9 & 15.7 & 6.4 & 12.0 & 22.2 \\
-26\,138\,421 (508\,M) & 74.5 & 38.5 & 20.8 & 6.8 & 13.2 & 24.4 \\
+26\,138\,428 (206\,M) & 41.4 & 21.5 & 12.5 & 5.0 & 9.6 & 16.5 \\
+26\,138\,416 (348\,M) & 55.1 & 29.2 & 16.4 & 6.3 & 11.9 & 21.2 \\
+26\,138\,421 (508\,M) & 75.8 & 38.9 & 21.5 & 6.7 & 13.1 & 23.6 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -117,7 +117,7 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 
 \begin{table}[t]
 \centering
-\caption{The same 16 consecutive Ethereum mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics, so with 16 blocks the 99th percentile lies just below the maximum), and the sums over all 16, whose throughput is the summed cycles divided by the summed proving time.}
+\caption{The same 16 consecutive Ethereum mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. For each client the rows give the range over the 16 blocks and the sums over all 16, whose throughput is the summed cycles divided by the summed proving time.}
 \label{tab:clients}
 \small
 \begin{tabular}{@{}llrrrrrr@{}}
@@ -126,15 +126,11 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 \cmidrule(lr){5-6}\cmidrule(lr){7-8}
 Client & & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
 \midrule
-Reth (Rust) & range & 43--508\,M & 33--164 & 16.3--77.5 & 6.4--14.3 & 2.6--6.5 & 6.7--35.5 \\
- & median & 193\,M & 87 & 40.2 & 9.5 & 4.8 & 20.6 \\
- & p99 & 484\,M & 158 & 74.4 & 13.9 & 6.5 & 34.7 \\
- & all 16 & 3.45\,G & 1\,490 & 690 & 158 & 5.0 & 21.8 \\
+Reth (Rust) & range & 43--508\,M & 33--164 & 16.4--76.6 & 6.3--14.3 & 2.6--6.6 & 6.8--35.5 \\
+ & all 16 & 3.45\,G & 1\,490 & 699 & 162 & 4.9 & 21.3 \\
 \midrule
-Geth (Go) & range & 0.25--2.99\,G & 64--537 & 33.3--250 & 9.9--38.4 & 7.6--12.0 & 25.7--77.8 \\
- & median & 1.27\,G & 268 & 124.5 & 22.3 & 10.5 & 58.1 \\
- & p99 & 2.87\,G & 518 & 241.2 & 37.2 & 12.0 & 77.0 \\
- & all 16 & 22.67\,G & 4\,471 & 2\,099 & 368 & 10.8 & 61.7 \\
+Geth (Go) & range & 0.25--2.99\,G & 64--537 & 33.9--257 & 10.3--39.4 & 7.5--12.0 & 24.6--75.8 \\
+ & all 16 & 22.67\,G & 4\,471 & 2\,124 & 377 & 10.7 & 60.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -168,4 +164,4 @@ Taken together, the Johnson-bound schedule at a first rate of $2^{-3}$ with $k_0
 \subsection{Threats to validity}
 \label{sec:perf-threats}
 
-\emph{Internal.} The spread of the interleaved repetitions is small relative to the effects reported, though another process shared the host (\S\ref{sec:perf-setup}). \emph{Construct.} The timings of Table~\ref{tab:census} and of the ablations predate the $\Poseidon{}$ correction, which adds seven partial rounds to commitments, transcripts and recursion and changes absolute performance by an unmeasured amount; they are evidence about mechanisms to the extent the correction leaves relative costs unchanged. The timings of Tables~\ref{tab:cards} and~\ref{tab:clients} and the compressed-proof size postdate it (\S\ref{sec:perf-revision}). Trace area is a model where the kernel profile is the measurement. The pipelining of \S\ref{sec:perf-pipeline} is not ablated: no run defers recursion until every shard is proved, so its effect on wall-clock time is not separated from the rest. \emph{External.} The primary workload is one Ethereum block, and other guests have different instruction mixes. The raw per-run timings are not retained, and the retained area census is for the analysed configuration rather than the measured one.
+\emph{Internal.} The spread of the interleaved repetitions is small relative to the effects reported, though another process shared the host (\S\ref{sec:perf-setup}). \emph{Construct.} The timings of Table~\ref{tab:census} and of the ablations predate the $\Poseidon{}$ correction, which adds seven partial rounds to commitments, transcripts and recursion and changes absolute performance by an unmeasured amount; they are evidence about mechanisms to the extent the correction leaves relative costs unchanged. The timings of Tables~\ref{tab:cards} and~\ref{tab:clients} and the compressed-proof size postdate it (\S\ref{sec:perf-revision}). Trace area is a model where the kernel profile is the measurement. The pipelining of \S\ref{sec:perf-pipeline} is not ablated: no run defers recursion until every shard is proved, so its effect on wall-clock time is not separated from the rest. \emph{External.} The primary workload is one Ethereum block, and other guests have different instruction mixes. The per-run timings for Tables~\ref{tab:cards} and~\ref{tab:clients} are retained with the paper; the earlier raw per-run timings are not retained, and the retained area census is for the analysed configuration rather than the measured one.
