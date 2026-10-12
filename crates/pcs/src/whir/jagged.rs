@@ -605,13 +605,42 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{bits_per_query, core_whir_config, min_queries, per_component_target_bits};
+    use super::{
+        bits_per_query, bits_per_query_johnson, compress_johnson_m, compress_whir_config,
+        core_whir_config, min_queries, min_queries_compress, per_component_target_bits,
+    };
+    use crate::whir::config::WhirConfig;
 
-    /// Every round's query count is exactly the least integer that reaches
-    /// [`per_component_target_bits`] under the unique-decoding bound, at the
-    /// rate of the codeword it queries: round 0 the starting rate, round `r`
-    /// the rate round `r - 1` committed, the final queries the last round's
-    /// rate.
+    /// Walk the rounds that query, round 0 at the starting rate and round `r`
+    /// at the rate round `r - 1` committed, then the final queries.  The last
+    /// round folds and commits nothing and its `num_queries` is never read, so
+    /// the final queries open the oracle the second-to-last round committed
+    /// (the stripe trees if there is one round).  Every phase must reach
+    /// [`per_component_target_bits`] with the least query count that does.
+    fn check_query_counts(
+        name: &str,
+        config: &WhirConfig,
+        bits_per_query: impl Fn(usize) -> f64,
+        min_queries: impl Fn(usize, usize) -> usize,
+    ) {
+        let target = per_component_target_bits();
+        let check = |phase: &str, rate: usize, queries: usize, pow: usize| {
+            let bits = queries as f64 * bits_per_query(rate) + pow as f64;
+            assert!(bits >= target, "{name} {phase} at rate 2^-{rate}: {bits} bits < {target}");
+            assert_eq!(queries, min_queries(rate, pow), "{name} {phase} at rate 2^-{rate}");
+        };
+        let committed = config.round_parameters.len() - 1;
+        let mut queried_rate = config.starting_log_inv_rate;
+        for (r, rp) in config.round_parameters.iter().take(committed).enumerate() {
+            check(&format!("round {r}"), queried_rate, rp.num_queries, rp.queries_pow_bits);
+            queried_rate = rp.log_inv_rate;
+        }
+        check("final queries", queried_rate, config.final_queries, config.final_pow_bits);
+    }
+
+    /// Every query phase of the core schedule is exactly the least count that
+    /// reaches [`per_component_target_bits`] under the unique-decoding bound,
+    /// at the rate of the codeword it opens.
     ///
     /// The comparison is self-consistency, not a fixed floor: whatever target
     /// the deployment configures, the solved schedule must reach it and must
@@ -619,24 +648,35 @@ mod tests {
     #[test]
     fn query_counts_are_the_unique_decoding_minimum() {
         for lsh in [20usize, 21, 22, 24] {
-            let config = core_whir_config(lsh);
-            let mut queried_rate = config.starting_log_inv_rate;
-            for (r, rp) in config.round_parameters.iter().enumerate() {
-                let bits = rp.num_queries as f64 * bits_per_query(queried_rate)
-                    + rp.queries_pow_bits as f64;
-                let target = per_component_target_bits();
-                assert!(bits >= target, "lsh {lsh} round {r}: {bits} bits < {target}");
-                assert_eq!(
-                    rp.num_queries,
-                    min_queries(queried_rate, rp.queries_pow_bits),
-                    "lsh {lsh} round {r} at rate 2^-{queried_rate}",
-                );
-                queried_rate = rp.log_inv_rate;
+            check_query_counts(
+                &format!("core lsh {lsh}"),
+                &core_whir_config(lsh),
+                bits_per_query,
+                min_queries,
+            );
+        }
+    }
+
+    /// The same for the compress schedule under its Johnson-bound accounting.
+    /// Solving the final queries at the rate the last round would have
+    /// committed (`2^-12` at `lsh = 21`) instead of the rate of the oracle they
+    /// open (`2^-9`) gave 14 queries worth 87 bits; this fails on it.
+    #[test]
+    fn compress_query_counts_are_the_johnson_minimum() {
+        let m = compress_johnson_m();
+        let bits = |rate: usize| {
+            if m == 0 {
+                bits_per_query(rate)
+            } else {
+                bits_per_query_johnson(rate, m)
             }
-            assert_eq!(
-                config.final_queries,
-                min_queries(queried_rate, config.final_pow_bits),
-                "lsh {lsh} final queries at rate 2^-{queried_rate}",
+        };
+        for lsh in [16usize, 19, 21] {
+            check_query_counts(
+                &format!("compress lsh {lsh}"),
+                &compress_whir_config(lsh),
+                bits,
+                min_queries_compress,
             );
         }
     }
