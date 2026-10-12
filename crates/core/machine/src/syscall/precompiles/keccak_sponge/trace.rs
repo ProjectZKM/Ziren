@@ -125,8 +125,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             dummy_chunk.push(row);
         }
 
-        let num_padded_rows =
-            next_multiple_of_32(num_real_rows, None, <Self as MachineAir<F>>::name(self).as_str());
+        let num_padded_rows = <Self as MachineAir<F>>::num_rows(self, input).unwrap();
         for i in num_real_rows..num_padded_rows {
             rows.push(dummy_chunk[i % NUM_ROUNDS]);
         }

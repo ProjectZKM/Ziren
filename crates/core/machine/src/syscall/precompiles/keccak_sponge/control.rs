@@ -199,8 +199,16 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeControlChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_real: usize = input
+            .get_precompile_events(SyscallCode::KECCAK_SPONGE)
+            .iter()
+            .map(|(_, event)| match event {
+                PrecompileEvent::KeccakSponge(event) => event.num_blocks(),
+                _ => unreachable!(),
+            })
+            .sum();
         let nb_rows = next_multiple_of_32(
-            input.get_precompile_events(SyscallCode::KECCAK_SPONGE).len(),
+            nb_real,
             input.fixed_log2_rows::<F, _>(self),
             <Self as MachineAir<F>>::name(self).as_str(),
         );
