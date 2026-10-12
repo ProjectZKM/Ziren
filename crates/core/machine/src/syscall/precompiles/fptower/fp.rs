@@ -28,7 +28,8 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBu
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
     operations::field::{field_op::FieldOpCols, range::FieldLtCols},
-    utils::{limbs_from_prev_access, pad_rows_mult32, words_to_bytes_le_vec},
+    utils::next_multiple_of_32,
+    utils::{limbs_from_prev_access, pad_rows, words_to_bytes_le_vec},
 };
 
 pub const fn num_fp_cols<P: FpOpField>() -> usize {
@@ -97,6 +98,19 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
         FpOpCols::<u8, P>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events_len = match P::FIELD_TYPE {
+            FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP_ADD).len(),
+            FieldType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_FP_ADD).len(),
+        };
+        let nb_rows = next_multiple_of_32(
+            events_len,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &Self::Record,
@@ -146,7 +160,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
 
         output.add_byte_lookup_events(new_byte_lookup_events);
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || {
                 let mut row = zeroed_f_vec(num_fp_cols::<P>());
@@ -162,8 +176,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
                 );
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <FpOpChip<P> as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), num_fp_cols::<P>()))

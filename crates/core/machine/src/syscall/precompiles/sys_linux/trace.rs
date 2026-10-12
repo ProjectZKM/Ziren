@@ -16,7 +16,8 @@ use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},
     SysLinuxChip,
 };
-use crate::{utils::pad_rows_mult32, CoreChipError};
+use crate::utils::next_multiple_of_32;
+use crate::{utils::pad_rows, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
     type Record = ExecutionRecord;
@@ -31,6 +32,15 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
 
     fn picus_info(&self) -> PicusInfo {
         SysLinuxCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SYS_LINUX).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -57,11 +67,10 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
             })
             .collect::<Vec<_>>();
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_SYS_LINUX_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <SysLinuxChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYS_LINUX_COLS))

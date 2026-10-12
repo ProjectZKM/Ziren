@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use zkm_derive::PicusAnnotations;
 use zkm_pcs::PicusInfo;
 
-use crate::{air::MemoryAirBuilder, utils::pad_rows_mult32_with_err, CoreChipError};
+use crate::{air::MemoryAirBuilder, utils::pad_rows_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
@@ -32,6 +32,7 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
     operations::field::{field_op::FieldOpCols, field_sqrt::FieldSqrtCols, range::FieldLtCols},
+    utils::next_multiple_of_32,
     utils::{limbs_from_access, limbs_from_prev_access},
 };
 
@@ -215,6 +216,15 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
         EdDecompressCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::ED_DECOMPRESS).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -237,7 +247,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             rows.push(row);
         }
 
-        pad_rows_mult32_with_err(
+        pad_rows_with_err(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
@@ -247,8 +257,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
                     .map_err(CoreChipError::CurveError)?;
                 Ok(row)
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <EdDecompressChip<E> as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         )?;
 
         Ok(RowMajorMatrix::new(

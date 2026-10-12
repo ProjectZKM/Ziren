@@ -31,7 +31,7 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     frame::{eval_i_type_frame, ITypeFrameCols},
     operations::ShiftRightOperation,
-    utils::{next_multiple_of_32, pad_rows_mult32},
+    utils::{next_multiple_of_32, pad_rows},
     CoreChipError,
 };
 
@@ -97,7 +97,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         let nb_rows = next_multiple_of_32(
             input.cloclz_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <CloClzChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -147,15 +147,14 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             rows.push(row);
         }
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
                 let _cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <CloClzChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         let trace =

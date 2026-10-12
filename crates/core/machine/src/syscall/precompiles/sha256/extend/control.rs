@@ -27,7 +27,8 @@ use zkm_pcs::{
     LookupKind, ZKMAirBuilder,
 };
 
-use crate::{utils::pad_rows_mult32, CoreChipError};
+use crate::utils::next_multiple_of_32;
+use crate::{utils::pad_rows, CoreChipError};
 
 pub const NUM_SHA_EXTEND_CONTROL_COLS: usize = size_of::<ShaExtendControlCols<u8>>();
 
@@ -69,6 +70,15 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendControlChip {
         ShaExtendControlCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SHA_EXTEND).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -87,11 +97,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendControlChip {
             rows.push(row);
         }
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <ShaExtendControlChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(

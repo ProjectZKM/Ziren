@@ -52,7 +52,7 @@ use zkm_primitives::consts::WORD_SIZE;
 use crate::{
     air::ZKMCoreAirBuilder,
     frame::{eval_r_type_frame, RTypeFrameCols},
-    utils::{next_multiple_of_32, pad_rows_mult32},
+    utils::{next_multiple_of_32, pad_rows},
     CoreChipError,
 };
 
@@ -144,11 +144,10 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             rows.push(row);
         }
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_SHIFT_LEFT_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <ShiftLeft as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         let mut trace = RowMajorMatrix::new(

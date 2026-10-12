@@ -91,7 +91,7 @@ use crate::{
     operations::{
         AddOperation, IsEqualWordOperation, IsZeroWordOperation, LtOperation, MulOperation,
     },
-    utils::{next_multiple_of_32, pad_rows_mult32},
+    utils::{next_multiple_of_32, pad_rows},
 };
 
 /// The number of main trace columns for `DivRemChip`.
@@ -231,7 +231,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         let nb_rows = next_multiple_of_32(
             input.divrem_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <DivRemChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -372,15 +372,14 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             rows.push(row);
         }
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_DIVREM_COLS];
                 let _cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <DivRemChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS))
     }

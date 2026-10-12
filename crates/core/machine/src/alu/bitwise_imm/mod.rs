@@ -18,7 +18,7 @@ use zkm_pcs::air::{MachineAir, PicusInfo, ZKMAirBuilder};
 
 use crate::{
     frame::{eval_i_type_frame, ITypeFrameCols},
-    utils::{next_multiple_of_32, pad_rows_mult32},
+    utils::{next_multiple_of_32, pad_rows},
     CoreChipError,
 };
 
@@ -87,7 +87,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseImmChip {
         let nb_rows = next_multiple_of_32(
             input.bitwise_imm_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <BitwiseImmChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -115,11 +115,10 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseImmChip {
             })
             .collect::<Vec<_>>();
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_BITWISE_IMM_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <BitwiseImmChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(

@@ -63,6 +63,23 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         Ok(())
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_real: usize = input
+            .get_precompile_events(SyscallCode::KECCAK_SPONGE)
+            .iter()
+            .map(|(_, e)| match e {
+                PrecompileEvent::KeccakSponge(ev) => ev.num_blocks() * NUM_ROUNDS,
+                _ => 0,
+            })
+            .sum();
+        let nb_rows = next_multiple_of_32(
+            nb_real,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &Self::Record,
@@ -108,11 +125,8 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             dummy_chunk.push(row);
         }
 
-        let num_padded_rows = if num_real_rows == 0 {
-            0
-        } else {
-            next_multiple_of_32(num_real_rows, None, <Self as MachineAir<F>>::name(self).as_str())
-        };
+        let num_padded_rows =
+            next_multiple_of_32(num_real_rows, None, <Self as MachineAir<F>>::name(self).as_str());
         for i in num_real_rows..num_padded_rows {
             rows.push(dummy_chunk[i % NUM_ROUNDS]);
         }

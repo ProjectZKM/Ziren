@@ -179,6 +179,26 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events_len = match E::CURVE_TYPE {
+            CurveType::Secp256k1 => {
+                input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE).len()
+            }
+            CurveType::Secp256r1 => {
+                input.get_precompile_events(SyscallCode::SECP256R1_DOUBLE).len()
+            }
+            CurveType::Bn254 => input.get_precompile_events(SyscallCode::BN254_DOUBLE).len(),
+            CurveType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_DOUBLE).len(),
+            _ => panic!("Unsupported curve"),
+        };
+        let nb_rows = next_multiple_of_32(
+            events_len,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_dependencies(
         &self,
         input: &Self::Record,
@@ -235,12 +255,8 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         };
 
         let num_cols = num_weierstrass_double_cols::<E::BaseField>();
-        let num_rows = next_multiple_of_32(
-            events.len(),
-            input.fixed_log2_rows::<F, _>(self),
-            <Self as MachineAir<F>>::name(self).as_str(),
-        );
-        let mut values = zeroed_f_vec(num_rows * num_cols);
+        let mut values =
+            zeroed_f_vec(<Self as MachineAir<F>>::num_rows(self, input).unwrap() * num_cols);
         let chunk_size = 64;
 
         let num_words_field_element = E::BaseField::NB_LIMBS / 4;

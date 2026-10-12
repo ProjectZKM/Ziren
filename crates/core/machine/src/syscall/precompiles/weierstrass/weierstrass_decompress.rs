@@ -8,7 +8,7 @@ use zkm_pcs::PicusInfo;
 
 use crate::{
     air::MemoryAirBuilder,
-    utils::{pad_rows_mult32_with_err, zeroed_f_vec},
+    utils::{pad_rows_with_err, zeroed_f_vec},
     CoreChipError,
 };
 use generic_array::GenericArray;
@@ -40,6 +40,7 @@ use crate::{
         field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         field_sqrt::FieldSqrtCols, range::FieldLtCols,
     },
+    utils::next_multiple_of_32,
     utils::{bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access},
 };
 
@@ -164,6 +165,27 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         WeierstrassDecompressCols::<u8, E::BaseField>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events_len = match E::CURVE_TYPE {
+            CurveType::Secp256k1 => {
+                input.get_precompile_events(SyscallCode::SECP256K1_DECOMPRESS).len()
+            }
+            CurveType::Secp256r1 => {
+                input.get_precompile_events(SyscallCode::SECP256R1_DECOMPRESS).len()
+            }
+            CurveType::Bls12381 => {
+                input.get_precompile_events(SyscallCode::BLS12381_DECOMPRESS).len()
+            }
+            _ => panic!("Unsupported curve"),
+        };
+        let nb_rows = next_multiple_of_32(
+            events_len,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -249,7 +271,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
         output.add_byte_lookup_events(new_byte_lookup_events);
 
-        pad_rows_mult32_with_err(
+        pad_rows_with_err(
             &mut rows,
             || {
                 let mut row = zeroed_f_vec(width);
@@ -267,8 +289,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                     .map_err(CoreChipError::CurveError)?;
                 Ok(row)
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <WeierstrassDecompressChip<E> as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         )?;
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), width))

@@ -11,6 +11,7 @@ use zkm_core_executor::{
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::PicusInfo;
 
+use crate::utils::pad_rows;
 use crate::{utils::next_multiple_of_32, CoreChipError};
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
@@ -30,6 +31,15 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         ShaExtendCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SHA_EXTEND).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -46,12 +56,11 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         }
 
         let mut rows = wrapped_rows.unwrap();
-        let nb_rows = rows.len();
-        let padded_nb_rows =
-            next_multiple_of_32(nb_rows, None, <Self as MachineAir<F>>::name(self).as_str());
-        for _ in nb_rows..padded_nb_rows {
-            rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
-        }
+        pad_rows(
+            &mut rows,
+            || [F::ZERO; NUM_SHA_EXTEND_COLS],
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
+        );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS))
     }

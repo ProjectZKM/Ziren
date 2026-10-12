@@ -10,11 +10,12 @@ use crate::{
     air::MemoryAirBuilder,
     operations::{field::range::FieldLtCols, IsZeroOperation},
     utils::{
-        limbs_from_access, limbs_from_prev_access, pad_rows_mult32, words_to_bytes_le,
+        limbs_from_access, limbs_from_prev_access, pad_rows, words_to_bytes_le,
         words_to_bytes_le_vec,
     },
 };
 
+use crate::utils::next_multiple_of_32;
 use generic_array::GenericArray;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, BaseAir, WindowAccess};
@@ -105,6 +106,15 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
         Uint256MulCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::UINT256_MUL).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -187,7 +197,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
             output.append(&mut record);
         }
 
-        pad_rows_mult32(
+        pad_rows(
             &mut rows,
             || {
                 let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];
@@ -199,8 +209,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
 
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <Uint256MulChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
