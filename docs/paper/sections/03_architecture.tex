@@ -31,7 +31,7 @@ $\pi \gets \mathsf{Root}(\mathcal{S})$ \tcp*{arity one, under the compress sched
 \begin{figure}[t]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/architecture}}
-\caption{One proving stack ends in a 274\,KiB compressed proof for a native verifier, and applications re-prove that proof for on-chain and garbled verifiers. Read left to right. \Ziren{} (top): a guest program compiles to a MIPS32 image; execution cuts one run into shards, which accelerators prove in parallel over \KB{} with \Poseidon{} commitments (the dashed panel lists the objects built along the way), and recursion composes the shard proofs into the compressed proof that a native verifier checks. Applications (bottom): a shrink node re-proves the compressed proof under the hash an application reads; the wrap closes it with a pairing-based SNARK for an on-chain verifier, and a binary stage over $\mathbb F_{2^{128}}$ and narrow recursion reach a garbled verifier.}
+\caption{One proving stack ends in a 284\,KiB compressed proof for a native verifier, and applications re-prove that proof for on-chain and garbled verifiers. Read left to right. \Ziren{} (top): a guest program compiles to a MIPS32 image; execution cuts one run into shards, which accelerators prove in parallel over \KB{} with \Poseidon{} commitments (the dashed panel lists the objects built along the way), and recursion composes the shard proofs into the compressed proof that a native verifier checks. Applications (bottom): a shrink node re-proves the compressed proof under the hash an application reads; the wrap closes it with a pairing-based SNARK for an on-chain verifier, and a binary stage over $\mathbb F_{2^{128}}$ and narrow recursion reach a garbled verifier.}
 \label{fig:architecture}
 \end{figure}
 

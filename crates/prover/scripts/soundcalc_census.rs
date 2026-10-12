@@ -113,43 +113,77 @@ kind column ({widest_chip})",
     println!();
 }
 
-/// The inner schedule at one stacking height, as the calculator reads it.
+/// One WHIR schedule at one stacking height, as the calculator reads it.
 ///
-/// Core and compress share it: both stack at `DEFAULT_LOG_STACKING_HEIGHT` and
-/// open under `core_whir_config`, so one block describes both profiles.
-fn whir_schedule(name: &str, log_stacking_height: usize) {
-    let config = zkm_pcs::whir::jagged::core_whir_config(log_stacking_height);
-    let folds: Vec<String> =
-        config.round_parameters.iter().map(|r| r.folding_factor.to_string()).collect();
-    let rates: Vec<String> = core::iter::once(config.starting_log_inv_rate)
-        .chain(config.round_parameters.iter().map(|r| r.log_inv_rate))
-        .map(|r| r.to_string())
+/// Only the rounds that commit an oracle query one: round 0 opens the stripe
+/// trees, round `r` the oracle round `r - 1` committed, and the last round
+/// folds and commits nothing, so its `num_queries` is never read.  The final
+/// queries open the last committed oracle.  The lists below therefore hold
+/// one entry per committed round, and the final phase its own keys.
+/// `query_phase_bits` is `q · bits_per_query(rate) + pow` for each phase under
+/// the profile's accounting, the figure the per-component target is solved
+/// against.
+fn whir_schedule(
+    name: &str,
+    config: &zkm_pcs::whir::config::WhirConfig,
+    log_stacking_height: usize,
+    accounting: &str,
+    bits_per_query: impl Fn(usize) -> f64,
+) {
+    let rounds = &config.round_parameters;
+    let committed = &rounds[..rounds.len() - 1];
+    let join = |v: Vec<String>| v.join(", ");
+    // The rate of the oracle each committed round queries, then the one the
+    // final queries open.
+    let queried_rates: Vec<usize> = core::iter::once(config.starting_log_inv_rate)
+        .chain(committed.iter().map(|r| r.log_inv_rate))
         .collect();
-    let queries: Vec<String> = config
-        .round_parameters
+    let final_rate = *queried_rates.last().unwrap();
+    let phase_bits: Vec<String> = committed
         .iter()
-        .map(|r| r.num_queries)
-        .chain(core::iter::once(config.final_queries))
-        .map(|q| q.to_string())
-        .collect();
-    let ood: Vec<String> =
-        config.round_parameters.iter().map(|r| r.ood_samples.to_string()).collect();
-    let query_pow: Vec<String> = config
-        .round_parameters
-        .iter()
-        .map(|r| r.queries_pow_bits)
-        .chain(core::iter::once(config.final_pow_bits))
-        .map(|b| b.to_string())
+        .zip(&queried_rates)
+        .map(|(r, &rate)| (r.num_queries, rate, r.queries_pow_bits))
+        .chain(core::iter::once((config.final_queries, final_rate, config.final_pow_bits)))
+        .map(|(q, rate, pow)| format!("{:.2}", q as f64 * bits_per_query(rate) + pow as f64))
         .collect();
     println!("[{name}.schedule]");
     println!("log_stacking_height = {log_stacking_height}");
+    println!("query_accounting = \"{accounting}\"");
     println!("log_inv_rate = {}", config.starting_log_inv_rate);
-    println!("whir_log_inv_rates = [{}]", rates.join(", "));
-    println!("folding_factors = [{}]", folds.join(", "));
-    println!("num_queries = [{}]            # last entry is the final round", queries.join(", "));
-    println!("num_ood_samples = [{}]", ood.join(", "));
-    println!("grinding_bits_queries = [{}]", query_pow.join(", "));
+    println!(
+        "committed_log_inv_rates = [{}]   # the stripe trees, then each committed round",
+        join(queried_rates.iter().map(|r| r.to_string()).collect())
+    );
+    println!(
+        "folding_factors = [{}]",
+        join(rounds.iter().map(|r| r.folding_factor.to_string()).collect())
+    );
+    println!(
+        "grinding_bits_folding = [{}]   # per round, on every folding challenge",
+        join(
+            rounds
+                .iter()
+                .map(|r| r.pow_bits.iter().copied().max().unwrap_or(0).to_string())
+                .collect()
+        )
+    );
+    println!(
+        "num_queries = [{}]   # per committed round",
+        join(committed.iter().map(|r| r.num_queries.to_string()).collect())
+    );
+    println!(
+        "num_ood_samples = [{}]   # per committed round",
+        join(committed.iter().map(|r| r.ood_samples.to_string()).collect())
+    );
+    println!(
+        "grinding_bits_queries = [{}]   # per committed round",
+        join(committed.iter().map(|r| r.queries_pow_bits.to_string()).collect())
+    );
+    println!("final_queries = {}   # open the last committed oracle", config.final_queries);
+    println!("final_log_inv_rate = {final_rate}");
+    println!("final_grinding_bits = {}", config.final_pow_bits);
     println!("grinding_batching_phase = {}", config.batch_pow_bits);
+    println!("query_phase_bits = [{}]   # per committed round, then final", join(phase_bits));
     println!("per_component_target_bits = {}", zkm_pcs::whir::jagged::per_component_target_bits());
     println!();
 }
@@ -162,7 +196,31 @@ fn main() {
     let wrap = WrapAir::<Val<OuterSC>>::wrap_machine(OuterSC::default());
     census("wrap", &wrap);
 
-    whir_schedule("inner", zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize);
+    // Core shards open under the core profile, the root compose (the
+    // published compressed proof) under the compress profile; every other
+    // recursion node shares the core one.
+    let lsh = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+    whir_schedule(
+        "core",
+        &zkm_pcs::whir::jagged::core_whir_config(lsh),
+        lsh,
+        "unique_decoding",
+        zkm_pcs::whir::jagged::bits_per_query,
+    );
+    let m = zkm_pcs::whir::jagged::compress_johnson_m();
+    whir_schedule(
+        "compress",
+        &zkm_pcs::whir::jagged::compress_whir_config(lsh),
+        lsh,
+        &if m == 0 { "unique_decoding".to_string() } else { format!("johnson_m{m}") },
+        |rate| {
+            if m == 0 {
+                zkm_pcs::whir::jagged::bits_per_query(rate)
+            } else {
+                zkm_pcs::whir::jagged::bits_per_query_johnson(rate, m)
+            }
+        },
+    );
 
     let wrap_fri =
         zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config();
