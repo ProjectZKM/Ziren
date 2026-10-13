@@ -14,7 +14,7 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 
 | File | Role |
 |---|---|
-| `regen_all.sh OUT` | Regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Byte-identical between runs. |
+| `regen_all.sh OUT` | Verifies the external tools against `../snippets/tools.lock.json`, then regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Byte-identical between runs. |
 | `check.py FILE ROOT PREFIX` | Splits the file (`split.py`), applies each pass of its `PASSES` table to the modules it matches, and runs `make`. `--no-build` stops before `make`. |
 | `split.py` | Prelude module for definitions no theorem depends on; theorems in chunk modules by dependency level, packed to about 40 KB, each importing exactly the chunks it uses; a `Makefile` and `Check.lean`, which prints `#print axioms` for every `deterministic`. |
 | `lift_steps.py` | Moves the top-level `have` steps of one theorem into lemmas in their own modules. |

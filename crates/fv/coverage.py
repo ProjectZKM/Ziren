@@ -29,17 +29,34 @@ def pipeline_digest():
     paths |= set(FV.glob("lean4/snippets/**/*.py")) | set(FV.glob("lean4/snippets/**/*.lean"))
     paths |= {p for p in FV.glob("lean4/snippets/**/*") if p.suffix in {".tmpl", ".tac", ".tsv", ".txt"}}
     paths |= set(FV.glob("lean4/check/*.py")) | set(FV.glob("lean4/check/*.sh"))
-    paths |= {FV / "coverage.py", FV / "lean4/snippets/tools/recipes.tsv",
+    paths |= {FV / "coverage.py", FV / "lean4/snippets/tools.lock.json",
               FV / "lean4/lean-toolchain", FV / "lean4/lake-manifest.json",
               FV / "lean4/lakefile.toml", FV / "picus/Cargo.toml", REPO / "Cargo.lock",
               REPO / "Cargo.toml", REPO / "rust-toolchain.toml"}
-    paths = [p for p in paths if "Chips" not in p.parts and p.name != "Chips.lean"]
+    tools = FV / "lean4/snippets/tools"
+    paths = [p for p in paths if "Chips" not in p.parts and p.name != "Chips.lean"
+             and not p.is_relative_to(tools)]
     h = hashlib.sha256()
     for p in sorted(paths):
         for data in (p.relative_to(REPO).as_posix().encode(), p.read_bytes()):
             h.update(len(data).to_bytes(8, "little"))
             h.update(data)
     return h.hexdigest()
+
+
+def verify_snippet_tools(directory):
+    """Check external generators against the inputs pinned by the proof pipeline."""
+    lock = json.loads((FV / "lean4/snippets/tools.lock.json").read_text())
+    if lock.get("schema") != 1 or not lock.get("files"):
+        raise ValueError("invalid snippet generator pin")
+    directory = Path(directory)
+    files = {p.relative_to(directory).as_posix(): sha(p.read_bytes())
+             for p in directory.rglob("*") if p.is_file()
+             and "__pycache__" not in p.parts
+             and (p.suffix in {".py", ".lean", ".tmpl", ".tac", ".tsv", ".txt"}
+                  or p.name == "README")}
+    if files != lock["files"]:
+        raise ValueError("external snippet generators differ from tools.lock.json")
 
 
 def load_fingerprints(path):
@@ -86,13 +103,18 @@ def check_manifest(manifest, current, require_closed=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["snapshot", "check", "stamp", "record"])
-    parser.add_argument("fingerprints")
+    parser.add_argument("action", choices=["snapshot", "check", "stamp", "record", "verify-tools"])
+    parser.add_argument("fingerprints", metavar="INPUT",
+                        help="AIR fingerprint JSON, or external tools directory for verify-tools")
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--require-closed", action="store_true")
     args = parser.parse_args()
+    if args.action == "verify-tools":
+        verify_snippet_tools(args.fingerprints)
+        print("External snippet generators match the pinned inputs")
+        return
     current = load_fingerprints(args.fingerprints)
     digest = pipeline_digest()
     if args.action == "snapshot":

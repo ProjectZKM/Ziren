@@ -2,7 +2,7 @@
   "chips": {
     "AddSub": {
       "air_sha256": "bb65e63f4f1e9c4836ceba46c510a1cd88afdc74a5d950406ea932941ef44a8d",
-      "source_sha256": "1713a8976b0ce4f90ef49119e9a156d22e073d25373e393cf4939462c8a8669f",
+      "source_sha256": "58c21680c7b3d038cad143a5d4cfcd5f57bb535bca54d2ab40f5b97a52c3b67b",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.AddSub.AddSub_is_add.deterministic",
@@ -11,7 +11,7 @@
     },
     "AddSubImm": {
       "air_sha256": "f5598b4513e75736afe0d85780c896c9881063cd34450488052516c15174f447",
-      "source_sha256": "f765624dc0d88a29bfc11c815a6e0d6cb0584bf9d6489f998333ea5e0d47fd7a",
+      "source_sha256": "0480cab53ee2f93b20d9347c4ad79f46faca835e9a2268b7d94485ed772f6cd2",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.AddSubImm.AddSubImm_is_add.deterministic",
@@ -20,7 +20,7 @@
     },
     "Bitwise": {
       "air_sha256": "aa8d209ab044d0c303687245f8114c2d3563fdf4dcca41f39f2f932a9eab0766",
-      "source_sha256": "9517bbec40bc4d6a8a4680a082c0f0313a983f3939ee3a0612f287cc9d3a48dd",
+      "source_sha256": "eab1a54b59105bc9f4ef70edf5bac161d3fbdb70aa86bc21ffa2bc5d4a8a3bc1",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bitwise.Bitwise_is_and.deterministic",
@@ -31,7 +31,7 @@
     },
     "BitwiseImm": {
       "air_sha256": "ca6aa32a38fcef6f1eb24457ea62bfb972b57740165e98fb93406d1a3424c607",
-      "source_sha256": "704b9f377e8f442f11584ac67d22ea1fb20978e6ab449d2a1f1f1f3847c25b55",
+      "source_sha256": "0e33a68a3c4d691dfa9304f9593b3784c28e11f8f090c864b2eff9aaf8dcc2c3",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.BitwiseImm.BitwiseImm_is_and.deterministic",
@@ -41,7 +41,7 @@
     },
     "Bls12381AddAssign": {
       "air_sha256": "a9a43a416f8422a46e92ca25b9728bb3f007bf11050e795a79060a5fb0f3602d",
-      "source_sha256": "0a04a3012ef27a0553eb9a383ec0b625fa51abbc1bc0cbb4c9cc3d6266a69520",
+      "source_sha256": "3d554837c5489c952c62de86411662e0b8943596ac28ff9dcd1de3503283ddd9",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12381AddAssign.Bls12381AddAssign.deterministic"
@@ -49,7 +49,7 @@
     },
     "Bls12381Decompress": {
       "air_sha256": "da9f8b7a1a2f995f64bfe9ce89a32e898f98bfa5ccd04b18ecdd8f24aa905bef",
-      "source_sha256": "338a5ad3e17e9081ab4a86703a747bd4ce6ec4987f70e0ba8bc1150e8c914612",
+      "source_sha256": "7072c5d093d130b8d0ab68842571b942dffd100b66b270d764e44252980b57de",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12381Decompress.Bls12381Decompress.deterministic"
@@ -57,7 +57,7 @@
     },
     "Bls12381DoubleAssign": {
       "air_sha256": "2eafa3c11d880571eb061b17c366465961f03431b20c72a266fc1daef9f726ca",
-      "source_sha256": "67d5d54428996869a277d9569f16b2d15a13b9bee45f95a1b3102fd96efc8b76",
+      "source_sha256": "93eca1b2f7a68a777a0b7a0c24656fe12fcaa4d8337c643925863826494bcefa",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12381DoubleAssign.Bls12381DoubleAssign.deterministic"
@@ -65,7 +65,7 @@
     },
     "Bls12381FpOpAssign": {
       "air_sha256": "d49963100fc06da76b9069c65c45e1e0572e8a77f344aacdfcac12b782005544",
-      "source_sha256": "3ec8f57c995348b528fa5cc8b311921047d9c3dd5391f1d7b722c00399b830dc",
+      "source_sha256": "1e740d12496bb81fd4b8d5a9adb697affd25432f0ca8a59d5e5ae3b592639534",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12381FpOpAssign.Bls12381FpOpAssign_is_add.deterministic",
@@ -74,7 +74,7 @@
     },
     "Bls12831Fp2AddSubAssign": {
       "air_sha256": "b71b0c96d800d8e4f73da72fc5500b1c67a32070374559e8965c6d2780abf729",
-      "source_sha256": "c0262cdafea18f1c817de165dc2df6bb90a73b5ce186a07336d7fa7c64fdcbed",
+      "source_sha256": "f1f6a34efcc11b0ae61d36e15b40c6411b62009044afef6b7117cdae78270275",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12831Fp2AddSubAssign.Bls12831Fp2AddSubAssign.deterministic"
@@ -82,7 +82,7 @@
     },
     "Bls12831Fp2MulAssign": {
       "air_sha256": "4e79cf390a9ed5e1222151d9ede8df63c3a31ddb35d99dc442ba38c07936faff",
-      "source_sha256": "1bf25a285e63815fdee1dc733b9bacabdf013352865d881bceb97b9dda3c2466",
+      "source_sha256": "b6e381569de94573a86928a7c55cace07d1b78381d0a751f1ed164e23b535605",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bls12831Fp2MulAssign.Bls12831Fp2MulAssign.deterministic"
@@ -90,7 +90,7 @@
     },
     "Bn254AddAssign": {
       "air_sha256": "8e6b2b105932528fc372d7dab978ced17de8de08b9996a5c4d4a8399a09cd265",
-      "source_sha256": "98372c408664329e9294fdf66f8d40fbee9734d40c9a1dd487d659c5a44dcacc",
+      "source_sha256": "a2b507968bed04c74a119cb3cb734cb347fc678bde46207492cb7ffe352a734b",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bn254AddAssign.Bn254AddAssign.deterministic"
@@ -98,7 +98,7 @@
     },
     "Bn254DoubleAssign": {
       "air_sha256": "254d6319db48e192fb76d4f66d03ecf12dba9899f4b323bf93fe18a9a4b911e3",
-      "source_sha256": "a2c5f85ec5bbfb2cd9291dc3dd5cf1fb6d4f02c364ed6e5a7a89d45c6420256e",
+      "source_sha256": "530c7450830a21ab9a06b16d8b1fb98724b4b26cab975f791fd520a1813463b2",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bn254DoubleAssign.Bn254DoubleAssign.deterministic"
@@ -106,7 +106,7 @@
     },
     "Bn254Fp2AddSubAssign": {
       "air_sha256": "20786bc1c2118d742bc518c391806e3b1db8e88adee55be0efe09d85f7415d20",
-      "source_sha256": "04fedae008cb37d42259b73815ca70fe62cf9f23ab9e954712c6939ad4a0f0e1",
+      "source_sha256": "ca7c8d5228c08308810acdac922b911e0763f89db899a7b2795df9a0ad727e46",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bn254Fp2AddSubAssign.Bn254Fp2AddSubAssign.deterministic"
@@ -114,7 +114,7 @@
     },
     "Bn254Fp2MulAssign": {
       "air_sha256": "4616b316f1ee0865da545257c620c74076fd0f220a07d4040137f9cd80aba615",
-      "source_sha256": "9c069ba301e04f79c7452bee0a88a5ce010f73e5d08cd0b0203aec59a1f6cf0f",
+      "source_sha256": "d622c310bcf5a6575bd48e66db05a5c645278c9960eade8d8b24b5385693be20",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bn254Fp2MulAssign.Bn254Fp2MulAssign.deterministic"
@@ -122,7 +122,7 @@
     },
     "Bn254FpOpAssign": {
       "air_sha256": "f19042ea2c888694004eca4b39e217f6e9be876aaead3fadcf2878f2910a912f",
-      "source_sha256": "2092e490f4b996db46ae83bd4c13d932d5e68d8a719273605e3e9e8d30c34adb",
+      "source_sha256": "1d649282b38621f1ee13e1f978ab0e1b43a326bcaaaefb0213e2125c571f42ec",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Bn254FpOpAssign.Bn254FpOpAssign_is_add.deterministic",
@@ -131,7 +131,7 @@
     },
     "Branch": {
       "air_sha256": "4aa0321284f0e9f0bb2e920deb8d89e157c5f1cf61f7cf31dfe36b6361b269e2",
-      "source_sha256": "3e24c2ebf7eafd82376093976a164dbcc36e715b7d3be2a922ec1e6c700a29b5",
+      "source_sha256": "8feab209dc0a9728ac1525fab02f8087821c7ede697a39bea507254f9887afc7",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Branch.Branch_is_beq.deterministic",
@@ -149,7 +149,7 @@
     },
     "CloClz": {
       "air_sha256": "ab84469db17b44578bcb609cddb103e03905145e612a49f12aee65fba4789c1f",
-      "source_sha256": "5595a0bd54ea92e5136788504d95b6ed5c369a5bf260d6c918ebe38503da79de",
+      "source_sha256": "141db113266413efd63dc2ac363274706e084d837172daf9c1e24c0f6b893e19",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.CloClz.CloClz_is_clz.deterministic"
@@ -157,7 +157,7 @@
     },
     "DivRem": {
       "air_sha256": "d22706c5b0727cbc45c55e49b97133466b71c320243fa870a1cc898eaef1c996",
-      "source_sha256": "66eedf001f86218eeb13bae528e2f86ab539d612e4cb89873980a6dd0b71904a",
+      "source_sha256": "7c759125e82dd2836554b98a1b254f17116bd6bbe37ad6c776d0ce2419c75da2",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.DivRem.DivRem_is_div.deterministic",
@@ -168,7 +168,7 @@
     },
     "EdAddAssign": {
       "air_sha256": "c33bc786a2936a1fc5de7d9c705494c358756d9c7278d122303f92516eb61c9e",
-      "source_sha256": "ee578a306d72130725c1377c53a3ac68ae27e5bec61200704585c92120d01d65",
+      "source_sha256": "ab043d2e31390711067d38f4532675a54a9893a208c46120811f8bbeb11a8f97",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.EdAddAssign.EdAddAssign.deterministic"
@@ -176,7 +176,7 @@
     },
     "EdDecompress": {
       "air_sha256": "edd6bfc71fa69cc24887215705f438c5104d857a773e27ebd64ec3fe3db7ff3c",
-      "source_sha256": "db13e714a08fec0108f26d76edbacb6710490dfe11e327950497911070bcfc1c",
+      "source_sha256": "0697ba22f5b2ba05041873c7d9f60efdd8f999b934da6ecf2eb00a5c5752b673",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.EdDecompress.EdDecompress.deterministic"
@@ -184,7 +184,7 @@
     },
     "Global": {
       "air_sha256": "89d599815b075e74e02829123b6ebfe4ecf42cfc3544080ac9fd12273f49ba39",
-      "source_sha256": "f967ca19bd5fde1ea257db31990aa06cdc5ef4ca8b3eadc93437920e6aed9b32",
+      "source_sha256": "ebb2663746064e269ff33fe607f764cbcd4aa6858cb066a8538669ecd346bebd",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Global.Global.deterministic"
@@ -192,7 +192,7 @@
     },
     "Jump": {
       "air_sha256": "a769d3a1bf2aa1c039726af1d049ee12d9d029cc055f32d3dedb09fb385f78fd",
-      "source_sha256": "ef1ff493585d151a1e5664db1ba9b35c8c9050673e29579a662c0e1c24f928ee",
+      "source_sha256": "45f5e91c9758dde6c0133aae2f83c530a151ae2c0cde541a205a3dfcb89b665c",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Jump.Jump_is_jump.deterministic",
@@ -202,7 +202,7 @@
     },
     "KeccakSponge": {
       "air_sha256": "7d2b037d916135419360cdf9b5c6f73a64d5ae5c74c2d8603cd5bf73647a5774",
-      "source_sha256": "4515c54c49eb0675c9df7523458b69f60f197bc0eb7641d855b75f6b5a25e40c",
+      "source_sha256": "0b734f143d5960b034afab6618dadfb38a56eba6fc82f771ceb25b445c92efaa",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.KeccakSponge.KeccakSponge.deterministic"
@@ -210,7 +210,7 @@
     },
     "KeccakSpongeControl": {
       "air_sha256": "787ce4a8bf5f3c1b72d9766082a41d3fe7b5430bf1be68b1aeebb3c641807d7c",
-      "source_sha256": "969f4489793dda83f0e8e37c89f710c4bf0f83f55f7e6159a88fe559b03f8b7a",
+      "source_sha256": "cf335ffea06467ec347056b84f26efeecd78a00d0e6ca26c7fd1e48ad39df930",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.KeccakSpongeControl.KeccakSpongeControl.deterministic"
@@ -218,7 +218,7 @@
     },
     "LoadNarrow": {
       "air_sha256": "1b3297aa2a9b0cc28277eac40342b0d1404928b45ed1cd77e0f807e4ebae6941",
-      "source_sha256": "1ac40ef63f04d852640d55728988c66c1ede246d7ada68e3197e955b6c55c3b3",
+      "source_sha256": "84d2a6c9ce0857fd17681eb55970df73932589961d1443cf059778d08ba9b403",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.LoadNarrow.LoadNarrow_is_lb.deterministic",
@@ -229,7 +229,7 @@
     },
     "LoadWord": {
       "air_sha256": "caf6db05d36ed06e7be42fe1e7c12da8ff36c26cd88af456057df69dfdf725ec",
-      "source_sha256": "a383c7c140a5bcab0383e701f8a9740565e791b781129b3eb20b44d3824de579",
+      "source_sha256": "7ce73488c001a91b11d0cbf4c6b596fb7c5e4cf9b28283ac1dafb639387e8286",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.LoadWord.LoadWord_is_ll.deterministic",
@@ -238,7 +238,7 @@
     },
     "Lt": {
       "air_sha256": "d7f5c13cc00e54d117da89fb8c857711376de17b928e1db89bb9606173c34ef3",
-      "source_sha256": "34d0aca6f36a186c194887bcfd81541979d70b03dac273ebb9b05e0afc6e9d46",
+      "source_sha256": "3997d14f764cdab38a4f7e0ceb50f403577b4e6b3e3dd4e182e3fedbf0a63f4e",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Lt.Lt_is_slt.deterministic",
@@ -247,7 +247,7 @@
     },
     "LtImm": {
       "air_sha256": "7ce8a1d971c191079dca6f8c19e80db63a47976a5e52cd01d4a7b365f81091fb",
-      "source_sha256": "d9595208a008ea178e146b0f1bb6911c82edb7e32cd6a662877d6d10c7252234",
+      "source_sha256": "4cefede18412441e12bc332fdd98bcf4e6e715ceeebe6b750faf63b3334d3395",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.LtImm.LtImm_is_slt.deterministic",
@@ -256,7 +256,7 @@
     },
     "MemoryBump": {
       "air_sha256": "8163e02f1678d2e35fe60e31e182cbe13d9b6a1ec6d87ab4189324f90ca2ddc3",
-      "source_sha256": "e504c79e48607b74b51ef64f87170cc7c4b3593769931c680f3368ad1df3b87c",
+      "source_sha256": "ede3f98faf8f916de87f67f53b2d3723a98c69babde39f6662785496064f596b",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MemoryBump.MemoryBump.deterministic"
@@ -264,7 +264,7 @@
     },
     "MemoryGlobalFinalize": {
       "air_sha256": "e06da48a20240de5949f32fa389aeba99769eec0869c0195decf5bdb4b1537ef",
-      "source_sha256": "c53c82f79b9d13689ac5e7df857518364fa1688080b7b3147e6bdfacfe7bc17b",
+      "source_sha256": "2f934eaaee7f51e6e1917153fef99561b2658962e31a1e2275368219a5147488",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MemoryGlobalFinalize.MemoryGlobalFinalize.deterministic"
@@ -272,7 +272,7 @@
     },
     "MemoryGlobalInit": {
       "air_sha256": "bc7b2fa777dba390f152dadefca38f975fdff0d40fa94b07655469c97d868fbf",
-      "source_sha256": "f2057aa977a47be15dc0f624587cef500f311e8484abaaf446472e79da5d6d66",
+      "source_sha256": "6a1ccae7afd91b94216f79c5721cc0c9aed5a89f43afdfb40fc8d26c0be936df",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MemoryGlobalInit.MemoryGlobalInit.deterministic"
@@ -280,7 +280,7 @@
     },
     "MemoryLocal": {
       "air_sha256": "74e259273af56179fa33c32144f0da1367217e4f749f48148a046a86a1ca0112",
-      "source_sha256": "47a884ceee4cf853c79d368c91d7a54d9a67720a99d35ea3dcbc970dd8a1bc20",
+      "source_sha256": "0db62307c9bd3283a24117b5209360bba4d2a356607ca3e687326997bad4a4bf",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MemoryLocal.MemoryLocal.deterministic"
@@ -288,7 +288,7 @@
     },
     "MemoryUnaligned": {
       "air_sha256": "566466db47890209bba6af0bdffb22ebd58eef970933ff8dbb1be3a456ecf271",
-      "source_sha256": "272b3c36dbf7c254b2282cd0e7e9276fdfcbb2a4d26b659ad7f9cb4948ac62ea",
+      "source_sha256": "e2d1e3077b56d843d77771758b66540ac48c444e2f6ba63db054f74926d92b75",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MemoryUnaligned.MemoryUnaligned_is_lwl.deterministic",
@@ -299,7 +299,7 @@
     },
     "MiscInstrs": {
       "air_sha256": "3b7c2af298769e308880847adddde2cc16ffd35316461104ec70064bcccdb114",
-      "source_sha256": "9098e61e8f5aadfdeaac9eb188314e49534784901da428f01d20d35929594306",
+      "source_sha256": "b288eab46971e8ccef4a6faaf4a30f276db3a70aa302cf7a6a5b9fbe0f49bc37",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MiscInstrs.MiscInstrs_is_ext.deterministic",
@@ -314,7 +314,7 @@
     },
     "MovCond": {
       "air_sha256": "c7917b93d3fdd0b0c948263ccb6cb5425ef4801d03172ebae186b377292ecdec",
-      "source_sha256": "91ea0ed542dacd0467b7aef279e987a4058e6de313e0f6bc0a42126c844d9ab8",
+      "source_sha256": "f6ef3b6252f2c98b7d8b0a6fd76fc5363bdd9c33c9e3742c0df9a71ffe3c28ec",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.MovCond.MovCond_is_meq.deterministic",
@@ -324,7 +324,7 @@
     },
     "Mul": {
       "air_sha256": "c86a694591ca174d605e7cea11f590a8687fc96c10c09c761ca91b9e84e08b03",
-      "source_sha256": "42d725008aadd5463e57fbb1b9aa6c370a55176ddd2636d997432e0e87399614",
+      "source_sha256": "9bd8afb2ffaef9e731c2c36fd37b433090c9a7b5bbd27d21fd52e23a26c37b79",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Mul.Mul_is_mul.deterministic",
@@ -334,7 +334,7 @@
     },
     "Poseidon2Permute": {
       "air_sha256": "c0a8b9f63139e2284e1599fe1bdf4efad0b32b2e1828fb217887c2fb8d55ef4a",
-      "source_sha256": "d2fd248edd502fa7f96032877daf8340aad5c04024ef461c550324d6bec51a89",
+      "source_sha256": "d0b793dd9ee9d309cbdde3f0ce78ec7dd0d4738330d7a8bdb16f82f5a293a907",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Poseidon2Permute.Poseidon2Permute.deterministic"
@@ -352,7 +352,7 @@
     },
     "Secp256k1AddAssign": {
       "air_sha256": "bf62e5c136c84456e2f90ed68e0a5d48b0af87b631b62a30c4212d782f89e1d4",
-      "source_sha256": "c09cebfaa883b6f0801adfc905cf4e438893f89f89cd8d9d16eb4cdde9d16cfc",
+      "source_sha256": "d114f7ec781a68b2c883eb7b3bdd2eca028c2f1a3c4181c668d34e0fe0c3c559",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256k1AddAssign.Secp256k1AddAssign.deterministic"
@@ -360,7 +360,7 @@
     },
     "Secp256k1Decompress": {
       "air_sha256": "02e44c9f66e143b76a2d2265981811e1f76ce3693db8f4f6763a2e12a52684bd",
-      "source_sha256": "a5a41f49038035bbb3b90d27a07000ac3b95589b6892e25a4193a1da9ebe7b2a",
+      "source_sha256": "743e5a9a349af0306dc1fa16b220316ac8678feb8e70b21a91de5f47c8f807a7",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256k1Decompress.Secp256k1Decompress.deterministic"
@@ -368,7 +368,7 @@
     },
     "Secp256k1DoubleAssign": {
       "air_sha256": "0f9eda0d0e363c1b85309666f7841690c6c1567abfebab8377b0a7f3ecc504a6",
-      "source_sha256": "50c6737dcee36246ffdfd7d2862d3fe6fc6191461481db34069e7b81118cfbb7",
+      "source_sha256": "30f950f3e13957ed59919f6bbf4fe5c03ae2f55d11598a7caa2d2eb8ec8c8cec",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256k1DoubleAssign.Secp256k1DoubleAssign.deterministic"
@@ -376,7 +376,7 @@
     },
     "Secp256r1AddAssign": {
       "air_sha256": "0b710ba73c27a553f2ac77aa458b6419af7cfb0b9f8a55995b00452d40f62be2",
-      "source_sha256": "35f2bcf37538acd53106c61aae80c8604d78c40cede3080d3c42d505130fe07a",
+      "source_sha256": "403e94e43136be31a57b7b254fbd8c26edc0dac2071a3bfc3641fe624e382e67",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256r1AddAssign.Secp256r1AddAssign.deterministic"
@@ -384,7 +384,7 @@
     },
     "Secp256r1Decompress": {
       "air_sha256": "b802d6880acb29ca2d1f1b8ce58227137598438f06463b4425d13fdca93ec651",
-      "source_sha256": "7dbfe110a8a91d811c9cf663dd1dd3eea9c5b18c216490b30602ac8bda391599",
+      "source_sha256": "426aa732ddf9db567b08d61f43aa8a40a12013168cf6788a193b49dc09e8f2eb",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256r1Decompress.Secp256r1Decompress.deterministic"
@@ -392,7 +392,7 @@
     },
     "Secp256r1DoubleAssign": {
       "air_sha256": "80a5725ceb96fa4bf90a0435829f6b6c80bc36e5afc2c8f2e3e744ddd4037895",
-      "source_sha256": "8fbd8fd86f72a5e96bb541529c7ad5c59040569e5d05b7ae4a76f5f105651c94",
+      "source_sha256": "4715adf634f435fcdb86e2bd244c9367910fab23292a168f44a5d29259ef786d",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Secp256r1DoubleAssign.Secp256r1DoubleAssign.deterministic"
@@ -400,7 +400,7 @@
     },
     "ShaCompress": {
       "air_sha256": "51bfd92a2f50b66d25e2578fd839bd56c7150c18e59876e3403720ce470e52e2",
-      "source_sha256": "375d720e7ecfb253e90426338dded28c25ded9cfc75f31f78e3d321c8d50b091",
+      "source_sha256": "7915c8eea6f4b285690bca6405c1ab772ddef059eba2255670448dd9722c5dc7",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShaCompress.ShaCompress_is_compression.deterministic",
@@ -415,7 +415,7 @@
     },
     "ShaExtend": {
       "air_sha256": "38c71756e31853b1653107706ea8a3183cc94570b45dda9974d8cefa91e85fd2",
-      "source_sha256": "8ee7b056e1d6c74265ff1519ae63509237c2bbe1617032adc917ceb1b9410f40",
+      "source_sha256": "6e2220a175fed6566efe232412b59f8ef193e3829c532b4612827f44951eab4c",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShaExtend.ShaExtend.deterministic"
@@ -428,7 +428,7 @@
     },
     "ShiftLeft": {
       "air_sha256": "f0b0ac155bfe090ef2358ab3feb5e155262125bd2d82a8c52217631e08cf9f63",
-      "source_sha256": "78ff998b4fbeeb150359cfe33fdfd3cc61992c8157987d2c4fcd5a4d9b6d0acc",
+      "source_sha256": "b06094d35c0ca4deef37d43af7419d865ae82baab1a7c75f4bae91ad380c2d6c",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShiftLeft.ShiftLeft.deterministic"
@@ -436,7 +436,7 @@
     },
     "ShiftLeftImm": {
       "air_sha256": "1d511e03389e0ec9e9fa51ea40388814f20dc4e0c0474508fc181c0fbd8a033f",
-      "source_sha256": "ac4b8ae5706560aa03ab23be4a6fe8fd3ac2a7f17a12de091caba2033973edbd",
+      "source_sha256": "cbd216a90871630707a871de7d7321f6a543e52cac935d08621d8684128dba32",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShiftLeftImm.ShiftLeftImm.deterministic"
@@ -444,7 +444,7 @@
     },
     "ShiftRight": {
       "air_sha256": "6c65d1a46ac073ef0e50bee14e1a7db77930c033aaf6866b0bb89d30dfbdc27c",
-      "source_sha256": "8a413246c0993e3144cda3b957c47f199f05a01a51be192dbe4702b2bd988d4d",
+      "source_sha256": "d010e3168ed557ea8a2ae04ce6b83254630d59900154786251c8eb6d4d8b4a46",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShiftRight.ShiftRight_is_ror.deterministic",
@@ -454,7 +454,7 @@
     },
     "ShiftRightImm": {
       "air_sha256": "1eedb9d394af1868c5544f88116faeb7a237ef06870868ae1c6e0b4d6e4dbb49",
-      "source_sha256": "8ff300b8724569da30f68852726fcd9dbc85f51d7c49ad6af8e96ab9457bc845",
+      "source_sha256": "f4927fb736f44d7362e0eef07354693e5b6865dccdaf004e149f1fd00f203bf5",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.ShiftRightImm.ShiftRightImm_is_ror.deterministic",
@@ -464,7 +464,7 @@
     },
     "StoreNarrow": {
       "air_sha256": "2b46624bd6c18625aee2fbd4c506e497f72cd9b09809a1483b253ab6e3e2846d",
-      "source_sha256": "8e802602130ae7f16d091f3600bd3845e94fecf9122e3131b6c28904020b2d75",
+      "source_sha256": "aaec0d9a21ce15e2b6ac4c5312cf8d94933d64520b05e873402589f70603f0e9",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.StoreNarrow.StoreNarrow_is_sb.deterministic",
@@ -473,7 +473,7 @@
     },
     "StoreWord": {
       "air_sha256": "d6ada1715cb4992aff775d1527d91cfbb81dbbe5fa9262365ae664ba87be97cc",
-      "source_sha256": "2753b015b2061ceb9b92133334e8ef9b09c2d9ed5bf5d9e382db61f4ed999c05",
+      "source_sha256": "cb3152a3a0b4e4e5a9a8a7aad30f600b76dd545ab22ad2053da3987cb28f95b5",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.StoreWord.StoreWord_is_sc.deterministic",
@@ -482,7 +482,7 @@
     },
     "SysLinux": {
       "air_sha256": "5c1724fc553011ef4fe78039a76f447f77a8f7284f0d6f1260838eeddac52237",
-      "source_sha256": "473cc682f4c892654b5f33fe921c9ffdc16e74480230d777861ef41e091f2e62",
+      "source_sha256": "ab6cf21d37171a87ec86b89c877e76ef26a205b4065d384e47738f00c25e5b5b",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.SysLinux.SysLinux.deterministic"
@@ -490,7 +490,7 @@
     },
     "SyscallCore": {
       "air_sha256": "c2b2318043d58e7361c95ae5520f9ba6e92d185f22a643a529d7697182456db9",
-      "source_sha256": "103a1a3a34772839bcbbc24820afc09bbb3bee7566290ae85d4234c7c607be26",
+      "source_sha256": "6bc647ff6a606bbc8fe7d65fc46679f1a9976c6fe69882747e50b426998dda57",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.SyscallCore.SyscallCore.deterministic"
@@ -498,7 +498,7 @@
     },
     "SyscallInstrs": {
       "air_sha256": "9118c37280bcc19849934540ecfd7ba9e1fd934906bad630035548eeb0020e59",
-      "source_sha256": "c030410888a4f87e67fdc90f115a2d0fe59558620cf7d9b3c09789692c9e8e79",
+      "source_sha256": "2f20ab2c26068c40c9eadebdc68278c49f920012c502cf594805670151053030",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.SyscallInstrs.SyscallInstrs.deterministic"
@@ -506,7 +506,7 @@
     },
     "SyscallPrecompile": {
       "air_sha256": "9ba4bbc310a0261bb77de685c7ed1aa0e8646e8ebe46fdae3449e9eb5406c3d9",
-      "source_sha256": "983f143729ccb5059ce4b198b53dd2d7d15295820be000557e4e05d50864dec7",
+      "source_sha256": "c42075f32fe274444d62aa247f9fc893ccf6f662f06ac976505d01f32f8a41b8",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.SyscallPrecompile.SyscallPrecompile.deterministic"
@@ -514,7 +514,7 @@
     },
     "U256XU2048Mul": {
       "air_sha256": "ffcd5a4835de541cc7fece74d0377a08e51e4d660737cf1aaf30d13941413148",
-      "source_sha256": "cd4e441cc554687d0becbedfdacb8f7ab7751520cf82f7457c075b55a7fe1b1e",
+      "source_sha256": "248d6eb732a3752830c482f0430bdb770dbe6a234517dbdc6b066a27ae203079",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.U256XU2048Mul.U256XU2048Mul.deterministic"
@@ -522,13 +522,13 @@
     },
     "Uint256MulMod": {
       "air_sha256": "e8189ccc30f0256e915388cff6327c2a377e00bf8a2ecfb9c4bad60d27967168",
-      "source_sha256": "a7f2c9a55096fd9b07251f9decfa24a1808f629b1980ae5a376e72e09e4893be",
+      "source_sha256": "1ec2fc3c1db6c5745dedf9077041b5c27e89c74f9e2b5d19dac3dc8a9ec1f2b0",
       "status": "closed",
       "theorems": [
         "ZirenDet.Chips.Uint256MulMod.Uint256MulMod.deterministic"
       ]
     }
   },
-  "pipeline_sha256": "34d355a78ce1abf23d592a3040c6b9b8b179566bb2cb3310b5885bc35cb75283",
+  "pipeline_sha256": "d737d258e15ddf070cedbc171bd57cfad9e7c9278740b767df1f21594067fcb1",
   "schema": 1
 }
