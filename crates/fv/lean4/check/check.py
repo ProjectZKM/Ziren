@@ -19,7 +19,7 @@ from pathlib import Path
 from closure import validate
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from coverage import pipeline_digest, verify_lean_project
+from coverage import lean_library_digest, pipeline_digest, verify_lean_project
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -42,12 +42,34 @@ def run(script, args):
     return subprocess.run([sys.executable, os.path.join(HERE, script)] + args).returncode
 
 
+def prepare_proof_cache(root, prefix, identity):
+    """Discard compiled modules unless their library/compiler identity is recorded and current."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = root / ".lean-cache.json"
+    expected = {"schema": 1, "prefix": prefix, "inputs": identity}
+    try:
+        previous = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        previous = None
+    if identity is None or previous != expected:
+        for module in (root / prefix).glob("*.olean*"):
+            module.unlink()
+        for module in (root / prefix).glob("*.ilean"):
+            module.unlink()
+    if identity is None:
+        stamp.unlink(missing_ok=True)
+    else:
+        stamp.write_text(json.dumps(expected, sort_keys=True) + "\n")
+
+
 def main(argv):
     build = "--no-build" not in argv
     file, root, prefix = [a for a in argv if a != "--no-build"]
     receipt = Path(root, "closure.json")
     receipt.unlink(missing_ok=True)
     identity = None
+    cache_identity = None
     first = Path(file).read_text().splitlines()[0]
     if first.startswith("-- ZIREN_COVERAGE "):
         identity = json.loads(first[len("-- ZIREN_COVERAGE "):])
@@ -59,9 +81,15 @@ def main(argv):
                 verify_lean_project(project)
                 if subprocess.run(["lake", "build", "ZirenDet"], cwd=project).returncode:
                     return 1
-        except (ValueError, KeyError, OSError) as exc:
+                compiler = subprocess.run(["lake", "env", "lean", "--version"], cwd=project,
+                                          check=True, capture_output=True, text=True).stdout.strip()
+                cache_identity = {"library_sha256": lean_library_digest(), "compiler": compiler,
+                                  "project": str(Path(project).resolve())}
+        except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
             print(f"proof closure failed: {exc}", file=sys.stderr)
             return 1
+    if build:
+        prepare_proof_cache(root, prefix, cache_identity)
     if run("split.py", [file, root, prefix]):
         return 3
     for script in ("run_mod.sh", "closure.py"):
@@ -98,6 +126,8 @@ def main(argv):
                 if identity["pipeline_sha256"] != pipeline_digest():
                     raise ValueError("proof pipeline changed during checking")
                 verify_lean_project(os.environ["LEAN_PROJECT"])
+                if cache_identity["library_sha256"] != lean_library_digest():
+                    raise ValueError("Lean library changed during checking")
                 inventory["pipeline_sha256"] = identity["pipeline_sha256"]
         except (ValueError, OSError) as exc:
             print(f"proof closure failed: {exc}", file=sys.stderr)

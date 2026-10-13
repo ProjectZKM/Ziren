@@ -19,7 +19,7 @@ class CoverageTests(unittest.TestCase):
             (fv / "coverage.py").write_text("# checker\n")
             lean = fv / "lean4"
             lean.mkdir()
-            for name in ("lean-toolchain", "lake-manifest.json", "lakefile.toml"):
+            for name in ("ZirenDet.lean", "lean-toolchain", "lake-manifest.json", "lakefile.toml"):
                 (lean / name).write_text("pin\n")
             picus = fv / "picus"
             picus.mkdir()
@@ -61,6 +61,30 @@ class CoverageTests(unittest.TestCase):
         check_manifest(self.manifest, self.current)
         with self.assertRaises(ValueError):
             check_manifest(self.manifest, self.current, require_closed=True)
+
+    def test_unlisted_exclusions_fail_even_with_missing_or_null_reason(self):
+        for reason in ({}, {"reason": None}, {"reason": "preprocessed table"}):
+            manifest = copy.deepcopy(self.manifest)
+            manifest["chips"]["AddSub"].update(status="excluded", **reason)
+            with self.subTest(reason=reason), self.assertRaises(ValueError):
+                check_manifest(manifest, self.current, require_closed=True)
+
+    def test_closed_evidence_has_valid_hashes_and_unique_chip_theorems(self):
+        valid = {"source_sha256": "c" * 64,
+                 "theorems": ["ZirenDet.Chips.AddSub.AddSub_is_add.deterministic"]}
+        manifest = copy.deepcopy(self.manifest)
+        manifest["chips"]["AddSub"].update(status="closed", **valid)
+        check_manifest(manifest, self.current, require_closed=True)
+        mutations = [{"source_sha256": value} for value in (None, "bad", 123)] + [
+            {"theorems": value} for value in (
+                None, [], "ZirenDet.Chips.AddSub.AddSub_is_add.deterministic", [None],
+                ["ZirenDet.Chips.Other.top.deterministic"], ["ZirenDet.Chips.AddSub.fake"],
+                valid["theorems"] * 2)]
+        for mutation in mutations:
+            changed = copy.deepcopy(manifest)
+            changed["chips"]["AddSub"].update(mutation)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                check_manifest(changed, self.current, require_closed=True)
 
     def test_rejects_constraint_inventory_pipeline_and_exclusion_drift(self):
         for mutation in ["constraint", "inventory", "pipeline", "exclusion", "evidence"]:

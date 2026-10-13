@@ -23,9 +23,41 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def validate_proof_evidence(name, entry):
+    source = entry.get("source_sha256")
+    theorems = entry.get("theorems")
+    if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{64}", source):
+        raise ValueError(f"{name}: invalid checked source hash")
+    if (not isinstance(theorems, list) or not theorems
+            or any(not isinstance(t, str) or not re.fullmatch(
+                rf"ZirenDet\.Chips\.{re.escape(name)}\.[A-Za-z_][A-Za-z0-9_]*"
+                r"(?:\.[A-Za-z_][A-Za-z0-9_]*)*\.deterministic", t)
+                   for t in theorems)
+            or len(set(theorems)) != len(theorems)):
+        raise ValueError(f"{name}: invalid determinism theorem inventory")
+
+
+def lean_project_inputs():
+    reference = FV / "lean4"
+    paths = [p for p in reference.glob("ZirenDet/**/*.lean")
+             if "Chips" not in p.parts and p.name != "Chips.lean"]
+    return paths + [reference / name for name in
+                    ("ZirenDet.lean", "lean-toolchain", "lake-manifest.json", "lakefile.toml")]
+
+
+def lean_library_digest():
+    """Semantic build inputs that compiled chip proofs must never outlive."""
+    h = hashlib.sha256()
+    for p in sorted(lean_project_inputs()):
+        for data in (p.relative_to(FV / "lean4").as_posix().encode(), p.read_bytes()):
+            h.update(len(data).to_bytes(8, "little"))
+            h.update(data)
+    return h.hexdigest()
+
+
 def pipeline_digest():
     # Include the lowering, proof generators, gadget lemmas, checker and dependency pins.
-    paths = set(FV.glob("picus/src/**/*.rs")) | set(FV.glob("lean4/ZirenDet/**/*.lean"))
+    paths = set(FV.glob("picus/src/**/*.rs")) | set(lean_project_inputs())
     paths |= set(FV.glob("lean4/snippets/**/*.py")) | set(FV.glob("lean4/snippets/**/*.lean"))
     paths |= {p for p in FV.glob("lean4/snippets/**/*") if p.suffix in {".tmpl", ".tac", ".tsv", ".txt"}}
     paths |= set(FV.glob("lean4/check/*.py")) | set(FV.glob("lean4/check/*.sh"))
@@ -69,10 +101,7 @@ def load_fingerprints(path):
 def verify_lean_project(project):
     """A receipt must use the Lean definitions and dependency pins fingerprinted here."""
     reference = FV / "lean4"
-    paths = [p for p in reference.glob("ZirenDet/**/*.lean")
-             if "Chips" not in p.parts and p.name != "Chips.lean"]
-    paths += [reference / name for name in ("lean-toolchain", "lake-manifest.json", "lakefile.toml")]
-    for path in paths:
+    for path in lean_project_inputs():
         actual = Path(project) / path.relative_to(reference)
         if not actual.exists() or actual.read_bytes() != path.read_bytes():
             raise ValueError(f"Lean project differs from fingerprinted library: {actual}")
@@ -90,11 +119,12 @@ def check_manifest(manifest, current, require_closed=False):
     for name, entry in entries.items():
         state = entry["status"]
         if state == "excluded":
-            if EXCLUDED.get(name) != entry.get("reason"):
+            if name not in EXCLUDED or EXCLUDED[name] != entry.get("reason"):
                 raise ValueError(f"{name}: invalid exclusion")
         elif state == "closed":
-            if not entry.get("theorems") or not entry.get("source_sha256"):
-                raise ValueError(f"{name}: missing proof evidence")
+            if name in EXCLUDED:
+                raise ValueError(f"{name}: excluded chip cannot have closed coverage")
+            validate_proof_evidence(name, entry)
         elif state != "pending":
             raise ValueError(f"{name}: invalid coverage status")
         elif require_closed:
@@ -169,7 +199,8 @@ def main():
         receipt = json.loads(args.receipt.read_text())
         if receipt.get("pipeline_sha256") != digest:
             raise ValueError("closure receipt used a different or unchecked proof pipeline")
-        if receipt["source_sha256"] != sha(args.source.read_bytes()) or not receipt["theorems"]:
+        validate_proof_evidence(name, receipt)
+        if receipt["source_sha256"] != sha(args.source.read_bytes()):
             raise ValueError("closure receipt does not match the generated proof source")
         if name in EXCLUDED or any(not t.startswith(f"ZirenDet.Chips.{name}.")
                                    or not t.endswith(".deterministic") for t in receipt["theorems"]):

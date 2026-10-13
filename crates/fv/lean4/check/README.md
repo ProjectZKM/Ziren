@@ -32,6 +32,12 @@ SHA-256 of the original generated source and the complete determinism theorem in
 receipt is removed before each check; a failed elaboration or closure check produces no receipt.
 For stamped sources, the checker also requires `LEAN_PROJECT` to match the fingerprinted Lean
 library and dependency pins, builds that library, and includes the pipeline hash in the receipt.
+Use `crates/fv/lean4` as the project template, including its `ZirenDet.lean` root and pinned
+configuration files; keep regenerated chip output in the separate regeneration directory.
+Compiled proof modules are reusable only when `OUTROOT/.lean-cache.json` records the same
+Lean library sources, dependency pins, compiler version and project path. Changed or unrecorded
+inputs discard the compiled modules before rebuilding; an axiom audit alone cannot certify a
+module compiled against a different library. Unstamped sources always receive a fresh build.
 
 `regen_all.sh` stamps each generated source with its current unspecialised AIR fingerprint and
 the proof-pipeline fingerprint. Refresh the inventory after regeneration; unchanged receipts
