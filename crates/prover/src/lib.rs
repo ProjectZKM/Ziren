@@ -45,9 +45,6 @@ use zkm_pcs::{
     Challenge, MachineProver, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
     Val, Word, ZKMCoreOpts, ZKMProverOpts, DIGEST_SIZE,
 };
-// Used only by the `#[cfg(test)]` shape-cardinality census below; the
-// non-test build has no reader, which is why it needs the gate.
-#[cfg(test)]
 use zkm_pcs::shape::OrderedShape;
 use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, types::RecursionProgramType};
 use zkm_recursion_circuit::{
@@ -266,6 +263,19 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
 
+    /// Fixed terminal programs, derived once from the configured root proof geometry.
+    shrink_template: OnceLock<TerminalProgram>,
+    wrap_template: OnceLock<TerminalProgram>,
+    /// Native setup keys stay on the prover backend that created them.
+    shrink_setup: OnceLock<(
+        <C::ShrinkProver as MachineProver<InnerSC, ShrinkAir<KoalaBear>>>::DeviceProvingKey,
+        StarkVerifyingKey<InnerSC>,
+    )>,
+    wrap_setup: OnceLock<(
+        <C::WrapProver as MachineProver<OuterSC, WrapAir<KoalaBear>>>::DeviceProvingKey,
+        StarkVerifyingKey<OuterSC>,
+    )>,
+
     /// Whether to verify verification keys.
     pub vk_verification: bool,
 
@@ -325,6 +335,12 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// and reusing a program built for shape A against shape B's witness
     /// stream trips `RuntimeError::EmptyWitnessStream`.
     pub compose_programs_basefold_cache: Mutex<RecursionProgramCache>,
+}
+
+struct TerminalProgram {
+    program: Arc<RecursionProgram<KoalaBear>>,
+    input_shape_key: u64,
+    vk_verification: bool,
 }
 
 /// Program-identity-keyed recursion proving keys, capped so the retained
@@ -692,6 +708,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
+            shrink_template: OnceLock::new(),
+            wrap_template: OnceLock::new(),
+            shrink_setup: OnceLock::new(),
+            wrap_setup: OnceLock::new(),
             normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
@@ -1425,83 +1445,124 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    /// Build the Wrap (basefold) recursion program. Cluster-parametrized
-    /// analog of [`Self::shrink_program`] / [`Self::wrap_program`].
-    /// Band-snapped through [`Self::fix_recursion_shape`], like every other
-    /// recursion stage whose verifying key the allowlist has to contain.
+    /// Single root-class input used to compile the terminal shrink verifier.
+    fn shrink_template_input(&self) -> ZKMWrapBasefoldWitnessValues<CompressedSC> {
+        let default_config = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
+        let config = self
+            .compress_shape_config
+            .as_ref()
+            .unwrap_or(&default_config);
+        let rows = config.all_shapes()[zkm_pcs::jagged::RecursionPins::ROOT_CLASS]
+            .iter()
+            .map(|(name, rows)| (name.clone(), *rows))
+            .collect::<Vec<_>>();
+        let shape = ZKMCompressWithVkeyShape {
+            compress_shape: vec![OrderedShape::from_rows(&rows)].into(),
+            merkle_tree_height: VK_MERKLE_TREE_HEIGHT,
+        };
+        ZKMWrapBasefoldWitnessValues::dummy(self.root_prover.machine(), &shape)
+    }
+
+    /// Derive exact chip heights from the generated preprocessed tables.
+    fn fixed_shrink_template(&self) -> &TerminalProgram {
+        let template = self.shrink_template.get_or_init(|| {
+            use p3_matrix::Matrix;
+            use zkm_pcs::air::MachineAir;
+            let input = self.shrink_template_input();
+            let mut program = build_wrap_basefold_program(
+                self.root_prover.machine(),
+                &input,
+                Self::pcs_max_log_row_count(),
+                self.vk_verification,
+            );
+            let rows: BTreeMap<String, usize> = self
+                .shrink_prover
+                .machine()
+                .chips()
+                .iter()
+                .filter_map(|chip| {
+                    chip.generate_preprocessed_trace(&program)
+                        .map(|trace| (chip.name(), trace.height()))
+                })
+                .collect();
+            *program.shape_mut() = Some(RecursionShape::from(rows));
+            TerminalProgram {
+                program: Arc::new(program),
+                input_shape_key: input.shape_key(),
+                vk_verification: self.vk_verification,
+            }
+        });
+        assert_eq!(
+            template.vk_verification, self.vk_verification,
+            "VK verification setting changed after terminal program initialization"
+        );
+        template
+    }
+
+    /// Build the wrap verifier from the shrink template's actual table heights.
+    fn wrap_template_input(&self) -> ZKMWrapBasefoldWitnessValues<InnerSC> {
+        let rows = self
+            .fixed_shrink_template()
+            .program
+            .shape
+            .as_ref()
+            .unwrap()
+            .clone_into_hash_map()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let shape = ZKMCompressWithVkeyShape {
+            compress_shape: vec![OrderedShape::from_rows(&rows)].into(),
+            merkle_tree_height: VK_MERKLE_TREE_HEIGHT,
+        };
+        ZKMWrapBasefoldWitnessValues::dummy(self.shrink_prover.machine(), &shape)
+    }
+
+    fn fixed_wrap_template(&self) -> &TerminalProgram {
+        let template = self.wrap_template.get_or_init(|| {
+            let input = self.wrap_template_input();
+            let program = self.build_wrap_bn254_program_basefold(&input);
+            TerminalProgram {
+                program,
+                input_shape_key: input.shape_key(),
+                vk_verification: self.vk_verification,
+            }
+        });
+        assert_eq!(
+            template.vk_verification, self.vk_verification,
+            "VK verification setting changed after terminal program initialization"
+        );
+        template
+    }
+
+    /// Return the fixed shrink program after checking the input witness structure.
     pub fn shrink_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<CompressedSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count = Self::pcs_max_log_row_count();
-        let mut program = build_wrap_basefold_program(
-            self.root_prover.machine(),
-            input,
-            max_log_row_count,
-            self.vk_verification,
+        let template = self.fixed_shrink_template();
+        assert_eq!(
+            input.shape_key(),
+            template.input_shape_key,
+            "shrink input does not match the configured root proof geometry"
         );
-        let shape = Self::shrink_shape();
-        let caps = shape.clone_into_hash_map();
-        for (name, height) in ShrinkAir::<KoalaBear>::heights(&program) {
-            match caps.get(&name) {
-                Some(cap) => assert!(
-                    height <= *cap,
-                    "shrink program needs {name} height {height}, frozen cap is {cap} rows — \
-                     the frozen shrink shape no longer fits; changing it re-runs the ceremony",
-                ),
-                None => assert!(
-                    height == 0,
-                    "shrink program emits {height} {name} rows but the frozen shrink shape \
-                     has no {name} entry — a shrink builder took a compress-only path",
-                ),
-            }
-        }
-        *program.shape_mut() = Some(shape);
-        Arc::new(program)
+        template.program.clone()
     }
 
-    /// The FROZEN shrink proof shape (per-chip log2 heights).  See
-    /// [`Self::shrink_program_basefold`] — do not edit without re-running
-    /// the gnark ceremony.
-    fn shrink_shape() -> RecursionShape {
-        [
-            ("BaseAlu", 1 << 18),
-            ("ExtAlu", 1 << 18),
-            ("MemoryConst", 1 << 19),
-            ("MemoryVar", 1 << 18),
-            ("Poseidon2WideDeg3", 1 << 18),
-            ("PublicValues", 1 << 4),
-            ("Select", 1 << 19),
-        ]
-        .into_iter()
-        .map(|(n, rows)| (n.to_string(), rows))
-        .collect::<std::collections::BTreeMap<_, _>>()
-        .into()
-    }
-
-    /// Build the bn254-Wrap (basefold) recursion program — terminal
-    /// stage analog of [`Self::wrap_program`] for the basefold pipeline.
-    ///
-    /// Differs from [`Self::shrink_program_basefold`] in two ways:
-    /// 1. Compiles with [`WrapConfig`] (instead of [`InnerConfig`]) so
-    ///    the resulting [`RecursionProgram`] is provable on the OuterSC
-    ///    (BN254-friendly) ring via [`Self::wrap_prover`], not the
-    ///    KoalaBear-side [`Self::shrink_prover`].
-    /// 2. Verifies the input proof against
-    ///    [`Self::shrink_prover`]`.machine()` (the machine that produced
-    ///    the shrink-basefold output we are wrapping).
-    ///
-    /// The `verify_wrap_basefold` body is generic over `C: CircuitConfig`
-    /// with `F=InnerVal` / `EF=InnerChallenge` / `Bit=Felt<KoalaBear>`,
-    /// and `WrapConfig` satisfies these bounds (its `CircuitConfig` impl in
-    /// `zkm_recursion_circuit`), so the same verifier function works
-    /// unchanged here.
-    ///
-    /// Not cached — like [`Self::shrink_program_basefold`], the program
-    /// is built fresh per call from the real input shape (cumulative-sum
-    /// maps, chip names, column counts).  `wrap_bn254` is invoked once
-    /// per end-to-end proof, so the per-call build cost is acceptable.
+    /// Return the fixed wrap program after checking the input witness structure.
     pub fn wrap_bn254_program_basefold(
+        &self,
+        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let template = self.fixed_wrap_template();
+        assert_eq!(
+            input.shape_key(),
+            template.input_shape_key,
+            "wrap input does not match the configured shrink proof geometry"
+        );
+        template.program.clone()
+    }
+
+    fn build_wrap_bn254_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
@@ -2021,7 +2082,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
         };
-        let program = self.shrink_program_basefold(&input);
+        let template = self.fixed_shrink_template();
+        if input.shape_key() != template.input_shape_key {
+            return Err(ZKMRecursionProverError::RuntimeError(
+                "shrink input does not match the configured root proof geometry".into(),
+            ));
+        }
+        let program = template.program.clone();
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -2034,24 +2101,31 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.print_stats();
         tracing::debug!("Shrink basefold program executed successfully");
 
-        let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
-            .in_scope(|| self.shrink_prover.setup(&program));
+        let (shrink_pk, shrink_vk) = self.shrink_setup.get_or_init(|| {
+            let (pk, vk) = tracing::debug_span!("setup shrink basefold")
+                .in_scope(|| self.shrink_prover.setup(&program));
+            let rows = program.shape.as_ref().unwrap().clone_into_hash_map();
+            for (name, _, (_, height)) in &vk.chip_information {
+                assert_eq!(rows.get(name), Some(height), "shrink setup height changed for {name}");
+            }
+            (pk, vk)
+        });
         let mut challenger = self.shrink_prover.machine().config().challenger();
 
         let rec = runtime.record;
         let mut compress_proof = self
             .shrink_prover
-            .prove(&shrink_pk, vec![rec.clone()], &mut challenger, opts.recursion_opts)
+            .prove(shrink_pk, vec![rec.clone()], &mut challenger, opts.recursion_opts)
             .unwrap();
         let mut proof = compress_proof.shard_proofs.pop().unwrap();
 
         if let Some(bf) =
-            self.shrink_prover.reprove_shrink_shard(&shrink_pk, &rec, &opts.recursion_opts)
+            self.shrink_prover.reprove_shrink_shard(shrink_pk, &rec, &opts.recursion_opts)
         {
             proof.jagged_shard_proof = bf;
         }
 
-        Ok(ZKMReduceProof { vk: shrink_vk, proof })
+        Ok(ZKMReduceProof { vk: shrink_vk.clone(), proof })
     }
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
@@ -2069,7 +2143,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
         };
-        let program = self.wrap_bn254_program_basefold(&input);
+        let template = self.fixed_wrap_template();
+        if input.shape_key() != template.input_shape_key {
+            return Err(ZKMRecursionProverError::RuntimeError(
+                "wrap input does not match the configured shrink proof geometry".into(),
+            ));
+        }
+        let program = template.program.clone();
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -2082,10 +2162,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.print_stats();
         tracing::debug!("wrap_bn254 basefold program executed successfully");
 
-        let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bn254 basefold")
-            .in_scope(|| self.wrap_prover.setup(&program));
-        if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
-            tracing::debug!("wrap verifier key set (basefold)");
+        let (wrap_pk, wrap_vk) = self.wrap_setup.get_or_init(|| {
+            tracing::debug_span!("setup wrap_bn254 basefold")
+                .in_scope(|| self.wrap_prover.setup(&program))
+        });
+        let fixed_vk = self.wrap_vk.get_or_init(|| wrap_vk.clone());
+        if fixed_vk.commit != wrap_vk.commit || fixed_vk.pc_start != wrap_vk.pc_start {
+            return Err(ZKMRecursionProverError::RuntimeError(
+                "cached wrap verifying key does not match the fixed terminal program".into(),
+            ));
         }
         if let Some(path) = std::env::var_os("ZIREN_DUMP_PART_STARK_VK") {
             match bincode::serialize(&wrap_vk.part_vk()) {
@@ -2107,15 +2192,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let time = std::time::Instant::now();
         let mut wrap_proof = self
             .wrap_prover
-            .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
+            .prove(wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
             .unwrap();
         let elapsed = time.elapsed();
         tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
         let mut wrap_challenger = self.wrap_prover.machine().config().challenger();
-        self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
+        self.wrap_prover.machine().verify(wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
         tracing::info!("wrapping (basefold) successful");
 
-        Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
+        Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.
@@ -2752,18 +2837,70 @@ pub mod tests {
         );
     }
 
-    /// The wrap proves ONE program — the verifier of the shrink proof at the
-    /// frozen shrink shape — so the stripes its two rounds commit are a
+    #[test]
+    fn fixed_terminal_programs_reuse_witness_independent_templates() {
+        use p3_matrix::Matrix;
+        use zkm_pcs::air::MachineAir;
+        let mut prover = ZKMProver::<DefaultProverComponents>::uninitialized_with(Some(false));
+        let mut input = prover.shrink_template_input();
+        let program = prover.shrink_program_basefold(&input);
+        let rows = program.shape.as_ref().unwrap().clone_into_hash_map();
+        for chip in prover.shrink_prover.machine().chips() {
+            if let Some(trace) = chip.generate_preprocessed_trace(&program) {
+                assert_eq!(rows.get(&chip.name()), Some(&trace.height()));
+            }
+        }
+        input.vks_and_proofs[0].1.public_values[0] += KoalaBear::ONE;
+        assert!(Arc::ptr_eq(
+            &program,
+            &prover.shrink_program_basefold(&input)
+        ));
+        let mut fresh = build_wrap_basefold_program(
+            prover.root_prover.machine(),
+            &input,
+            ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count(),
+            false,
+        );
+        *fresh.shape_mut() = program.shape.clone();
+        assert_eq!(
+            zkm_recursion_core::setup_digest(&fresh),
+            zkm_recursion_core::setup_digest(&program)
+        );
+        let mut wrap_input = prover.wrap_template_input();
+        let wrap = prover.wrap_bn254_program_basefold(&wrap_input);
+        wrap_input.vks_and_proofs[0].1.public_values[0] += KoalaBear::ONE;
+        assert!(Arc::ptr_eq(
+            &wrap,
+            &prover.wrap_bn254_program_basefold(&wrap_input)
+        ));
+        let fresh_wrap = prover.build_wrap_bn254_program_basefold(&wrap_input);
+        assert_eq!(
+            zkm_recursion_core::setup_digest(&fresh_wrap),
+            zkm_recursion_core::setup_digest(&wrap)
+        );
+        input.vk_merkle_data.vk_merkle_proofs[0].path.pop();
+        assert_ne!(
+            input.shape_key(),
+            prover.fixed_shrink_template().input_shape_key
+        );
+        prover.vk_verification = true;
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prover.fixed_shrink_template();
+        }))
+        .is_err());
+    }
+
+    /// The wrap proves ONE program — the verifier of the shrink proof at its
+    /// setup-derived shape — so the stripes its two rounds commit are a
     /// constant of the tree, and the soundness model's wrap batch
     /// cardinality (the batching over both rounds) is pinned rather than
     /// bounded.  Rows are what the prover pads to without a shape,
     /// `next_multiple_of_32_rows`, and cells stack at `2^21` per stripe:
     /// under the compress schedule the shrink proof's verifier packs into
-    /// 8 preprocessed and 8 main stripes (a count above 4 rounds up to a
-    /// multiple of 8), batch 16.
+    /// 4 preprocessed and 8 main stripes, batch 12.
     #[test]
     #[serial]
-    fn wrap_committed_stripes_are_pinned() {
+    fn fixed_terminal_wrap_committed_stripes_are_pinned() {
         use p3_air::BaseAir;
         use zkm_core_machine::utils::next_multiple_of_32_rows;
         use zkm_pcs::air::MachineAir;
@@ -2772,12 +2909,9 @@ pub mod tests {
             ZKMCompressShape, ZKMCompressWithVkeyShape, ZKMWrapBasefoldWitnessValues,
         };
 
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let shrink_rows: Vec<(String, usize)> =
-            ZKMProver::<DefaultProverComponents>::shrink_shape()
-                .clone_into_hash_map()
-                .into_iter()
-                .collect();
+        let prover = ZKMProver::<DefaultProverComponents>::uninitialized_with(Some(true));
+        let shrink_rows: Vec<(String, usize)> = prover.fixed_shrink_template().program
+            .shape.as_ref().unwrap().clone_into_hash_map().into_iter().collect();
         let compress_shape = ZKMCompressShape::from(vec![OrderedShape::from_rows(&shrink_rows)]);
         let shape =
             ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height: VK_MERKLE_TREE_HEIGHT };
@@ -2805,7 +2939,7 @@ pub mod tests {
         );
         assert_eq!(
             (prep_stripes, main_stripes),
-            (8, 16),
+            (4, 8),
             "the wrap geometry moved to ({prep_stripes}, {main_stripes}); update the pin and the \
              soundness model's wrap batch cardinality to {}",
             prep_stripes + main_stripes

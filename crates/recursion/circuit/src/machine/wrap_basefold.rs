@@ -46,6 +46,26 @@ pub struct ZKMWrapBasefoldWitnessValues<
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
 }
 
+impl<const P: u8>
+    ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+{
+    /// Structural signature of the single-proof witness, excluding field values.
+    pub fn shape_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.vks_and_proofs.len().hash(&mut h);
+        for (_, proof) in &self.vks_and_proofs {
+            crate::machine::shape_signature::hash_shard_proof_structure(proof, &mut h);
+        }
+        self.vk_merkle_data.vk_merkle_proofs.len().hash(&mut h);
+        for proof in &self.vk_merkle_data.vk_merkle_proofs {
+            proof.path.len().hash(&mut h);
+        }
+        self.vk_merkle_data.values.len().hash(&mut h);
+        h.finish()
+    }
+}
+
 pub struct ZKMWrapBasefoldWitnessVariable<
     C: CircuitConfig<F = p3_koala_bear::KoalaBear>,
     SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
