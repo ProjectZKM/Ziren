@@ -7,11 +7,19 @@
 `deterministic`.  A pass only restates or regroups a proof, and Lean re-checks every module, so a
 wrong rewrite is an error, never a gap.  See README.md."""
 import glob
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+from closure import validate
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from coverage import pipeline_digest, verify_lean_project
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -37,9 +45,30 @@ def run(script, args):
 def main(argv):
     build = "--no-build" not in argv
     file, root, prefix = [a for a in argv if a != "--no-build"]
+    receipt = Path(root, "closure.json")
+    receipt.unlink(missing_ok=True)
+    identity = None
+    first = Path(file).read_text().splitlines()[0]
+    if first.startswith("-- ZIREN_COVERAGE "):
+        identity = json.loads(first[len("-- ZIREN_COVERAGE "):])
+        try:
+            if identity["pipeline_sha256"] != pipeline_digest():
+                raise ValueError("generated source uses a different proof pipeline")
+            if build:
+                project = os.environ["LEAN_PROJECT"]
+                verify_lean_project(project)
+                if subprocess.run(["lake", "build", "ZirenDet"], cwd=project).returncode:
+                    return 1
+        except (ValueError, KeyError, OSError) as exc:
+            print(f"proof closure failed: {exc}", file=sys.stderr)
+            return 1
     if run("split.py", [file, root, prefix]):
         return 3
-    shutil.copy(os.path.join(HERE, "run_mod.sh"), os.path.join(root, "run_mod.sh"))
+    for script in ("run_mod.sh", "closure.py"):
+        src = Path(HERE, script)
+        dest = Path(root, script)
+        if not dest.exists() or dest.read_bytes() != src.read_bytes():
+            shutil.copy(src, dest)
     for p in PASSES:
         for path in sorted(glob.glob(os.path.join(root, prefix, "C*.lean"))):
             text = open(path, encoding="utf-8").read()
@@ -54,7 +83,27 @@ def main(argv):
             if run(p["script"], p["args"].format(root=root, prefix=prefix, mod=mod, thm=names[0], file=path).split()):
                 print(f"{p['script']}: {mod} kept as generated")
     if build:
-        return subprocess.run(["make", "-C", root, "-k", f"-j{os.environ.get('JOBS', '12')}", "all"]).returncode
+        rc = subprocess.run(["make", "-C", root, "-k", f"-j{os.environ.get('JOBS', '12')}", "all"]).returncode
+        if rc:
+            return rc
+        inventory = json.loads(Path(root, "inventory.json").read_text())
+        try:
+            for module in Path(root, prefix).glob("*.lean"):
+                validate(Path(root, "logs", module.stem + ".out").read_text(),
+                         inventory["theorems"] if module.stem == "Check" else None)
+            validate(Path(root, "logs", "Check.out").read_text(), inventory["theorems"])
+            if hashlib.sha256(Path(file).read_bytes()).hexdigest() != inventory["source_sha256"]:
+                raise ValueError("source changed during checking")
+            if identity:
+                if identity["pipeline_sha256"] != pipeline_digest():
+                    raise ValueError("proof pipeline changed during checking")
+                verify_lean_project(os.environ["LEAN_PROJECT"])
+                inventory["pipeline_sha256"] = identity["pipeline_sha256"]
+        except (ValueError, OSError) as exc:
+            print(f"proof closure failed: {exc}", file=sys.stderr)
+            return 1
+        receipt.write_text(json.dumps(inventory, indent=2) + "\n")
+        return 0
     return 0
 
 

@@ -1,0 +1,273 @@
+import ZirenDet.Basic
+
+/-!
+# The septic extension of the Global chip
+
+The Global chip adds its messages as points of `y² = x³ + 3z·x − 3` over the septic extension
+`F[z]/(z⁷ + 2z − 8)` (`zkm_pcs::septic_extension`), an element being its 7 coordinates.  `sm`
+is the AIR's product on coordinates and `φ` maps coordinates into `AdjoinRoot fpoly`, an
+injective map that turns `sm` into the ring product.
+
+* `chord_unique`: the chord identities with a witnessed inverse of `x₂ − x₁` fix `p₁ + p₂`; this
+  needs only a commutative ring.
+* `fpoly_irreducible`: a root `s` of a factor of degree `e ≤ 3` would satisfy `s^(p^e) = s`,
+  but `z^(p^e) − z` is a unit for `e = 1, 2, 3` (certificates `cert1`–`cert3`, checked by the
+  kernel from explicit square-and-multiply chains), so `AdjoinRoot fpoly` is a field.
+* `sq_unique`: two coordinate vectors with the same square are equal up to sign; `y6_recv` and
+  `y6_send` rule out the sign flip under the chip's range checks on `y₆`.
+-/
+
+namespace ZirenDet.Septic
+
+open Polynomial
+
+/-- Septic coordinates. -/
+abbrev V := Fin 7 → F
+
+/-- The AIR's product: the schoolbook product reduced by `z⁷ = 8 − 2z`. -/
+%SM_DEF%
+/-- The unit. -/
+def one : V := ![1, 0, 0, 0, 0, 0, 0]
+
+/-- The generator `z`. -/
+def Xv : V := ![0, 1, 0, 0, 0, 0, 0]
+
+/-- The curve's right-hand side `x³ + 3z·x − 3`, as the AIR computes it. -/
+def cv (x : V) : V := sm (sm x x) x + sm x ![0, 3, 0, 0, 0, 0, 0] - ![3, 0, 0, 0, 0, 0, 0]
+
+theorem V_ext {a b : V} (h0 : a 0 = b 0) (h1 : a 1 = b 1) (h2 : a 2 = b 2) (h3 : a 3 = b 3)
+    (h4 : a 4 = b 4) (h5 : a 5 = b 5) (h6 : a 6 = b 6) : a = b := by
+  funext k
+  fin_cases k <;> assumption
+
+theorem V_components {a0 a1 a2 a3 a4 a5 a6 b0 b1 b2 b3 b4 b5 b6 : F}
+    (h : (![a0, a1, a2, a3, a4, a5, a6] : V) = ![b0, b1, b2, b3, b4, b5, b6]) :
+    a0 = b0 ∧ a1 = b1 ∧ a2 = b2 ∧ a3 = b3 ∧ a4 = b4 ∧ a5 = b5 ∧ a6 = b6 :=
+  ⟨congrFun h 0, congrFun h 1, congrFun h 2, congrFun h 3, congrFun h 4, congrFun h 5,
+    congrFun h 6⟩
+
+/-- The modulus `z⁷ + 2z − 8`. -/
+noncomputable def fpoly : F[X] := X ^ 7 + C 2 * X - C 8
+
+theorem fpoly_natDegree : fpoly.natDegree = 7 := by
+  unfold fpoly
+  compute_degree!
+
+theorem fpoly_monic : fpoly.Monic := by
+  unfold fpoly
+  monicity!
+
+local notation "S" => AdjoinRoot fpoly
+local notation "r" => AdjoinRoot.root fpoly
+local notation "ι" => AdjoinRoot.of fpoly
+
+theorem hr : r ^ 7 + 2 * r - 8 = 0 := by
+  have h : AdjoinRoot.mk fpoly (X ^ 7 + C 2 * X - C 8) = 0 := AdjoinRoot.mk_self
+  simp only [map_sub, map_add, map_mul, map_pow, AdjoinRoot.mk_X, AdjoinRoot.mk_C,
+    map_ofNat] at h
+  exact h
+
+/-- Coordinates as an element of `AdjoinRoot fpoly`. -/
+noncomputable def φ (a : V) : S :=
+  ι (a 0) + ι (a 1) * r + ι (a 2) * r ^ 2 + ι (a 3) * r ^ 3 + ι (a 4) * r ^ 4 +
+    ι (a 5) * r ^ 5 + ι (a 6) * r ^ 6
+
+theorem φ_sm (a b : V) : φ (sm a b) = φ a * φ b := by
+  simp only [φ, sm, Matrix.cons_val, Matrix.cons_val_zero, Matrix.cons_val_one,
+    map_add, map_sub, map_mul, map_ofNat]
+  linear_combination (-(%PHI_QUOT%)) * hr
+
+theorem φ_add (a b : V) : φ (a + b) = φ a + φ b := by
+  simp only [φ, Pi.add_apply, map_add]; ring
+
+theorem φ_sub (a b : V) : φ (a - b) = φ a - φ b := by
+  simp only [φ, Pi.sub_apply, map_sub]; ring
+
+theorem φ_neg (a : V) : φ (-a) = -φ a := by
+  simp only [φ, Pi.neg_apply, map_neg]; ring
+
+theorem φ_one : φ one = 1 := by
+  simp [φ, one]
+
+theorem φ_X : φ Xv = r := by
+  simp [φ, Xv]
+
+/-- Coordinates as a polynomial of degree below 7. -/
+noncomputable def poly (a : V) : F[X] :=
+  C (a 0) + C (a 1) * X + C (a 2) * X ^ 2 + C (a 3) * X ^ 3 + C (a 4) * X ^ 4 +
+    C (a 5) * X ^ 5 + C (a 6) * X ^ 6
+
+theorem φ_mk (a : V) : φ a = AdjoinRoot.mk fpoly (poly a) := by
+  simp only [φ, poly, map_add, map_mul, map_pow, AdjoinRoot.mk_C, AdjoinRoot.mk_X]
+
+theorem φ_inj {a b : V} (h : φ a = φ b) : a = b := by
+  rw [φ_mk, φ_mk, AdjoinRoot.mk_eq_mk] at h
+  have hz : poly a - poly b = 0 := by
+    apply eq_zero_of_dvd_of_natDegree_lt h
+    rw [fpoly_natDegree]
+    have : (poly a - poly b).natDegree ≤ 6 := by
+      unfold poly
+      compute_degree
+    omega
+  have hc : ∀ k : ℕ, (poly a - poly b).coeff k = 0 := fun k => by rw [hz, coeff_zero]
+  refine V_ext ?_ ?_ ?_ ?_ ?_ ?_ ?_
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 0
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 1
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 2
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 3
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 4
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 5
+  · simpa [poly, coeff_X_pow, coeff_C, coeff_X, sub_eq_zero] using hc 6
+
+/-! ### Chord addition -/
+
+/-- The chord identities of `p₁ + p₂ = p₃`, with a witnessed inverse `i` of `x₂ − x₁`, fix
+`p₃`: `x₃ = (y₂ − y₁)² i² − x₁ − x₂` and `y₃ = (y₂ − y₁)(x₁ − x₃) i − y₁`. -/
+theorem chord_unique {x1 y1 x2 y2 x3 y3 i x3' y3' i' : V}
+    (hx : sm (x1 + x2 + x3) (sm (x2 - x1) (x2 - x1)) = sm (y2 - y1) (y2 - y1))
+    (hy : sm (y1 + y3) (x2 - x1) = sm (y2 - y1) (x1 - x3)) (hi : sm (x2 - x1) i = one)
+    (hx' : sm (x1 + x2 + x3') (sm (x2 - x1) (x2 - x1)) = sm (y2 - y1) (y2 - y1))
+    (hy' : sm (y1 + y3') (x2 - x1) = sm (y2 - y1) (x1 - x3')) (hi' : sm (x2 - x1) i' = one) :
+    x3 = x3' ∧ y3 = y3' := by
+  have ex := congrArg φ hx
+  have ey := congrArg φ hy
+  have ei := congrArg φ hi
+  have ex' := congrArg φ hx'
+  have ey' := congrArg φ hy'
+  have ei' := congrArg φ hi'
+  simp only [φ_sm, φ_add, φ_sub, φ_one] at ex ey ei ex' ey' ei'
+  have hI : φ i = φ i' := by linear_combination φ i' * ei - φ i * ei'
+  have h3 : φ x3 = φ x3' := by
+    linear_combination (φ i) ^ 2 * ex - (φ i) ^ 2 * ex' -
+      (φ x3 - φ x3') * ((φ x2 - φ x1) * φ i + 1) * ei
+  have hx3 := φ_inj h3
+  subst hx3
+  refine ⟨rfl, φ_inj ?_⟩
+  linear_combination φ i * ey - φ i * ey' - (φ y3 - φ y3') * ei
+
+/-! ### `z⁷ + 2z − 8` is irreducible -/
+
+theorem chain_sq {b A B : V} {n m : ℕ} (hA : φ A = φ b ^ n) (h : sm A A = B) (hm : 2 * n = m) :
+    φ B = φ b ^ m := by
+  rw [← h, φ_sm, hA, ← hm]; ring
+
+theorem chain_mul {b A B : V} {n m : ℕ} (hA : φ A = φ b ^ n) (h : sm A b = B) (hm : n + 1 = m) :
+    φ B = φ b ^ m := by
+  rw [← h, φ_sm, hA, ← hm]; ring
+
+%CERTS%
+
+theorem small_factor (h : ¬ Irreducible fpoly) :
+    ∃ g : F[X], Irreducible g ∧ g ∣ fpoly ∧ g.natDegree ≤ 3 := by
+  have hf0 : fpoly ≠ 0 := fpoly_monic.ne_zero
+  have hnu : ¬ IsUnit fpoly := fun hu => by
+    have := natDegree_eq_zero_of_isUnit hu
+    rw [fpoly_natDegree] at this
+    omega
+  rw [irreducible_iff] at h
+  push Not at h
+  obtain ⟨a, b, hab, ha, hb⟩ := h hnu
+  have ha0 : a ≠ 0 := by
+    rintro rfl
+    exact hf0 (by rw [hab, zero_mul])
+  have hb0 : b ≠ 0 := by
+    rintro rfl
+    exact hf0 (by rw [hab, mul_zero])
+  have hdeg : a.natDegree + b.natDegree = 7 := by
+    rw [← natDegree_mul ha0 hb0, ← hab, fpoly_natDegree]
+  have pick : ∀ c : F[X], c ∣ fpoly → c ≠ 0 → ¬ IsUnit c → c.natDegree ≤ 3 →
+      ∃ g : F[X], Irreducible g ∧ g ∣ fpoly ∧ g.natDegree ≤ 3 := by
+    intro c hc hc0 hcu hcd
+    obtain ⟨g, hg, hgc⟩ := WfDvdMonoid.exists_irreducible_factor hcu hc0
+    exact ⟨g, hg, hgc.trans hc, (natDegree_le_of_dvd hgc hc0).trans hcd⟩
+  rcases le_or_gt a.natDegree 3 with h3 | h3
+  · exact pick a ⟨b, hab⟩ ha0 ha h3
+  · exact pick b ⟨a, by rw [hab, mul_comm]⟩ hb0 hb (by omega)
+
+theorem fpoly_irreducible : Irreducible fpoly := by
+  by_contra hred
+  obtain ⟨g, hg, hgf, hg3⟩ := small_factor hred
+  have : Fact (Irreducible g) := ⟨hg⟩
+  have hg0 : g ≠ 0 := hg.ne_zero
+  have hg1 : 0 < g.natDegree :=
+    natDegree_pos_iff_degree_pos.mpr (degree_pos_of_irreducible hg)
+  let pb := AdjoinRoot.powerBasis hg0
+  haveI : Module.Finite F (AdjoinRoot g) := pb.finite
+  haveI : Finite (AdjoinRoot g) := Module.finite_of_finite F
+  letI : Fintype (AdjoinRoot g) := Fintype.ofFinite _
+  have hcard : Fintype.card (AdjoinRoot g) = KB ^ g.natDegree := by
+    rw [Module.card_eq_pow_finrank (K := F), ZMod.card, pb.finrank, AdjoinRoot.powerBasis_dim]
+  have hfrob : AdjoinRoot.root g ^ KB ^ g.natDegree = AdjoinRoot.root g := by
+    rw [← hcard]
+    exact FiniteField.pow_card _
+  have kill : ∀ (v : V) (e : ℕ), φ v * (r ^ KB ^ e - r) = 1 → e = g.natDegree → False := by
+    intro v e hv he
+    have h := congrArg (AdjoinRoot.algHomOfDvd F fpoly g hgf) hv
+    rw [map_mul, map_sub, map_pow, AdjoinRoot.algHomOfDvd_root, map_one, he, hfrob, sub_self,
+      mul_zero] at h
+    exact zero_ne_one h
+  obtain hd | hd | hd : g.natDegree = 1 ∨ g.natDegree = 2 ∨ g.natDegree = 3 := by omega
+  · exact kill _ 1 cert1 hd.symm
+  · exact kill _ 2 cert2 hd.symm
+  · exact kill _ 3 cert3 hd.symm
+
+instance : Fact (Irreducible fpoly) := ⟨fpoly_irreducible⟩
+
+/-! ### Square roots and their sign -/
+
+/-- In the field `AdjoinRoot fpoly`, equal squares mean equal up to sign. -/
+theorem sq_unique {y y' : V} (h : sm y y = sm y' y') : y = y' ∨ y = -y' := by
+  have h2 : φ y ^ 2 = φ y' ^ 2 := by rw [sq, sq, ← φ_sm, ← φ_sm, h]
+  rcases sq_eq_sq_iff_eq_or_eq_neg.mp h2 with h3 | h3
+  · exact Or.inl (φ_inj h3)
+  · exact Or.inr (φ_inj (by rw [h3, φ_neg]))
+
+/-- A receive row's `y₆ = 1 + t`, `t < 63·2²⁴`, and its negation are never both of that form. -/
+theorem y6_recv {a b lo mid top lo' mid' top' : F}
+    (ha : a = 1 + ((lo + mid * 65536) + top * 16777216))
+    (hb : b = 1 + ((lo' + mid' * 65536) + top' * 16777216))
+    (hl : lo.val ≤ 65535) (hm : mid.val ≤ 255) (ht : top.val < 63)
+    (hl' : lo'.val ≤ 65535) (hm' : mid'.val ≤ 255) (ht' : top'.val < 63) (hab : a = -b) :
+    False := by
+  have key : ((2 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val + mid'.val * 65536 +
+      top'.val * 16777216 : ℕ) : F) = 0 := by
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination hab - ha - hb
+  rw [ZMod.natCast_eq_zero_iff] at key
+  obtain ⟨k, hk⟩ := key
+  have hk' : 2 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val + mid'.val * 65536 +
+      top'.val * 16777216 = 2130706433 * k := hk
+  have hs : 2 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val + mid'.val * 65536 +
+      top'.val * 16777216 ≤ 2113929216 := by omega
+  rw [hk'] at hs
+  have hk0 : k = 0 := by omega
+  subst hk0
+  omega
+
+/-- A send row's `y₆ = 2³⁰ + 1 + t`, `t < 63·2²⁴`, and its negation are never both of that
+form (`2³⁰ + 1 ≡ −1056964608`). -/
+theorem y6_send {a b lo mid top lo' mid' top' : F}
+    (ha : a = -1056964608 + ((lo + mid * 65536) + top * 16777216))
+    (hb : b = -1056964608 + ((lo' + mid' * 65536) + top' * 16777216))
+    (hl : lo.val ≤ 65535) (hm : mid.val ≤ 255) (ht : top.val < 63)
+    (hl' : lo'.val ≤ 65535) (hm' : mid'.val ≤ 255) (ht' : top'.val < 63) (hab : a = -b) :
+    False := by
+  have hK : (4261412866 : F) = 0 := by decide
+  have key : ((2147483650 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val +
+      mid'.val * 65536 + top'.val * 16777216 : ℕ) : F) = 0 := by
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination hab - ha - hb + hK
+  rw [ZMod.natCast_eq_zero_iff] at key
+  obtain ⟨k, hk⟩ := key
+  have hk' : 2147483650 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val +
+      mid'.val * 65536 + top'.val * 16777216 = 2130706433 * k := hk
+  have hs : 2147483650 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val +
+      mid'.val * 65536 + top'.val * 16777216 ≤ 4261412864 := by omega
+  have hs' : 2147483650 ≤ 2147483650 + lo.val + mid.val * 65536 + top.val * 16777216 + lo'.val +
+      mid'.val * 65536 + top'.val * 16777216 := by omega
+  rw [hk'] at hs hs'
+  omega
+
+end ZirenDet.Septic

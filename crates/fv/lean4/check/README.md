@@ -25,3 +25,26 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 
 A chip is closed when `Check` prints only `propext`, `Classical.choice` and `Quot.sound` for every
 `deterministic`, and every `END` line in `progress.log` shows `rc=0 sorry=0`.
+
+These conditions are enforced: admitted obligations, missing theorem reports, and additional
+axioms fail the command. A successful `check.py` writes `OUTROOT/closure.json`, containing the
+SHA-256 of the original generated source and the complete determinism theorem inventory. An old
+receipt is removed before each check; a failed elaboration or closure check produces no receipt.
+For stamped sources, the checker also requires `LEAN_PROJECT` to match the fingerprinted Lean
+library and dependency pins, builds that library, and includes the pipeline hash in the receipt.
+
+`regen_all.sh` stamps each generated source with its current unspecialised AIR fingerprint and
+the proof-pipeline fingerprint. Refresh the inventory after regeneration; unchanged receipts
+are preserved, while changed constraints or proof-pipeline sources become pending. Record
+coverage only after checking the stamped source:
+
+```bash
+python3 crates/fv/coverage.py snapshot /scratch/regen/air-fingerprints.json
+python3 crates/fv/coverage.py record /scratch/regen/air-fingerprints.json \
+  --source /scratch/regen/ZirenDet/Chips/AddSub.lean --receipt /scratch/addsub/closure.json
+```
+
+The committed `crates/fv/coverage.json` distinguishes pending checks, closed proofs, and the five
+explicitly excluded chips. `coverage.py check` verifies the machine inventory, constraints,
+lookups, extraction annotations, and proof pipeline against it. Add `--require-closed` to require
+a checked receipt for every non-excluded chip; pending entries never count as closed coverage.

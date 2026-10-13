@@ -13,8 +13,9 @@ conjuncts `c…`, `d…`.  `%PROJ_Cn%` and `%PROJ_Dn%` are replaced by the proje
 `n` out of `hw` and `hw'`, for a snippet that keeps both witnesses whole.
 
 The snippets name constraints by index, so they follow the chip's AIR: regenerate them after
-any change to it.  The generators named below (`tools/`) are not kept in the repository; they
-are distributed with the archived snapshot of the checked files (`src/crates/fv/lean4/snippets/tools`).
+any change to it. The generators and recipes in `tools/` are kept in the repository and included
+in the proof-pipeline fingerprint. `../check/regen_all.sh` uses them from this checkout by default;
+`SNIPPET_TOOLS` can select another copy with identical inputs.
 
 - `CloClz_is_clz.lean` rests on `ZirenDet/LeadingOne.lean` and needs
   `--shrcarry-summary precise` (the default `abstract` summary has fewer conjuncts, so its

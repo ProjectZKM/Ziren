@@ -6761,6 +6761,8 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-matrix",
+ "serde_json",
+ "sha2",
  "tracing",
  "zkm-core-executor",
  "zkm-core-machine",

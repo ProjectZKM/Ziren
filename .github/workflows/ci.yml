@@ -36,6 +36,10 @@ jobs:
           toolchain: nightly-2026-09-17
           components: rustfmt
       - run: cargo fmt --all -- --check
+      - name: Formal verification coverage and closure guards
+        run: |
+          python3 -m unittest discover -s crates/fv/lean4/check -p 'test_*.py'
+          python3 -m unittest discover -s crates/fv -p 'test_*.py'
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -110,3 +114,9 @@ jobs:
           cargo test -r -p zkm-verifier --features ark malformed_input
         env:
           RUSTFLAGS: "-C target-cpu=native"
+      - name: Bind determinism inventory to current AIRs
+        run: |
+          cargo test -r -p zkm-picus fingerprint --lib
+          cargo test -r -p zkm-pcs query_counts --lib
+          cargo run -r -p zkm-picus -- --all --fingerprint-out /tmp/ziren-air-fingerprints.json
+          python3 crates/fv/coverage.py check /tmp/ziren-air-fingerprints.json --require-closed

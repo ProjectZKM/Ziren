@@ -178,15 +178,19 @@ What makes this manual today:
 - **Gadget shapes.** Each snippet generator recognises its gadget by the shape of the extracted
   constraints; a gadget whose internal layout changes no longer matches, and the generator has to
   be edited. Moving columns or adding unrelated constraints needs no edit.
-- **Silence.** The chip files are not committed, so nothing flags that a change has left the
-  proofs behind.
+- **Coverage evidence.** The chip files are not committed. `../coverage.json` now binds each
+  chip to an unspecialised AIR fingerprint and records closed proofs only from strict checker
+  receipts. The current inventory records 104 kernel-checked determinism theorems over 57 chips;
+  three preprocessed tables and two SHA-256 control chips are explicitly excluded. CI requires
+  closed coverage for every non-excluded chip.
 
-The planned fixes, in order of cost:
+Maintaining coverage and improving the extraction:
 
-1. **A fingerprint manifest.** `zkm-picus` emits a canonical hash of each chip's extracted
-   constraint system; a committed manifest records, per chip, that hash, its theorem count and the
-   check that closed it. A CI job that needs no Lean recomputes the hashes and names the chips to
-   re-check; their entries change only from a passing check log.
+1. **Refresh the fingerprint manifest after changes.** `zkm-picus --all --fingerprint-out FILE` emits SHA-256
+   fingerprints of the raw constraint expression DAGs, bus lookups and scopes, gadget annotations,
+   and extraction interface. CI recomputes them without Lean and rejects drift. `coverage.py`
+   also binds the proof generators, Lean library, checker and dependency pins. Regenerate,
+   strictly check, and record each chip to replace its pending entry with closed evidence.
 2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
    such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
    names rather than positions.

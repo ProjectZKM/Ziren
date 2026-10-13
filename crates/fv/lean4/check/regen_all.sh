@@ -1,17 +1,18 @@
 #!/bin/bash
 # regen_all.sh OUT: regenerate every chip's determinism file from this checkout.
 #
-# 1. `zkm-picus --all` without snippets writes the base chip files (OUT/base).
+# 1. `zkm-picus --all` without snippets writes the base constraints (OUT/base), without
+#    deriving proofs: the snippet generators consume definitions, not proof replay steps.
 # 2. Each generated gadget snippet is produced from its chip's base file by the family generator
 #    of snippets/tools into OUT/snippets, over a copy of the snippets kept in snippets/ (the
 #    hand-written ones); the recipes are $tools/recipes.tsv (snippet, chip, module, generator,
-#    arguments), kept with the generators.  The generators are not in the
-#    repository: take snippets/tools from the archived snapshot, or point SNIPPET_TOOLS at it.
+#    arguments), kept with the generators in this checkout. SNIPPET_TOOLS can select
+#    another copy of the same generator inputs.
 # 3. `zkm-picus --all` with those snippets writes the chip files (OUT/ZirenDet/Chips), CloClz
 #    with `--shrcarry-summary precise`, which its snippet is written for.
 #
 # The output is deterministic: the same checkout gives byte-identical files.  Check each file
-# with check.sh.  Build `zkm-picus` first (`cargo build -r -p zkm-picus`).
+# with check.py.  Build `zkm-picus` first (`cargo build -r -p zkm-picus`).
 set -eu
 out=$(realpath -m "$1")
 here=$(cd "$(dirname "$0")" && pwd)
@@ -26,10 +27,11 @@ mkdir -p "$out/base" "$out/modules" "$out/snippets" "$out/empty"
 
 run_picus() {
   local snip=$1 dest=$2
-  (cd "$repo" && PICUS_SNIPPET_DIR=$snip "$picus" --all --format lean --derive --derive-diagnose \
+  shift 2
+  (cd "$repo" && PICUS_SNIPPET_DIR=$snip "$picus" --all --format lean "$@" \
     --lean-out-dir "$dest" > "$dest.log" 2>&1)
   (cd "$repo" && PICUS_SNIPPET_DIR=$snip "$picus" --chip CloClz --shrcarry-summary precise \
-    --format lean --derive --derive-diagnose --lean-out-dir "$dest" >> "$dest.log" 2>&1)
+    --format lean "$@" --lean-out-dir "$dest" >> "$dest.log" 2>&1)
 }
 
 module() {
@@ -58,5 +60,9 @@ while read -r snip chip mod gen extra; do
 done < "$tools/recipes.tsv"
 
 echo "chip files"
-run_picus "$out/snippets" "$out"
+run_picus "$out/snippets" "$out" --derive --derive-diagnose
+"$picus" --all --fingerprint-out "$out/air-fingerprints.json"
+for chipfile in "$out"/ZirenDet/Chips/*.lean; do
+  python3 "$repo/crates/fv/coverage.py" stamp "$out/air-fingerprints.json" --source "$chipfile"
+done
 echo "$(ls "$out/ZirenDet/Chips" | wc -l) chip files in $out/ZirenDet/Chips"
