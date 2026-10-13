@@ -10,10 +10,27 @@ impl SysLinuxChip {
         Self {}
     }
 
-    /// A bounded encoding for comparisons against constants below 256.
-    /// With range-checked byte limbs, this is at most 196095 < p and equals
-    /// a small constant exactly when the low byte equals it and every upper
-    /// byte is zero. Unlike `Word::reduce`, it cannot alias p or 2p to zero.
+    /// Encodes a little-endian word for exact equality checks against constants `0 <= c < 256`.
+    /// The caller must range-check all four limbs as bytes; the AIR does this on real rows
+    /// before using the result in `IsZero` checks for fds, commands and null addresses.
+    ///
+    /// For bytes `b0..b3`, the result is `x = b0 + 256 * (b1 + b2 + b3)`. Its integer
+    /// range is `0..=255 + 256 * (3 * 255) = 196095`, below the KoalaBear modulus
+    /// `p = 0x7F000001`, so the encoding cannot wrap modulo the field.
+    ///
+    /// If any upper byte is nonzero, their nonnegative sum is at least one, so `x >= 256`.
+    /// Otherwise `x = b0`. Thus `IsZero(x - c)` is true exactly when `b0 = c` and every
+    /// upper byte is zero, which is equivalent to the original u32 word equaling `c`.
+    /// The byte range checks are essential: without them, forged limbs could cancel.
+    ///
+    /// For example, `p` has bytes `[1, 0, 0, 127]` and encodes to `32513`, whereas
+    /// `Word::reduce` maps it to zero. `[1, 127, 127, 127]` encodes to `97537`, also
+    /// safely above every small constant. Full-width syscall arguments remain allowed.
+    ///
+    /// Giving all upper bytes the same weight is intentional: only their being zero
+    /// matters for these checks. The encoding is not injective for larger words (e.g.
+    /// `[0, 1, 0, 0]` and `[0, 0, 1, 0]` both encode to `256`), so do not use it for
+    /// equality with constants >= 256, equality between arbitrary words, or ordering.
     fn small_arg_comparison_value<T: p3_field::PrimeCharacteristicRing>(
         word: zkm_pcs::Word<T>,
     ) -> T {
