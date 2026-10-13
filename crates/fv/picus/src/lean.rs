@@ -142,7 +142,11 @@ fn focused(
         String::new()
     };
     let wider = if wide.len() > keep.len() {
-        format!("picus_cap {} (clear * - {}; picus_local) | ", c(400000), wide.join(" "))
+        format!(
+            "picus_cap {} (clear * - {}; first | picus_canonical_word | picus_local) | ",
+            c(400000),
+            wide.join(" ")
+        )
     } else {
         String::new()
     };
@@ -1357,6 +1361,19 @@ impl Replay<'_> {
                     .filter(|&j| self.conj_vars[j as usize].len() <= SMALL_CONJUNCT)
                     .take(WIDE_MAX),
             );
+        }
+        // A nearby gated range brings its flag into scope, but the flag's
+        // boolean equation may not share a variable with the original support.
+        // Keep those scalar facts too: canonical-word injectivity needs them.
+        let nearby_vars: BTreeSet<usize> =
+            out.iter().flat_map(|&o| self.conj_vars[o as usize].iter().copied()).collect();
+        for (o, vars) in self.conj_vars.iter().enumerate() {
+            if out.len() >= WIDE_MAX {
+                break;
+            }
+            if vars.len() == 1 && vars.iter().any(|v| nearby_vars.contains(v)) {
+                out.insert(o as u32);
+            }
         }
         out
     }
