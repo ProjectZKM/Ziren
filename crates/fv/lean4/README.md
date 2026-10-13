@@ -185,12 +185,10 @@ What makes this manual today:
 
 Maintaining coverage and improving the extraction:
 
-1. **Regenerate and check after changes.** `zkm-picus --all --fingerprint-out FILE` emits SHA-256
-   fingerprints of the raw constraint expression DAGs, bus lookups and scopes, gadget annotations,
-   and extraction interface. Generated Lean sources include their chip's fingerprint, extraction
-   settings and proof-body hash. Keep the regenerated sources, fingerprint inventory and strict
-   checker receipts together outside Git. The generator files also stay outside Git; select their
-   directory with `SNIPPET_TOOLS` when running `check/regen_all.sh`.
+1. **Regenerate and check after changes.** Keep the regenerated sources and strict checker receipts
+   together outside Git. The generator files also stay outside Git; select their directory with
+   `SNIPPET_TOOLS` when running `check/regen_all.sh`. A receipt identifies the checked source by
+   its hash and records the theorem inventory and Lean build inputs.
 2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
    such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
    names rather than positions.

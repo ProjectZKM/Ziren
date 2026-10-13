@@ -18,8 +18,6 @@ p3-koala-bear = {workspace = true}
 
 clap = { version = "4.5.7", features = ["derive", "env"] }
 tracing = { workspace = true }
-sha2 = { workspace = true }
-serde_json = { workspace = true }
 
 [lints.clippy]
 # The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)

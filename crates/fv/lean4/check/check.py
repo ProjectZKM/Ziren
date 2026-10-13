@@ -115,29 +115,17 @@ def main(argv):
     file, root, prefix = [a for a in argv if a != "--no-build"]
     receipt = Path(root, "closure.json")
     receipt.unlink(missing_ok=True)
-    identity = None
     cache_identity = None
     try:
-        first, body = Path(file).read_text().split("\n", 1)
-        for marker in ("-- ZIREN_AIR ", "-- ZIREN_COVERAGE "):
-            if first.startswith(marker):
-                identity = json.loads(first[len(marker):])
-                if (identity.get("chip") != Path(file).stem
-                        or not isinstance(identity.get("air_sha256"), str)
-                        or not re.fullmatch(r"[0-9a-f]{64}", identity["air_sha256"])
-                        or identity.get("body_sha256") != hashlib.sha256(body.encode()).hexdigest()):
-                    raise ValueError("generated source does not match its AIR identity")
-                break
         if build:
-            if identity:
-                project = os.environ["LEAN_PROJECT"]
-                verify_lean_project(project)
-                if subprocess.run(["lake", "build", "ZirenDet"], cwd=project).returncode:
-                    return 1
-                compiler = subprocess.run(["lake", "env", "lean", "--version"], cwd=project,
-                                          check=True, capture_output=True, text=True).stdout.strip()
-                cache_identity = {"library_sha256": lean_library_digest(), "compiler": compiler,
-                                  "project": str(Path(project).resolve())}
+            project = os.environ["LEAN_PROJECT"]
+            verify_lean_project(project)
+            if subprocess.run(["lake", "build", "ZirenDet"], cwd=project).returncode:
+                return 1
+            compiler = subprocess.run(["lake", "env", "lean", "--version"], cwd=project,
+                                      check=True, capture_output=True, text=True).stdout.strip()
+            cache_identity = {"library_sha256": lean_library_digest(), "compiler": compiler,
+                              "project": str(Path(project).resolve())}
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
         print(f"proof closure failed: {exc}", file=sys.stderr)
         return 1
@@ -175,12 +163,10 @@ def main(argv):
             validate(Path(root, "logs", "Check.out").read_text(), inventory["theorems"])
             if hashlib.sha256(Path(file).read_bytes()).hexdigest() != inventory["source_sha256"]:
                 raise ValueError("source changed during checking")
-            if identity:
-                verify_lean_project(os.environ["LEAN_PROJECT"])
-                if cache_identity["library_sha256"] != lean_library_digest():
-                    raise ValueError("Lean library changed during checking")
-                inventory["extraction"] = {k: v for k, v in identity.items() if k != "pipeline_sha256"}
-                inventory["lean_inputs"] = cache_identity
+            verify_lean_project(os.environ["LEAN_PROJECT"])
+            if cache_identity["library_sha256"] != lean_library_digest():
+                raise ValueError("Lean library changed during checking")
+            inventory["lean_inputs"] = cache_identity
         except (ValueError, OSError) as exc:
             print(f"proof closure failed: {exc}", file=sys.stderr)
             return 1

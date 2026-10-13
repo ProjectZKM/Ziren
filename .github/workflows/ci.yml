@@ -110,7 +110,6 @@ jobs:
           cargo test -r -p zkm-verifier --features ark malformed_input
         env:
           RUSTFLAGS: "-C target-cpu=native"
-      - name: AIR fingerprint and query-count tests
+      - name: Query-count tests
         run: |
-          cargo test -r -p zkm-picus fingerprint --lib
           cargo test -r -p zkm-pcs query_counts --lib

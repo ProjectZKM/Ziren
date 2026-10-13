@@ -30,18 +30,15 @@ These conditions are enforced: admitted obligations, missing theorem reports, an
 axioms fail the command. A successful `check.py` writes `OUTROOT/closure.json`, containing the
 SHA-256 of the original generated source and the complete determinism theorem inventory. An old
 receipt is removed before each check; a failed elaboration or closure check produces no receipt.
-For sources with an AIR identity, the checker verifies the chip name, constraint fingerprint
-format and proof-body hash. It also requires `LEAN_PROJECT` to match the repository's Lean
-library and dependency pins, builds that library, and records the extraction identity and Lean
-build inputs in the receipt.
+The checker requires `LEAN_PROJECT` to match the repository's Lean library and dependency pins,
+builds that library, and records its build inputs in the receipt.
 Use `crates/fv/lean4` as the project template, including its `ZirenDet.lean` root and pinned
 configuration files; keep regenerated chip output in the separate regeneration directory.
 Compiled proof modules are reusable only when `OUTROOT/.lean-cache.json` records the same
 Lean library sources, dependency pins, compiler version and project path. Changed or unrecorded
 inputs discard the compiled modules before rebuilding; an axiom audit alone cannot certify a
-module compiled against a different library. Unstamped sources always receive a fresh build.
+module compiled against a different library.
 
-`regen_all.sh` writes `OUT/air-fingerprints.json`, and Picus includes the matching chip fingerprint,
-extraction settings and proof-body hash in each generated Lean source. Keep these outputs and
-the checker receipts together outside Git. Regenerate and recheck after constraint or generator
-changes; CI does not compare the archived proof checks with the current checkout.
+Keep the generated sources and checker receipts together outside Git. Regenerate and recheck
+after constraint or generator changes; CI does not compare the archived proof checks with the
+current checkout.

@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
@@ -7,7 +5,6 @@ use std::{
 
 use clap::{Parser, ValueEnum, ValueHint};
 use p3_air::{Air, BaseAir};
-use sha2::{Digest, Sha256};
 use zkm_core_machine::MipsAir;
 use zkm_pcs::{Chip, MachineAir, PicusInfo, PROOF_MAX_NUM_PVS};
 use zkm_picus::{
@@ -38,10 +35,6 @@ struct Args {
     /// List the chip names and exit.
     #[arg(long, default_value_t = false)]
     pub list: bool,
-
-    /// Write all selected chips' unspecialised AIR fingerprints as JSON, without extracting proofs.
-    #[arg(long, value_name = "FILE")]
-    pub fingerprint_out: Option<PathBuf>,
 
     /// Directory for `<Chip>.picus` files.  Can be overridden with PICUS_OUT_DIR.
     #[arg(long = "picus-out-dir", value_name = "DIR", value_hint = ValueHint::DirPath, env = "PICUS_OUT_DIR", default_value = "picus_out")]
@@ -290,16 +283,6 @@ fn main() {
             .collect()
     };
 
-    if let Some(path) = &args.fingerprint_out {
-        let fingerprints: BTreeMap<_, _> = selected
-            .iter()
-            .map(|chip| (chip.name(), zkm_picus::fingerprint::chip_fingerprint(*chip)))
-            .collect();
-        std::fs::write(path, serde_json::to_string_pretty(&fingerprints).unwrap() + "\n")
-            .expect("write AIR fingerprints");
-        return;
-    }
-
     zkm_picus::lean::REPLAY_DIAGNOSE
         .store(args.derive_diagnose, std::sync::atomic::Ordering::Relaxed);
     let mut failures = Vec::new();
@@ -360,21 +343,6 @@ fn main() {
         if matches!(args.format, Format::Lean | Format::Both) {
             let path = lean::write_chip(&program, &chip.name(), &args.lean_out_dir, &names)
                 .unwrap_or_else(|e| panic!("write lean for {}: {e}", chip.name()));
-            let body = std::fs::read_to_string(&path).expect("read generated Lean");
-            let body_sha256: String =
-                Sha256::digest(body.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
-            let identity = serde_json::json!({
-                "chip": chip.name(),
-                "air_sha256": zkm_picus::fingerprint::chip_fingerprint(chip),
-                "assume_selectors_deterministic": args.assume_selectors_deterministic,
-                "keep_padding": args.keep_padding,
-                "column_output_mode": format!("{:?}", args.column_output_mode),
-                "shrcarry_summary": format!("{:?}", args.shrcarry_summary),
-                "reify_threshold": args.reify_threshold,
-                "body_sha256": body_sha256,
-            });
-            std::fs::write(&path, format!("-- ZIREN_AIR {identity}\n{body}"))
-                .expect("stamp generated AIR identity");
             println!("  wrote {}", path.display());
         }
     }

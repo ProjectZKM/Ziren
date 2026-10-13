@@ -61,5 +61,4 @@ done < "$tools/recipes.tsv"
 
 echo "chip files"
 run_picus "$out/snippets" "$out" --derive --derive-diagnose
-"$picus" --all --fingerprint-out "$out/air-fingerprints.json"
 echo "$(ls "$out/ZirenDet/Chips" | wc -l) chip files in $out/ZirenDet/Chips"

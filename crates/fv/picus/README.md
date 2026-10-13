@@ -85,7 +85,6 @@ Chip-level hooks on `MachineAir`: `selectors_partition_real_rows()` (stronger `t
 cargo run -p zkm-picus -- --list
 cargo run -p zkm-picus -- --chip AddSub --picus-out-dir picus_out --lean-out-dir crates/fv/lean4
 cargo run -p zkm-picus -- --all --format lean --lean-out-dir crates/fv/lean4
-cargo run -p zkm-picus -- --all --fingerprint-out /tmp/ziren-air-fingerprints.json
 ```
 
 Options: `--assume-selectors-deterministic`, `--shrcarry-summary abstract|precise`,

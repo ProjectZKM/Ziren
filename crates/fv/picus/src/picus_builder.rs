@@ -94,8 +94,6 @@ pub struct PicusBuilder {
     pub constraints: Vec<SymbolicExpression<Felt>>,
     pub sends: Vec<AirLookup<SymbolicExpression<Felt>>>,
     pub receives: Vec<AirLookup<SymbolicExpression<Felt>>>,
-    pub send_scopes: Vec<LookupScope>,
-    pub receive_scopes: Vec<LookupScope>,
     /// Gadgets the AIR marked, in evaluation order (see `MessageBuilder::annotate`).
     pub gadgets: Vec<(&'static str, Vec<AirLookup<SymbolicExpression<Felt>>>)>,
 }
@@ -129,8 +127,6 @@ impl PicusBuilder {
             constraints: Vec::new(),
             sends: Vec::new(),
             receives: Vec::new(),
-            send_scopes: Vec::new(),
-            receive_scopes: Vec::new(),
             gadgets: Vec::new(),
         }
     }
@@ -175,14 +171,12 @@ impl AirBuilder for PicusBuilder {
 }
 
 impl MessageBuilder<AirLookup<SymbolicExpression<Felt>>> for PicusBuilder {
-    fn send(&mut self, message: AirLookup<SymbolicExpression<Felt>>, scope: LookupScope) {
+    fn send(&mut self, message: AirLookup<SymbolicExpression<Felt>>, _scope: LookupScope) {
         self.sends.push(message);
-        self.send_scopes.push(scope);
     }
 
-    fn receive(&mut self, message: AirLookup<SymbolicExpression<Felt>>, scope: LookupScope) {
+    fn receive(&mut self, message: AirLookup<SymbolicExpression<Felt>>, _scope: LookupScope) {
         self.receives.push(message);
-        self.receive_scopes.push(scope);
     }
 
     fn annotate<O: FnOnce() -> Vec<AirLookup<SymbolicExpression<Felt>>>>(
