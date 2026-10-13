@@ -108,8 +108,9 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
     }
 }
 
-/// Padded height: the next multiple of 32 that is `>= n` and
-/// `>= 32`.  If `fixed_power` is set, behaves exactly like
+/// Padded height: the next multiple of 32 that is `>= n`,
+/// with a minimum of 16 (so `n == 0` yields 16).
+/// If `fixed_power` is set, behaves exactly like
 /// [`next_power_of_two`] (a pinned shape height is still `2^power`).
 ///
 /// The jagged PCS commits every chip at its RAW row count
@@ -121,7 +122,7 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
 pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
     match fixed_power {
         Some(_) => next_power_of_two(n, fixed_power, chip),
-        None => n.next_multiple_of(32).max(32),
+        None => n.next_multiple_of(32).max(16),
     }
 }
 
