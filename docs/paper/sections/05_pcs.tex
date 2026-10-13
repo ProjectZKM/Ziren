@@ -8,7 +8,7 @@ Sections~\ref{sec:pcs-jagged-fn}--\ref{sec:pcs-jagged-assist} restate the constr
 \begin{figure}[t]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/jagged_system}}
-\caption{The jagged commitment. (a) The sparse view: $K$ columns of different heights inside a $2^n$-row box; the dotted cells above each column are virtual zeros, never committed; hatched columns, $c_3$ and $c_6$, are the synthetic padding of \S\ref{sec:pcs-stacking} and count among the $K$ columns. (b) The dense representation $\mathbf Q$: the columns laid end to end, located by the public prefix sums $t_k$, split into two ordered input rounds with separate roots, and zero-padded to $2^m$ for free (the dashed tail, which has no column and so no weight in $W$); the indicator $W$ is aligned with it cell for cell. Protocol~\ref{prot:jagged} reduces the $K$ column claims to one opening of $\mathbf Q$.}
+\caption{The jagged commitment. (a) The sparse view: $K$ columns of different heights inside a $2^n$-row box; the dotted cells above each column are virtual zeros, never committed; hatched columns, $c_3$ and $c_6$, are the synthetic padding of \S\ref{sec:pcs-stacking} and count among the $K$ columns. (b) The dense representation $\mathbf Q$: the columns laid end to end, located by the public prefix sums $t_k$, split into two ordered input rounds with separate Merkle roots, and extended to $2^m$ by implicit zeros (the dashed tail, which has no column and so no weight in $W$); the indicator $W$ is aligned with it cell for cell. Protocol~\ref{prot:jagged} reduces the $K$ column claims to one opening of $\mathbf Q$.}
 \label{fig:jagged}
 \end{figure}
 
@@ -119,7 +119,7 @@ The second verifier term dominates: it is linear in the number of columns, about
 \subsection{Several commitments opened as one}
 \label{sec:pcs-stacking}
 
-The paper assumes one dense oracle. \Ziren{} commits a shard in several ordered \emph{input-commitment rounds}, preprocessed first and main last, each with its own root, and opens them together; each round uses the stacked layout of SP1 Hypercube~\citep{sp1-hypercube}, which the paper's concrete evaluation also uses, cutting the dense side into $2^8$ blocks of $2^{21}$ cells~\citep[\S7]{jagged-pcs}.
+The construction of Hemo et al.~\citep{jagged-pcs} assumes one dense oracle. \Ziren{} commits a shard in several ordered \emph{input-commitment rounds}, preprocessed first and main last, each with its own root, and opens them together; each round uses the stacked layout of SP1 Hypercube~\citep{sp1-hypercube}, which the paper's concrete evaluation also uses, cutting the dense side into $2^8$ blocks of $2^{21}$ cells~\citep[\S7]{jagged-pcs}.
 
 Round $r$ contains columns $\mathbf c_{r,0},\ldots,\mathbf c_{r,K_r-1}$ of real area $a_r = \sum_k h_{r,k}$, committed over an area $A_r \ge a_r$ that is a multiple of the stacking height $H=2^\ell$:
 \[
@@ -129,21 +129,21 @@ Round $r$ contains columns $\mathbf c_{r,0},\ldots,\mathbf c_{r,K_r-1}$ of real 
   \mathbf Q = \mathbf q_0\Vert\mathbf q_1\Vert\cdots\Vert\mathbf q_{R-1},
   \qquad A=\sum_{r<R}A_r.
 \]
-The reduction of \S\ref{sec:pcs-jagged} runs on this logical $\mathbf Q$; the roots $C_0,\ldots,C_{R-1}$ remain separate and their order is load-bearing. Each gap $A_r-a_r$ is represented by explicit synthetic zero columns of zero claim and height at most $2^n$, so the prefix sums describe every committed cell and only the suffix from $A$ to $M$ is implicit. That suffix is the paper's ``free padding''~\citep[fn.~4]{jagged-pcs}, on which the indicator vanishes because $g$ requires $b<d$. Under a recursion area pin the gap is split into a fixed number of columns, zero-height ones allowed, so the recursion program's column count does not depend on a child's row counts.
+The reduction of \S\ref{sec:pcs-jagged} runs on this logical $\mathbf Q$; the Merkle roots $C_0,\ldots,C_{R-1}$ authenticate the input rounds separately. Their fixed order determines the stripe order used for batching and authentication. Each gap $A_r-a_r$ is represented by explicit synthetic zero columns of zero claim and height at most $2^n$, so the prefix sums describe every committed cell and only the suffix from $A$ to $M$ is implicit. That unallocated suffix is the ``free padding'' of Hemo et al.~\citep[fn.~4]{jagged-pcs}, on which the indicator vanishes because $g$ requires $b<d$. Under a recursion area pin the gap is split into a fixed number of columns, zero-height ones allowed, so the recursion program's column count does not depend on a child's row counts.
 
-Each round is cut into $S_r=A_r/H$ stripes of $H$ consecutive entries under its own root. With $S=\sum_r S_r$ and $b=\lceil\log_2\max(S,1)\rceil$, the opening domain has $\ell+b$ variables, which for a nonempty ordinary instance equals $m$. Its point is $(\bm z_{\mathrm{stack}},\bm z_{\mathrm{batch}})$: $\ell$ coordinates select a position inside a stripe and $b$ interpolate the ordered list of stripes across all rounds.
+Each round is cut into $S_r=A_r/H$ stripes of $H$ consecutive entries under its own root. With $S=\sum_r S_r$ and $b=\lceil\log_2\max(S,1)\rceil$, the opening domain has $\ell+b$ variables, which equals $m$ for the nonempty stacked layout defined above. Its point is $(\bm z_{\mathrm{stack}},\bm z_{\mathrm{batch}})$: $\ell$ coordinates select a position inside a stripe and $b$ interpolate the ordered list of stripes across all rounds.
 
 \subsection{One opening across all roots}
 \label{sec:pcs-multiround-open}
 
-If the reduction point has fewer than $\ell+b$ coordinates, the prover appends Fiat--Shamir coordinates after the assist, each contributing a factor $1-r_j$; in the ordinary multi-round layout $m=\ell+b$ and this is a no-op. For round $r$ and stripe $s$ let $e_{r,s}=\widetilde{\mathbf q_{r,s}}(\bm z_{\mathrm{stack}})$. The prover reports these in round-major, stripe-major order; the verifier zero-pads the list to $2^b$ and checks
+If the reduction point has fewer than $\ell+b$ coordinates, the prover appends Fiat--Shamir coordinates after the assist, each contributing a factor $1-r_j$; in the multi-round layout above, $m=\ell+b$, so no coordinates are appended. For round $r$ and stripe $s$ let $e_{r,s}=\widetilde{\mathbf q_{r,s}}(\bm z_{\mathrm{stack}})$. The prover reports these in round-major, stripe-major order; the verifier zero-pads the list to $2^b$ and checks
 \begin{equation}
 \label{eq:stacking-bind}
   v_Q
   =\widetilde{(e_{0,0},\ldots,e_{0,S_0-1},e_{1,0},\ldots,e_{R-1,S_{R-1}-1})}
      (\bm z_{\mathrm{batch}}).
 \end{equation}
-One stacked \WHIR{} or \BaseFold{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while commitments stay per round. All rounds must share the stacking height and PCS mode; a mixed transcript is rejected. The implementation also offers BaseFold as the opening; every configuration in this paper uses \WHIR{}.
+One stacked \WHIR{} or \BaseFold{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while each input round retains its own Merkle root. All rounds must share the stacking height and PCS mode; a mixed transcript is rejected. The implementation also offers BaseFold as the opening; every configuration in this paper uses \WHIR{}.
 
 \begin{figure}[t]
 \centering
@@ -193,6 +193,6 @@ For an unpinned round, which is every core round, the gap is split into
 \]
 at least one: the number the widest gap of the bucket needs, so the count depends on the bucket alone, and a narrower gap leaves trailing columns short or empty. A pinned round, as in the compress machine, uses a fixed column count.
 
-Both rules make a shard's committed geometry, and hence the recursion program that verifies it and that program's key, a function of the chip set, the first-shard flag and the two buckets rather than of exact row counts. Rounding up to the next block, or letting the padding-column count follow the gap, would make every row profile a distinct verifier program. Under the quantised rule the key space is small enough to enumerate offline, which lets a verifier hold a fixed allowlist covering every shard shape the declared clusters admit (Section~\ref{sec:recursion}). The price is the padding inside a bucket, committed and opened like any other cell.
+Both rules make a shard's committed geometry, and hence the recursion program that verifies it and that program's key, a function of the chip set, the first-shard flag and the two buckets rather than of exact row counts. Rounding up to the next block, or letting the padding-column count follow the gap, would make every row profile a distinct verifier program. Under the quantised rule the key space is small enough to enumerate offline, which lets a verifier hold a fixed allowlist covering every shard shape the declared clusters admit (Section~\ref{sec:recursion}). The overhead is the padding inside a bucket, committed and opened like any other cell.
 
 The reduction's memory stays proportional to the real data: $W$ is never materialised (\S\ref{sec:pcs-jagged-assist}); the suffix from $A$ to $M$ is treated as zero rather than allocated, which is why inter-round padding must be explicit and the suffix need not be; and the stripe evaluations of Equation~\eqref{eq:stacking-bind} are read off the committed interleaved layout, so a round is traversed once to commit and once to open.
