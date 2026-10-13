@@ -83,8 +83,8 @@
 \draw[a] (shrink.east) -- ++(0.55,0) |- (wrap.west);
 \draw[a, dashed] (shrink.east) ++(0.55,0) |- (bin.west);
 \node[frame, fit=(shrink)(tS)(wrap)(snark)(tW)(bin)(nar)(tB)(rp)(main.west |- wrap)(main.east |- wrap), inner xsep=3pt, inner ysep=8pt] (apps) {};
-\node[lab, font=\small, below=0.05cm of apps] {applications};
-\node[ver] (oc) at (14.6,-3.6) {On-chain verifier};
+\node[lab, font=\small, below=0.05cm of apps] {application verification};
+\node[ver] (oc) at (14.6,-3.6) {EVM verifier};
 \node[ver, dashed] (gv) at (14.6,-6.4) {Garbled verifier};
 \draw[a] (snark.east) -- (snark.east -| apps.east) -- node[lab, above] {$\pi_{\mathrm{snark}}$} (oc);
 \draw[a, dashed] (nar.east) -- (nar.east -| apps.east) -- node[lab, above] {$\pi_{\mathrm n}$} (gv);
