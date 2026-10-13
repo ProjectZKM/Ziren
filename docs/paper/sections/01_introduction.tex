@@ -6,7 +6,7 @@ A \emph{succinct argument for machine execution} convinces a verifier that a pro
 \subsection{Succinct arguments for machine execution}
 \label{sec:intro-background}
 
-A \zkVM{} fixes an instruction set, a register file and a memory model, and proves that a program for that machine ran correctly. Representative systems that prove RISC-V programs are SP1, OpenVM, ZisK and Jolt~\citep{sp1,openvm,zisk,jolt}, and system-level comparisons are restricted to these four. Such a system has two halves, a front end and a back end. The \emph{arithmetisation} turns an execution into tables whose rows satisfy polynomial constraints and between which multiset relations hold; the \emph{commitment} and its proximity test let the prover show that it knows such tables. The arithmetisation determines the trace cells and bus interactions per instruction; the commitment and proximity test determine the cost of encoding, hashing and opening those cells.
+A \zkVM{} fixes an instruction set, a register file and a memory model, and proves that a program for that machine ran correctly. Representative systems that prove RISC-V programs are SP1, OpenVM, ZisK, Jolt and Airbender~\citep{sp1,openvm,zisk,jolt,airbender}, the five systems in our design comparison. Such a system has two halves, a front end and a back end. The \emph{arithmetisation} turns an execution into tables whose rows satisfy polynomial constraints and between which multiset relations hold; the \emph{commitment} and its proximity test let the prover show that it knows such tables. The arithmetisation determines the trace cells and bus interactions per instruction; the commitment and proximity test determine the cost of encoding, hashing and opening those cells.
 
 \paragraph{Motivation.} \Ziren{} is a production \zkVM{} for MIPS32. It proves 77 user-mode integer instructions of MIPS32r2 with the branch-delay slot (Appendix~\ref{sec:app-isa}, which also names the few it leaves out), and it has proved Ethereum mainnet blocks end to end in production; earlier proof systems address MIPS-\emph{like} models or offer MIPS as one mode among several (\S\ref{sec:related}). The specification is \emph{stable}: its owner moved its roadmap to RISC-V in 2021~\citep{mips-riscv-2021,mips-at-40}, so the target ISA specification is fixed; changes to the arithmetisation still change its verifying keys. It is \emph{uniform}: fixed 32-bit encodings in a handful of formats let one row carry an instruction's whole frame. And its toolchains are \emph{mature}: Rust, Go and C programs compile to the same little-endian ELF, and the architecture is widely deployed~\citep{mips-shipped}. The fault-proof software of Ethereum rollups, Optimism's Cannon and Kona~\citep{cannon,kona}, can therefore be targeted, subject to compatible runtime conventions and image formats.
 
@@ -70,7 +70,7 @@ Table~\ref{tab:related} places the systems discussed along the axes of this intr
 \begin{table}[t]
 \centering
 \scriptsize\setlength{\tabcolsep}{3pt}
-\caption{Design axes of \Ziren{} and four systems it is most often read against, from their public descriptions at the release named in the last column, retrieved on 2026-09-24. The \emph{Regime} column names the basis on which each project states its soundness level; regimes differ and levels are not comparable without the accounting of Section~\ref{sec:iopp-soundness}.}
+\caption{Design axes of \Ziren{} and five representative systems, from their public descriptions at the release named in the last column. Sources were retrieved on 2026-09-24, except Airbender on 2026-10-13. The \emph{Regime} column names the basis on which each project states its soundness level; regimes differ and levels are not comparable without the accounting of Section~\ref{sec:iopp-soundness}.}
 \label{tab:related}
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.125\textwidth}
                   >{\raggedright\arraybackslash}p{0.095\textwidth}
@@ -88,6 +88,7 @@ SP1 Hypercube~\citep{sp1-hypercube} & RV64IM & KoalaBear & chip per opcode, read
 ZisK~\citep{zisk} & RV64IMA & Goldilocks & micro-operations, PIL2 & LogUp & PIL2 (e)STARK & not stated & v1.3.0-alpha \\
 OpenVM\newline\citep{openvm} & own ISA, RV32IM transpiler & BabyBear & executor chips, adapter and core & LogUp & SWIRL: stacked \WHIR{} & unique decoding low in the tree, list decoding above & v2.0.2 \\
 Jolt~\citep{jolt} & RV64IMAC & BN254 scalar (Dory), 128-bit (Akita) & Twist and Shout, small R1CS & Twist and Shout & Dory (default), Akita (lattice) & not stated & v0.3.0-alpha \\
+Airbender\newline\citep{airbender} & RV32IM (restricted) & Mersenne-31 & CPU trace, delegated precompiles & log-derivative & DEEP STARK / FRI & not stated & v0.5.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
