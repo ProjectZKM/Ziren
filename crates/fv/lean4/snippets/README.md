@@ -16,9 +16,8 @@ The snippets name constraints by index, so they follow the chip's AIR: regenerat
 any change to it. The generators and recipes in `tools/` are not kept in the repository;
 they are distributed with the archived snapshot of the checked files
 (`src/crates/fv/lean4/snippets/tools`). Set `SNIPPET_TOOLS` to that directory when running
-`../check/regen_all.sh`. The existing `crates/fv/coverage.json` manifest pins their combined fingerprint;
-regeneration verifies that fingerprint before and after generating snippets. CI fingerprints
-the pin without requiring a local copy of the external tools.
+`../check/regen_all.sh`. Regenerate the snippets and recheck the chip proofs after changes to
+the constraints or generator inputs.
 
 The [archived snapshot](https://zkm-toolchain.s3.amazonaws.com/fv/ziren-fv-lean-20261001b.tar.gz)
 contains all generator sources, but omitted `divrem_reference.txt`. After extracting it,
@@ -35,10 +34,9 @@ lines = [line.strip() for line in block.splitlines() if line.strip() and not lin
 Path(os.environ['SNIPPET_TOOLS'], 'divrem_reference.txt').write_text(
     '\n'.join(f'c{i}: {line}' for i, line in enumerate(lines)))
 PY
-python3 crates/fv/coverage.py verify-tools "$SNIPPET_TOOLS"
 ```
 
-This recreates the pinned reference byte-for-byte; no generated tools or snippets need to
+This recreates the reference from the archived constraints; no generated tools or snippets need to
 be committed.
 
 - `CloClz_is_clz.lean` rests on `ZirenDet/LeadingOne.lean` and needs

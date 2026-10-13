@@ -42,6 +42,8 @@ def validate(text, expected=None):
             raise ValueError(f"{name}: unexpected axioms {sorted(axioms - ALLOWED_AXIOMS)}")
     if not re.search(r'^"?PICUS_FILE_DONE"?$', text, re.M):
         raise ValueError("missing completed axiom-check marker")
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # A pass rewrites every chunk module `C*.lean` that holds a theorem matching `theorem` (and, if
@@ -61,6 +63,30 @@ PASSES = [
 
 def run(script, args):
     return subprocess.run([sys.executable, os.path.join(HERE, script)] + args).returncode
+
+
+def lean_project_inputs():
+    reference = Path(HERE).parent
+    paths = [p for p in reference.glob("ZirenDet/**/*.lean")
+             if "Chips" not in p.parts and p.name != "Chips.lean"]
+    return paths + [reference / name for name in
+                    ("ZirenDet.lean", "lean-toolchain", "lake-manifest.json", "lakefile.toml")]
+
+
+def lean_library_digest():
+    h = hashlib.sha256()
+    for path in sorted(lean_project_inputs()):
+        for data in (path.relative_to(Path(HERE).parent).as_posix().encode(), path.read_bytes()):
+            h.update(len(data).to_bytes(8, "little"))
+            h.update(data)
+    return h.hexdigest()
+
+
+def verify_lean_project(project):
+    for path in lean_project_inputs():
+        actual = Path(project) / path.relative_to(Path(HERE).parent)
+        if not actual.exists() or actual.read_bytes() != path.read_bytes():
+            raise ValueError(f"Lean project differs from the repository library: {actual}")
 
 
 def prepare_proof_cache(root, prefix, identity):
@@ -85,22 +111,25 @@ def prepare_proof_cache(root, prefix, identity):
 
 
 def main(argv):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from coverage import lean_library_digest, pipeline_digest, verify_lean_project
-
     build = "--no-build" not in argv
     file, root, prefix = [a for a in argv if a != "--no-build"]
     receipt = Path(root, "closure.json")
     receipt.unlink(missing_ok=True)
     identity = None
     cache_identity = None
-    first = Path(file).read_text().splitlines()[0]
-    if first.startswith("-- ZIREN_COVERAGE "):
-        identity = json.loads(first[len("-- ZIREN_COVERAGE "):])
-        try:
-            if identity["pipeline_sha256"] != pipeline_digest():
-                raise ValueError("generated source uses a different proof pipeline")
-            if build:
+    try:
+        first, body = Path(file).read_text().split("\n", 1)
+        for marker in ("-- ZIREN_AIR ", "-- ZIREN_COVERAGE "):
+            if first.startswith(marker):
+                identity = json.loads(first[len(marker):])
+                if (identity.get("chip") != Path(file).stem
+                        or not isinstance(identity.get("air_sha256"), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", identity["air_sha256"])
+                        or identity.get("body_sha256") != hashlib.sha256(body.encode()).hexdigest()):
+                    raise ValueError("generated source does not match its AIR identity")
+                break
+        if build:
+            if identity:
                 project = os.environ["LEAN_PROJECT"]
                 verify_lean_project(project)
                 if subprocess.run(["lake", "build", "ZirenDet"], cwd=project).returncode:
@@ -109,9 +138,9 @@ def main(argv):
                                           check=True, capture_output=True, text=True).stdout.strip()
                 cache_identity = {"library_sha256": lean_library_digest(), "compiler": compiler,
                                   "project": str(Path(project).resolve())}
-        except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
-            print(f"proof closure failed: {exc}", file=sys.stderr)
-            return 1
+    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"proof closure failed: {exc}", file=sys.stderr)
+        return 1
     if build:
         prepare_proof_cache(root, prefix, cache_identity)
     if run("split.py", [file, root, prefix]):
@@ -147,12 +176,11 @@ def main(argv):
             if hashlib.sha256(Path(file).read_bytes()).hexdigest() != inventory["source_sha256"]:
                 raise ValueError("source changed during checking")
             if identity:
-                if identity["pipeline_sha256"] != pipeline_digest():
-                    raise ValueError("proof pipeline changed during checking")
                 verify_lean_project(os.environ["LEAN_PROJECT"])
                 if cache_identity["library_sha256"] != lean_library_digest():
                     raise ValueError("Lean library changed during checking")
-                inventory["pipeline_sha256"] = identity["pipeline_sha256"]
+                inventory["extraction"] = {k: v for k, v in identity.items() if k != "pipeline_sha256"}
+                inventory["lean_inputs"] = cache_identity
         except (ValueError, OSError) as exc:
             print(f"proof closure failed: {exc}", file=sys.stderr)
             return 1

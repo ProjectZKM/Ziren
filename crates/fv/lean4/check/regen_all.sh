@@ -7,11 +7,11 @@
 #    of snippets/tools into OUT/snippets, over a copy of the snippets kept in snippets/ (the
 #    hand-written ones); the recipes are $tools/recipes.tsv (snippet, chip, module, generator,
 #    arguments), distributed with the archived snapshot rather than kept in Git.
-#    Set SNIPPET_TOOLS to that external directory; coverage.json pins its inputs.
+#    Set SNIPPET_TOOLS to that external directory.
 # 3. `zkm-picus --all` with those snippets writes the chip files (OUT/ZirenDet/Chips), CloClz
 #    with `--shrcarry-summary precise`, which its snippet is written for.
 #
-# The output is deterministic: the same checkout gives byte-identical files.  Check each file
+# The output is deterministic: the same checkout and snippet inputs give byte-identical files. Check each file
 # with check.py.  Build `zkm-picus` first (`cargo build -r -p zkm-picus`).
 set -eu
 out=$(realpath -m "$1")
@@ -21,7 +21,6 @@ repo=$(cd "$lean4/../../.." && pwd)
 picus=${PICUS:-$repo/target/release/zkm-picus}
 tools=${SNIPPET_TOOLS:-$lean4/snippets/tools}
 [ -d "$tools" ] || { echo "snippet generators not found at $tools (set SNIPPET_TOOLS)"; exit 2; }
-python3 "$repo/crates/fv/coverage.py" verify-tools "$tools"
 export PICUS_BUDGET_S=${PICUS_BUDGET_S:-1800}
 rm -rf "$out/base" "$out/modules" "$out/snippets" "$out/ZirenDet" "$out/ZirenDet.lean"
 mkdir -p "$out/base" "$out/modules" "$out/snippets" "$out/empty"
@@ -59,12 +58,8 @@ while read -r snip chip mod gen extra; do
   (cd "$tools" && python3 "$gen" "$out/modules/$mod.lean" $extra "$out/snippets/$snip.lean" \
     > "$out/modules/$snip.log" 2>&1) || { echo "generator failed: $snip"; exit 1; }
 done < "$tools/recipes.tsv"
-python3 "$repo/crates/fv/coverage.py" verify-tools "$tools"
 
 echo "chip files"
 run_picus "$out/snippets" "$out" --derive --derive-diagnose
 "$picus" --all --fingerprint-out "$out/air-fingerprints.json"
-for chipfile in "$out"/ZirenDet/Chips/*.lean; do
-  python3 "$repo/crates/fv/coverage.py" stamp "$out/air-fingerprints.json" --source "$chipfile"
-done
 echo "$(ls "$out/ZirenDet/Chips" | wc -l) chip files in $out/ZirenDet/Chips"

@@ -14,7 +14,7 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 
 | File | Role |
 |---|---|
-| `regen_all.sh OUT` | Verifies the external tools against `../../coverage.json`, then regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Byte-identical between runs. |
+| `regen_all.sh OUT` | Regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Identical checkout and snippet inputs give byte-identical output. |
 | `check.py FILE ROOT PREFIX` | Splits the file (`split.py`), applies each pass of its `PASSES` table to the modules it matches, and runs `make`. `--no-build` stops before `make`. `--validate-log LOG [INVENTORY]` checks a module's diagnostics and, when supplied, its theorem axiom reports. |
 | `split.py` | Prelude module for definitions no theorem depends on; theorems in chunk modules by dependency level, packed to about 40 KB, each importing exactly the chunks it uses; a `Makefile` and `Check.lean`, which prints `#print axioms` for every `deterministic`. |
 | `lift_steps.py` | Moves the top-level `have` steps of one theorem into lemmas in their own modules. |
@@ -30,8 +30,10 @@ These conditions are enforced: admitted obligations, missing theorem reports, an
 axioms fail the command. A successful `check.py` writes `OUTROOT/closure.json`, containing the
 SHA-256 of the original generated source and the complete determinism theorem inventory. An old
 receipt is removed before each check; a failed elaboration or closure check produces no receipt.
-For stamped sources, the checker also requires `LEAN_PROJECT` to match the fingerprinted Lean
-library and dependency pins, builds that library, and includes the pipeline hash in the receipt.
+For sources with an AIR identity, the checker verifies the chip name, constraint fingerprint
+format and proof-body hash. It also requires `LEAN_PROJECT` to match the repository's Lean
+library and dependency pins, builds that library, and records the extraction identity and Lean
+build inputs in the receipt.
 Use `crates/fv/lean4` as the project template, including its `ZirenDet.lean` root and pinned
 configuration files; keep regenerated chip output in the separate regeneration directory.
 Compiled proof modules are reusable only when `OUTROOT/.lean-cache.json` records the same
@@ -39,18 +41,7 @@ Lean library sources, dependency pins, compiler version and project path. Change
 inputs discard the compiled modules before rebuilding; an axiom audit alone cannot certify a
 module compiled against a different library. Unstamped sources always receive a fresh build.
 
-`regen_all.sh` stamps each generated source with its current unspecialised AIR fingerprint and
-the proof-pipeline fingerprint. Refresh the inventory after regeneration; unchanged receipts
-are preserved, while changed constraints or proof-pipeline sources become pending. Record
-coverage only after checking the stamped source:
-
-```bash
-python3 crates/fv/coverage.py snapshot /scratch/regen/air-fingerprints.json
-python3 crates/fv/coverage.py record /scratch/regen/air-fingerprints.json \
-  --source /scratch/regen/ZirenDet/Chips/AddSub.lean --receipt /scratch/addsub/closure.json
-```
-
-The committed `crates/fv/coverage.json` distinguishes pending checks, closed proofs, and the five
-explicitly excluded chips. `coverage.py check` verifies the machine inventory, constraints,
-lookups, extraction annotations, and proof pipeline against it. Add `--require-closed` to require
-a checked receipt for every non-excluded chip; pending entries never count as closed coverage.
+`regen_all.sh` writes `OUT/air-fingerprints.json`, and Picus includes the matching chip fingerprint,
+extraction settings and proof-body hash in each generated Lean source. Keep these outputs and
+the checker receipts together outside Git. Regenerate and recheck after constraint or generator
+changes; CI does not compare the archived proof checks with the current checkout.

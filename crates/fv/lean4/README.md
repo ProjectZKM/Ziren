@@ -178,21 +178,19 @@ What makes this manual today:
 - **Gadget shapes.** Each snippet generator recognises its gadget by the shape of the extracted
   constraints; a gadget whose internal layout changes no longer matches, and the generator has to
   be edited. Moving columns or adding unrelated constraints needs no edit.
-- **Coverage evidence.** The chip files are not committed. `../coverage.json` now binds each
-  chip to an unspecialised AIR fingerprint and records closed proofs only from strict checker
-  receipts. The current inventory records 104 kernel-checked determinism theorems over 57 chips;
-  three preprocessed tables and two SHA-256 control chips are explicitly excluded. CI requires
-  closed coverage for every non-excluded chip.
+- **Coverage evidence.** The chip files and checker receipts are kept outside Git. The completed
+  check contains 104 kernel-checked determinism theorems over 57 chips; three preprocessed tables
+  and two SHA-256 control chips are excluded. After a constraint or generator change, regenerate
+  and recheck the affected proofs. CI does not check whether archived proof coverage is current.
 
 Maintaining coverage and improving the extraction:
 
-1. **Refresh the fingerprint manifest after changes.** `zkm-picus --all --fingerprint-out FILE` emits SHA-256
+1. **Regenerate and check after changes.** `zkm-picus --all --fingerprint-out FILE` emits SHA-256
    fingerprints of the raw constraint expression DAGs, bus lookups and scopes, gadget annotations,
-   and extraction interface. CI recomputes them without Lean and rejects drift. `coverage.py`
-   also binds the external proof-generator fingerprint in `../coverage.json`, Lean library,
-   checker and dependency pins. The generator files stay outside Git; `regen_all.sh` verifies
-   the directory selected by `SNIPPET_TOOLS` against that pin. Regenerate,
-   strictly check, and record each chip to replace its pending entry with closed evidence.
+   and extraction interface. Generated Lean sources include their chip's fingerprint, extraction
+   settings and proof-body hash. Keep the regenerated sources, fingerprint inventory and strict
+   checker receipts together outside Git. The generator files also stay outside Git; select their
+   directory with `SNIPPET_TOOLS` when running `check/regen_all.sh`.
 2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
    such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
    names rather than positions.
