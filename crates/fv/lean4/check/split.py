@@ -180,13 +180,13 @@ def emit(path, extra_imports, items, tail=""):
 
 emit(os.path.join(root, mp, "P.lean"), [], prelude)
 mk = [f"R := {root}", "LEANRUN ?= $(R)/run_mod.sh", "", ".PHONY: all check", "all: check", ""]
-mk.append(f"{mp}/P.olean: {mp}/P.lean closure.py run_mod.sh\n\t$(LEANRUN) {mp} P\n")
+mk.append(f"{mp}/P.olean: {mp}/P.lean check.py run_mod.sh\n\t$(LEANRUN) {mp} P\n")
 for b in chunks:
     need = sorted({decls[k]["chunk"] for d in b["items"] for k in d["deps"]} - {None, b["items"][0]["chunk"]})
     imps = [f"{mp}.P"] + [f"{mp}.{chunks[c]['mod']}" for c in need]
     emit(os.path.join(root, mp, b["mod"] + ".lean"), imps, b["items"])
     deps = " ".join([f"{mp}/P.olean"] + [f"{mp}/{chunks[c]['mod']}.olean" for c in need])
-    mk.append(f"{mp}/{b['mod']}.olean: {mp}/{b['mod']}.lean {deps} closure.py run_mod.sh\n\t$(LEANRUN) {mp} {b['mod']}\n")
+    mk.append(f"{mp}/{b['mod']}.olean: {mp}/{b['mod']}.lean {deps} check.py run_mod.sh\n\t$(LEANRUN) {mp} {b['mod']}\n")
 dets = [d for d in decls if d["name"] == "deterministic"]
 theorems = ['.'.join([n for n in d['ns'] if n] + ['deterministic']) for d in dets]
 write_if_changed(os.path.join(root, "inventory.json"), json.dumps({

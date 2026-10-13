@@ -7,7 +7,7 @@
 #    of snippets/tools into OUT/snippets, over a copy of the snippets kept in snippets/ (the
 #    hand-written ones); the recipes are $tools/recipes.tsv (snippet, chip, module, generator,
 #    arguments), distributed with the archived snapshot rather than kept in Git.
-#    Set SNIPPET_TOOLS to that external directory; tools.lock.json pins its inputs.
+#    Set SNIPPET_TOOLS to that external directory; coverage.json pins its inputs.
 # 3. `zkm-picus --all` with those snippets writes the chip files (OUT/ZirenDet/Chips), CloClz
 #    with `--shrcarry-summary precise`, which its snippet is written for.
 #

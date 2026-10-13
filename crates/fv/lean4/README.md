@@ -189,7 +189,7 @@ Maintaining coverage and improving the extraction:
 1. **Refresh the fingerprint manifest after changes.** `zkm-picus --all --fingerprint-out FILE` emits SHA-256
    fingerprints of the raw constraint expression DAGs, bus lookups and scopes, gadget annotations,
    and extraction interface. CI recomputes them without Lean and rejects drift. `coverage.py`
-   also binds the external proof-generator hashes in `snippets/tools.lock.json`, Lean library,
+   also binds the external proof-generator fingerprint in `../coverage.json`, Lean library,
    checker and dependency pins. The generator files stay outside Git; `regen_all.sh` verifies
    the directory selected by `SNIPPET_TOOLS` against that pin. Regenerate,
    strictly check, and record each chip to replace its pending entry with closed evidence.

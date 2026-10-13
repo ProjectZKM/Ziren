@@ -8,7 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import coverage
-from coverage import check_manifest, pipeline_digest, sha, verify_snippet_tools
+from coverage import (check_manifest, pipeline_digest, sha, verify_snippet_tools,
+                      snippet_tools_digest, snippet_tools_pin)
 
 
 class CoverageTests(unittest.TestCase):
@@ -29,15 +30,19 @@ class CoverageTests(unittest.TestCase):
                 (repo / name).write_text("pin\n")
             snippets = lean / "snippets"
             snippets.mkdir()
-            lock = snippets / "tools.lock.json"
-            lock.write_text(json.dumps({"schema": 1, "files": {"gen.py": sha(b"# generator\n")}}))
             tools = snippets / "tools"
+            tools.mkdir()
+            generator = tools / "gen.py"
+            generator.write_text("# generator\n")
+            pin = fv / "coverage.json"
+            pin.write_text(json.dumps({"snippet_tools_sha256": snippet_tools_digest(tools)}))
+            generator.unlink()
+            tools.rmdir()
             with patch.object(coverage, "FV", fv), patch.object(coverage, "REPO", repo):
                 absent = pipeline_digest()
                 with self.assertRaises(ValueError):
                     verify_snippet_tools(tools)
                 tools.mkdir()
-                generator = tools / "gen.py"
                 generator.write_text("# generator\n")
                 self.assertEqual(absent, pipeline_digest())
                 verify_snippet_tools(tools)
@@ -48,12 +53,13 @@ class CoverageTests(unittest.TestCase):
                 (tools / "unlisted.py").write_text("# extra input\n")
                 with self.assertRaises(ValueError):
                     verify_snippet_tools(tools)
-                lock.write_text(json.dumps({"schema": 1, "files": {"gen.py": sha(b"# changed\n")}}))
+                pin.write_text(json.dumps({"snippet_tools_sha256": "b" * 64}))
                 self.assertNotEqual(absent, pipeline_digest())
 
     def setUp(self):
         self.current = {"AddSub": "a" * 64, "Byte": "b" * 64}
-        self.manifest = {"schema": 1, "pipeline_sha256": pipeline_digest(), "chips": {
+        self.manifest = {"schema": 1, "pipeline_sha256": pipeline_digest(),
+                         "snippet_tools_sha256": snippet_tools_pin(), "chips": {
             "AddSub": {"air_sha256": "a" * 64, "status": "pending"},
             "Byte": {"air_sha256": "b" * 64, "status": "excluded", "reason": "preprocessed table"}}}
 
@@ -87,7 +93,7 @@ class CoverageTests(unittest.TestCase):
                 check_manifest(changed, self.current, require_closed=True)
 
     def test_rejects_constraint_inventory_pipeline_and_exclusion_drift(self):
-        for mutation in ["constraint", "inventory", "pipeline", "exclusion", "evidence"]:
+        for mutation in ["constraint", "inventory", "pipeline", "generator", "exclusion", "evidence"]:
             manifest, current = copy.deepcopy(self.manifest), dict(self.current)
             if mutation == "constraint":
                 current["AddSub"] = "c" * 64
@@ -95,6 +101,8 @@ class CoverageTests(unittest.TestCase):
                 current["NewChip"] = "d" * 64
             elif mutation == "pipeline":
                 manifest["pipeline_sha256"] = "e" * 64
+            elif mutation == "generator":
+                manifest["snippet_tools_sha256"] = "f" * 64
             elif mutation == "exclusion":
                 manifest["chips"]["AddSub"].update(status="excluded", reason="preprocessed table")
             else:

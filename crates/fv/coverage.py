@@ -55,13 +55,34 @@ def lean_library_digest():
     return h.hexdigest()
 
 
+def snippet_tools_digest(directory):
+    directory = Path(directory)
+    paths = [p for p in directory.rglob("*") if p.is_file()
+             and "__pycache__" not in p.parts
+             and (p.suffix in {".py", ".lean", ".tmpl", ".tac", ".tsv", ".txt"}
+                  or p.name == "README")]
+    h = hashlib.sha256()
+    for p in sorted(paths):
+        for data in (p.relative_to(directory).as_posix().encode(), p.read_bytes()):
+            h.update(len(data).to_bytes(8, "little"))
+            h.update(data)
+    return h.hexdigest()
+
+
+def snippet_tools_pin():
+    pin = json.loads((FV / "coverage.json").read_text()).get("snippet_tools_sha256")
+    if not isinstance(pin, str) or not re.fullmatch(r"[0-9a-f]{64}", pin):
+        raise ValueError("coverage.json has no valid external generator fingerprint")
+    return pin
+
+
 def pipeline_digest():
     # Include the lowering, proof generators, gadget lemmas, checker and dependency pins.
     paths = set(FV.glob("picus/src/**/*.rs")) | set(lean_project_inputs())
     paths |= set(FV.glob("lean4/snippets/**/*.py")) | set(FV.glob("lean4/snippets/**/*.lean"))
     paths |= {p for p in FV.glob("lean4/snippets/**/*") if p.suffix in {".tmpl", ".tac", ".tsv", ".txt"}}
     paths |= set(FV.glob("lean4/check/*.py")) | set(FV.glob("lean4/check/*.sh"))
-    paths |= {FV / "coverage.py", FV / "lean4/snippets/tools.lock.json",
+    paths |= {FV / "coverage.py",
               FV / "lean4/lean-toolchain", FV / "lean4/lake-manifest.json",
               FV / "lean4/lakefile.toml", FV / "picus/Cargo.toml", REPO / "Cargo.lock",
               REPO / "Cargo.toml", REPO / "rust-toolchain.toml"}
@@ -73,22 +94,15 @@ def pipeline_digest():
         for data in (p.relative_to(REPO).as_posix().encode(), p.read_bytes()):
             h.update(len(data).to_bytes(8, "little"))
             h.update(data)
+    h.update(b"external-snippet-tools\0")
+    h.update(bytes.fromhex(snippet_tools_pin()))
     return h.hexdigest()
 
 
 def verify_snippet_tools(directory):
     """Check external generators against the inputs pinned by the proof pipeline."""
-    lock = json.loads((FV / "lean4/snippets/tools.lock.json").read_text())
-    if lock.get("schema") != 1 or not lock.get("files"):
-        raise ValueError("invalid snippet generator pin")
-    directory = Path(directory)
-    files = {p.relative_to(directory).as_posix(): sha(p.read_bytes())
-             for p in directory.rglob("*") if p.is_file()
-             and "__pycache__" not in p.parts
-             and (p.suffix in {".py", ".lean", ".tmpl", ".tac", ".tsv", ".txt"}
-                  or p.name == "README")}
-    if files != lock["files"]:
-        raise ValueError("external snippet generators differ from tools.lock.json")
+    if snippet_tools_digest(directory) != snippet_tools_pin():
+        raise ValueError("external snippet generators differ from coverage.json")
 
 
 def load_fingerprints(path):
@@ -110,6 +124,8 @@ def verify_lean_project(project):
 def check_manifest(manifest, current, require_closed=False):
     if manifest["schema"] != 1 or manifest["pipeline_sha256"] != pipeline_digest():
         raise ValueError("proof pipeline changed: regenerate and recheck coverage")
+    if manifest.get("snippet_tools_sha256") != snippet_tools_pin():
+        raise ValueError("external generator fingerprint changed")
     entries = manifest["chips"]
     if set(entries) != set(current):
         raise ValueError("machine chip inventory changed")
@@ -149,7 +165,8 @@ def main():
     digest = pipeline_digest()
     if args.action == "snapshot":
         previous = json.loads(args.manifest.read_text()) if args.manifest.exists() else None
-        manifest = {"schema": 1, "pipeline_sha256": digest, "chips": {
+        manifest = {"schema": 1, "pipeline_sha256": digest,
+                    "snippet_tools_sha256": snippet_tools_pin(), "chips": {
             name: {"air_sha256": value, "status": "excluded" if name in EXCLUDED else "pending",
                    **({"reason": EXCLUDED[name]} if name in EXCLUDED else {})}
             for name, value in sorted(current.items())}}

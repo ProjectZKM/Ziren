@@ -16,11 +16,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-from closure import validate
+ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
+AXIOMS = re.compile(r"'([^']+)'\s+depends on axioms:\s*\[([^\]]*)\]", re.S)
+NO_AXIOMS = re.compile(r"'([^']+)'\s+does not depend on any axioms")
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from coverage import lean_library_digest, pipeline_digest, verify_lean_project
 
+def validate(text, expected=None):
+    if re.search(r"declaration uses ['‘`]sorry|sorryAx|PICUS_OPEN|goal admitted|: error", text):
+        raise ValueError("Lean output contains an admitted obligation or an error")
+    if expected is None:
+        return
+    found = {}
+    for name, axioms in AXIOMS.findall(text):
+        if name in found:
+            raise ValueError(f"duplicate axiom report: {name}")
+        found[name] = {a.strip() for a in axioms.split(",") if a.strip()}
+    for name in NO_AXIOMS.findall(text):
+        if name in found:
+            raise ValueError(f"duplicate axiom report: {name}")
+        found[name] = set()
+    if set(found) != set(expected) or len(expected) != len(set(expected)):
+        raise ValueError("axiom reports do not match the extracted theorem inventory")
+    for name, axioms in found.items():
+        if axioms - ALLOWED_AXIOMS:
+            raise ValueError(f"{name}: unexpected axioms {sorted(axioms - ALLOWED_AXIOMS)}")
+    if not re.search(r'^"?PICUS_FILE_DONE"?$', text, re.M):
+        raise ValueError("missing completed axiom-check marker")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # A pass rewrites every chunk module `C*.lean` that holds a theorem matching `theorem` (and, if
@@ -64,6 +85,9 @@ def prepare_proof_cache(root, prefix, identity):
 
 
 def main(argv):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from coverage import lean_library_digest, pipeline_digest, verify_lean_project
+
     build = "--no-build" not in argv
     file, root, prefix = [a for a in argv if a != "--no-build"]
     receipt = Path(root, "closure.json")
@@ -92,7 +116,7 @@ def main(argv):
         prepare_proof_cache(root, prefix, cache_identity)
     if run("split.py", [file, root, prefix]):
         return 3
-    for script in ("run_mod.sh", "closure.py"):
+    for script in ("run_mod.sh", "check.py"):
         src = Path(HERE, script)
         dest = Path(root, script)
         if not dest.exists() or dest.read_bytes() != src.read_bytes():
@@ -138,4 +162,11 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "--validate-log":
+        try:
+            expected = json.loads(Path(sys.argv[3]).read_text())["theorems"] if len(sys.argv) > 3 else None
+            validate(Path(sys.argv[2]).read_text(), expected)
+        except (ValueError, OSError) as exc:
+            sys.exit(f"proof closure failed: {exc}")
+    else:
+        sys.exit(main(sys.argv[1:]))

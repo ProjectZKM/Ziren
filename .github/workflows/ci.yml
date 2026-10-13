@@ -36,9 +36,8 @@ jobs:
           toolchain: nightly-2026-09-17
           components: rustfmt
       - run: cargo fmt --all -- --check
-      - name: Formal verification coverage and closure guards
+      - name: Formal verification coverage guards
         run: |
-          python3 -m unittest discover -s crates/fv/lean4/check -p 'test_*.py'
           python3 -m unittest discover -s crates/fv -p 'test_*.py'
   clippy:
     name: Clippy

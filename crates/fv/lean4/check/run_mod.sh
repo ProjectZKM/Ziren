@@ -27,9 +27,9 @@ sleep 2; flock -u 9; exec 9>&-
 wait $pid; rc=$?
 if [ "$rc" -eq 0 ]; then
   if [ "$m" = Check ]; then
-    python3 "$R/closure.py" "$out" "$R/inventory.json" || rc=1
+    python3 "$R/check.py" --validate-log "$out" "$R/inventory.json" || rc=1
   else
-    python3 "$R/closure.py" "$out" || rc=1
+    python3 "$R/check.py" --validate-log "$out" || rc=1
   fi
 fi
 if [ "$rc" -ne 0 ] && [ "$m" != Check ]; then rm -f "$R/$p/$m.olean"; fi

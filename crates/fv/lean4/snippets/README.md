@@ -16,8 +16,8 @@ The snippets name constraints by index, so they follow the chip's AIR: regenerat
 any change to it. The generators and recipes in `tools/` are not kept in the repository;
 they are distributed with the archived snapshot of the checked files
 (`src/crates/fv/lean4/snippets/tools`). Set `SNIPPET_TOOLS` to that directory when running
-`../check/regen_all.sh`. The small `tools.lock.json` manifest pins their file hashes;
-regeneration verifies those hashes before and after generating snippets. CI fingerprints
+`../check/regen_all.sh`. The existing `crates/fv/coverage.json` manifest pins their combined fingerprint;
+regeneration verifies that fingerprint before and after generating snippets. CI fingerprints
 the pin without requiring a local copy of the external tools.
 
 The [archived snapshot](https://zkm-toolchain.s3.amazonaws.com/fv/ziren-fv-lean-20261001b.tar.gz)
