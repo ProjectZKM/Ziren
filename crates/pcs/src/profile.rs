@@ -317,7 +317,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "10521b33215c265a03db6744526f9e696bf41ec428c92f3c47869a1c3418efbf",
+            "71a49cf2564480354be2cd1b7e0c0bb379720c7c1a07cc6912f676ec54967f69",
             "the transcript profile changed -- see this test's documentation",
         );
     }
