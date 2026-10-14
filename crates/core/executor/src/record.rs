@@ -1,3 +1,4 @@
+use crate::event_vec::EventVec;
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
@@ -187,54 +188,54 @@ pub struct ExecutionRecord {
     /// A trace of the CPU events which get emitted during execution.
     pub cpu_events: Vec<CpuEvent>,
     /// A trace of the register-form ADD, ADDU, SUB and SUBU events.
-    pub add_sub_events: Vec<AluEvent>,
+    pub add_sub_events: EventVec<AluEvent>,
     /// A trace of the immediate-form ADD/SUB events (ADDI, ADDIU): `op_c` is
     /// an immediate, so they prove on the narrower I-type frame.
-    pub add_sub_imm_events: Vec<AluEvent>,
+    pub add_sub_imm_events: EventVec<AluEvent>,
     /// A trace of the MUL, MULT and MULTU events.
-    pub mul_events: Vec<CompAluEvent>,
+    pub mul_events: EventVec<CompAluEvent>,
     /// A trace of the register-form XOR, OR, AND and NOR events.
-    pub bitwise_events: Vec<AluEvent>,
+    pub bitwise_events: EventVec<AluEvent>,
     /// A trace of the immediate-form bitwise events (XORI, ORI, ANDI): `op_c`
     /// is an immediate, so they prove on the narrower I-type frame.
-    pub bitwise_imm_events: Vec<AluEvent>,
+    pub bitwise_imm_events: EventVec<AluEvent>,
     /// A trace of the register-form (SLLV) shift-left events.
-    pub shift_left_events: Vec<AluEvent>,
+    pub shift_left_events: EventVec<AluEvent>,
     /// A trace of the immediate-form (shamt) shift-left events, on the
     /// narrower I-type frame.
-    pub shift_left_imm_events: Vec<AluEvent>,
+    pub shift_left_imm_events: EventVec<AluEvent>,
     /// A trace of the register-form (SRLV/SRAV/ROTRV) shift-right events.
-    pub shift_right_events: Vec<AluEvent>,
+    pub shift_right_events: EventVec<AluEvent>,
     /// A trace of the immediate-form (shamt) shift-right events, on the
     /// narrower I-type frame.
-    pub shift_right_imm_events: Vec<AluEvent>,
+    pub shift_right_imm_events: EventVec<AluEvent>,
     /// A trace of the DIV, DIVU events.
-    pub divrem_events: Vec<CompAluEvent>,
+    pub divrem_events: EventVec<CompAluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
-    pub lt_events: Vec<AluEvent>,
+    pub lt_events: EventVec<AluEvent>,
     /// A trace of the immediate-form compare events (SLTI, SLTIU), on the
     /// narrower I-type frame.
-    pub lt_imm_events: Vec<AluEvent>,
+    pub lt_imm_events: EventVec<AluEvent>,
     /// A trace of the CLO and CLZ events.
-    pub cloclz_events: Vec<AluEvent>,
+    pub cloclz_events: EventVec<AluEvent>,
     /// A trace of the narrow (sub-word) loads: `LB`, `LBU`, `LH`, `LHU`.
-    pub memory_load_narrow_events: Vec<MemInstrEvent>,
+    pub memory_load_narrow_events: EventVec<MemInstrEvent>,
     /// A trace of the word-aligned loads: `LW`, `LL`.
-    pub memory_load_word_events: Vec<MemInstrEvent>,
+    pub memory_load_word_events: EventVec<MemInstrEvent>,
     /// A trace of the narrow (sub-word) stores: `SB`, `SH`.
-    pub memory_store_narrow_events: Vec<MemInstrEvent>,
+    pub memory_store_narrow_events: EventVec<MemInstrEvent>,
     /// A trace of the word-aligned stores: `SW`, `SC`.
-    pub memory_store_word_events: Vec<MemInstrEvent>,
+    pub memory_store_word_events: EventVec<MemInstrEvent>,
     /// A trace of the unaligned loads/stores: `LWL`, `LWR`, `SWL`, `SWR`.
-    pub memory_unaligned_events: Vec<MemInstrEvent>,
+    pub memory_unaligned_events: EventVec<MemInstrEvent>,
     /// A trace of the branch events.
-    pub branch_events: Vec<BranchEvent>,
+    pub branch_events: EventVec<BranchEvent>,
     /// A trace of the jump events.
-    pub jump_events: Vec<JumpEvent>,
+    pub jump_events: EventVec<JumpEvent>,
     /// A trace of the conditional move events.
-    pub movcond_events: Vec<MovCondEvent>,
+    pub movcond_events: EventVec<MovCondEvent>,
     /// A trace of the misc events.
-    pub misc_events: Vec<MiscEvent>,
+    pub misc_events: EventVec<MiscEvent>,
     /// A trace of the byte lookups that are needed.
     pub byte_lookups: crate::events::ByteLookupMap,
     /// A trace of the precompile events.
@@ -251,9 +252,9 @@ pub struct ExecutionRecord {
     /// [`MemoryBumpEvent`].
     pub bump_memory_events: Vec<MemoryBumpEvent>,
     /// A trace of all the syscall events.
-    pub syscall_events: Vec<SyscallEvent>,
+    pub syscall_events: EventVec<SyscallEvent>,
     /// A trace of all the global lookup events.
-    pub global_lookup_events: Vec<GlobalLookupEvent>,
+    pub global_lookup_events: EventVec<GlobalLookupEvent>,
     /// Carrier for the global cumulative-sum digest, published by whichever
     /// `GlobalChip` trace generator ran for this shard.  See
     /// [`GlobalCumulativeSumCell`].
@@ -285,10 +286,10 @@ impl ExecutionRecord {
     #[cfg(feature = "pre-alloc")]
     pub fn new(program: Arc<Program>) -> Self {
         let cpu_events = Vec::with_capacity(1 << 22);
-        let add_sub_events = Vec::with_capacity(1 << 21);
-        let add_sub_imm_events = Vec::with_capacity(1 << 22);
-        let memory_load_word_events = Vec::with_capacity(1 << 21);
-        let memory_store_word_events = Vec::with_capacity(1 << 21);
+        let add_sub_events = EventVec::with_capacity(1 << 21);
+        let add_sub_imm_events = EventVec::with_capacity(1 << 22);
+        let memory_load_word_events = EventVec::with_capacity(1 << 21);
+        let memory_store_word_events = EventVec::with_capacity(1 << 21);
         Self {
             program,
             cpu_events,

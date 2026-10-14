@@ -94,7 +94,7 @@ pub mod extend_tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
+        shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)].into();
         let chip = ShaExtendChip::new();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

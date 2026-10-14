@@ -66,6 +66,8 @@ serde_json = { workspace = true }
 [features]
 bigint-rug = ["zkm-curves/bigint-rug"]
 pre-alloc = []
+# Allow GPU runtimes to supply pinned storage for instruction/lookup events.
+event-allocator = []
 # Compile OUT the native JIT executor, leaving the interpreter.
 #
 # `build.rs` has always gated `zkm_use_native_executor` on
