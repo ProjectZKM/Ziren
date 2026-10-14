@@ -13,8 +13,31 @@ conjuncts `c…`, `d…`.  `%PROJ_Cn%` and `%PROJ_Dn%` are replaced by the proje
 `n` out of `hw` and `hw'`, for a snippet that keeps both witnesses whole.
 
 The snippets name constraints by index, so they follow the chip's AIR: regenerate them after
-any change to it.  The generators named below (`tools/`) are not kept in the repository; they
-are distributed with the archived snapshot of the checked files (`src/crates/fv/lean4/snippets/tools`).
+any change to it. The generators and recipes in `tools/` are not kept in the repository;
+they are distributed with the archived snapshot of the checked files
+(`src/crates/fv/lean4/snippets/tools`). Set `SNIPPET_TOOLS` to that directory when running
+`../check/regen_all.sh`. Regenerate the snippets and recheck the chip proofs after changes to
+the constraints or generator inputs.
+
+The [archived snapshot](https://zkm-toolchain.s3.amazonaws.com/fv/ziren-fv-lean-20261001b.tar.gz)
+contains all generator sources, but omitted `divrem_reference.txt`. After extracting it,
+reconstruct that generated reference from the archived division constraints:
+
+```bash
+export SNIPPET_TOOLS=/path/to/ziren-fv-lean-20261001b/src/crates/fv/lean4/snippets/tools
+python3 - /path/to/ziren-fv-lean-20261001b/generated/DivRem.lean <<'PY'
+import os, sys
+from pathlib import Path
+module = Path(sys.argv[1]).read_text().split('namespace DivRem_is_div\n', 1)[1]
+block = module.split('def constraints_0 (w : W) : Prop :=\n', 1)[1].split('\ndef constraints ', 1)[0]
+lines = [line.strip() for line in block.splitlines() if line.strip() and not line.startswith('def ')]
+Path(os.environ['SNIPPET_TOOLS'], 'divrem_reference.txt').write_text(
+    '\n'.join(f'c{i}: {line}' for i, line in enumerate(lines)))
+PY
+```
+
+This recreates the reference from the archived constraints; no generated tools or snippets need to
+be committed.
 
 - `CloClz_is_clz.lean` rests on `ZirenDet/LeadingOne.lean` and needs
   `--shrcarry-summary precise` (the default `abstract` summary has fewer conjuncts, so its

@@ -6,7 +6,7 @@ This section collects the security argument. It states the relation the block pr
 \subsection{The proved relation}
 \label{sec:security-relation}
 
-The shard argument proves one shard; the statement of Section~\ref{sec:statement} is about an execution. Between the two sits the arithmetised relation the recursion tree is knowledge sound for, displayed, as Ceno displays its own~\citep{ceno}, with each part assigned to the component that discharges it:
+The shard argument proves one shard; the statement of Section~\ref{sec:statement} is about an execution. Between the two sits the arithmetised relation the recursion tree is knowledge sound for, with each condition assigned to the component that enforces it:
 \begin{align*}
   \mathcal R_{\mathrm{arith}} = \Big\{ (\mathsf{vk}, h) :\ \exists\, (\mathsf{T}_i, \mathsf{pv}_i)_{i<N}\ \
   & \forall i:\ \mathsf{T}_i \text{ is a valid shard for } \mathsf{pv}_i \text{ and } \mathsf{vk},\ h_i = h
@@ -22,27 +22,31 @@ The shard argument proves one shard; the statement of Section~\ref{sec:statement
 \end{align*}
 Validity is Definition~\ref{def:shard}; $\mathsf{sh}_i$, $h_i$ and $\mathsf{code}_i$ are fields of $\mathsf{pv}_i$; the halt row sets the exit program counter to zero; $\mathsf{start}(\mathsf{vk})$ is the start state the key fixes; the entry and exit states are program-counter pairs; $O$ is the identity of the digest's curve group; the cursors tile the address space; $D_i$ is the shard's cross-shard digest net of the offset $D_{\mathrm{off}}$ of \S\ref{sec:air-global}. Theorem~\ref{thm:composition} (\S\ref{sec:iopp-layers}) is knowledge soundness for $\mathcal R_{\mathrm{arith}}$, and Theorem~\ref{thm:unique} (\S\ref{sec:air-unique}) with the conformance evidence of \S\ref{sec:verification} is what connects $\mathcal R_{\mathrm{arith}}$ to $\mathcal R$, through Lemma~\ref{lem:xmem}, which joins the shards' memory into one execution.
 
-\paragraph{Summary of the proved statement.} Theorem~\ref{thm:composition} is knowledge soundness for $\mathcal R_{\mathrm{arith}}$ under the hypotheses below, the last of three layers after the functional IOP and the interactive commit-and-open argument (\S\ref{sec:iopp-layers}). Theorem~\ref{thm:unique} makes the rows a valid shard reaches unique up to permutation, given chip determinism (\S\ref{sec:verification}) and real-row exhaustiveness; identifying them with an execution needs the conformance evidence of the same section. Neither statement depends on a particular chip set, field or proximity test.
+\paragraph{Summary of the proved statement.} Theorem~\ref{thm:composition} is knowledge soundness for $\mathcal R_{\mathrm{arith}}$ under the hypotheses below, the last of three layers after the functional IOP and the interactive commit-and-open argument (\S\ref{sec:iopp-layers}). Theorem~\ref{thm:unique} makes the rows a valid shard reaches unique up to permutation, given chip determinism (\S\ref{sec:verification}), well-formed shard boundary rows and real-row exhaustiveness; identifying them with an execution needs the conformance evidence of the same section. Neither statement depends on a particular chip set, field or proximity test.
 
 \paragraph{Open hypotheses.} The end-to-end statement holds under five hypotheses that this paper does not discharge:
 \begin{enumerate}
   \item round-by-round knowledge soundness of every node's committed protocol, which carries function binding of the jagged \WHIR{} commitment with an unquantified loss (\S\ref{sec:iopp-layers});
   \item that each node's extractor succeeds on the transcripts its parent's extractor produces (\S\ref{sec:iopp-layers});
   \item that the leaf and compose programs, which are not extracted, enforce the compose relation, the key binding included (\S\ref{sec:security-binding});
-  \item Assumption~\ref{ass:digest}, to which we assign no value (\S\ref{sec:air-digest-security});
-  \item determinism of the two SHA-256 control chips and real-row exhaustiveness, the open premises of Theorem~\ref{thm:unique} (\S\ref{sec:air-unique}).
+  \item Assumption~\ref{ass:digest}, for which we give no numerical security bound (\S\ref{sec:air-digest-security});
+  \item determinism of the two SHA-256 control chips, well-formed shard boundary rows (one per touched word, linked to actual accesses), and real-row exhaustiveness, the open premises of the memory and trace-uniqueness arguments (\S\ref{sec:air-unique}).
 \end{enumerate}
 Conformance evidence (\S\ref{sec:verification}), not a proof, identifies the arithmetised machine with the MIPS32 instruction set.
 
 \subsection{Soundness accounting}
 \label{sec:iopp-soundness}
 
-\paragraph{How the level is computed.} We compute soundness with \texttt{soundcalc}~\citep{soundcalc}, the Ethereum Foundation's calculator for hash-based proof systems, from a configuration that records the field, the trace dimensions and the schedule of Table~\ref{tab:whir-schedule}; a census program kept with the source emits its machine figures from the machine the prover builds. The calculator evaluates the error of every transcript component of the interactive protocol: the out-of-domain samples and shift queries of each \WHIR{} round, the batching of the committed stripes in the opening (column batching is counted in the jagged reduction), each folding round, the final polynomial, the three terms of the jagged reduction (Section~\ref{sec:pcs}), the zerocheck and the \LogUp{} argument, with grinding counted inside the term it protects. Query soundness is counted in the unique-decoding regime for the core schedule and under the Johnson bound for the compress schedule; neither needs a proximity-gap conjecture. A proof's level is $-\log_2$ of the \emph{sum} of its component errors, a union bound rather than the smallest component, and a block's level sums over every node of its recursion tree. The analysis follows \WHIR{}'s~\citep{whir}, adding the batching over several commitments and the jagged terms; levels computed by other calculators, such as RISC Zero's~\citep{risc0-soundness}, are comparable only when they charge the same components.
+\paragraph{How the level is computed.} We compute soundness with \texttt{soundcalc}~\citep{soundcalc}, the Ethereum Foundation's calculator for hash-based proof systems, extended for jagged commitments over \WHIR{}, from a configuration that records the field, the trace dimensions and the schedule of Table~\ref{tab:whir-schedule}; a census program kept with the source emits its machine figures from the machine the prover builds.
+
+We use the calculator to evaluate the component errors of the interactive protocol: the out-of-domain samples and shift queries of each \WHIR{} round, the batching of the committed stripes in the opening (column batching is counted in the jagged reduction), each folding round, the final polynomial, the three terms of the jagged reduction (Section~\ref{sec:pcs}), the zerocheck and the \LogUp{} argument, with grinding counted inside the term it protects. The calculator's \texttt{fin} term accounts for the final query phase; we include it once and sum the component errors, whereas the calculator's reported total takes their minimum.
+
+Query soundness is counted in the unique-decoding regime for the core schedule and under the Johnson bound for the compress schedule~\citep{proximity-gaps-2025}; neither needs a proximity-gap conjecture. A proof's level is $-\log_2$ of the \emph{sum} of its component errors, a union bound rather than the smallest component, and a block's level sums over every node of its recursion tree. The analysis follows \WHIR{}'s~\citep{whir}, adding the batching over several commitments and the jagged terms; levels computed by other calculators, such as RISC Zero's~\citep{risc0-soundness}, are comparable only when they charge the same components.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Soundness of the analysed configuration by component group, in bits ($-\log_2$ of the error) as computed by \texttt{soundcalc}~\citep{soundcalc}, each component floored to whole bits, with each schedule's final query phase (85 queries and 22 bits of grinding, 106 bits, for core; 19 queries and 26 bits, 109.3 bits, for compress), which the calculator's model omits, added. A group's figure is the union over its members, and the last row the union over the stage. All figures are for the interactive protocol.}
+\caption{Soundness of the analysed configuration by component group, in bits ($-\log_2$ of the error) as computed by \texttt{soundcalc}~\citep{soundcalc}, each component floored to whole bits. The query group includes the two shift phases and the final-query term, counted once. A group's figure is the union over its members, and the last row the union over the stage. All figures are for the interactive protocol.}
 \label{tab:components}
 \begin{tabular}{lrr}
 \toprule
@@ -50,24 +54,25 @@ Component group & core & compress \\
 \midrule
 Query phases & 104.42 & 104.91 \\
 Folding rounds & 100.93 & 101.69 \\
-Final polynomial & 106.00 & 109.00 \\
 \LogUp{} & 106.00 & 116.00 \\
 Batching & 107.00 & 103.00 \\
 Zerocheck & 109.00 & 114.00 \\
 Reduction to the dense polynomial & 116.00 & 116.00 \\
 Out-of-domain samples & 213.00 & 200.00 \\
 \midrule
-\textbf{Union over the stage} & \textbf{100.70} & \textbf{101.09} \\
+\textbf{Union over the stage} & \textbf{100.74} & \textbf{101.10} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage is above 100 bits, and the two together give 99.88 bits; the folding rounds are the largest error group in both schedules, and only the compress schedule grinds them (Table~\ref{tab:whir-schedule}). We call $-\log_2 \sum_i \varepsilon_i$, summed over every node $i$ of a block's recursion tree, the block's \emph{composite security}; it falls by $\log_2$ of the node count below the per-stage level. For the measured block's tree of about 150 proofs, all but the root under the core schedule, it is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms. Taking each node's error $\varepsilon_i$ in Theorem~\ref{thm:composition} to be its sum in Table~\ref{tab:components}, which leaves out the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the Fiat--Shamir compiled composite security against an adversary making $Q$ oracle queries is $93.51 - \log_2 Q$ bits, 53.5 bits at $Q = 2^{40}$, before the digest term of Assumption~\ref{ass:digest}.
+\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage has more than 100 bits of interactive soundness; the union bound for one core-schedule proof and one compress-schedule proof gives 99.91 bits; the folding rounds are the largest error group in both schedules, and only the compress schedule grinds them (Table~\ref{tab:whir-schedule}). We call $-\log_2 \sum_i \varepsilon_i$, summed over every node $i$ of a block's recursion tree, the block's \emph{composite security}; when all nodes have the same error bound, this is $\log_2$ of the node count below that common per-proof level; for different schedules we sum their individual errors. For an illustrative tree of 150 proofs, comprising 149 proofs under the core schedule and one root under the compress schedule, it is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms.
+
+Applying the $Q$ factor of Theorem~\ref{thm:composition} to these quantified interactive terms gives $93.51 - \log_2 Q$ bits, or 53.5 bits at $Q = 2^{40}$. This calculation excludes the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the digest term of Assumption~\ref{ass:digest}, and the theorem's separate hash-collision term. It therefore does not give a numerical bound on the full non-interactive proof's security.
 
 \subsection{Security in three layers}
 \label{sec:iopp-layers}
 
-The figures above bound an interactive protocol, the proof that ships is its Fiat--Shamir compilation, and between the two sits the commitment. We separate the argument into the three layers of the commit-and-open paradigm in its functional form~\citep{funky26}: an information-theoretic protocol whose verifier reads the prover's messages only through evaluation queries; the interactive argument obtained by committing to those messages; and the non-interactive argument obtained by Fiat--Shamir. Each layer has its own security statement, and the statements compose in that order.
+The figures above bound an interactive protocol; the deployed proof is its Fiat--Shamir compilation. The commitment layer connects these constructions. We separate the argument into the three layers of the commit-and-open paradigm in its functional form~\citep{funky26}: an information-theoretic protocol whose verifier reads the prover's messages only through evaluation queries; the interactive argument obtained by committing to those messages; and the non-interactive argument obtained by Fiat--Shamir. Each layer has its own security statement, and the statements compose in that order.
 
 \paragraph{Layer 1: a functional interactive oracle proof.} Let $\Sigma$ be an alphabet and $\ell \in \mathbb N$. A \emph{query class} is a set $\mathcal Q$ of functions $\alpha : \Sigma^{\ell} \to D$; a \emph{constraint} is a pair $(\alpha, \beta) \in \mathcal Q \times D$, satisfied by $\Pi$ when $\alpha(\Pi) = \beta$.
 
@@ -88,27 +93,71 @@ Knowledge soundness of the interactive argument then reduces to the knowledge so
 
 \begin{theorem}[Conditional composition]
 \label{thm:composition}
-Work in the random-oracle model, and let an adversary make at most $Q$ oracle queries. Let every proof in the tree, including each shard, leaf and compose proof, be the Fiat--Shamir compilation~\citep{bcs16} of an interactive protocol that is round-by-round knowledge sound with error $\varepsilon_i = \sum_c \varepsilon_{i,c}$. Let a block proof contain $n_\pi$ such proofs, each verified once by its parent, with the root checked by the external verifier, every leaf and compose key, the root's included, an entry of the allowlist, and every shard proof verified against the guest key $\mathsf{vk}$ (\S\ref{sec:security-binding}). Assume further that each node extractor succeeds on transcripts produced by its parent extractor, not only on transcripts drawn from an honest interaction, and that the leaf and compose programs enforce the compose relation of Section~\ref{sec:recursion}, which no theorem of \S\ref{sec:verification} covers. Then the block proof is an argument of knowledge for $\mathcal R_{\mathrm{arith}}$ with knowledge error at most
+Work in the random-oracle model, and let an adversary make at most $Q$ oracle queries. Let every proof in the tree, including each shard, leaf and compose proof, be the Fiat--Shamir compilation~\citep{bcs16} of an interactive protocol that is round-by-round knowledge sound with error $\varepsilon_i = \sum_c \varepsilon_{i,c}$. Let a block proof contain $n_\pi$ such proofs, each verified once by its parent, with the root checked by the external verifier, every leaf and compose key, the root's included, an entry of the allowlist, and every shard proof verified against the guest key $\mathsf{vk}$ (\S\ref{sec:security-binding}). Assume further that each node extractor succeeds on transcripts produced by its parent extractor, not only on transcripts drawn from an honest interaction, and that the leaf and compose programs enforce the compose relation of Section~\ref{sec:security-binding}, which no theorem of \S\ref{sec:verification} covers. Then the block proof is an argument of knowledge for $\mathcal R_{\mathrm{arith}}$ with knowledge error at most
 \[
   Q \sum_{i=1}^{n_\pi} \varepsilon_i \;+\; \varepsilon_{\mathrm{hash}} \;+\; \varepsilon_{\mathrm{digest}},
 \]
 where $\varepsilon_{\mathrm{digest}}$ is the error of Assumption~\ref{ass:digest} and $\varepsilon_{\mathrm{hash}} = O(Q^2/2^{d})$ is the probability of a collision in the $d$-bit output of $\Hash$, which builds the transcript and the Merkle trees, with $d = 248$ in the measured instantiation, the term SWIRL states explicitly for its own compilation~\citep[Cor.~4.2.6]{swirl}.
 \end{theorem}
 \begin{proof}[Proof sketch]
-Compiling a round-by-round knowledge sound protocol with Fiat--Shamir costs a factor in the number of oracle queries: an adversary may re-query the oracle on modified prefixes, and the standard analysis charges $Q$ attempts against the per-round error~\citep{bcs16,chiesa-yogev}. Within the tree, the extractor of the compiled argument runs the extractor of each verified proof in turn: a compose node's extractor yields its children's transcripts, and so on down to the shard proofs, whose extractor yields the witness rows. The allowlist hypothesis makes each step an extraction from the intended verifier; without it a node could verify a program other than the compose or leaf program. The hypothesis about parent-produced transcripts is not discharged here: a child's extractor is invoked on a transcript the parent's extractor constructed, which is not the distribution its guarantee is stated against, and a compose node checks its children inside its own circuit rather than as further rounds of one protocol. Discharging this hypothesis would make the theorem unconditional; we leave it open. Given it, the failure events combine by the union bound.
+Compiling a round-by-round knowledge sound protocol with Fiat--Shamir costs a factor in the number of oracle queries: an adversary may re-query the oracle on modified prefixes, and the standard analysis charges $Q$ attempts against the per-round error~\citep{bcs16,chiesa-yogev}. Within the tree, the extractor of the compiled argument runs the extractor of each verified proof in turn: a compose node's extractor yields its children's transcripts, and so on down to the shard proofs, whose extractor yields the witness rows. The allowlist hypothesis makes each step an extraction from the intended verifier; without it a node could verify a program other than the compose or leaf program. The hypothesis about parent-produced transcripts is not discharged here: a child's extractor is invoked on a transcript the parent's extractor constructed, which is not the distribution its guarantee is stated against, and a compose node checks its children inside its own circuit rather than as further rounds of one protocol. Discharging this hypothesis would remove the extractor-compatibility premise; the theorem's other hypotheses would still apply. We leave that premise open. Given it, the failure events combine by the union bound.
 \end{proof}
 
 \subsection{Verifying-key binding}
 \label{sec:security-binding}
 
-The statement of Section~\ref{sec:statement} concerns the advertised machine only if every leaf verified a \emph{core} proof of that machine, every compose node ran the compose program, and the external verifier checked the root under a key of that machine. Three checks give this. A compose node checks that its children's recursion keys belong to a Merkle allowlist (Algorithm~\ref{alg:compose}, line~2); inside the tree that root is a prover-supplied witness, so it is exported as a public value of the root proof. A leaf verifies each shard proof against the guest key $\mathsf{vk}$ its public values carry, and every node carries that $\mathsf{vk}$ upward unchanged. The external verifier then checks the root proof under the recursion key the proof names, requires that key to be in the published allowlist and the exported root to equal the published root, requires the completion flag $\mathsf{complete}$ that only the root sets (\S\ref{sec:recursion}), and compares the exported $\mathsf{vk}$ with the key of the guest program it expects. Every node's key, the root's included, is thus an allowlist entry or the expected guest key.
+\paragraph{The compose relation.} Write a node's public values as
+\[
+  \mathsf{pv} = (\mathsf{vk}, \mathsf{sh}_{\mathrm{in}}, \mathsf{sh}_{\mathrm{out}}, \mathsf{entry}, \mathsf{exit}, \mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}, D, h, \mathsf{code}, \mathsf{root}),
+\]
+the guest's verifying key, the index of the node's first shard and the index after its last, the entry and exit machine states, the memory-address cursors the node opens and closes with, the accumulated cross-shard digest, the digest of committed output, the exit code, and the root of the allowlist of admissible recursion keys; a completion flag $\mathsf{complete}$, set only by the root, accompanies the tuple. With a delay slot the entry and exit states are \emph{pairs} $(\mathsf{pc}, \mathsf{next\_pc})$, so adjacency must pin both components. A compose node of arity $k$ proves $\mathcal R_{\mathrm{comp}}(\mathsf{pv}; \pi_0,\dots,\pi_{k-1})$, which holds when every check of Algorithm~\ref{alg:compose} passes: each $\pi_i$ verifies against a key the allowlist at $\mathsf{root}$ contains, the children share $\mathsf{vk}$, $h$, $\mathsf{code}$ and $\mathsf{root}$, their ranges are adjacent and their cursors tile, and $\mathsf{pv}$ spans the children with $D = \sum_i D_i$. Digests are stored net of the offset $D_{\mathrm{off}}$ of \S\ref{sec:air-global}, so $D = O$ below means the stored value equals $D_{\mathrm{off}}$.
 
-The recursion machine is outside the extraction of \S\ref{sec:verification}, so this binding is part of hypothesis~3 of \S\ref{sec:security-relation}. A prover configured to skip the in-circuit check produces a different compose key, which the allowlist does not contain, and is rejected. The allowlist is enumerated for leaf as well as compose programs (\S\ref{sec:recursion}). The shard-to-leaf step is uniform per shard shape but not across shapes, and the allowlist lets one compose program accept the non-uniform set of leaves by committing to their keys in advance.
+\paragraph{Leaves and the root.} A leaf proves the same relation for its one child, except that the child is a core shard proof verified against the guest's $\mathsf{vk}$; it is the leaf's own key that the allowlist must contain, checked by its parent. A leaf sets $\mathsf{sh}_{\mathrm{in}}$ and $\mathsf{sh}_{\mathrm{out}}$ from the shard indices it verifies. The leaf of the first shard, index~1, also requires its entry state to be $\mathsf{start}(\mathsf{vk})$, the start state the guest key fixes, and its starting cursors to be zero. The root's additional checks in Algorithm~\ref{alg:compose} are $\mathsf{sh}_{\mathrm{in}} = 1$, so that its leftmost leaf is the first-shard leaf; an exit program counter of zero, which the halt row sets (\S\ref{sec:ext-syscall}); $D = O$, which closes the memory argument and the cross-shard digest over the execution; and the exit code zero that the relation of Section~\ref{sec:statement} admits. It then sets $\mathsf{complete}$.
+
+\begin{algorithm}[t]
+\caption{The compose node of arity $k$, and what the root additionally
+requires. Line~2 is the binding of \S\ref{sec:security-binding}: without it the node
+would verify \emph{some} proof rather than a proof of this machine.}
+\label{alg:compose}
+\DontPrintSemicolon
+\KwIn{child proofs $\pi_0,\dots,\pi_{k-1}$ with public values
+      $\mathsf{pv}_0,\dots,\mathsf{pv}_{k-1}$, recursion keys $\mathsf{vk}^{\mathrm{rec}}_0,\dots,\mathsf{vk}^{\mathrm{rec}}_{k-1}$ and membership paths
+      $\mathsf{path}_0,\dots,\mathsf{path}_{k-1}$; a claimed allowlist root $\mathsf{root}$}
+\KwOut{the node's public values $\mathsf{pv}$, or $\bot$}
+\For{$i \gets 0$ \KwTo $k-1$}{
+  \lIf{$\neg\,\mathsf{MerkleVerify}(\mathsf{root}, \mathsf{vk}^{\mathrm{rec}}_i, \mathsf{path}_i)$}{\Return $\bot$
+    \tcp*[f]{the child's key is admissible}}
+  \lIf{$\neg\,\mathsf{Verify}(\mathsf{vk}^{\mathrm{rec}}_i, \mathsf{pv}_i, \pi_i)$}{\Return $\bot$}
+}
+\lIf{$\exists\, i:\ \mathsf{root}_i \neq \mathsf{root}$}{\Return $\bot$
+    \tcp*[f]{children share the root}}
+\lIf{$\mathsf{vk}_i$, $h_i$, $\mathsf{code}_i$ not all equal over $i$}{\Return $\bot$}
+\For{$i \gets 0$ \KwTo $k-2$}{
+  \lIf{$\mathsf{sh}_{\mathrm{out},i} \neq \mathsf{sh}_{\mathrm{in},i+1} \lor \mathsf{exit}_i \neq \mathsf{entry}_{i+1}$}{\Return $\bot$
+    \tcp*[f]{ranges adjacent}}
+  \lIf{$\mathsf{cur}_{\mathrm{out},i} \neq \mathsf{cur}_{\mathrm{in},i+1}$}{\Return $\bot$
+    \tcp*[f]{cursors tile}}
+}
+$D \gets \sum_{i} D_i$ \tcp*{digests accumulate}
+$\mathsf{pv} \gets (\mathsf{vk},\ \mathsf{sh}_{\mathrm{in},0},\ \mathsf{sh}_{\mathrm{out},k-1},\ \mathsf{entry}_0,\ \mathsf{exit}_{k-1},\
+  \mathsf{cur}_{\mathrm{in},0},\ \mathsf{cur}_{\mathrm{out},k-1},\ D,\ h,\ \mathsf{code},\ \mathsf{root})$\;
+\If{this node is the root}{
+  \lIf{$\mathsf{sh}_{\mathrm{in}} \neq 1 \lor \mathsf{pc}(\mathsf{exit}) \neq 0$}{\Return $\bot$
+    \tcp*[f]{first shard; exit pc zero}}
+  \lIf{$D \neq O \lor \mathsf{code} \neq 0$}{\Return $\bot$}
+  set $\mathsf{complete}$\;
+}
+\Return $\mathsf{pv}$\;
+\end{algorithm}
+
+The statement of Section~\ref{sec:statement} concerns the advertised machine only if every leaf verified a \emph{core} proof of that machine, every compose node ran the compose program, and the external verifier checked the root under a key of that machine. Three checks give this. A compose node checks that its children's recursion keys belong to a Merkle allowlist (Algorithm~\ref{alg:compose}, line~2); inside the tree that root is a prover-supplied witness, so it is exported as a public value of the root proof. A leaf verifies each shard proof against the guest key $\mathsf{vk}$ its public values carry, and every node carries that $\mathsf{vk}$ upward unchanged. The external verifier then checks the root proof under the recursion key the proof names, requires that key to be in the published allowlist and the exported root to equal the published root, requires the completion flag $\mathsf{complete}$ that only the root sets (\S\ref{sec:argument-block}), and compares the exported $\mathsf{vk}$ with the key of the guest program it expects. Every node's key, the root's included, is thus an allowlist entry or the expected guest key.
+
+The recursion machine is outside the extraction of \S\ref{sec:verification}, so this binding is part of hypothesis~3 of \S\ref{sec:security-relation}. A prover configured to skip the in-circuit check produces a different compose key, which the allowlist does not contain, and is rejected. The allowlist is enumerated for leaf as well as compose programs (\S\ref{sec:argument-block}). The shard-to-leaf step is uniform per shard shape but not across shapes, and the allowlist lets one compose program accept the non-uniform set of leaves by committing to their keys in advance.
 
 \subsection{Security of the cross-shard digest}
 \label{sec:air-digest-security}
 
-This subsection gives what the elliptic-curve option of \S\ref{sec:air-global} rests on: the addition row, the lift, and Assumption~\ref{ass:digest}.
+This subsection states the curve-addition constraints, message encoding and computational binding assumption for the elliptic-curve option of \S\ref{sec:air-global}.
 
 \paragraph{The addition row.} The chord identities
 \[
@@ -146,19 +195,27 @@ That analysis is open, as is a parameter analysis of the curve: SP1's memo cites
 \subsection{Trace uniqueness}
 \label{sec:air-unique}
 
-Uniqueness is argued shard by shard; what joins the shards is the memory carried across their boundaries.
+We first link memory accesses across shard boundaries, then derive trace uniqueness within each shard.
 
 \begin{lemma}[Cross-shard memory]
 \label{lem:xmem}
-Let $(\mathsf{T}_i, \mathsf{pv}_i)_{i<N}$ satisfy $\mathcal R_{\mathrm{arith}}$ with at most $N_{\mathrm{int}}$ interactions in all, and suppose no reachable vanishing combination of Assumption~\ref{ass:digest} occurs. Then every shard has at most one boundary row per word, and for every word the initial tuple that a shard's boundary row receives is the final tuple of the latest earlier shard that touched the word, or the word's initial tuple, from the memory-initialisation table or, for an image word, from the image digest of $\mathsf{vk}$ that the first shard's leaf adds (\S\ref{sec:air-memory}), if none did. The per-shard chains of Lemma~\ref{lem:memory} therefore join into one chain per word, ordered by $(\mathsf{shard}, \mathsf{clk})$.
+Let $(\mathsf{T}_i, \mathsf{pv}_i)_{i<N}$ satisfy $\mathcal R_{\mathrm{arith}}$ with at most $N_{\mathrm{int}}$ interactions in all, and suppose no reachable vanishing combination of Assumption~\ref{ass:digest} occurs. Assume further that each shard has at most one real boundary row per word, and that such a row supplies the previous tuple of the first actual access to that word in the shard and consumes the tuple of its last actual access. Consider a shard and a word it touches. If an earlier shard touched the word, the current shard's initial boundary tuple equals the final tuple of the most recent earlier shard that touched it. If no earlier shard touched the word, the initial tuple comes from the program image for an image word and from the memory-initialisation table for any other word. The image tuples are bound by the digest in $\mathsf{vk}$, which the first shard's leaf adds (\S\ref{sec:air-memory}). The per-shard chains of Lemma~\ref{lem:memory} therefore join into one chain per word, ordered by $(\mathsf{shard}, \mathsf{clk})$.
 \end{lemma}
 \begin{proof}[Proof sketch]
-Three facts fix the timestamps. Every access carries the timestamp $(\mathsf{shard}, \mathsf{clk})$ of the instruction that makes it, a precompile's accesses that of the instruction invoking it; the public-values table sends the entry state with the shard's execution index, the state bus carries that index unchanged through the shard, and compose nodes chain these indices as they chain $\mathsf{sh}$, so timestamps of different instructions are distinct and ordered as the execution is. The initial-memory and finalisation tables prove their addresses strictly increasing, and their cursors start at zero and tile, so each address has at most one initial tuple (one initialisation row or one image entry) and one finalisation row in the execution; an initial tuple has timestamp $(0,0)$. Every boundary row receives a word's initial tuple and sends its final tuple through the cross-shard digest (\S\ref{sec:air-global}). By Lemma~\ref{lem:digest} and the hypothesis, $\sum_i D_i = O$ makes the sent and received multisets of tuples equal. Now induct, for one word, over the shards that touch it in the order of their timestamps. The $k$-th such shard receives tuples whose timestamps precede its own accesses, and the only sent tuples with such timestamps that no earlier shard has consumed are the word's initial tuple, when $k = 1$, and otherwise the final tuple of the $(k-1)$-th shard; each tuple is consumed once, so the shard has exactly one boundary row for the word, and that row receives this tuple. This is offline memory checking~\citep{blum1994} across shards.
+By Lemma~\ref{lem:digest} and the hypothesis, $\sum_i D_i = O$, including the image digest added by the first shard's leaf, makes the sent and received multisets of memory tuples equal. Fix an address $a$. Let $I_a$ count its memory-initialisation rows, $P_a$ its entries in the fixed program image, and $F_a$ its memory-finalisation rows. Every boundary row contributes one tuple to each side at the same address. Counting multiplicities at $a$ therefore gives
+\[
+  I_a + P_a = F_a \le 1.
+\]
+The inequality follows from the strictly increasing finalisation addresses and the public cursors that chain their tables across shards. Thus the combined initial multiset has at most one tuple per address. In particular, if $P_a = 1$, then $I_a = 0$: disjointness of image entries and initialisation rows follows from tuple balance. Their initial timestamp is $(0,0)$.
+
+Under the boundary-row premise, Lemma~\ref{lem:memory} makes each shard's accesses to $a$ one path from its boundary row's initial tuple to its final tuple. Every actual access strictly increases $(\mathsf{shard},\mathsf{clk})$, so each nonempty path does too. The boundary paths form a finite directed graph with balanced internal tuple multiplicities, at most one initial tuple and at most one finalisation tuple. Strictly increasing timestamps exclude cycles; the unit initial multiplicity and balance then force one path. Each shard contributes at most one segment of that path, so consecutive segments link the last access of one touching shard to the first access of the next. This is offline memory checking~\citep{blum1994} across shards.
 \end{proof}
+
+The boundary-row premise is not proved by this argument or by the extracted determinism theorems. The honest executor emits one boundary row per touched word, but the current \texttt{MemoryLocal} AIR does not enforce uniqueness or a nonempty access segment: a row with identical initial and final tuples contributes cancelling interactions to both the local memory bus and the cross-shard digest. Establishing that every satisfying trace has the required boundary rows remains an open obligation of item~5 in \S\ref{sec:security-relation}.
 
 \begin{theorem}[From chip determinism to trace uniqueness]
 \label{thm:unique}
-Fix a program image, public values and a valid shard with at most one boundary row per word. If every chip of the shard is deterministic in the sense of Definition~\ref{def:det}, then the rows reachable from the entry state along the state and memory buses are determined by the program image, the public values, the initial values of the words the shard touches (the hint words of the memory-initialisation table and, in a shard after the first, the initial tuples of its boundary rows), and the declared free values of Definition~\ref{def:det} (Table~\ref{tab:det-findings}): any two valid shards that agree on these agree on those rows up to permutation.
+Fix a program image, public values and a valid shard with the well-formed boundary rows assumed by Lemma~\ref{lem:xmem}. If every chip of the shard is deterministic in the sense of Definition~\ref{def:det}, then the rows reachable from the entry state along the state and memory buses are determined by the program image, the public values, the initial values of the words the shard touches (the hint words of the memory-initialisation table and, in a shard after the first, the initial tuples of its boundary rows), and the declared free values of Definition~\ref{def:det} (Table~\ref{tab:det-findings}): any two valid shards that agree on these agree on those rows up to permutation.
 \end{theorem}
 \begin{proof}
 By Lemma~\ref{lem:chain} the instruction rows of either shard form one chain from the entry state; write $r_1, \dots, r_N$ for the chain of the first of the two shards compared, and let a step $i$ be $r_i$ together with the precompile rows it invokes, which access memory at $r_i$'s clock. We show by induction on $i$ that the rows of step $i$ have the same inputs and outputs in both shards. The inputs of $r_i$ are its received state tuple $s_{i-1}$, its fetched instruction, and the previous values of the addresses it accesses. $s_0$ is public and $s_{i-1}$ is the output of $r_{i-1}$ by induction. The fetched instruction is a function of $\mathsf{pc}(s_{i-1})$ because the program bus is received only by the preprocessed program table, which is committed. The previous value of an address is, by Lemma~\ref{lem:memory}, the value written by the last earlier access to that address, or the word's initial value, which is fixed: an image word is bound to the program image through the image digest of $\mathsf{vk}$, and a hint word or boundary tuple is one of the initial values the statement fixes. Earlier accesses belong to steps $j < i$, whose outputs agree by induction. So the inputs of $r_i$ agree, and determinism of its chip gives that its outputs agree; a precompile row of the step then receives its arguments from $r_i$'s syscall tuple and its previous values from earlier accesses, so the same argument applies to it, in the order of its accesses.

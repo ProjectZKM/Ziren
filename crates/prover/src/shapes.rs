@@ -388,12 +388,6 @@ const LOG_STACK: usize = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usi
 const PROGRAM_LOG_ROWS: std::ops::RangeInclusive<usize> =
     10..=zkm_pcs::stacked_shapes::consts::CORE_MAX_LOG_ROW_COUNT;
 
-/// Cells a core shard's main round may carry past `ELEMENT_THRESHOLD`: the
-/// executor closes a shard once its accounted area reaches the threshold, so
-/// the last instruction's rows, and the chips the accounting leaves out, land
-/// on top of it.  `2^26` cells is the allowance; the buckets stop there.
-const CORE_MAIN_OVERSHOOT_CELLS: usize = 1 << 26;
-
 /// A core chip's name and its two round widths.
 struct CoreChipDims {
     name: String,
@@ -453,11 +447,9 @@ enum Stage {
 impl ZKMProofShape {
     /// The enumerable shapes that need VK setup: compose, deferred and shrink.
     ///
-    /// These key on the children's PIN CLASSES, which the machine fixes.  No
-    /// core shape configuration is taken because none is consulted: the
-    /// normalize shapes that WOULD have depended on core workload data are not
-    /// enumerated at all, being collected from real proofs instead, for the
-    /// reason the body records.
+    /// These key on the children's pin classes, which the machine fixes.
+    /// [`Self::generate_all`] adds the normalize classes enumerated from the
+    /// core machine's supported proof geometry.
     pub fn generate<'a>(
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
@@ -579,7 +571,10 @@ impl ZKMProofShape {
                     .collect();
                 fill.sort_by(|a, b| b.main_width.cmp(&a.main_width).then(a.name.cmp(&b.name)));
                 let one_row_each: usize = fill.iter().map(|d| d.main_width).sum();
-                let max_main = zkm_pcs::ELEMENT_THRESHOLD + fixed_main + CORE_MAIN_OVERSHOOT_CELLS;
+                // The executor's area budget counts unpadded events. Trace padding,
+                // especially Keccak's power-of-two rows, can exceed that budget.
+                // Enumerate through the jagged verifier's round-area ceiling.
+                let max_main = 1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA;
                 for blocks in main_buckets(max_main.div_ceil(block)) {
                     let hi = blocks * block;
                     let lo = zkm_pcs::jagged::previous_bucket_blocks(blocks) * block;
@@ -1459,6 +1454,40 @@ mod normalize_enumeration_tests {
             crate::VK_MERKLE_TREE_HEIGHT
         );
         assert!(shapes.len() + compose <= 1 << crate::VK_MERKLE_TREE_HEIGHT);
+    }
+
+    #[test]
+    fn normalize_enumeration_covers_padded_keccak_shard() {
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        // Block 26,181,835: Keccak padding pushes the main round to 352 blocks,
+        // past the former executor-budget-based enumeration limit.
+        let rows: Vec<(String, usize)> = [
+            ("Byte", 65_536),
+            ("Global", 441_056),
+            ("KeccakSponge", 262_144),
+            ("KeccakSpongeControl", 8_192),
+            ("MemoryLocal", 55_136),
+            ("Program", 1_048_576),
+            ("Range", 2_048),
+            ("SyscallPrecompile", 32),
+        ]
+        .into_iter()
+        .map(|(name, height)| (name.to_owned(), height))
+        .collect();
+        let class = ZKMProofShape::normalize_class(machine, &rows);
+        assert_eq!((class.1, class.2), (8, 352));
+        assert!(ZKMProofShape::generate_normalize(machine)
+            .iter()
+            .any(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)) == class));
+        let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &rows, false);
+        input.is_first_shard = false;
+        let (program, _) = prover.recursion_program_basefold(&input);
+        let (_, vk) = prover.compress_prover.setup(&program);
+        assert!(
+            prover.recursion_vk_map.contains_key(&vk.hash_koalabear()),
+            "vk_map.bin must cover the padded Keccak shard"
+        );
     }
 
     /// Every leaf the production census recorded (`ZIREN_CENSUS_FILE`, lines

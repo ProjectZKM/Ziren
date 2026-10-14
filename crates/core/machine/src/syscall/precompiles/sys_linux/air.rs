@@ -144,36 +144,40 @@ where
         builder.assert_eq(recognized_sum + local.is_nop_known, local.is_real);
         let is_nop: AB::Expr = local.is_nop_known.into();
 
-        let a0_reduce = local.a0.reduce::<AB>();
+        // Linux arguments are full u32 words. Pin their byte decomposition before
+        // using the bounded encoding for exact comparisons with small constants.
+        builder.slice_range_check_u8(&local.a0.0, local.is_real);
+        builder.slice_range_check_u8(&local.a1.0, local.is_real);
+        let a0_decode = Self::small_arg_comparison_value(local.a0.map(Into::<AB::Expr>::into));
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a0_reduce.clone(),
+            a0_decode.clone(),
             local.decode_a0_0,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a0_reduce.clone() - AB::Expr::one(),
+            a0_decode.clone() - AB::Expr::one(),
             local.decode_a0_1,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a0_reduce - AB::Expr::two(),
+            a0_decode - AB::Expr::two(),
             local.decode_a0_2,
             local.is_real.into(),
         );
 
-        let a1_reduce = local.a1.reduce::<AB>();
+        let a1_decode = Self::small_arg_comparison_value(local.a1.map(Into::<AB::Expr>::into));
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a1_reduce.clone() - AB::Expr::one(),
+            a1_decode.clone() - AB::Expr::one(),
             local.decode_a1_1,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a1_reduce - AB::Expr::from_u32(3),
+            a1_decode - AB::Expr::from_u32(3),
             local.decode_a1_3,
             local.is_real.into(),
         );
@@ -280,9 +284,6 @@ impl SysLinuxChip {
         local: &SysLinuxCols<AB::Var>,
         is_a0_0: AB::Var,
     ) {
-        builder.when(local.is_mmap).slice_range_check_u8(&local.a0.0, local.is_mmap.into());
-        builder.when(local.is_mmap).slice_range_check_u8(&local.a1.0, local.is_mmap.into());
-
         let mut a1_byte1_lo = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);

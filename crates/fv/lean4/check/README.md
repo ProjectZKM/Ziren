@@ -14,8 +14,8 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 
 | File | Role |
 |---|---|
-| `regen_all.sh OUT` | Regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Byte-identical between runs. |
-| `check.py FILE ROOT PREFIX` | Splits the file (`split.py`), applies each pass of its `PASSES` table to the modules it matches, and runs `make`. `--no-build` stops before `make`. |
+| `regen_all.sh OUT` | Regenerates every chip file: base files, the gadget snippets generated from them by the recipes in `$SNIPPET_TOOLS/recipes.tsv`, then the chip files with those snippets. Identical checkout and snippet inputs give byte-identical output. |
+| `check.py FILE ROOT PREFIX` | Splits the file (`split.py`), applies each pass of its `PASSES` table to the modules it matches, and runs `make`. `--no-build` stops before `make`. `--validate-log LOG [INVENTORY]` checks a module's diagnostics and, when supplied, its theorem axiom reports. |
 | `split.py` | Prelude module for definitions no theorem depends on; theorems in chunk modules by dependency level, packed to about 40 KB, each importing exactly the chunks it uses; a `Makefile` and `Check.lean`, which prints `#print axioms` for every `deterministic`. |
 | `lift_steps.py` | Moves the top-level `have` steps of one theorem into lemmas in their own modules. |
 | `flat_gadget.py` | Rewrites a snippet's `gadget_det` or `row_spec` so its constraint conjuncts are projected where used instead of opened as hypotheses. |
@@ -25,3 +25,20 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 
 A chip is closed when `Check` prints only `propext`, `Classical.choice` and `Quot.sound` for every
 `deterministic`, and every `END` line in `progress.log` shows `rc=0 sorry=0`.
+
+These conditions are enforced: admitted obligations, missing theorem reports, and additional
+axioms fail the command. A successful `check.py` writes `OUTROOT/closure.json`, containing the
+SHA-256 of the original generated source and the complete determinism theorem inventory. An old
+receipt is removed before each check; a failed elaboration or closure check produces no receipt.
+The checker requires `LEAN_PROJECT` to match the repository's Lean library and dependency pins,
+builds that library, and records its build inputs in the receipt.
+Use `crates/fv/lean4` as the project template, including its `ZirenDet.lean` root and pinned
+configuration files; keep regenerated chip output in the separate regeneration directory.
+Compiled proof modules are reusable only when `OUTROOT/.lean-cache.json` records the same
+Lean library sources, dependency pins, compiler version and project path. Changed or unrecorded
+inputs discard the compiled modules before rebuilding; an axiom audit alone cannot certify a
+module compiled against a different library.
+
+Keep the generated sources and checker receipts together outside Git. Regenerate and recheck
+after constraint or generator changes; CI does not compare the archived proof checks with the
+current checkout.
