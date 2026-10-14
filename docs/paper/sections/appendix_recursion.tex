@@ -1,0 +1,62 @@
+\section{Recursion implementation and key enumeration}
+\label{sec:app-recursion}
+
+Section~\ref{sec:arch-recursion} gives the block-level aggregation pipeline, and \S\ref{sec:security-binding} defines its compose relation and root checks. This appendix gives the recursion machine, proving schedule, verifying-key enumeration and downstream shrink and wrap configurations.
+
+\subsection{Recursion machine and proving schedule}
+
+Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same chip/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its chips are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate, the public values and, in the machine that proves leaves and composes, the decomposition of an $\EF$ element into its four $\F$ coordinates. The final recursion-tree root produces the compressed proof; the verifying-key allowlist binds that proof to the advertised machine. Shrink and wrap nodes extend the tree past the root for the applications (\S\ref{sec:recursion-shrink-wrap}).
+
+\paragraph{Leaves.} A \emph{leaf} (\emph{normalize}) program verifies one core shard proof in four phases mirroring the host verifier: the transcript prologue (public values, commitment, chip dimensions), the \LogUp{} layer replay, the zerocheck replay with the constraint evaluation of every chip present, and the jagged opening with its closing identity followed by the \WHIR{} verifier. The leaf programs form a bounded set that can be enumerated in advance (see below); on one GPU, consecutive shards of the same class reuse a device-resident proving key. On the GPU prover, leaf proving is \emph{fused} into the core-stage pipeline, meaning that it is scheduled alongside core-shard proving: each leaf is proved on the device that proved its shard, and a separate proving lane overlaps this work with core-shard proving. Fusion preserves one core shard proof per leaf.
+
+\paragraph{Tree shape.} The tree merges contiguous shard \emph{ranges} as soon as they are complete rather than level by level, which shortens the tail after the last core shard from four serial composes to two, followed by the root (\S\ref{sec:perf-pipeline}). A leaf is never the root, and neither is a compose of several children: once one node covers the execution, a compose of arity one over it closes the run, keeping leaf programs within the classes the enumeration below covers and giving the root one verifier program per child class, whatever the tree below it. The root alone is proved under the compress schedule (\S\ref{sec:perf-proofsize}). Arity is capped at three by the recursion chips' height budget; arity four was measured as neutral (41 nodes replaced by 27, $-0.7\%$ of wall time, unchanged tail).
+
+\subsection{Verifying-key enumeration}
+\label{sec:recursion-key-enumeration}
+
+\paragraph{Enumerating the leaf keys.} A leaf program is determined by the geometry of the shard proof it verifies, which Section~\ref{sec:pcs-geometry} quantises into buckets with a padding-column count fixed by the bucket. What remains is the shard's chip set, one of the machine's declared clusters, whether it is the execution's first shard, and the two bucket indices. Enumerating those combinations yields, without running a guest, every leaf key a prover can produce for a shard in those clusters, at most $2\,|\mathcal C|\,|\mathcal B_{\mathrm{prep}}|\,|\mathcal B_{\mathrm{main}}|$ of them. A \emph{cluster} is a chip-set combination declared by the shape configuration, curated from the target workloads rather than exhaustive over the chip powerset, so the allowlist covers an arbitrary guest only as far as the list does (\S\ref{sec:scope}). A shard outside the list produces a key the allowlist lacks and is refused: a restriction on which executions have an accepted proof. For the configuration this paper describes, the allowlist holds 6\,494 leaf and compose keys.
+
+Sampling the leaf keys from a corpus of proved shards instead would leave every shard shape the corpus missed outside the allowlist. The enumeration is checked against such a corpus class by class and against the programs the classes generate. Algorithm~\ref{alg:enum} states it; every quantity it ranges over is fixed by the machine and the committed geometry.
+
+\begin{algorithm}[!htb]
+\caption{Enumerating the admissible leaf and compose keys. The loop bounds come from the
+machine's chip clusters and from the bucket rule of \S\ref{sec:pcs-geometry};
+no guest is executed.}
+\label{alg:enum}
+\DontPrintSemicolon
+\KwIn{chip clusters $\mathcal{C}$; bucket sets $\mathcal{B}_{\mathrm{prep}}$,
+      $\mathcal{B}_{\mathrm{main}}$; padding rule $\mathsf{pad}(\cdot)$}
+\KwOut{the allowlist root $\mathsf{root}$}
+$K \gets \emptyset$\;
+\ForEach{cluster $c \in \mathcal{C}$}{
+  \ForEach{$b_{\mathrm{p}} \in \mathcal{B}_{\mathrm{prep}}$,
+           $b_{\mathrm{m}} \in \mathcal{B}_{\mathrm{main}}$}{
+    $n \gets \mathsf{pad}(b_{\mathrm{m}})$ \tcp*{a function of the bucket, not of the real count}
+    \ForEach{$\mathit{first} \in \{\mathsf{true}, \mathsf{false}\}$}{
+      $\sigma \gets (c,\ \mathit{first},\ b_{\mathrm{p}},\ b_{\mathrm{m}},\ n)$
+        \tcp*{the shape a leaf can be asked to verify}
+      $K \gets K \cup \{\,\mathsf{vk}(\mathsf{CompileLeaf}(\sigma))\,\}$\;
+    }
+  }
+}
+\ForEach{compose shape $\gamma$ (arity $k \le 3$ over the leaf and compose classes)}{
+  $K \gets K \cup \{\,\mathsf{vk}(\mathsf{CompileCompose}(\gamma))\,\}$\;
+}
+\Return $\mathsf{MerkleRoot}(K)$\;
+\end{algorithm}
+
+\subsection{Beyond the root: shrink and wrap}
+\label{sec:recursion-shrink-wrap}
+
+The applications of \S\ref{sec:applications} extend the tree past the root with nodes of arity one. Each verifies one child proof, checks the child's key against the allowlist, and re-exports the child's public values, so the statement is unchanged as the proof moves between configurations; the nodes differ only in the configuration they are proved under and in the verifier that reads their proof.
+
+\paragraph{Shrink.} A shrink node verifies the compressed proof under the compress schedule. One program has two variants, which differ only in how its proof is committed. The \Poseidon{} variant is proved under the core configuration, \KB{} traces and \Poseidon{} commitments and transcript, and is the wrap's input. The \Blake{} variant commits the same traces, and runs its transcript, under \Blake{}, opened by jagged \WHIR{} at a low rate, and is the binary stage's input (\S\ref{sec:arch-garbled}).
+
+\paragraph{Wrap.} A wrap node verifies the \Poseidon{} shrink. Its traces stay over \KB{}, while its Merkle trees and transcript use \Poseidon{} over the BN254 scalar field; the transcript absorbs \KB{} elements several to one BN254 element and draws its \KB{} challenges from BN254 outputs. A circuit over BN254 that verifies the wrap proof therefore hashes in its native field and emulates only the \KB{} arithmetic.
+
+\paragraph{The SNARK circuit.} A Groth16~\citep{groth16} or PLONK~\citep{plonk} circuit over BN254, written with gnark~\citep{gnark}, verifies the wrap proof. Its public inputs are a hash of the guest's key, the digest of the committed values and the allowlist root, read from the public values the wrap re-exports. The circuit checks no allowlist; it binds the wrap key itself, in one of two variants.
+\begin{itemize}
+  \item \emph{Fixed wrap key.} The circuit constrains the wrap key's preprocessed commitment and start address to constants, so a proof attests the wrap of some compressed proof under the allowlisted keys, and a new wrap key needs a new circuit and, for Groth16, a new setup. PLONK and the default Groth16 circuit take this form.
+  \item \emph{Wrap key as input.} A Groth16 circuit leaves those two values free, and its public key hash becomes a \Poseidon{} hash over BN254 of the guest key's hash together with them, so the verifier names the wrap key it accepts and one setup serves every wrap key. In this variant the guest digests its committed values with \Blake{} instead of SHA-256.
+\end{itemize}
+In both, an on-chain verifier checks the proof with a constant number of pairings.

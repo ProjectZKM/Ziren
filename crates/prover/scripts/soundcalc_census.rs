@@ -238,4 +238,24 @@ fn main() {
         "transcript_profile_digest = \"{}\"",
         zkm_pcs::profile::transcript_profile_digest_hex()
     );
+
+    // Soundness bounds use what the verifier admits, including its fixed row
+    // cube, rather than an honest shard's area fence or a program's row count.
+    let log_rows =
+        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
+    let width = |name: &str| {
+        core.chips().iter().find(|chip| chip.name() == name).unwrap().preprocessed_width()
+    };
+    let prep_cells = (1usize << log_rows) * width("Program")
+        + (1usize << 16) * width("Byte")
+        + zkm_core_machine::range::NUM_RANGE_ROWS * width("Range");
+    let stripe = 1usize << lsh;
+    let prep_stripes = zkm_pcs::jagged::committed_dense_len(prep_cells, lsh) / stripe;
+    let main_cells = (1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA) - 1;
+    let main_stripes = zkm_pcs::jagged::committed_dense_len(main_cells, lsh) / stripe;
+    let pins = zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
+    println!("\n[verifier_bounds]");
+    println!("max_log_row_count = {log_rows}   # every stage's fixed zerocheck and LogUp cube");
+    println!("core_dense_batch = {}   # preprocessed + main stripes", prep_stripes + main_stripes);
+    println!("compress_dense_batch = {}", (pins.prep.area + pins.main.area) / stripe);
 }

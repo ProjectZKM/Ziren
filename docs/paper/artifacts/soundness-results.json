@@ -1,0 +1,92 @@
+{
+  "ziren_revision": "cf0b3742",
+  "soundcalc_revision": "d683f29183d8e831fb0bd8fdb8c39ce8598e43ab",
+  "profile_digest": "71a49cf2564480354be2cd1b7e0c0bb379720c7c1a07cc6912f676ec54967f69",
+  "config_sha256": "3f865692ce22e395db791d9a5459c318ae0878673d8eb5ccbcf0701e066de306",
+  "census_sha256": "ee14c92ad3014d88d622f9d508f7631dc60cda59bf0629128eef614a3647bf2b",
+  "stages": {
+    "core": {
+      "regime": "UDR",
+      "components_floored_bits": {
+        "batching": 107,
+        "fold(i=0,s=1)": 103,
+        "fold(i=0,s=2)": 104,
+        "fold(i=0,s=3)": 105,
+        "OOD(i=1)": 213,
+        "Shift(i=1)": 106,
+        "fold(i=1,s=1)": 103,
+        "fold(i=1,s=2)": 104,
+        "fold(i=1,s=3)": 105,
+        "fold(i=1,s=4)": 106,
+        "fold(i=1,s=5)": 107,
+        "fold(i=1,s=6)": 108,
+        "OOD(i=2)": 225,
+        "Shift(i=2)": 106,
+        "fold(i=2,s=1)": 105,
+        "fold(i=2,s=2)": 106,
+        "fold(i=2,s=3)": 107,
+        "fold(i=2,s=4)": 108,
+        "fold(i=2,s=5)": 109,
+        "fold(i=2,s=6)": 110,
+        "fin": 106,
+        "reduce to dense PCS": 116,
+        "zerocheck": 109,
+        "logup-gkr": 106
+      },
+      "groups_bits": {
+        "Query phases": 104.41503749927884,
+        "Folding rounds": 100.92585853724749,
+        "LogUp-GKR": 106,
+        "Batching": 107,
+        "Zerocheck": 109,
+        "Reduction to the dense polynomial": 116,
+        "Out-of-domain samples": 212.9996478225197
+      },
+      "union_bits": 100.74021996335208
+    },
+    "compress": {
+      "regime": "JBR(m=6)",
+      "components_floored_bits": {
+        "batching": 103,
+        "fold(i=0,s=1)": 110,
+        "fold(i=0,s=2)": 111,
+        "OOD(i=1)": 200,
+        "Shift(i=1)": 106,
+        "fold(i=1,s=1)": 105,
+        "fold(i=1,s=2)": 106,
+        "fold(i=1,s=3)": 107,
+        "fold(i=1,s=4)": 108,
+        "fold(i=1,s=5)": 109,
+        "fold(i=1,s=6)": 110,
+        "OOD(i=2)": 209,
+        "Shift(i=2)": 106,
+        "fold(i=2,s=1)": 103,
+        "fold(i=2,s=2)": 104,
+        "fold(i=2,s=3)": 105,
+        "fold(i=2,s=4)": 106,
+        "fold(i=2,s=5)": 107,
+        "fold(i=2,s=6)": 108,
+        "fin": 109,
+        "reduce to dense PCS": 116,
+        "zerocheck": 114,
+        "logup-gkr": 116
+      },
+      "groups_bits": {
+        "Query phases": 104.91253715874966,
+        "Folding rounds": 101.69393831057165,
+        "LogUp-GKR": 116,
+        "Batching": 103,
+        "Zerocheck": 114,
+        "Reduction to the dense polynomial": 116,
+        "Out-of-domain samples": 199.99718498439296
+      },
+      "union_bits": 101.09734225351367
+    }
+  },
+  "one_core_plus_root_bits": 99.90775902535312,
+  "example_tree": {
+    "core_schedule_proofs": 149,
+    "compress_schedule_proofs": 1,
+    "union_bits": 93.51351184070434
+  }
+}

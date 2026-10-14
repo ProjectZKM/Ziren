@@ -23,21 +23,25 @@ and a cost estimate before the measurements.
 | `046_ext` | multiplication, division, bit manipulation and system calls |
 | `05_pcs` | dense packing, stacking, jagged reduction and branching program |
 | `06_iopp` | WHIR protocol, interleaved commitment, schedule, soundness, proof size |
-| `07_recursion` | leaves, compose tree, shrink/wrap, vk allowlist |
+| `065_security` | security relation, soundness accounting, compose and root checks, verifying-key binding and cross-shard digest |
 | `075_verification` | trusted base, conformance, extracted determinism, defects |
 | `08_performance` | per-instruction cost estimate, then the measurements |
 | `09_conclusion` | conclusion |
-| appendices | `appendix_units` (frame and chips), `appendix_isa`, `appendix_prior` (results imported from prior work, by number), `035_ipcore` (system boundary), `appendix_ipcore` (interfaces, defects) |
+| appendices | `appendix_units` (frame and chips), `appendix_isa`, `appendix_prior` (results imported from prior work, by number), `appendix_recursion` (recursion implementation, key enumeration, shrink and wrap) |
 
 `sections/old/` holds the previous migration-narrative draft for reference;
 it is not built.
 
-Build: `make` (pdflatex + bibtex). Parameters quoted in the paper come from
-`crates/pcs/src/whir/jagged.rs` (`core_whir_config`) and
-`docs/soundness/ziren.soundcalc-report.md`; re-check both when the schedule
-changes. In that report, `total` is the minimum component level. The paper
-therefore cites the separately composed union-bound subtotal and keeps the
-Fiat--Shamir query factor and digest term explicit.
+Build: `make` (pdflatex + bibtex). Protocol parameters come from
+`crates/pcs/src/whir/jagged.rs`. Matching soundness inputs, the machine census,
+component report and reproduction script are in [`artifacts/`](artifacts/README.md).
+The report uses the current core and Johnson-bound root schedules, sums the
+floored component errors and counts the final-query term once. It reproduces
+the soundness table's stage bounds of 100.74 and 101.10 bits. The Fiat–Shamir query factor
+and unquantified binding and digest terms remain separate.
+
+The same directory contains the allowlist-enabled compressed-proof benchmark:
+290,643 bytes and 25.2 ms median native verification over five warm runs.
 
 Authoring conventions: section content lives in `sections/`, only `ziren-mips32-gpu.tex`
 contains `\input{}`; natbib `\citep{}`; math macros (`\F`, `\EF`, `\KB`,

@@ -1,0 +1,12 @@
+{
+  "sha256": "c12ddd701c5c4545e2b6b6e6cd421c036d4a4298745fafb37cdceb7b30380e81",
+  "bytes": 91469945,
+  "modules": 9854,
+  "files": 20205,
+  "url": "https://zkm-toolchain.s3.amazonaws.com/fv/ziren-fv-lean-20261014.tar.gz",
+  "ziren_revision": "cf0b3742a3c383c4fab456172fb508f6e0b14538",
+  "closed_chips": 57,
+  "determinism_theorems": 104,
+  "lean_version": "4.33.1",
+  "validation": "All archive hashes, checker receipts, per-module diagnostics, fresh public-theorem axiom audits and current-AIR contracts verified; full rebuild instructions included."
+}
