@@ -1,11 +1,13 @@
 # Performance
 
+The latest Ethereum block benchmarks (11 October 2026) reach **75.8 MHz** on eight RTX 5090 GPUs, with **60.6 MHz aggregate throughput** across 15 blocks using Geth. The latest compressed-proof benchmark (14 October 2026) measures **290,643 bytes (284 KiB)** and **25.2 ms native verification**. The workloads and measurement conditions are detailed below.
+
 ## Metrics
 
 Three quantities describe a zkVM's performance:
 
 - **Instruction efficiency**: the committed trace area (cells) and bus interactions one executed instruction costs. It is a property of the arithmetization, independent of the hardware.
-- **Proving throughput**: guest cycles proved per second on named hardware, from reading the input to writing the compressed proof. It is a rate, not a clock frequency. One cycle is one executed MIPS instruction; a precompile call is one cycle and many rows of its chip.
+- **Proving throughput**: guest cycles divided by proving time on named hardware, reported in MHz (10⁶ guest instructions/s). The GPU benchmarks below measure from the prove request at the prover to the compressed proof, excluding client execution and verification. One cycle is one executed MIPS instruction; a precompile call counts as one cycle but contributes many rows to its chip.
 - **Proof size**: the bytes of the compressed proof a verifier reads.
 
 Proving cost follows from throughput and the price of the hardware: the cost of a proof is its proving time multiplied by the cost per second of the machine. [ethproofs.org](https://ethproofs.org/) reports proving time, proof size and cost per Mgas for Ethereum mainnet blocks proved by each zkVM.
@@ -14,9 +16,9 @@ To reproduce measurements on your own hardware, use the [zkvm-benchmarks](https:
 
 ## Measurements
 
-The figures below are from the Ziren V2.0 paper (`docs/paper`). The workload is Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth (Rust) and the block keeper of Geth (Go). The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor and 925 GB of memory.
+The figures below are from the Ziren V2.0 paper (`docs/paper`). The throughput workload is Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth (Rust) and the block keeper of Geth (Go). The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor, 124 vCPUs and 925 GiB of memory. The throughput runs use driver 570.153.02 and CUDA 12.8 on Ubuntu 22.04, with the GPU server in a CUDA 12.8.1 container based on Ubuntu 24.04.
 
-The proving throughput and the proof size are of the released configuration. The GPU kernel profile and the executor rates were measured on revisions of the v2.0.0 branch that precede the release in two respects: the Poseidon2 permutation used 13 partial rounds instead of the released 20, and the lookup challenge was not ground.
+The throughput tables were rerun on 11 October 2026, before the subsequent Linux syscall and Poseidon2 address constraint fixes. The proof-size and native-verification measurements were rerun on 14 October 2026 at revision `cf0b3742`, with both fixes and the regenerated verification-key map. The GPU kernel profile and executor rates are historical measurements from an earlier configuration, including 13 Poseidon2 partial rounds rather than the corrected 20 and no lookup-challenge grinding. These results should be interpreted within their respective configurations.
 
 ### Instruction efficiency
 
@@ -37,7 +39,7 @@ Committed cells and bus interactions for one row of the most frequent chips. The
 | `Mul` | 32 | 42 | 74 | 42 |
 | `DivRem` | 32 | 131 | 163 | 64 |
 
-Over a whole block the cost per instruction is higher, mainly because of the per-shard memory-argument rows. Block 25,955,640 (495.6 million cycles) commits 29.2 G cells and 12.8 G (row, interaction) pairs: 59.5 cells and 26.2 pairs per executed instruction. The cross-shard `Global` chip holds 15% of the area (8.9 cells per instruction), because every word a shard touches costs two of its rows. The figure depends on the workload: a block that uses more precompiles has more cells per cycle.
+Over a whole block the cost per instruction is higher, mainly because of the per-shard memory-argument rows. Block 25,955,640 (495.6 million cycles) commits 29.2 G cells and 12.8 G (row, interaction) pairs: 58.9 cells and 25.8 pairs per executed instruction. The cross-shard `Global` chip holds 15% of the area (8.8 cells per instruction), because every word a shard touches costs two of its rows. The figure depends on the workload: a block that uses more precompiles has more cells per cycle.
 
 ### Proving throughput
 
@@ -79,4 +81,13 @@ With one GPU, execution does not limit proving. With several GPUs fed by one hos
 
 ### Proof size
 
-The compressed proof is 274 KiB (280,653 bytes): the root of the recursion tree is proved under a compress schedule (rate 1/8, Johnson-bound WHIR), and since the root program is the same for every tree, the size does not depend on the guest or the length of the execution. Openings of the first WHIR oracle account for most of it. The native verifier checks it in 73 ms. Groth16 and PLONK proofs wrapped from it are constant-size SNARKs for on-chain verification.
+On 14 October 2026, a freshly generated Fibonacci proof (`n = 500`) at revision `cf0b3742` was measured with both the prover's in-circuit child-key allowlist checks and the native verifier's root-key check enabled, using the regenerated map of 6,494 supported verification keys. Proving used one RTX 5090; native verification used the AMD EPYC 9355 host with 24 Rayon threads.
+
+| Measurement | Result |
+|-------------|-------:|
+| Compressed proof including its recursion key (`ZKMReduceProof`) | 290,643 bytes (284 KiB) |
+| SDK container including variant, public outputs and version | 290,681 bytes |
+| Native verification, median of five warm runs | 25.2 ms |
+| Native verification, range across those runs | 24.8–25.3 ms |
+
+Verification time excludes proving, setup, deserialization and one warm-up verification. The compressed proof uses the root's compress schedule (rate 1/8, Johnson-bound WHIR); openings of the first WHIR oracle account for most of its size. For a fixed root program and commitment shape, proof size is independent of the guest's execution length. Groth16 and PLONK wrapping produce separate constant-size SNARKs for on-chain verification; the measurements above are for the native compressed proof.
