@@ -87,7 +87,6 @@ Definition~\ref{def:shard}.
 
 \subsection{The block argument}
 \label{sec:arch-recursion}
-\label{sec:recursion}
 \label{sec:argument-block}
 \label{sec:perf-pipeline}
 
@@ -113,7 +112,7 @@ additional conditions for closing the execution and memory argument.
 
 \begin{protocol}[Block proof, end to end]
 \label{prot:block}
-\textbf{Public parameters:} the field $\F$ and extension $\EF$, the $\Poseidon{}$ transcript and Merkle trees, the \WHIR{} schedule (Table~\ref{tab:whir-schedule}), the bucket rule (\S\ref{sec:pcs-geometry}), the compose arity (at most three), and the allowlist root $\mathsf{root}_K$ of the admissible leaf and compose keys (Algorithm~\ref{alg:enum}).
+\textbf{Public parameters:} the field $\F$ and extension $\EF$, the $\Poseidon{}$ transcript and Merkle trees, the \WHIR{} schedule (Table~\ref{tab:whir-schedule}), the bucket rule (\S\ref{sec:pcs-geometry}), the compose arity (at most three), and the allowlist root $\mathsf{root}_K$ of the admissible leaf and compose keys.
 
 \smallskip
 \noindent\textbf{Setup}$(P)$. Commit to the program ROM of image $P$ and to the preprocessed \texttt{Program}, \texttt{Byte} and \texttt{Range} tables; output $(\mathsf{pk}, \mathsf{vk})$.
@@ -136,7 +135,7 @@ additional conditions for closing the execution and memory argument.
 \end{enumerate}
 \end{protocol}
 
-\paragraph{Enumerating admissible keys.} A leaf program is determined by its shard's chip cluster, first-shard flag, two committed-area buckets and the padding rule of \S\ref{sec:pcs-geometry}. Enumerating these combinations produces at most $2\,|\mathcal C|\,|\mathcal B_{\mathrm{prep}}|\,|\mathcal B_{\mathrm{main}}|$ leaf keys without executing a guest; compose keys are enumerated over the admitted recursion classes. The analysed configuration contains 6\,494 leaf and compose keys. The clusters are curated from target workloads rather than exhaustive over chip sets, so a shard outside them has no admissible key and is refused. Algorithm~\ref{alg:enum} in Appendix~\ref{sec:app-recursion} gives the enumeration; \S\ref{sec:security-binding} explains how the allowlist binds the compressed proof to the advertised machine.
+\paragraph{Admissible keys.} The allowlist contains 6\,494 leaf and compose keys determined by the declared chip clusters and committed shapes. The clusters are curated from target workloads rather than exhaustive over chip sets, so a shard outside them has no admissible key and is refused. Section~\ref{sec:security-binding} states the checks that bind the compressed proof to the advertised machine.
 
 Steps~2 to~4 of \textbf{Prove} overlap: a shard is proved as soon as its record exists and a compose node as soon as its children are proved, with trace generation and proof-of-work on the accelerators. Only the root uses the schedule tuned for size (\S\ref{sec:perf-proofsize}). The start-up interval and the serial composes over the last shards remain (Table~\ref{tab:cards}).
 
@@ -148,7 +147,7 @@ The protocol is symbolic in the following parameters; numeric values are fixed w
   \item The base field $\F$ and the challenge extension $\EF$, whose size bounds every term of the form $\deg/|\EF|$; the permutation of the transcript and commitment trees, with its round counts (\S\ref{sec:prelim}), and the trees' arity.
   \item The committed geometry: the stacking height $H=2^{\ell}$, the row cube $2^{n}$ and the bucket rule (\S\ref{sec:pcs-geometry}), which together fix the set of recursion programs a prover can produce.
   \item The proximity test: the initial rate $\rho$, per-round folding factors, query counts, out-of-domain samples, the grinding bits of each query phase and of the bus challenges (Table~\ref{tab:whir-schedule}), and the decoding regime.
-  \item Recursion: the compose arity and the height of the tree of admissible keys (\S\ref{sec:recursion}).
+  \item Recursion: the compose arity and the height of the tree of admissible keys (\S\ref{sec:argument-block}).
   \item The machine: the shard size, clock fence and per-chip height budgets (\S\ref{sec:isa}), and the guest-accelerator set, which fixes the chip set.
   \item The cross-shard digest: the curve and its extension, the interaction bound $N_{\mathrm{int}}$ and the multiplicity bound $B$ (\S\ref{sec:air-digest-security}).
 \end{itemize}
@@ -157,9 +156,9 @@ The protocol is symbolic in the following parameters; numeric values are fixed w
 \label{sec:applications}
 \label{sec:arch-routes}
 
-\Ziren{} execution proofs support private computation and rollups on Ethereum and Bitcoin. Figure~\ref{fig:architecture} (bottom) shows SNARK wrapping for private computation and garbled verification for Bitcoin rollups. Both routes preserve the execution statement of $\pi$; Section~\ref{sec:recursion-shrink-wrap} describes their shrink and wrap stages.
+\Ziren{} execution proofs support private computation and rollups on Ethereum and Bitcoin. Figure~\ref{fig:architecture} (bottom) shows SNARK wrapping for private computation and garbled verification for Bitcoin rollups. Both routes preserve the execution statement of $\pi$.
 
-\paragraph{Private computation.}\label{sec:arch-wrap} A Groth16 or PLONK circuit over BN254 verifies the wrap proof while hashing in its native field. An on-chain verifier checks the resulting SNARK proof with a constant number of pairings~\citep{groth16,plonk}. The inner proof is a private witness to the Groth16 or PLONK circuit. A zero-knowledge instantiation hides that witness beyond what follows from the public execution statement~\citep{groth16,plonk}. The current circuit exposes the guest-key hash, the committed-values digest and the allowlist root (\S\ref{sec:recursion-shrink-wrap}); privacy is relative to these public inputs and to any application data published separately.
+\paragraph{Private computation.}\label{sec:arch-wrap} A Groth16 or PLONK circuit over BN254 verifies a wrapped form of the compressed proof while hashing in its native field. An on-chain verifier checks the resulting SNARK proof with a constant number of pairings~\citep{groth16,plonk}. The inner proof is a private witness to the Groth16 or PLONK circuit. A zero-knowledge instantiation hides that witness beyond what follows from the public execution statement~\citep{groth16,plonk}. The current circuit exposes the guest-key hash, the committed-values digest and the allowlist root; privacy is relative to these public inputs and to any application data published separately.
 
 \paragraph{Ethereum rollups.} A rollup can run its execution client as a MIPS32 guest and use \Ziren{} to prove its state transitions. For Ethereum rollups, a verifier contract checks the execution proof as part of settlement. Each rollup supplies its own data-availability and settlement protocol.
 

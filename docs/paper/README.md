@@ -9,7 +9,7 @@ Sections (`sections/`), in reading order. The architecture follows Jolt
 (ePrint 2023/1217), with devices from the jagged-PCS paper (theorems with completeness/soundness/efficiency), Cairo (formal step function, limb lemma, "stricter than the relation" list), RISC Zero (verifier checklist, departures from reference analyses), Ceno (displayed block relation), OpenVM (adapter comparison, bus invariants) and Nexus (evaluation questions): background and approach, preliminaries with formal
 definitions, an overview of the ISA and the approach, the shared building
 blocks and the cost of one row, per-family instruction sections with uniform
-tables, then the back end, recursion, verification,
+tables, then the back end, verification,
 and a cost estimate before the measurements.
 
 | file | content |
@@ -27,20 +27,21 @@ and a cost estimate before the measurements.
 | `075_verification` | trusted base, conformance, extracted determinism, defects |
 | `08_performance` | per-instruction cost estimate, then the measurements |
 | `09_conclusion` | conclusion |
-| appendices | `appendix_units` (frame and chips), `appendix_isa`, `appendix_prior` (results imported from prior work, by number), `appendix_recursion` (recursion implementation, key enumeration, shrink and wrap) |
+| appendices | `appendix_units` (frame and chips), `appendix_isa`, `appendix_prior` (results imported from prior work, by number) |
 
 `sections/old/` holds the previous migration-narrative draft for reference;
 it is not built.
 
 Build: `make` (pdflatex + bibtex). Protocol parameters come from
 `crates/pcs/src/whir/jagged.rs`. Matching soundness inputs, the machine census,
-component report and reproduction script are in [`artifacts/`](artifacts/README.md).
+component report and reproduction script are retained as local validation evidence
+and are not included in this repository.
 The report uses the current core and Johnson-bound root schedules, sums the
 floored component errors and counts the final-query term once. It reproduces
 the soundness table's stage bounds of 100.74 and 101.10 bits. The Fiat–Shamir query factor
 and unquantified binding and digest terms remain separate.
 
-The same directory contains the allowlist-enabled compressed-proof benchmark:
+The local evidence also includes the allowlist-enabled compressed-proof benchmark:
 290,643 bytes and 25.2 ms median native verification over five warm runs.
 
 Authoring conventions: section content lives in `sections/`, only `ziren-mips32-gpu.tex`
