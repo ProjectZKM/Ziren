@@ -25,7 +25,7 @@ use crate::{
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionShape {
-    /// Per-chip exact row count.  `BTreeMap` (not `HashMap`) so the
+    /// Per-chip log2 height.  `BTreeMap` (not `HashMap`) so the
     /// iteration order is deterministic across processes — without
     /// this, the recursion-compiler emits opcodes in a per-process-
     /// random order, the resulting wrap_program's compiled hint
