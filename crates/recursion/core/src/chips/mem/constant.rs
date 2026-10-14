@@ -205,9 +205,8 @@ mod tests {
 
     #[test]
     fn unshaped_memory_tables_use_multiple_of_32_rows() {
-        let instructions = (0..130)
-            .map(|addr| instr::mem(MemAccessKind::Write, 1, addr, 2))
-            .collect();
+        let instructions =
+            (0..130).map(|addr| instr::mem(MemAccessKind::Write, 1, addr, 2)).collect();
         let program = Arc::new(RecursionProgram::<KoalaBear>::new(
             crate::RawProgram::from_linear(instructions),
             130,

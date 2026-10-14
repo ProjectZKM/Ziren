@@ -2925,7 +2925,9 @@ mod test {
             let views = as_chip_views(&traces);
             let mut p_chal = build_challenger();
             let precomputed =
-                <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+                <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+                    &views, None,
+                );
             p_chal.observe(precomputed.commit.original_commitment.clone());
             let r_row = r_row_suffixes(&views, &z_row);
             let rounds = [JaggedOpenRound {
