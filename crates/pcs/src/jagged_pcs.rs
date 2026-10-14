@@ -2919,25 +2919,28 @@ mod test {
     /// round-trip through the production verifier.
     #[test]
     fn test_jagged_basefold_roundtrip() {
-        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0xC0DE_BA5E);
-        let views = as_chip_views(&traces);
-        let mut p_chal = build_challenger();
-        let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
-        p_chal.observe(precomputed.commit.original_commitment.clone());
-        let r_row = r_row_suffixes(&views, &z_row);
-        let rounds = [JaggedOpenRound {
-            chip_traces: &views,
-            r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row),
-            precomputed: &precomputed,
-        }];
-        let bundle = prove_jagged_rounds(&rounds, &z_row, &mut p_chal);
-        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
-        assert!(
-            verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
-            "jagged-basefold pipeline should accept honest proof"
-        );
+        // Cover both power-of-two heights and a chip padded to 96 rows.
+        for shapes in [&[(4, 16), (2, 8)][..], &[(4, 96), (2, 32)][..]] {
+            let (traces, z_row) = mk_shard(shapes, 0xC0DE_BA5E);
+            let views = as_chip_views(&traces);
+            let mut p_chal = build_challenger();
+            let precomputed =
+                <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+            p_chal.observe(precomputed.commit.original_commitment.clone());
+            let r_row = r_row_suffixes(&views, &z_row);
+            let rounds = [JaggedOpenRound {
+                chip_traces: &views,
+                r_row_per_chip: &r_row,
+                claims: column_claims(&views, &z_row),
+                precomputed: &precomputed,
+            }];
+            let bundle = prove_jagged_rounds(&rounds, &z_row, &mut p_chal);
+            let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
+            assert!(
+                verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
+                "jagged-basefold pipeline should accept honest proof"
+            );
+        }
     }
 
     /// Deterministic chip traces under a NAME PREFIX, so two rounds' chips stay
