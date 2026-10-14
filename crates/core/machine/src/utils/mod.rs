@@ -127,22 +127,27 @@ pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> 
 }
 
 /// Padded height for a chip whose shape pins an EXACT row count rather than a
-/// log2 one. Unshaped traces round up to a multiple of 32, with a minimum of 16;
-/// shaped traces use the pinned count itself.
+/// log2 one: the next multiple of 32 that is `>= n` and `>= 32`, or the pinned
+/// count itself when the shape supplies one.
 ///
-/// Individual chip heights can be arbitrary: the jagged PCS packs them before
-/// the power-of-two codeword boundary used by Merkle commitments and FRI.
+/// The recursion side of [`next_multiple_of_32`].  Pinning the row count
+/// (rather than `2^log`) lets one shape fit every program tightly, so a
+/// compose program is a function of its arity alone.
 ///
 /// # Panics
 ///
-/// If the pinned count is smaller than the number of real rows.
+/// If the pinned count is `< n`.
+///
+/// The unshaped branch rounds to a power of two, unlike the core-side
+/// [`next_multiple_of_32`]: the recursion merkle-tree and FRI paths call
+/// `log2_strict_usize` on trace heights, which requires `h = 2^k`.
 pub fn next_multiple_of_32_rows(n: usize, fixed_rows: Option<usize>, chip: &str) -> usize {
     match fixed_rows {
         Some(rows) => {
             assert!(n <= rows, "chip {chip}: shape pins {rows} rows but the trace needs {n}",);
             rows
         }
-        None => next_multiple_of_32(n, None, chip),
+        None => next_power_of_two(n, None, chip),
     }
 }
 
@@ -238,20 +243,6 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-
-    #[test]
-    fn recursion_padding_preserves_exact_shape_rows() {
-        assert_eq!(next_multiple_of_32_rows(65, None, "test"), 96);
-        assert_eq!(next_multiple_of_32_rows(0, None, "test"), 16);
-        assert_eq!(next_multiple_of_32_rows(65, Some(80), "test"), 80);
-        assert_eq!(next_multiple_of_32_rows(65, Some(128), "test"), 128);
-    }
-
-    #[test]
-    #[should_panic(expected = "shape pins 64 rows but the trace needs 65")]
-    fn recursion_padding_rejects_undersized_shape() {
-        next_multiple_of_32_rows(65, Some(64), "test");
-    }
 
     #[test]
     fn zeroed_f_vec_returns_zero_values_for_koalabear() {

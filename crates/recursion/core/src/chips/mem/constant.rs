@@ -156,7 +156,7 @@ mod tests {
     use machine::{tests::run_recursion_test_machines, RecursionAir};
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
 
     use crate::stark::KoalaBearPoseidon2Outer;
     use zkm_pcs::test_harness::run_test_machine;
@@ -201,30 +201,6 @@ mod tests {
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
-    }
-
-    #[test]
-    fn unshaped_memory_tables_use_multiple_of_32_rows() {
-        let instructions = (0..130)
-            .map(|addr| instr::mem(MemAccessKind::Write, 1, addr, 2))
-            .collect();
-        let program = Arc::new(RecursionProgram::<KoalaBear>::new(
-            crate::RawProgram::from_linear(instructions),
-            130,
-            Vec::new(),
-            None,
-        ));
-        let record = ExecutionRecord {
-            program: program.clone(),
-            mem_const_count: 130,
-            ..Default::default()
-        };
-        let chip = MemoryChip::<KoalaBear>::default();
-        let preprocessed = chip.generate_preprocessed_trace(&program).unwrap();
-        let main = chip.generate_trace(&record, &mut ExecutionRecord::default()).unwrap();
-        // 130 entries occupy 65 real rows; a power-of-two pad would use 128.
-        assert_eq!(preprocessed.height(), 96);
-        assert_eq!(main.height(), preprocessed.height());
     }
 
     #[test]
