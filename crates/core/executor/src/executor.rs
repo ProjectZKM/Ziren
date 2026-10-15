@@ -294,6 +294,11 @@ pub struct Executor<'a> {
     /// populates.  See the `shape_match_found` note in `inc_shard_if_need`.
     pub maximal_shapes: Option<MaximalShapes>,
 
+    /// How many of a block's first shards the cutting pass closes early, at
+    /// `1 / 2^RAMP_AREA_SHIFT` of the area budget.  Defaults to `RAMP_SHARDS`;
+    /// a caller with only one card to keep busy sets 0.
+    pub ramp_shards: u32,
+
     /// The costs of the program.
     pub costs: HashMap<MipsAirId, u64>,
 
@@ -657,6 +662,7 @@ impl<'a> Executor<'a> {
             local_memory_access: nohash_hasher::IntMap::default(),
             local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
+            ramp_shards: RAMP_SHARDS,
             costs,
             lde_size_check: false,
             lde_size_threshold: 0,
@@ -3462,7 +3468,7 @@ impl<'a> Executor<'a> {
     /// cutting pass already recorded.
     #[inline]
     fn ramp_split_due(&self) -> bool {
-        if self.state.current_shard > RAMP_SHARDS {
+        if self.state.current_shard > self.ramp_shards {
             return false;
         }
         let area = self.split_acct.trace_area((self.state.clk / 5) as u64);
