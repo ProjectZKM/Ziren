@@ -60,38 +60,38 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     })
 }
 
-/// The share of the area budget an area-cut precompile shard is sized to
-/// fill, by the cost model in [`area_split_threshold`].
-const AREA_FILL_PERCENT: usize = 90;
-
 /// How many events of `code` one deferred shard holds when it is cut by area,
 /// or `None` for a code without a cost model here (it keeps its count
 /// threshold).
 ///
-/// One event costs its own row, a local-memory entry per touched word (four
-/// to a row), two global rows per touched word plus one for the syscall, and
-/// a precompile-syscall row; each row is charged its AIR's width from
-/// `mips_costs`.  The byte table is in every shard and comes off the budget
-/// first.  The model leaves out rows that grow with the shard, so it
-/// undercounts a full one; the count fills [`AREA_FILL_PERCENT`] of the
-/// budget to keep the real shard inside it.  The global AIR is the tallest,
-/// so it also bounds the count by the per-chip height cap the core shards
-/// are cut at.  Rounded down to a multiple of 32.
+/// One event costs a row of its own AIR, a local-memory entry per touched
+/// word (four to a row), two global rows per touched word plus two for the
+/// syscall, and a precompile-syscall row; each row is charged its AIR's width
+/// from `mips_costs`.  The precompile's own trace is padded to a power of two,
+/// so each padded height is tried and the largest count that fits the budget
+/// is kept.  The byte table is in every shard and comes off the budget first.
+/// The global AIR is the tallest, so it also bounds the count by the
+/// per-chip height cap the core shards are cut at.  Rounded down to a
+/// multiple of 32.
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
     let (air, words) = weierstrass_air_and_words(code)?;
     let costs = COSTS.get_or_init(crate::mips_costs);
-    let global = costs[&MipsAirId::Global];
-    let cells = costs[&air]
-        + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
-        + (2 * words + 1) * global
+    let global_rows = 2 * words + 2;
+    let per_event = words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC)
+        * costs[&MipsAirId::MemoryLocal]
+        + global_rows * costs[&MipsAirId::Global]
         + costs[&MipsAirId::SyscallPrecompile];
-    let byte_table = (1 << 16) * costs[&MipsAirId::Byte];
-    let budget = element_threshold / 100 * AREA_FILL_PERCENT;
-    let by_area = budget.saturating_sub(byte_table) / cells;
-    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / (2 * words + 1);
-    Some(by_area.min(by_height) / 32 * 32)
+    let budget = element_threshold.saturating_sub((1 << 16) * costs[&MipsAirId::Byte]);
+    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows;
+    let mut best = 0;
+    for log_rows in 0..=zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT {
+        let padded = 1usize << log_rows;
+        let Some(rest) = budget.checked_sub(padded * costs[&air]) else { break };
+        best = best.max((rest / per_event).min(padded).min(by_height));
+    }
+    Some(best / 32 * 32)
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
@@ -410,11 +410,11 @@ mod tests {
         // A double touches half the words of an add, so more of them fit.
         assert!(double > add && add > opts.deferred);
         assert_eq!(double % 32, 0);
-        // The global AIR, two rows per touched word plus one, stays under the
+        // The global AIR, two rows per touched word plus two, stays under the
         // per-chip height cap.
         let words = zkm_curves::NUM_WORDS_EC_POINT;
-        assert!(add * (4 * words + 1) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
-        assert!(double * (2 * words + 1) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        assert!(add * (4 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        assert!(double * (2 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
         // A code without a cost model keeps its count threshold.
         assert_eq!(precompile_split_threshold(SyscallCode::BN254_FP_ADD, &opts), opts.deferred);
     }
