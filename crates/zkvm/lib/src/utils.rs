@@ -84,24 +84,37 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
 
     /// Performs multi-scalar multiplication (MSM) on slices of bit vectors and points. Note:
     /// a_bits_le and b_bits_le should be in little endian order.
+    ///
+    /// Shamir's trick, from the top bit down:
+    ///
+    /// ```text
+    ///   res ← 2·res + aᵢ·a + bᵢ·b,    with a + b added once up front
+    /// ```
+    ///
+    /// one doubling and at most one addition per bit, where doubling both points every bit
+    /// took two doublings and up to two additions. The accumulator is not doubled while it is
+    /// the identity, which some curves cannot double.
     fn multi_scalar_multiplication(
         a_bits_le: &[bool],
-        mut a: Self,
+        a: Self,
         b_bits_le: &[bool],
-        mut b: Self,
+        b: Self,
     ) -> Self {
         debug_assert!(a_bits_le.len() == b_bits_le.len());
 
+        let mut ab = a.clone();
+        ab.complete_add_assign(&b);
         let mut res: Self = Self::identity();
-        for (a_bit, b_bit) in a_bits_le.iter().zip(b_bits_le.iter()) {
-            if *a_bit {
-                res.complete_add_assign(&a);
+        for (a_bit, b_bit) in a_bits_le.iter().zip(b_bits_le.iter()).rev() {
+            if !res.is_identity() {
+                res.double();
             }
-            if *b_bit {
-                res.complete_add_assign(&b);
+            match (*a_bit, *b_bit) {
+                (true, true) => res.complete_add_assign(&ab),
+                (true, false) => res.complete_add_assign(&a),
+                (false, true) => res.complete_add_assign(&b),
+                (false, false) => {}
             }
-            a.double();
-            b.double();
         }
         res
     }
@@ -175,5 +188,127 @@ pub trait WeierstrassAffinePoint<const N: usize>: AffinePoint<N> {
         }
 
         self.add_assign(other);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AffinePoint, WeierstrassAffinePoint, WeierstrassPoint};
+
+    /// The additive group `ℤ_q`, `q = 2³² − 5`, posing as a curve: the element `v` has the
+    /// limbs `[min(v, q − v), v]`, so two elements share the first limb exactly when they are
+    /// equal or opposite, as two points share `x`. Its complete addition is the Weierstrass
+    /// one, special cases included.
+    #[derive(Clone, Copy, Debug)]
+    struct Zq(WeierstrassPoint<2>);
+
+    const Q: u64 = 4_294_967_291;
+
+    impl Zq {
+        fn of(v: u64) -> Self {
+            match v % Q {
+                0 => Self(WeierstrassPoint::Infinity),
+                v => Self(WeierstrassPoint::Affine([v.min(Q - v) as u32, v as u32])),
+            }
+        }
+
+        fn value(&self) -> u64 {
+            match self.0 {
+                WeierstrassPoint::Infinity => 0,
+                WeierstrassPoint::Affine(l) => l[1] as u64,
+            }
+        }
+    }
+
+    impl WeierstrassAffinePoint<2> for Zq {
+        fn infinity() -> Self {
+            Self(WeierstrassPoint::Infinity)
+        }
+
+        fn is_infinity(&self) -> bool {
+            matches!(self.0, WeierstrassPoint::Infinity)
+        }
+    }
+
+    impl AffinePoint<2> for Zq {
+        const GENERATOR: [u32; 2] = [1, 1];
+        const GENERATOR_T: Self = Self(WeierstrassPoint::Affine([1, 1]));
+
+        fn new(limbs: [u32; 2]) -> Self {
+            Self(WeierstrassPoint::Affine(limbs))
+        }
+
+        fn identity() -> Self {
+            Self::infinity()
+        }
+
+        fn is_identity(&self) -> bool {
+            self.is_infinity()
+        }
+
+        fn limbs_ref(&self) -> &[u32; 2] {
+            match &self.0 {
+                WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
+                WeierstrassPoint::Affine(limbs) => limbs,
+            }
+        }
+
+        fn limbs_mut(&mut self) -> &mut [u32; 2] {
+            match &mut self.0 {
+                WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
+                WeierstrassPoint::Affine(limbs) => limbs,
+            }
+        }
+
+        fn complete_add_assign(&mut self, other: &Self) {
+            self.weierstrass_add_assign(other);
+        }
+
+        /// Only reached for two elements that are neither equal nor opposite.
+        fn add_assign(&mut self, other: &Self) {
+            assert!(self.limbs_ref()[0] != other.limbs_ref()[0]);
+            *self = Self::of(self.value() + other.value());
+        }
+
+        /// Panics on the identity, as the bn254 and bls12-381 points do.
+        fn double(&mut self) {
+            assert!(!self.is_identity(), "doubled the identity");
+            *self = Self::of(2 * self.value());
+        }
+    }
+
+    /// `k mod q` for the little-endian bits of `k`.
+    fn reduce(bits: &[bool]) -> u64 {
+        bits.iter().rev().fold(0, |acc, &b| (2 * acc + b as u64) % Q)
+    }
+
+    fn bits(seed: &mut u64, len: usize, density: u64) -> Vec<bool> {
+        (0..len)
+            .map(|_| {
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                *seed % 8 < density
+            })
+            .collect()
+    }
+
+    #[test]
+    fn msm_matches_the_scalar_combination() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let points = [1, 2, 3, Q - 1, Q - 2, 12345, 1 << 31];
+        for len in [0, 1, 2, 7, 64, 256] {
+            for density in [0, 1, 4, 7, 8] {
+                for &a in &points {
+                    for &b in &[a, Q - a, 0, 7, 99991] {
+                        let (ka, kb) =
+                            (bits(&mut seed, len, density), bits(&mut seed, len, density));
+                        let got = Zq::multi_scalar_multiplication(&ka, Zq::of(a), &kb, Zq::of(b));
+                        let want = (reduce(&ka) * a % Q + reduce(&kb) * (b % Q) % Q) % Q;
+                        assert_eq!(got.value(), want, "len {len} density {density} a {a} b {b}");
+                    }
+                }
+            }
+        }
     }
 }
