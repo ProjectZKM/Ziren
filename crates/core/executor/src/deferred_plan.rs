@@ -47,31 +47,47 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
     }
 }
 
-/// The AIR that proves a 256-bit Weierstrass point operation, and the words
-/// one event touches: both points for an add, the one point for a double.
-///
-/// These codes are cut by area because a point operation is cheap per event:
-/// at the shared count threshold their shards held a small fraction of the
-/// area budget, so a signature-heavy block spent many mostly empty shards on
-/// them.  The model was checked against measured secp256k1 shards; secp256r1
-/// and bn254 use the same AIR layout and word count, so they share it.
-///
-/// Other curve and field precompiles keep the count threshold because none of
-/// them has been measured.  Each also touches a different set of words:
-/// BLS12-381 points are 384-bit, decompress reads a compressed point and
-/// writes the other coordinate, Ed25519 has its own AIR, and uint256 and the
-/// field operations also read a modulus.  Each would need its own word count
-/// and a measured check before it is cut by area, since a model that
-/// overestimates the count could push a shard past the height cap.
-fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
+/// The AIR that proves one event of a single-row precompile, and the words
+/// the event touches: every operand buffer the syscall reads or writes
+/// (both points for a curve add, one for a double or a decompress, both
+/// field elements for a field op, the three uint256 words of a mulmod, the
+/// four buffers of a 256x2048 multiply).  Keccak and SHA, whose chips take
+/// several rows per event and are cut by their own thresholds, are absent.
+fn precompile_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     let point = zkm_curves::NUM_WORDS_EC_POINT;
+    let bn_fp = 8;
+    let bls_fp = 12;
+    let bls_point = 2 * bls_fp;
     Some(match code {
         SyscallCode::SECP256K1_ADD => (MipsAirId::Secp256k1AddAssign, 2 * point),
         SyscallCode::SECP256K1_DOUBLE => (MipsAirId::Secp256k1DoubleAssign, point),
+        SyscallCode::SECP256K1_DECOMPRESS => (MipsAirId::Secp256k1Decompress, point),
         SyscallCode::SECP256R1_ADD => (MipsAirId::Secp256r1AddAssign, 2 * point),
         SyscallCode::SECP256R1_DOUBLE => (MipsAirId::Secp256r1DoubleAssign, point),
+        SyscallCode::SECP256R1_DECOMPRESS => (MipsAirId::Secp256r1Decompress, point),
         SyscallCode::BN254_ADD => (MipsAirId::Bn254AddAssign, 2 * point),
         SyscallCode::BN254_DOUBLE => (MipsAirId::Bn254DoubleAssign, point),
+        SyscallCode::BN254_FP_ADD | SyscallCode::BN254_FP_SUB | SyscallCode::BN254_FP_MUL => {
+            (MipsAirId::Bn254FpOpAssign, 2 * bn_fp)
+        }
+        SyscallCode::BN254_FP2_ADD | SyscallCode::BN254_FP2_SUB => {
+            (MipsAirId::Bn254Fp2AddSubAssign, 4 * bn_fp)
+        }
+        SyscallCode::BN254_FP2_MUL => (MipsAirId::Bn254Fp2MulAssign, 4 * bn_fp),
+        SyscallCode::BLS12381_ADD => (MipsAirId::Bls12381AddAssign, 2 * bls_point),
+        SyscallCode::BLS12381_DOUBLE => (MipsAirId::Bls12381DoubleAssign, bls_point),
+        SyscallCode::BLS12381_DECOMPRESS => (MipsAirId::Bls12381Decompress, bls_point),
+        SyscallCode::BLS12381_FP_ADD
+        | SyscallCode::BLS12381_FP_SUB
+        | SyscallCode::BLS12381_FP_MUL => (MipsAirId::Bls12381FpOpAssign, 2 * bls_fp),
+        SyscallCode::BLS12381_FP2_ADD | SyscallCode::BLS12381_FP2_SUB => {
+            (MipsAirId::Bls12831Fp2AddSubAssign, 4 * bls_fp)
+        }
+        SyscallCode::BLS12381_FP2_MUL => (MipsAirId::Bls12831Fp2MulAssign, 4 * bls_fp),
+        SyscallCode::ED_ADD => (MipsAirId::EdAddAssign, 2 * point),
+        SyscallCode::ED_DECOMPRESS => (MipsAirId::EdDecompress, point),
+        SyscallCode::UINT256_MUL => (MipsAirId::Uint256MulMod, 3 * bn_fp),
+        SyscallCode::U256XU2048_MUL => (MipsAirId::U256XU2048Mul, 2 * bn_fp + 2 * 64),
         _ => return None,
     })
 }
@@ -100,7 +116,7 @@ pub const PROGRAM_MAIN_COLS: usize = 1;
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<(usize, usize)> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
-    let (air, words) = weierstrass_air_and_words(code)?;
+    let (air, words) = precompile_air_and_words(code)?;
     let costs = COSTS.get_or_init(crate::mips_costs);
     let global_rows = 2 * words + 2;
     let per_event = costs[&air]
@@ -392,26 +408,26 @@ mod tests {
     #[test]
     fn count_cut_matches_chunks_exact_across_pushes() {
         let mut p = DeferredPlanner::new(opts());
-        p.push_precompile(SyscallCode::BN254_FP_ADD, "a", vec![1; 5]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "a", vec![1; 5]);
         assert!(p.split(false).is_empty());
-        p.push_precompile(SyscallCode::BN254_FP_ADD, "b", vec![1; 7]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "b", vec![1; 7]);
         let s = p.split(false);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::BN254_FP_ADD,
+                code: SyscallCode::SYS_LINUX,
                 slices: vec![
                     EventSlice { artifact: "a".into(), from: 0, to: 5 },
                     EventSlice { artifact: "b".into(), from: 0, to: 3 }
                 ]
             }]
         );
-        p.push_precompile(SyscallCode::BN254_FP_ADD, "c", vec![1; 4]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "c", vec![1; 4]);
         let s = p.split(true);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::BN254_FP_ADD,
+                code: SyscallCode::SYS_LINUX,
                 slices: vec![
                     EventSlice { artifact: "b".into(), from: 3, to: 7 },
                     EventSlice { artifact: "c".into(), from: 0, to: 4 }
@@ -436,7 +452,7 @@ mod tests {
         assert!(add * (4 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
         assert!(double * (2 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
         // A code without a cost model keeps its count threshold.
-        assert_eq!(precompile_split_threshold(SyscallCode::BN254_FP_ADD, &opts), opts.deferred);
+        assert_eq!(precompile_split_threshold(SyscallCode::SYS_LINUX, &opts), opts.deferred);
     }
 
     #[test]
