@@ -887,10 +887,7 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
+            if !self.unconstrained && !self.skip_replay_bookkeeping && prev.shard != shard {
                 self.split_acct.add_touched_address();
             }
             e.shard = shard;
@@ -934,10 +931,7 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
+        if !self.unconstrained && !self.skip_replay_bookkeeping && record.shard != shard {
             self.split_acct.add_touched_address();
         }
 
@@ -1151,10 +1145,7 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
+            if !self.unconstrained && !self.skip_replay_bookkeeping && prev.shard != shard {
                 self.split_acct.add_touched_address();
             }
             e.value = value;
@@ -1207,10 +1198,7 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
+        if !self.unconstrained && !self.skip_replay_bookkeeping && record.shard != shard {
             self.split_acct.add_touched_address();
         }
 
@@ -1300,10 +1288,7 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
+        if !self.unconstrained && !self.skip_replay_bookkeeping && record.shard != shard {
             self.split_acct.add_touched_address();
         }
 
