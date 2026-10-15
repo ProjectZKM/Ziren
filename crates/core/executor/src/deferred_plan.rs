@@ -67,31 +67,25 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
 /// One event costs a row of its own AIR, a local-memory entry per touched
 /// word (four to a row), two global rows per touched word plus two for the
 /// syscall, and a precompile-syscall row; each row is charged its AIR's width
-/// from `mips_costs`.  The precompile's own trace is padded to a power of two,
-/// so each padded height is tried and the largest count that fits the budget
-/// is kept.  The byte table is in every shard and comes off the budget first.
-/// The global AIR is the tallest, so it also bounds the count by the
-/// per-chip height cap the core shards are cut at.  Rounded down to a
-/// multiple of 32.
+/// from `mips_costs`.  The precompile's own trace is padded only to a
+/// multiple of 32 (`num_rows`, which the GPU trace generator follows too);
+/// a fixed shape would pad it to a power of two, which this does not model.
+/// The byte table is in every shard and comes off the budget first.  The
+/// global AIR is the tallest, so it also bounds the count by the per-chip
+/// height cap the core shards are cut at.  Rounded down to a multiple of 32.
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
     let (air, words) = weierstrass_air_and_words(code)?;
     let costs = COSTS.get_or_init(crate::mips_costs);
     let global_rows = 2 * words + 2;
-    let per_event = words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC)
-        * costs[&MipsAirId::MemoryLocal]
+    let per_event = costs[&air]
+        + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
         + global_rows * costs[&MipsAirId::Global]
         + costs[&MipsAirId::SyscallPrecompile];
     let budget = element_threshold.saturating_sub((1 << 16) * costs[&MipsAirId::Byte]);
     let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows;
-    let mut best = 0;
-    for log_rows in 0..=zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT {
-        let padded = 1usize << log_rows;
-        let Some(rest) = budget.checked_sub(padded * costs[&air]) else { break };
-        best = best.max((rest / per_event).min(padded).min(by_height));
-    }
-    Some(best / 32 * 32)
+    Some((budget / per_event).min(by_height) / 32 * 32)
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
