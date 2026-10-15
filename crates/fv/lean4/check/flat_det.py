@@ -24,6 +24,17 @@ t0 = next(i for i, l in enumerate(L) if l.startswith("theorem deterministic"))
 by = next(i for i in range(t0, len(L)) if L[i].rstrip().endswith(":= by"))
 end = next(i for i in range(by + 1, len(L)) if L[i].startswith("end ") or re.match(r"(theorem|lemma) ", L[i]))
 body = L[by + 1 : end]
+# A budgeted replay has a whole-theorem fallback. Flatten only the replay;
+# its adapters and final theorem still have to elaborate without the fallback.
+if len(body) >= 4 and body[0].strip() == "first" and body[1].strip() == "| picus_budget (":
+    fallback = next((i for i, line in enumerate(body)
+                     if line.strip().startswith("| picus_safe (")), None)
+    close = next((i for i in range((fallback or 0) - 1, 1, -1)
+                  if body[i].strip()), None)
+    if close is None or body[close].strip() != ")" or any(
+            line.strip() for line in body[fallback + 1:]):
+        raise SystemExit("unsupported budgeted replay wrapper")
+    body = body[2:close]
 ns_of_det = [l.split()[1] for l in L[:t0] if l.startswith("namespace ")]
 P = read(os.path.join(d, "P.lean"))
 

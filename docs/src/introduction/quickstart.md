@@ -207,9 +207,8 @@ Local proving is the default (`ZKM_PROVER=local`, or unset). For heavier workloa
 
 ```rust
 ZKM_PROVER=network
-ZKM_PRIVATE_KEY=<your_key>
-SSL_CERT_PATH=<path_to_cert>
-SSL_KEY_PATH=<path_to_key>
+ENDPOINT=<proof_network_endpoint>
+FLEET_TOKEN_FILE=<path_to_token_file>
 ```
 
 ## Verifying a proof on-chain

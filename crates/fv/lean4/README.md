@@ -178,15 +178,17 @@ What makes this manual today:
 - **Gadget shapes.** Each snippet generator recognises its gadget by the shape of the extracted
   constraints; a gadget whose internal layout changes no longer matches, and the generator has to
   be edited. Moving columns or adding unrelated constraints needs no edit.
-- **Silence.** The chip files are not committed, so nothing flags that a change has left the
-  proofs behind.
+- **Coverage evidence.** The chip files and checker receipts are kept outside Git. The completed
+  check contains 104 kernel-checked determinism theorems over 57 chips; three preprocessed tables
+  and two SHA-256 control chips are excluded. After a constraint or generator change, regenerate
+  and recheck the affected proofs. CI does not check whether archived proof coverage is current.
 
-The planned fixes, in order of cost:
+Maintaining coverage and improving the extraction:
 
-1. **A fingerprint manifest.** `zkm-picus` emits a canonical hash of each chip's extracted
-   constraint system; a committed manifest records, per chip, that hash, its theorem count and the
-   check that closed it. A CI job that needs no Lean recomputes the hashes and names the chips to
-   re-check; their entries change only from a passing check log.
+1. **Regenerate and check after changes.** Keep the regenerated sources and strict checker receipts
+   together outside Git. The generator files also stay outside Git; select their directory with
+   `SNIPPET_TOOLS` when running `check/regen_all.sh`. A receipt identifies the checked source by
+   its hash and records the theorem inventory and Lean build inputs.
 2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
    such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
    names rather than positions.

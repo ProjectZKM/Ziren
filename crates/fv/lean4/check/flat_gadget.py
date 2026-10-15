@@ -74,6 +74,13 @@ if None in groups:
 else:
     head = groups
     new_body = [TOK.sub(lambda m: f"({paths[m.group(1)]})" if m.group(1) in paths else m.group(1), l) for l in body]
+# A context-wide rewrite can change the types of the opened conjuncts. Replacing
+# them with projections would lose those normalized hypotheses (CloClz.row_spec).
+# Keep such proofs intact rather than changing what their later steps receive.
+if paths and any(re.search(r"\bat\s+\*(?:\s|$)", l) for l in body):
+    write(out, read(src))
+    print(f"{thm}: kept original (constraint hypotheses are rewritten)")
+    sys.exit(0)
 out_l = L[: by + 1] + head + new_body + rest
 write(out, "\n".join(out_l))
 print(f"{thm}: opened={len(paths)} used={len(used)} body={len(body)} unresolved={sorted(missing)[:10]} "

@@ -32,7 +32,7 @@ members = [
     "crates/verifier",
     "crates/zkvm/*",
 ]
-exclude = ["examples/target", "vendor/uint"]
+exclude = ["examples/target"]
 resolver = "2"
 
 
@@ -136,8 +136,4 @@ hashbrown = "0.14.5"
 [patch."https://github.com/ProjectZKM/Ziren.git"]
 zkm-lib = { path = "crates/zkvm/lib" }
 zkm-primitives = { path = "crates/primitives" }
-
-[patch.crates-io]
-# Backport the upstream expression-macro fix while retaining the 0.9 API used by ethers.
-uint = { path = "vendor/uint" }
 

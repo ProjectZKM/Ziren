@@ -17,7 +17,8 @@ pub const NUM_NOP_SYSCALLS: usize = super::NOP_SYSCALLS.len();
 
 /// Linux Syscall AIR columns.
 ///
-/// All branch selectors are **derived** from `syscall_id` / `a0` / `a1` via `IsZeroOperation`.
+/// All branch selectors are **derived** via `IsZeroOperation`: syscall IDs directly,
+/// and small argument constants through a bounded, range-checked byte encoding.
 /// Intermediate values (`page_offset`, `upper_address`, `is_offset_0`) are computed inline
 /// from byte decompositions, not stored.
 #[derive(PicusAnnotations, AlignedBorrow, Default, Debug, Clone, Copy)]

@@ -126,6 +126,8 @@ impl SysLinuxChip {
     ) {
         cols.a0 = event.a0.into();
         cols.a1 = event.a1.into();
+        blu.add_u8_range_checks(&event.a0.to_le_bytes());
+        blu.add_u8_range_checks(&event.a1.to_le_bytes());
         cols.shard = F::from_u32(event.shard);
         cols.clk = F::from_u32(event.clk);
         cols.syscall_id = F::from_u32(event.syscall_code);
@@ -159,12 +161,12 @@ impl SysLinuxChip {
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;
         cols.is_mmap = F::from_bool(is_mmap);
 
-        let a0_val = F::from_u32(event.a0);
+        let a0_val = Self::small_arg_comparison_value(cols.a0);
         cols.decode_a0_0.populate_from_field_element(a0_val);
         cols.decode_a0_1.populate_from_field_element(a0_val - F::ONE);
         cols.decode_a0_2.populate_from_field_element(a0_val - F::TWO);
 
-        let a1_val = F::from_u32(event.a1);
+        let a1_val = Self::small_arg_comparison_value(cols.a1);
         cols.decode_a1_1.populate_from_field_element(a1_val - F::ONE);
         cols.decode_a1_3.populate_from_field_element(a1_val - F::from_u32(3));
 
@@ -181,9 +183,6 @@ impl SysLinuxChip {
                 cols.inorout.populate_read(event.read_records[0], blu);
             }
             4210 | 4090 => {
-                blu.add_u8_range_checks(&event.a0.to_le_bytes());
-                blu.add_u8_range_checks(&event.a1.to_le_bytes());
-
                 let a1_bytes = event.a1.to_le_bytes();
                 let lo_nibble = a1_bytes[1] & 0x0F;
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
@@ -226,5 +225,150 @@ impl SysLinuxChip {
             4120 | 4246 | 4055 | 4003 => {}
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+    use p3_koala_bear::KoalaBear;
+    use zkm_core_executor::events::{ByteLookupMap, MemoryWriteRecord};
+    use zkm_pcs::constraints_hold_on_row;
+
+    type F = KoalaBear;
+    type EF = BinomialExtensionField<F, 4>;
+    const P: u32 = 0x7F00_0001;
+
+    fn linux_row(code: SyscallCode, a0: u32, a1: u32, result: u32, a3: u32) -> Vec<F> {
+        let event = LinuxEvent {
+            shard: 0,
+            clk: 8,
+            a0,
+            a1,
+            v0: result,
+            syscall_code: code as u32,
+            read_records: vec![],
+            write_records: vec![MemoryWriteRecord {
+                timestamp: 8,
+                value: a3,
+                ..Default::default()
+            }],
+            local_mem_access: vec![],
+        };
+        let mut row = vec![F::ZERO; NUM_SYS_LINUX_COLS];
+        SysLinuxChip::new().event_to_row(
+            &event,
+            row.as_mut_slice().borrow_mut(),
+            &mut ByteLookupMap::default(),
+        );
+        row
+    }
+
+    fn holds(row: &[F]) -> bool {
+        constraints_hold_on_row::<F, EF, _>(&SysLinuxChip::new(), row, row, &[])
+    }
+
+    #[test]
+    fn read_and_fcntl_match_integer_fd_checks() {
+        for fd in [
+            0,
+            1,
+            2,
+            3,
+            255,
+            256,
+            65536,
+            1 << 24,
+            P - 1,
+            P,
+            P + 1,
+            P + 2,
+            2 * P,
+            2 * P + 1,
+            2 * P + 2,
+            u32::MAX,
+        ] {
+            let (result, a3) = if fd == 0 { (0, 0) } else { (u32::MAX, 9) };
+            assert!(holds(&linux_row(SyscallCode::SYS_READ, fd, 0, result, a3)), "read fd={fd:#x}");
+            for cmd in [0, 1, 3, P + 1, P + 3, 2 * P + 1, 2 * P + 3, u32::MAX] {
+                let (result, a3) = match (fd, cmd) {
+                    (0..=2, 1) => (fd, 0),
+                    (0, 3) => (0, 0),
+                    (1..=2, 3) => (1, 0),
+                    _ => (u32::MAX, 9),
+                };
+                assert!(
+                    holds(&linux_row(SyscallCode::SYS_FCNTL, fd, cmd, result, a3)),
+                    "fcntl fd={fd:#x}, cmd={cmd:#x}"
+                );
+            }
+        }
+        for code in [SyscallCode::SYS_MMAP, SyscallCode::SYS_MMAP2] {
+            for addr in [P, 2 * P, u32::MAX] {
+                assert!(holds(&linux_row(code, addr, 0x1000, addr, 0)), "mmap addr={addr:#x}");
+            }
+        }
+    }
+
+    /// Recreate the old modulo-p selectors on a witness claiming a successful call.
+    /// The corrected AIR must reject these witnesses, independently of generation.
+    #[test]
+    fn forged_modulus_alias_selectors_are_rejected() {
+        for multiple in [P, 2 * P] {
+            for (code, a0, a1, result) in [
+                (SyscallCode::SYS_READ, multiple, 0, 0),
+                (SyscallCode::SYS_FCNTL, multiple, 1, 0),
+                (SyscallCode::SYS_FCNTL, multiple + 1, 1, 1),
+                (SyscallCode::SYS_FCNTL, multiple + 2, 3, 1),
+                (SyscallCode::SYS_FCNTL, 0, multiple + 1, 0),
+                (SyscallCode::SYS_FCNTL, 1, multiple + 3, 1),
+            ] {
+                let mut row = linux_row(code, a0, a1, result, 0);
+                let cols: &mut SysLinuxCols<F> = row.as_mut_slice().borrow_mut();
+                let a0_reduced = F::from_u32(a0);
+                cols.decode_a0_0.populate_from_field_element(a0_reduced);
+                cols.decode_a0_1.populate_from_field_element(a0_reduced - F::ONE);
+                cols.decode_a0_2.populate_from_field_element(a0_reduced - F::TWO);
+                let a1_reduced = F::from_u32(a1);
+                cols.decode_a1_1.populate_from_field_element(a1_reduced - F::ONE);
+                cols.decode_a1_3.populate_from_field_element(a1_reduced - F::from_u32(3));
+                cols.is_fnctl_a1_1 = cols.decode_fnctl.result * cols.decode_a1_1.result;
+                cols.is_fnctl_a1_3 = cols.decode_fnctl.result * cols.decode_a1_3.result;
+                assert!(!holds(&row), "forged {code:?}, a0={a0:#x}, a1={a1:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn non_byte_argument_decomposition_requires_an_invalid_byte_lookup() {
+        use zkm_core_executor::ByteOpcode;
+        use zkm_pcs::{Chip, LookupKind};
+
+        // Preserve p's half-words (1, 0x7F00), but use non-byte limbs to make
+        // the bounded comparison value zero. The local equations alone hold;
+        // the real-row byte lookups must reject this decomposition.
+        let mut row = linux_row(SyscallCode::SYS_READ, 0, 0, 0, 0);
+        let cols: &mut SysLinuxCols<F> = row.as_mut_slice().borrow_mut();
+        let b3 = F::from_u32(1 + 256 * 0x7F00) / F::from_u32(256 * 255);
+        cols.a0 = Word([F::ONE, F::ZERO, F::from_u32(0x7F00) - F::from_u32(256) * b3, b3]);
+        assert_eq!(cols.a0[0] + cols.a0[1] * F::from_u32(256), F::ONE);
+        assert_eq!(cols.a0[2] + cols.a0[3] * F::from_u32(256), F::from_u32(0x7F00));
+        assert!(holds(&row));
+
+        let chip = Chip::<F, _>::new(SysLinuxChip::new());
+        assert!(
+            chip.sends().iter().any(|lookup| {
+                if lookup.kind != LookupKind::Byte
+                    || lookup.multiplicity.apply::<F, F>(&[], &row) == F::ZERO
+                {
+                    return false;
+                }
+                let values: Vec<F> = lookup.values.iter().map(|v| v.apply(&[], &row)).collect();
+                values[0] == F::from_u8(ByteOpcode::U8Range as u8)
+                    && (values[2].as_canonical_u32() > 255 || values[3].as_canonical_u32() > 255)
+            }),
+            "a non-byte decomposition must request a tuple absent from the byte table"
+        );
     }
 }

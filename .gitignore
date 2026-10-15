@@ -37,8 +37,8 @@ docs/*.md
 !docs/README.md
 .chainstack
 
-# The paper is carried by the repo: sources, figures and the built PDF.  Only
-# LaTeX's own by-products and the figure preview renders are ignored.
+# Paper sources and figures are versioned; build products and local
+# validation evidence are ignored.
 docs/paper/*.aux
 docs/paper/*.log
 docs/paper/*.out
@@ -56,6 +56,8 @@ docs/paper/figures/unused/
 docs/paper/page-04-review.png
 # Superseded section drafts from the pre-restructure outline; kept locally only.
 docs/paper/sections/old/
+# Paper validation evidence is retained locally, outside versioned sources.
+docs/paper/artifacts/
 
 # Soundness working notes stay local; they are not release material.
 docs/soundness/

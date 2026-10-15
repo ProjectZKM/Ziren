@@ -9,15 +9,8 @@
 @misc{sp1-jit,
   author       = {{Succinct Labs}},
   title        = {{sp1-jit: Just-in-time RISC-V executor for SP1}},
-  howpublished = {\url{https://github.com/succinctlabs/sp1}},
+  howpublished = {\url{https://github.com/succinctlabs/sp1/tree/main/crates/core/jit}},
   year         = {2025},
-}
-
-@misc{ziren,
-  author       = {{The ZKM Project}},
-  title        = {{Ziren: A zero-knowledge MIPS virtual machine}},
-  howpublished = {\url{https://docs.zkm.io}},
-  year         = {2025}
 }
 
 @misc{plonky3,
@@ -56,28 +49,32 @@
   author       = {Gal Arnon and Alessandro Chiesa and Giacomo Fenzi and Eylon Yogev},
   title        = {{WHIR: Reed--Solomon Proximity Testing with Super-Fast Verification}},
   howpublished = {Cryptology ePrint Archive, Paper 2024/1586},
-  year         = {2024}
+  year         = {2024},
+  url          = {https://eprint.iacr.org/2024/1586}
 }
 
 @misc{brakedown,
-  author       = {Alexander Golovnev and Jonathan Lee and Srinath Setty and Justin Thaler and Riad Wahby},
+  author       = {Alexander Golovnev and Jonathan Lee and Srinath Setty and Justin Thaler and Riad S. Wahby},
   title        = {{Brakedown: Linear-time and field-agnostic SNARKs for $\mathsf{R1CS}$}},
   howpublished = {Cryptology ePrint Archive, Paper 2021/1043},
-  year         = {2021}
+  year         = {2021},
+  url          = {https://eprint.iacr.org/2021/1043}
 }
 
 @misc{logup-gkr,
   author       = {Shahar Papini and Ulrich Haböck},
   title        = {{Improving logarithmic derivative lookups using GKR}},
   howpublished = {Cryptology ePrint Archive, Paper 2023/1284},
-  year         = {2023}
+  year         = {2023},
+  url          = {https://eprint.iacr.org/2023/1284}
 }
 
 @misc{haboeck,
   author       = {Ulrich Haböck},
   title        = {{Multivariate lookups based on logarithmic derivatives}},
   howpublished = {Cryptology ePrint Archive, Paper 2022/1530},
-  year         = {2022}
+  year         = {2022},
+  url          = {https://eprint.iacr.org/2022/1530}
 }
 
 @article{lund1992algebraic,
@@ -106,16 +103,6 @@
   year         = {1987}
 }
 
-@article{barrington1989bounded,
-  author       = {David A. Barrington},
-  title        = {{Bounded-Width Polynomial-Size Branching Programs Recognize Exactly Those Languages in $\mathrm{NC}^1$}},
-  journal      = {Journal of Computer and System Sciences},
-  volume       = {38},
-  number       = {1},
-  pages        = {150--164},
-  year         = {1989}
-}
-
 @misc{risc0,
   author       = {Jeremy Bruestle and Paul Gafni and {the RISC Zero Team}},
   title        = {{RISC Zero zkVM}: Scalable, Transparent Arguments of {RISC-V} Integrity},
@@ -140,26 +127,21 @@
   year         = {2023}
 }
 
-@misc{gnark,
-  author       = {{Consensys}},
-  title        = {{gnark: A fast zk-SNARK library in Go}},
-  howpublished = {\url{https://github.com/Consensys/gnark}},
-  year         = {2024}
-}
-
 @misc{plookup,
   author       = {Ariel Gabizon and Zachary J. Williamson},
   title        = {{plookup: A simplified polynomial protocol for lookup tables}},
   howpublished = {Cryptology ePrint Archive, Paper 2020/315},
   note         = {\url{https://eprint.iacr.org/2020/315}},
-  year         = {2020}
+  year         = {2020},
+  url          = {https://eprint.iacr.org/2020/315}
 }
 
 @misc{cq,
   author       = {Liam Eagen and Dario Fiore and Ariel Gabizon},
   title        = {{cq: Cached quotients for fast lookups}},
   howpublished = {Cryptology ePrint Archive, Paper 2022/1763},
-  year         = {2022}
+  year         = {2022},
+  url          = {https://eprint.iacr.org/2022/1763}
 }
 
 @misc{stir,
@@ -178,12 +160,14 @@
   url          = {https://eccc.weizmann.ac.il/report/2018/161/}
 }
 
-@inproceedings{blum1994,
+@article{blum1994,
   author       = {Manuel Blum and Will Evans and Peter Gemmell and Sampath Kannan and Moni Naor},
   title        = {{Checking the Correctness of Memories}},
-  booktitle    = {Algorithmica},
+  journal      = {Algorithmica},
   volume       = {12},
   pages        = {225--244},
+  number       = {2--3},
+  doi          = {10.1007/BF01185212},
   year         = {1994}
 }
 
@@ -199,14 +183,15 @@
   author       = {Alessandro Chiesa and Eylon Yogev},
   title        = {{Building Cryptographic Proofs from Hash Functions}},
   year         = {2024},
-  howpublished = {\url{https://github.com/hash-based-snargs-book}},
+  howpublished = {\url{https://github.com/hash-based-snargs-book/hash-based-snargs-book}},
 }
 
 @misc{soundcalc,
   author       = {{Ethereum Foundation}},
-  title        = {{soundcalc: security calculator for hash-based proof systems}},
+  title        = {{soundcalc}: security calculator for hash-based proof systems and {zkVM} soundness reports},
   howpublished = {\url{https://github.com/ethereum/soundcalc}},
-  year         = {2026}
+  year         = {2026},
+  note         = {Airbender and ZisK v0.16.1 reports at revision 2af5e7d, \url{https://github.com/ethereum/soundcalc/tree/2af5e7dfc01e4aef1bc0e544a3b75c1940b1dded/reports}; Ziren analysis uses the jagged-over-WHIR extension in PR 91 at revision d683f29. Accessed 2026-10-14},
 }
 
 @misc{ethproofs,
@@ -229,13 +214,15 @@
   author       = {Arasu Arun and Srinath Setty and Justin Thaler},
   year         = {2024},
   howpublished = {EUROCRYPT 2024; Cryptology ePrint Archive, Paper 2023/1217},
+  url          = {https://eprint.iacr.org/2023/1217}
 }
 
 @misc{lasso,
   title        = {Unlocking the Lookup Singularity with {Lasso}},
-  author       = {Srinath Setty and Justin Thaler and Riad Wahby},
+  author       = {Srinath Setty and Justin Thaler and Riad S. Wahby},
   year         = {2024},
   howpublished = {EUROCRYPT 2024; Cryptology ePrint Archive, Paper 2023/1216},
+  url          = {https://eprint.iacr.org/2023/1216}
 }
 
 @inproceedings{vram,
@@ -257,6 +244,7 @@
   author       = {Tianyi Liu and Zhenfei Zhang and Yuncong Zhang and Wenqing Hu and Ye Zhang},
   year         = {2024},
   howpublished = {Cryptology ePrint Archive, Paper 2024/387},
+  url          = {https://eprint.iacr.org/2024/387}
 }
 
 @misc{openvm,
@@ -289,18 +277,12 @@
   howpublished = {\url{https://github.com/0xPolygonHermez/zisk}},
 }
 
-@misc{cysic,
-  title        = {{Cysic}: hardware-accelerated proof generation},
-  author       = {{Cysic}},
-  year         = {2025},
-  howpublished = {\url{https://cysic.xyz}},
-}
-
 @misc{airbender,
   title        = {{ZKsync Airbender}: A {RISC-V} {zkVM} over {Mersenne-31}},
   author       = {{Matter Labs}},
   year         = {2025},
-  howpublished = {\url{https://github.com/matter-labs/zksync-airbender}},
+  howpublished = {\url{https://github.com/matter-labs/zksync-airbender/tree/v0.5.2}},
+  note         = {Version 0.5.2; architecture and subargument documentation, accessed 2026-10-13},
 }
 
 @misc{circle-starks,
@@ -308,6 +290,7 @@
   author       = {Ulrich Hab{\"o}ck and David Levit and Shahar Papini},
   year         = {2024},
   howpublished = {Cryptology ePrint Archive, Paper 2024/278},
+  url          = {https://eprint.iacr.org/2024/278}
 }
 
 @misc{binius,
@@ -315,6 +298,7 @@
   author       = {Benjamin E. Diamond and Jim Posen},
   year         = {2023},
   howpublished = {Cryptology ePrint Archive, Paper 2023/1784},
+  url          = {https://eprint.iacr.org/2023/1784}
 }
 
 @misc{fri-binius,
@@ -322,6 +306,7 @@
   author       = {Benjamin E. Diamond and Jim Posen},
   year         = {2024},
   howpublished = {Cryptology ePrint Archive, Paper 2024/504},
+  url          = {https://eprint.iacr.org/2024/504}
 }
 
 @inproceedings{ligero,
@@ -345,18 +330,22 @@
   year         = {2020},
 }
 
-@misc{ethstark,
-  title        = {{ethSTARK} Documentation---Version 1.2},
-  author       = {{StarkWare}},
-  year         = {2023},
-  howpublished = {Cryptology ePrint Archive, Paper 2021/582},
+@misc{proximity-gaps-2025,
+  author       = {Eli Ben-Sasson and Dan Carmon and Ulrich Hab{\"o}ck and Swastik Kopparty and Shubhangi Saraf},
+  title        = {On Proximity Gaps for {Reed--Solomon} Codes},
+  howpublished = {Electronic Colloquium on Computational Complexity, Report TR25-169},
+  year         = {2025},
+  note         = {November 7, 2025},
+  url          = {https://eccc.weizmann.ac.il/report/2025/169/}
 }
 
-@misc{zkmips,
-  title        = {{zkMIPS}: A High-Performance Zero-Knowledge Proof System for the {MIPS} Architecture},
-  author       = {{ZKM}},
-  year         = {2024},
-  howpublished = {\url{https://github.com/zkMIPS/zkMIPS}},
+@misc{ethstark,
+  title        = {{ethSTARK} Documentation---Version 1.2},
+  author       = {{StarkWare Team}},
+  year         = {2023},
+  note         = {July 2023 revision},
+  howpublished = {Cryptology ePrint Archive, Paper 2021/582},
+  url          = {https://eprint.iacr.org/2021/582}
 }
 
 @misc{kona,
@@ -373,10 +362,14 @@
   year         = {2023},
 }
 
-@inproceedings{picus,
+@article{picus,
   title        = {Automated Detection of Under-Constrained Circuits in Zero-Knowledge Proofs},
   author       = {Shankara Pailoor and Yanju Chen and Franklyn Wang and Clara Rodr{\'\i}guez and Jacob Van Geffen and Jason Morton and Michael Chu and Brian Gu and Yu Feng and I{\c{s}}il Dillig},
-  booktitle    = {PLDI},
+  journal      = {Proceedings of the ACM on Programming Languages},
+  volume       = {7},
+  number       = {PLDI},
+  pages        = {1510--1532},
+  doi          = {10.1145/3591282},
   year         = {2023},
 }
 
@@ -384,7 +377,7 @@
   title        = {{STARK} Soundness Calculator},
   author       = {{RISC Zero}},
   year         = {2024},
-  howpublished = {\url{https://github.com/risc0/risc0/tree/main/risc0/zkp/src/prove/soundness.rs}},
+  howpublished = {\url{https://github.com/risc0/risc0/blob/main/risc0/zkp/src/prove/soundness.rs}},
 }
 
 @misc{unicorn,
@@ -399,27 +392,6 @@
   title = {{IP} Processors},
   howpublished = {\url{https://mips.com/products/hardware/}},
   note         = {Accessed September 2026},
-  year = {2026}
-}
-@misc{mediatek-mt7621,
-  author = {{MediaTek Inc.}},
-  title = {{MT7621A/N} dual-core network processor},
-  howpublished = {\url{https://www.mediatek.com/products/home-networking/mt7621}},
-  note         = {Accessed September 2026},
-  year = {2026}
-}
-@misc{openwrt-targets,
-  author = {{OpenWrt Project}},
-  title = {Targets and subtargets ({\tt ath79}, {\tt ramips})},
-  howpublished = {\url{https://openwrt.org/docs/techref/targets/start}},
-  note = {Accessed September 2026},
-  year = {2026}
-}
-@misc{microchip-pic32,
-  author = {{Microchip Technology Inc.}},
-  title = {{MIPS32}-core-based microcontrollers ({PIC32M})},
-  howpublished = {\url{https://www.microchip.com/en-us/products/microcontrollers/32-bit-mcus/pic32m}},
-  note = {Accessed September 2026},
   year = {2026}
 }
 @article{mips-riscv-2021,
@@ -454,7 +426,8 @@
   number = {20},
   pages = {2569},
   year = {2021},
-  note = {IACR ePrint 2021/1382}
+  note = {IACR ePrint 2021/1382},
+  url          = {https://eprint.iacr.org/2021/1382}
 }
 @inproceedings{zekra,
   author = {Heini Bergsson Debes and Edlira Dushku and Thanassis Giannetsos and Ali Marandi},
@@ -467,7 +440,8 @@
   title = {From Interaction to Independence: {zkSNARKs} for Transparent and Non-Interactive Remote Attestation},
   booktitle = {Network and Distributed System Security Symposium (NDSS)},
   year = {2024},
-  note = {IACR ePrint 2024/1068}
+  note = {IACR ePrint 2024/1068},
+  url          = {https://eprint.iacr.org/2024/1068}
 }
 @article{zilch,
   author = {Dimitris Mouris and Nektarios Georgios Tsoutsos},
@@ -475,7 +449,8 @@
   journal = {IEEE Transactions on Information Forensics and Security},
   year = {2021},
   doi = {10.1109/TIFS.2021.3074869},
-  note = {IACR ePrint 2020/1155, \url{https://eprint.iacr.org/2020/1155}}
+  note = {IACR ePrint 2020/1155, \url{https://eprint.iacr.org/2020/1155}},
+  url          = {https://eprint.iacr.org/2020/1155}
 }
 @misc{o1vm,
   author = {Marc Beunardeau and O(1) Labs},
@@ -491,27 +466,12 @@
   howpublished = {\url{https://github.com/openvm-org/openvm-fv}},
 }
 
-@misc{aws-f2,
-  author       = {{Amazon Web Services}},
-  title        = {{Amazon EC2 F2 Instances}},
-  howpublished = {\url{https://aws.amazon.com/ec2/instance-types/f2/}},
-  year         = {2026},
-  note         = {Accessed 24 September 2026}
-}
-
-@misc{aws-fpga-hdk,
-  author       = {{Amazon Web Services}},
-  title        = {{AWS EC2 FPGA Hardware and Software Development Kit}},
-  howpublished = {\url{https://github.com/aws/aws-fpga/tree/f2}},
-  year         = {2026},
-  note         = {F2 branch, accessed 24 September 2026}
-}
-
 @misc{twist-shout,
   author       = {Srinath Setty and Justin Thaler},
   title        = {{Twist} and {Shout}: faster memory checking arguments via one-hot addressing and increments},
   year         = {2025},
   howpublished = {Cryptology ePrint Archive, Paper 2025/105},
+  url          = {https://eprint.iacr.org/2025/105}
 }
 
 @misc{sp1-security,
@@ -520,14 +480,6 @@
   year         = {2026},
   howpublished = {\url{https://docs.succinct.xyz/docs/sp1/security/security-model}},
   note         = {Retrieved 2026-09-24}
-}
-
-@misc{ethproofs-personas,
-  author       = {Fara Woolf},
-  title        = {The {Ethproofs} prover personas and {GPU} price indices},
-  year         = {2025},
-  howpublished = {\url{https://ethproofs.org/blog/the-ethproofs-prover-personas-gpu-price-indices}},
-  note         = {Page dated 2025-12-16; retrieved 2026-09-24}
 }
 
 @misc{sppark,
@@ -556,8 +508,9 @@
 @misc{openvm-logup,
   title        = {On the Soundness of Interactions via {LogUp}},
   author       = {{OpenVM Contributors}},
-  year         = {2026},
-  howpublished = {\url{https://github.com/openvm-org/stark-backend}},
+  year         = {2025},
+  note         = {March 13, 2025},
+  howpublished = {\url{https://github.com/openvm-org/stark-backend/blob/main/docs/Soundness_of_Interactions_via_LogUp.pdf}},
 }
 
 @misc{ceno-repo,
@@ -579,7 +532,7 @@
   title        = {{SP1 V4 Turbo}: Memory Argument via Elliptic Curve based Multiset Hashing},
   author       = {Gyumin Roh and Ron D. Rothblum},
   year         = {2024},
-  howpublished = {Succinct Labs technical memo},
+  howpublished = {Succinct Labs technical memo, \url{https://docs.succinct.xyz/assets/files/SP1_Turbo_Memory_Argument-b042ba18b58c4add20a8370f4802f077.pdf}},
   note         = {December 2024}
 }
 
@@ -609,6 +562,10 @@
   author       = {Jeremy Maitin-Shepard and Mehdi Tibouchi and Diego F. Aranha},
   title        = {Elliptic Curve Multiset Hash},
   journal      = {The Computer Journal},
+  volume       = {60},
+  number       = {4},
+  pages        = {476--490},
+  doi          = {10.1093/comjnl/bxw053},
   year         = {2017}
 }
 
@@ -617,7 +574,8 @@
   title     = {Succinct Arguments in the Quantum Random Oracle Model},
   booktitle = {Theory of Cryptography Conference (TCC)},
   year      = {2019},
-  note      = {Cryptology ePrint Archive, Paper 2019/834}
+  note      = {Cryptology ePrint Archive, Paper 2019/834},
+  url          = {https://eprint.iacr.org/2019/834}
 }
 
 @inproceedings{bht98,
@@ -646,7 +604,8 @@
   booktitle    = {Advances in Cryptology --- CRYPTO 2026},
   pages        = {189--213},
   year         = {2026},
-  doi          = {10.1007/978-3-032-35424-2_7}
+  doi          = {10.1007/978-3-032-35424-2_7},
+  url          = {https://eprint.iacr.org/2025/902}
 }
 
 @misc{blake3,
@@ -721,6 +680,7 @@
   title        = {{PLONK}: Permutations over {Lagrange}-bases for Oecumenical Noninteractive arguments of Knowledge},
   howpublished = {Cryptology ePrint Archive, Paper 2019/953},
   year         = {2019},
+  url          = {https://eprint.iacr.org/2019/953}
 }
 
 @misc{glock,
@@ -728,6 +688,7 @@
   title        = {Glock: Garbled Locks for {Bitcoin}},
   howpublished = {Cryptology ePrint Archive, Paper 2025/1485},
   year         = {2025},
+  url          = {https://eprint.iacr.org/2025/1485}
 }
 
 @misc{bitvm3,
@@ -735,6 +696,7 @@
   title        = {{BitVM3}: Efficient {Bitcoin} Bridges via Garbled Circuits},
   howpublished = {Cryptology ePrint Archive, Paper 2026/933},
   year         = {2026},
+  url          = {https://eprint.iacr.org/2026/933}
 }
 
 @misc{argo-mac,
@@ -742,6 +704,7 @@
   title        = {{Argo MAC}: Garbling with Elliptic Curve {MACs}},
   howpublished = {Cryptology ePrint Archive, Paper 2026/049},
   year         = {2026},
+  url          = {https://eprint.iacr.org/2026/049}
 }
 
 @misc{babe,
@@ -749,6 +712,7 @@
   title        = {{BABE}: Verifying Proofs on {Bitcoin} Made 1000x Cheaper},
   howpublished = {Cryptology ePrint Archive, Paper 2026/065},
   year         = {2026},
+  url          = {https://eprint.iacr.org/2026/065}
 }
 
 @misc{mosaic,
@@ -756,4 +720,13 @@
   title        = {Mosaic: Practical Malicious Security for Garbled Circuits on {Bitcoin}},
   howpublished = {Cryptology ePrint Archive, Paper 2026/812},
   year         = {2026},
+  url          = {https://eprint.iacr.org/2026/812}
+}
+
+@misc{bitvm2-implementation,
+  author       = {{BitVM Contributors}},
+  title        = {{BitVM Bridge}: A Trust-minimized {Bitcoin} Bridge},
+  year         = {2026},
+  howpublished = {\url{https://github.com/BitVM/BitVM/tree/7d1ca3660cac08aab62e76f3aa4daec0d7403ecc}},
+  note         = {Source snapshot of the BitVM2 Groth16 verifier, accessed 2026-10-13},
 }

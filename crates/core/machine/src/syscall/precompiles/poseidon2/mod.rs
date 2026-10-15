@@ -15,7 +15,7 @@ impl Poseidon2PermuteChip {
 pub mod poseidon2_tests {
     use test_artifacts::POSEIDON2_PERMUTE_ELF;
     use zkm_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-    use zkm_pcs::CpuProver;
+    use zkm_pcs::{CpuProver, ZKMCoreOpts};
 
     use crate::utils::{run_test, setup_logger};
 
@@ -35,6 +35,49 @@ pub mod poseidon2_tests {
             Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
         ]);
         Program::new(instructions, 0, 0)
+    }
+
+    fn zero_state_program(state_ptr: u32) -> Program {
+        Program::new(
+            vec![
+                Instruction::new(
+                    Opcode::ADD,
+                    2,
+                    0,
+                    SyscallCode::POSEIDON2_PERMUTE as u32,
+                    false,
+                    true,
+                ),
+                Instruction::new(Opcode::ADD, 4, 0, state_ptr, false, true),
+                Instruction::new(Opcode::ADD, 5, 0, 0, false, true),
+                Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
+            ],
+            0,
+            0,
+        )
+    }
+
+    #[test]
+    fn prove_highest_canonical_state_span() {
+        run_test::<CpuProver<_, _>>(zero_state_program(0x7F00_0000 - 60)).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "state_ptr must be aligned")]
+    fn executor_rejects_unaligned_state_pointer() {
+        let mut executor =
+            zkm_core_executor::Executor::new(zero_state_program(101), ZKMCoreOpts::default());
+        executor.run().unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Poseidon2 state span exceeds MAX_MEMORY")]
+    fn executor_rejects_state_span_crossing_modulus() {
+        let mut executor = zkm_core_executor::Executor::new(
+            zero_state_program(0x7F00_0000),
+            ZKMCoreOpts::default(),
+        );
+        executor.run().unwrap();
     }
 
     #[test]

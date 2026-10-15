@@ -27,6 +27,13 @@ impl Syscall for Poseidon2PermuteSyscall {
             panic!("state_ptr must be aligned");
         }
 
+        assert!(
+            state_ptr
+                .checked_add(((STATE_SIZE - 1) * 4) as u32)
+                .is_some_and(|last_addr| last_addr as usize <= crate::MAX_MEMORY),
+            "Poseidon2 state span exceeds MAX_MEMORY",
+        );
+
         let pre_state = ctx.slice_unsafe(state_ptr, STATE_SIZE);
         let pre_state: [u32; 16] = pre_state.as_slice().try_into().unwrap();
 

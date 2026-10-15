@@ -9,6 +9,16 @@ impl SysLinuxChip {
     pub const fn new() -> Self {
         Self {}
     }
+
+    /// A bounded encoding for equality checks against constants below 256.
+    /// Requires range-checked byte limbs; the result is at most 196095 < p.
+    /// Use `IsEqualWordOperation` for larger constants or arbitrary word equality.
+    fn small_arg_comparison_value<T: p3_field::PrimeCharacteristicRing>(
+        word: zkm_pcs::Word<T>,
+    ) -> T {
+        let [b0, b1, b2, b3] = word.0;
+        b0 + (b1 + b2 + b3) * T::from_u32(256)
+    }
 }
 
 /// The Linux calls the executor accepts as no-ops (`SysNopSyscall`: result 0, `$a3` 0, no
@@ -208,12 +218,11 @@ pub mod sys_linux_tests {
 
     /// A Linux syscall whose argument exceeds the KoalaBear modulus.
     ///
-    /// `AT_FDCWD = 0xFFFFFF9C` is a legal `fcntl`/`openat` dirfd, but it is
-    /// larger than the KoalaBear prime (0x7F000001).  Linux syscall arguments
-    /// travel to `SysLinuxChip` via U16-range-checked half-word columns in
-    /// `SyscallChip`, so a `reduce()` collision is impossible and the
-    /// KoalaBear word range check must NOT be activated for them -- if it is,
-    /// this program cannot be proven at all.
+    /// Linux arguments can contain full-width values such as the `openat`
+    /// dirfd `AT_FDCWD = 0xFFFFFF9C`, above the KoalaBear prime. Half-word
+    /// transport preserves them exactly, and the small-constant decoders
+    /// compare their byte limbs without reducing the full word modulo p.
+    /// A blanket KoalaBear word range check would reject these arguments.
     fn sys_linux_large_arg_program() -> Program {
         let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
         instructions.extend(vec![
@@ -233,6 +242,36 @@ pub mod sys_linux_tests {
     fn prove_linux_arg_above_koalabear_modulus() {
         setup_logger();
         run_test::<CpuProver<_, _>>(sys_linux_large_arg_program()).unwrap();
+    }
+
+    /// Exercise byte lookups, syscall transport, result binding and register memory
+    /// together with honest executor traces, including both multiples of p in u32.
+    #[test]
+    fn prove_linux_modulus_alias_arguments() {
+        const P: u32 = 0x7F00_0001;
+        let mut instructions = Vec::new();
+        let mut call = |code: SyscallCode, a0: u32, a1: u32| {
+            instructions.extend([
+                Instruction::new(Opcode::ADD, 2, 0, code as u32, false, true),
+                Instruction::new(Opcode::ADD, 4, 0, a0, false, true),
+                Instruction::new(Opcode::ADD, 5, 0, a1, false, true),
+                Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
+            ]);
+        };
+        for fd in [0, 1, 2, P, P + 1, P + 2, 2 * P, 2 * P + 1, 2 * P + 2, u32::MAX] {
+            call(SyscallCode::SYS_READ, fd, 0);
+            for cmd in [1, 3, P + 1, P + 3, 2 * P + 1, 2 * P + 3] {
+                call(SyscallCode::SYS_FCNTL, fd, cmd);
+            }
+        }
+        for code in [SyscallCode::SYS_MMAP, SyscallCode::SYS_MMAP2] {
+            for addr in [0, P, 2 * P, u32::MAX] {
+                call(code, addr, 0x1000);
+            }
+        }
+        call(SyscallCode::HALT, 0, 0);
+        setup_logger();
+        run_test::<CpuProver<_, _>>(Program::new(instructions, 0, 0)).unwrap();
     }
 
     #[test]

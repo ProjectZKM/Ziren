@@ -20,7 +20,7 @@ Instructions & Chip (width), frame & Result & Added lookups \\
 \end{tabular}
 \end{center}
 
-A bitwise operation has no constraint at all: each byte pair is one lookup into the byte table, whose operation index is a selector-weighted sum of the opcode flags (\S\ref{sec:air-bytes}). The immediates of \texttt{andi}, \texttt{ori} and \texttt{xori} are zero-extended at decode, and \texttt{nor} has no immediate form.
+The bitwise result is fixed by lookups rather than by a polynomial result constraint: each byte pair is one lookup into the byte table, whose operation index is a selector-weighted sum of the opcode flags (\S\ref{sec:air-bytes}). The immediates of \texttt{andi}, \texttt{ori} and \texttt{xori} are zero-extended at decode, and \texttt{nor} has no immediate form.
 
 \subsubsection{Arithmetic instructions}
 \label{sec:base-arith}
