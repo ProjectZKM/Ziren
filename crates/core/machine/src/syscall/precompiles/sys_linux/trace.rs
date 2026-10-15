@@ -16,8 +16,10 @@ use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},
     SysLinuxChip,
 };
-use crate::utils::next_multiple_of_32;
-use crate::{utils::pad_rows, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
     type Record = ExecutionRecord;

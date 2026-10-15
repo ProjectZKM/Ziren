@@ -40,8 +40,9 @@ use crate::{
         field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         field_sqrt::FieldSqrtCols, range::FieldLtCols,
     },
-    utils::next_multiple_of_32,
-    utils::{bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access},
+    utils::{
+        bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access, next_multiple_of_32,
+    },
 };
 
 pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() -> usize {

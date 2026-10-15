@@ -2,13 +2,12 @@ use crate::{
     air::MemoryAirBuilder,
     memory::{value_as_limbs, MemoryCols, MemoryReadCols, MemoryWriteCols},
     operations::{field::field_op::FieldOpCols, KoalaBearWordRangeChecker},
-    utils::{limbs_from_access, pad_rows, words_to_bytes_le},
+    utils::{limbs_from_access, next_multiple_of_32, pad_rows, words_to_bytes_le},
     CoreChipError,
 };
 use zkm_derive::PicusAnnotations;
 use zkm_pcs::PicusInfo;
 
-use crate::utils::next_multiple_of_32;
 use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;

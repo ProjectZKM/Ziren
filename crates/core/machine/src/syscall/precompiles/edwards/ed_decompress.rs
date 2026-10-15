@@ -32,8 +32,7 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
     operations::field::{field_op::FieldOpCols, field_sqrt::FieldSqrtCols, range::FieldLtCols},
-    utils::next_multiple_of_32,
-    utils::{limbs_from_access, limbs_from_prev_access},
+    utils::{limbs_from_access, limbs_from_prev_access, next_multiple_of_32},
 };
 
 pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();

@@ -10,12 +10,11 @@ use crate::{
     air::MemoryAirBuilder,
     operations::{field::range::FieldLtCols, IsZeroOperation},
     utils::{
-        limbs_from_access, limbs_from_prev_access, pad_rows, words_to_bytes_le,
-        words_to_bytes_le_vec,
+        limbs_from_access, limbs_from_prev_access, next_multiple_of_32, pad_rows,
+        words_to_bytes_le, words_to_bytes_le_vec,
     },
 };
 
-use crate::utils::next_multiple_of_32;
 use generic_array::GenericArray;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, BaseAir, WindowAccess};

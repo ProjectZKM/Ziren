@@ -85,7 +85,7 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
 
         print_elf_paths_cargo_directives(&target_elf_paths);
 
-        println!("cargo:warning=Skipping build due to clippy invocation.");
+        println!("Skipping build due to clippy invocation.");
         return;
     }
 

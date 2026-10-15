@@ -29,8 +29,10 @@ use zkm_pcs::{
     LookupKind, Word, ZKMAirBuilder,
 };
 
-use crate::utils::next_multiple_of_32;
-use crate::{utils::pad_rows, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 pub const NUM_SHA_COMPRESS_CONTROL_COLS: usize = size_of::<ShaCompressControlCols<u8>>();
 

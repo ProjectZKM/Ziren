@@ -58,7 +58,6 @@ zkm-primitives = { workspace = true }
 zkm-cuda = { workspace = true }
 itertools = { workspace = true }
 tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"]}
-alloy-primitives = { version = "1.0", optional = true }
 num-bigint = "0.4.6"
 serde_json = "1.0.140"
 
@@ -71,7 +70,6 @@ pre-alloc = [ "zkm-core-executor/pre-alloc" ]
 native-gnark = ["zkm-prover/native-gnark"]
 network = [
   "dep:prost",
-  "dep:alloy-primitives",
   "dep:tokio",
   "dep:reqwest",
   "dep:twirp",

@@ -28,8 +28,7 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBu
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
     operations::field::{field_op::FieldOpCols, range::FieldLtCols},
-    utils::next_multiple_of_32,
-    utils::{limbs_from_prev_access, pad_rows, words_to_bytes_le_vec},
+    utils::{limbs_from_prev_access, next_multiple_of_32, pad_rows, words_to_bytes_le_vec},
 };
 
 pub const fn num_fp_cols<P: FpOpField>() -> usize {

@@ -27,8 +27,10 @@ use zkm_pcs::{
     LookupKind, ZKMAirBuilder,
 };
 
-use crate::utils::next_multiple_of_32;
-use crate::{utils::pad_rows, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 pub const NUM_SHA_EXTEND_CONTROL_COLS: usize = size_of::<ShaExtendControlCols<u8>>();
 

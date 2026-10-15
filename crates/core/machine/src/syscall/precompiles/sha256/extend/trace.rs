@@ -11,8 +11,10 @@ use zkm_core_executor::{
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::PicusInfo;
 
-use crate::utils::pad_rows;
-use crate::{utils::next_multiple_of_32, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS, SHA_EXTEND_ROWS_PER_EVENT};
 

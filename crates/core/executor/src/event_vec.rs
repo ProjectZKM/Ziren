@@ -43,6 +43,9 @@ mod allocated {
 
     /// Install the event pool before creating execution records. Existing event
     /// buffers keep their allocator, so installing a pool never changes ownership.
+    ///
+    /// # Panics
+    /// Panics if a provider has already been installed, even if it is the same provider.
     pub fn install_event_memory_provider(provider: &'static dyn EventMemoryProvider) {
         assert!(PROVIDER.set(provider).is_ok(), "event memory provider already installed");
     }
@@ -78,6 +81,9 @@ mod allocated {
         Layout::new::<Header>().extend(layout).map_err(|_| AllocError)
     }
 
+    // SAFETY: Each allocation reserves space for a header and the requested layout. The
+    // header records which allocator owns the block, and copies of EventAllocator retain
+    // the same provider, so deallocation returns the block to its original owner.
     unsafe impl Allocator for EventAllocator {
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             let (base_layout, offset) = allocation_layout(layout)?;
@@ -86,6 +92,8 @@ mod allocated {
                 None => (Global.allocate(base_layout)?, false),
             };
             let base = base.cast::<u8>();
+            // SAFETY: Both backends satisfy base_layout. Layout::extend reserves an aligned
+            // Header followed by at least layout.size() bytes at the aligned, in-bounds offset.
             unsafe {
                 base.cast::<Header>().as_ptr().write(Header { pinned });
                 let ptr = NonNull::new_unchecked(base.as_ptr().add(offset));
@@ -97,8 +105,14 @@ mod allocated {
 
         unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
             let (base_layout, offset) = allocation_layout(layout).unwrap();
+            // SAFETY: The caller supplies a live allocation and its layout. Subtracting the
+            // same offset used in allocate recovers its non-null base pointer.
             let base = unsafe { NonNull::new_unchecked(ptr.as_ptr().sub(offset)) };
+            // SAFETY: allocate initialized the aligned header at this base, before the
+            // caller-visible region, which has remained live and outside the caller's writes.
             let header = unsafe { base.cast::<Header>().as_ptr().read() };
+            // SAFETY: The header selects the original backend. Allocator copies retain the
+            // same provider, and base_layout reconstructs the layout passed to that backend.
             unsafe {
                 if header.pinned {
                     self.provider.unwrap().deallocate(base, base_layout);
@@ -127,6 +141,9 @@ mod allocated {
                 return false;
             }
             let (_, offset) = allocation_layout(Layout::new::<T>()).unwrap();
+            // SAFETY: A nonzero capacity for non-ZST T has a live EventAllocator allocation.
+            // The header offset depends only on T's alignment, so it is the same for one T
+            // and for the full buffer. The initialized header remains before the data region.
             unsafe { self.as_ptr().cast::<u8>().sub(offset).cast::<Header>().read().pinned }
         }
 

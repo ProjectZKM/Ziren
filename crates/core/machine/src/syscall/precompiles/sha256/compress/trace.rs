@@ -16,8 +16,10 @@ use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},
     ShaCompressChip, SHA_COMPRESS_K, SHA_COMPRESS_ROWS_PER_EVENT,
 };
-use crate::utils::next_multiple_of_32;
-use crate::{utils::pad_rows, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
     type Record = ExecutionRecord;

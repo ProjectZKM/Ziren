@@ -33,8 +33,7 @@ use crate::{
         field_den::FieldDenCols, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         range::FieldLtCols,
     },
-    utils::next_multiple_of_32,
-    utils::{limbs_from_prev_access, pad_rows},
+    utils::{limbs_from_prev_access, next_multiple_of_32, pad_rows},
 };
 
 pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
