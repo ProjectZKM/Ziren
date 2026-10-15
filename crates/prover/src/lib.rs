@@ -717,7 +717,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///
     /// Bails when `compress_shape_config` is None (`FIX_RECURSION_SHAPES=false`
     /// — no classes to enumerate) or it has no shapes (defensive).
-    fn prewarm_compose_programs(&self) {
+    ///
+    /// Public so a prover built with [`Self::uninitialized`] can run it later,
+    /// for instance on a background thread while it already proves: a node
+    /// that needs a program before the pre-warm reaches it builds the program
+    /// itself, and the program cache keeps whichever copy lands first.
+    pub fn prewarm_compose_programs(&self) {
         let Some(recursion_shape_config) = self.compress_shape_config.as_ref() else {
             tracing::debug!(
                 "compose pre-warm skipped: compress_shape_config is None \
