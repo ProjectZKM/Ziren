@@ -31,7 +31,8 @@
 //! 16-byte-entry memory (`ctx.memory` = `FlatMem::as_ptr()`), copy the
 //! entry's `MemValue` to the oracle tail (pinned [`ORACLE_TAIL`]) for
 //! addresses `>= 36` exactly as the flat `mr`/`mw` do, charge a touched
-//! address when the entry's shard differs from the current one, and
+//! address when the entry's shard differs from the current one or a
+//! precompile reopened it ([`FLAT_REOPEN`], cleared by the charge), and
 //! stamp the entry with `(clk, shard)`.
 //!
 //! Anything the interpreter can fail on (division by zero, TEQ, an
@@ -71,6 +72,13 @@ use super::{
 use crate::driver::{lower_one, DriverError, DriverInstruction, JitOpcode};
 use crate::risc::MipsRegister;
 use crate::{JitError, JitFunction, SyscallHandler};
+
+/// Byte offset of a flat entry's flags word (`FlatEntry::flags`).
+const FLAT_FLAGS_OFFSET: i32 = 12;
+/// `FlatEntry::REOPEN`: a precompile touched the word after the core had it
+/// open in this shard, so the core's next touch opens, and is charged, a new
+/// local-memory entry.
+const FLAT_REOPEN: u8 = 1;
 
 /// Pinned `(shard << 32) | (clk + 3)`.
 pub const CLK_SHARD: u8 = 15; // r15
@@ -604,6 +612,8 @@ fn emit_memory_op(
         ; no_push:
         ; cmp edx, DWORD [Rq(CONTEXT) + SHARD_OFFSET]
         ; jne =>touch
+        ; test BYTE [Rq(TEMP_B) + FLAT_FLAGS_OFFSET], FLAT_REOPEN as i8
+        ; jnz =>touch
         ; =>back
         ; lea rdx, [Rq(CLK_SHARD) - 3]
         ; mov QWORD [Rq(TEMP_B) + 4], rdx
@@ -874,6 +884,7 @@ fn emit_cold(t: &mut TranspilerBackend, s: &Shared, c: Cold) {
             let touch = s.touch;
             dynasm!(t.assembler ; .arch x64
                 ; =>label
+                ; mov DWORD [Rq(TEMP_B) + FLAT_FLAGS_OFFSET], 0
                 ; call =>touch
                 ; jmp =>back
             );
