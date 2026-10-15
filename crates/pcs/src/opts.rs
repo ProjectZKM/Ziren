@@ -350,6 +350,9 @@ pub struct SplitOpts {
     /// The threshold for combining the memory init/finalize events in to the current shard in
     /// terms of cycles.
     pub combine_memory_threshold: usize,
+    /// The per-shard trace-area cap (raw main-trace cells, [`ELEMENT_THRESHOLD`]) that a
+    /// precompile with a cost model fills, instead of cutting at `deferred` events.
+    pub element_threshold: usize,
 }
 
 impl SplitOpts {
@@ -366,6 +369,10 @@ impl SplitOpts {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1 << 17),
+            element_threshold: env::var("ELEMENT_THRESHOLD")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(ELEMENT_THRESHOLD),
         }
     }
 }

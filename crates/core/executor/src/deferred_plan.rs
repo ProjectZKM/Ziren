@@ -21,20 +21,70 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::SplitOpts;
 
 use crate::{
-    events::{MemoryInitializeFinalizeEvent, PrecompileEvent, SyscallEvent},
+    events::{
+        MemoryInitializeFinalizeEvent, PrecompileEvent, SyscallEvent,
+        NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC,
+    },
+    executor::CORE_SHARD_HEIGHT_THRESHOLD,
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
-    ExecutionRecord, Program,
+    ExecutionRecord, MipsAirId, Program,
 };
 
 /// The per-code threshold `split` cuts precompile shards at.
+///
+/// A code with a cost model ([`area_split_threshold`]) is cut where its shard
+/// fills the area budget, and never below the count threshold it had before.
 #[must_use]
 pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize {
     match code {
         SyscallCode::KECCAK_SPONGE => opts.keccak,
         SyscallCode::SHA_EXTEND => opts.sha_extend,
         SyscallCode::SHA_COMPRESS => opts.sha_compress,
-        _ => opts.deferred,
+        _ => area_split_threshold(code, opts.element_threshold)
+            .map_or(opts.deferred, |n| n.max(opts.deferred)),
     }
+}
+
+/// The AIR that proves a 256-bit Weierstrass point operation, and the words
+/// one event touches: both points for an add, the one point for a double.
+fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
+    let point = zkm_curves::NUM_WORDS_EC_POINT;
+    Some(match code {
+        SyscallCode::SECP256K1_ADD => (MipsAirId::Secp256k1AddAssign, 2 * point),
+        SyscallCode::SECP256K1_DOUBLE => (MipsAirId::Secp256k1DoubleAssign, point),
+        SyscallCode::SECP256R1_ADD => (MipsAirId::Secp256r1AddAssign, 2 * point),
+        SyscallCode::SECP256R1_DOUBLE => (MipsAirId::Secp256r1DoubleAssign, point),
+        SyscallCode::BN254_ADD => (MipsAirId::Bn254AddAssign, 2 * point),
+        SyscallCode::BN254_DOUBLE => (MipsAirId::Bn254DoubleAssign, point),
+        _ => return None,
+    })
+}
+
+/// How many events of `code` one deferred shard holds when it is cut by area,
+/// or `None` for a code without a cost model here (it keeps its count
+/// threshold).
+///
+/// One event costs its own row, a local-memory entry per touched word (four
+/// to a row), two global rows per touched word plus one for the syscall, and
+/// a precompile-syscall row; each row is charged its AIR's width from
+/// `mips_costs`.  The byte table is in every shard and comes off the budget
+/// first.  The global AIR is the tallest, so it also bounds the count by the
+/// per-chip height cap the core shards are cut at.  Rounded down to a
+/// multiple of 32.
+fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
+    static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
+        std::sync::OnceLock::new();
+    let (air, words) = weierstrass_air_and_words(code)?;
+    let costs = COSTS.get_or_init(crate::mips_costs);
+    let global = costs[&MipsAirId::Global];
+    let cells = costs[&air]
+        + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
+        + (2 * words + 1) * global
+        + costs[&MipsAirId::SyscallPrecompile];
+    let byte_table = (1 << 16) * costs[&MipsAirId::Byte];
+    let by_area = element_threshold.saturating_sub(byte_table) / cells;
+    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / (2 * words + 1);
+    Some(by_area.min(by_height) / 32 * 32)
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
@@ -316,26 +366,26 @@ mod tests {
     #[test]
     fn count_cut_matches_chunks_exact_across_pushes() {
         let mut p = DeferredPlanner::new(opts());
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "a", vec![1; 5]);
+        p.push_precompile(SyscallCode::BN254_FP_ADD, "a", vec![1; 5]);
         assert!(p.split(false).is_empty());
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "b", vec![1; 7]);
+        p.push_precompile(SyscallCode::BN254_FP_ADD, "b", vec![1; 7]);
         let s = p.split(false);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::SECP256K1_ADD,
+                code: SyscallCode::BN254_FP_ADD,
                 slices: vec![
                     EventSlice { artifact: "a".into(), from: 0, to: 5 },
                     EventSlice { artifact: "b".into(), from: 0, to: 3 }
                 ]
             }]
         );
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "c", vec![1; 4]);
+        p.push_precompile(SyscallCode::BN254_FP_ADD, "c", vec![1; 4]);
         let s = p.split(true);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::SECP256K1_ADD,
+                code: SyscallCode::BN254_FP_ADD,
                 slices: vec![
                     EventSlice { artifact: "b".into(), from: 3, to: 7 },
                     EventSlice { artifact: "c".into(), from: 0, to: 4 }
@@ -343,6 +393,23 @@ mod tests {
             }]
         );
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn weierstrass_codes_are_cut_by_area() {
+        let opts = SplitOpts::new(1 << 15);
+        let double = precompile_split_threshold(SyscallCode::SECP256K1_DOUBLE, &opts);
+        let add = precompile_split_threshold(SyscallCode::SECP256K1_ADD, &opts);
+        // A double touches half the words of an add, so more of them fit.
+        assert!(double > add && add > opts.deferred);
+        assert_eq!(double % 32, 0);
+        // The global AIR, two rows per touched word plus one, stays under the
+        // per-chip height cap.
+        let words = zkm_curves::NUM_WORDS_EC_POINT;
+        assert!(add * (4 * words + 1) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        assert!(double * (2 * words + 1) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        // A code without a cost model keeps its count threshold.
+        assert_eq!(precompile_split_threshold(SyscallCode::BN254_FP_ADD, &opts), opts.deferred);
     }
 
     #[test]

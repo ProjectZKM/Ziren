@@ -74,7 +74,7 @@ const CORE_MAX_LOG_ROW_COUNT: usize =
 /// estimate, which is refreshed only every `shape_check_frequency` cycles and omits some
 /// dependency rows, so the real trace height cannot overshoot the cube between checks.
 const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
-const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
+pub(crate) const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
 
 /// The `clk` (timestamp) ceiling for a single core shard.
 ///
