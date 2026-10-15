@@ -59,8 +59,9 @@ pub const UNUSED_PC: u32 = 1;
 /// `clk += 5` per instruction, bound (2) caps any shard at `CORE_SHARD_CLK_LIMIT / 5` cycles no
 /// matter what `SHARD_SIZE` says. At the old 24-bit width that was 3.355 M cycles and it was the
 /// bound that fired: over a 60-shard reth block the close reasons were clk 52 / area 7 / final 1,
-/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits it
-/// is 6.71 M cycles and the trace-area bound (1) is the one that binds again.
+/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits
+/// (6.71 M cycles) it still closed most reth shards short of the area budget; at 26 bits, the
+/// width the memory argument checks, the trace-area bound (1) is the one that binds.
 const CORE_MAX_LOG_ROW_COUNT: usize =
     zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
@@ -103,7 +104,7 @@ pub(crate) const CORE_SHARD_HEIGHT_THRESHOLD: u64 =
 /// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
 /// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
 /// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
-pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
 
 /// BLOCK-START RAMP.  A block's first shards decide how quickly every card can
 /// start: a card cannot prove what the parent has not cut yet.  MEASURED on 76
