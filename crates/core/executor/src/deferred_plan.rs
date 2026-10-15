@@ -25,7 +25,7 @@ use crate::{
         MemoryInitializeFinalizeEvent, PrecompileEvent, SyscallEvent,
         NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC,
     },
-    executor::CORE_SHARD_HEIGHT_THRESHOLD,
+    executor::{CORE_SHARD_HEIGHT_THRESHOLD, MAX_PROGRAM_SIZE},
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
     ExecutionRecord, MipsAirId, Program,
 };
@@ -60,6 +60,12 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     })
 }
 
+/// Main columns of the byte table, which every shard carries at 2^16 rows.
+pub const BYTE_MAIN_COLS: usize = 10;
+/// Main columns of the program table, which every shard carries at one row
+/// per instruction.
+pub const PROGRAM_MAIN_COLS: usize = 1;
+
 /// How many events of `code` one deferred shard holds when it is cut by area,
 /// or `None` for a code without a cost model here (it keeps its count
 /// threshold).
@@ -70,8 +76,10 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
 /// from `mips_costs`.  The precompile's own trace is padded only to a
 /// multiple of 32 (`num_rows`, which the GPU trace generator follows too);
 /// a fixed shape would pad it to a power of two, which this does not model.
-/// The byte table is in every shard and comes off the budget first.  The
-/// global AIR is the tallest, so it also bounds the count by the per-chip
+/// The byte and program tables are in every shard and come off the budget
+/// first, the program table at `MAX_PROGRAM_SIZE` rows since the program is
+/// not known here.  (`mips_costs` charges both their preprocessed columns
+/// too, which are not main-trace area.)  The global AIR is the tallest, so it also bounds the count by the per-chip
 /// height cap the core shards are cut at.  Rounded down to a multiple of 32.
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
@@ -83,7 +91,8 @@ fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<u
         + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
         + global_rows * costs[&MipsAirId::Global]
         + costs[&MipsAirId::SyscallPrecompile];
-    let budget = element_threshold.saturating_sub((1 << 16) * costs[&MipsAirId::Byte]);
+    let fixed = (1 << 16) * BYTE_MAIN_COLS + MAX_PROGRAM_SIZE * PROGRAM_MAIN_COLS;
+    let budget = element_threshold.saturating_sub(fixed);
     let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows;
     Some((budget / per_event).min(by_height) / 32 * 32)
 }
