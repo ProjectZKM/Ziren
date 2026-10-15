@@ -169,9 +169,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             (Self::Select(SelectChip), heights.select_events),
             (Self::Ext2Felt(Ext2FeltChip::default()), heights.ext2felt_events),
             (Self::PrefixSumChecks(PrefixSumChecksChip), heights.prefix_sum_checks_events),
-            (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
+            (Self::PublicValues(PublicValuesChip), 1 << PUB_VALUES_LOG_HEIGHT),
         ]
-        .map(|(chip, log_height)| (chip.name(), log_height))
+        .map(|(chip, height)| (chip.name(), height))
         .to_vec()
     }
 }

@@ -352,7 +352,16 @@ pub struct SplitOpts {
     pub combine_memory_threshold: usize,
     /// The per-shard trace-area cap (raw main-trace cells, [`ELEMENT_THRESHOLD`]) that a
     /// precompile with a cost model fills, instead of cutting at `deferred` events.
+    ///
+    /// Defaults from the environment when absent, so options serialized before the field
+    /// existed still decode.
+    #[serde(default = "env_element_threshold")]
     pub element_threshold: usize,
+}
+
+/// [`ELEMENT_THRESHOLD`], or the `ELEMENT_THRESHOLD` environment override.
+fn env_element_threshold() -> usize {
+    env::var("ELEMENT_THRESHOLD").ok().and_then(|s| s.parse().ok()).unwrap_or(ELEMENT_THRESHOLD)
 }
 
 impl SplitOpts {
@@ -369,10 +378,7 @@ impl SplitOpts {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1 << 17),
-            element_threshold: env::var("ELEMENT_THRESHOLD")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(ELEMENT_THRESHOLD),
+            element_threshold: env_element_threshold(),
         }
     }
 }

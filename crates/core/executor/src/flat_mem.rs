@@ -37,8 +37,16 @@ pub struct FlatEntry {
     pub timestamp: u32,
     /// Shard of the last access, 0 if never accessed.
     pub shard: u32,
-    /// Padding: 16-byte entries keep `addr >> 2` a shift-and-scale index.
-    pub _pad: u32,
+    /// Access bookkeeping ([`FlatEntry::REOPEN`]); it also keeps entries 16 bytes, so
+    /// `addr >> 2` is a shift-and-scale index.
+    pub flags: u32,
+}
+
+impl FlatEntry {
+    /// A precompile touched the word after the core had it open in the current shard, so
+    /// the core's next touch opens a new local-memory entry (its postprocess closed the old
+    /// one).  Cleared whenever the core shard charges the entry.
+    pub const REOPEN: u32 = 1;
 }
 
 const _: () = assert!(std::mem::size_of::<FlatEntry>() == 16);

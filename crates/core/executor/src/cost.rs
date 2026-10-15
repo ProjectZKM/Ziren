@@ -328,7 +328,16 @@ impl ShardSplitAccumulator {
         self.bump(air, count);
     }
 
-    /// Record one newly-touched address, charging the `MemoryLocal` and `Global` chips.
+    /// Record one local-memory entry the core shard opens, charging the `MemoryLocal` and
+    /// `Global` chips.
+    ///
+    /// The executor calls it on an address's first access in the shard, from the core or from
+    /// a precompile, and again when the core touches an address a precompile touched since:
+    /// the precompile's postprocess closes the core's open entry for every word it accessed
+    /// (its own events go to its deferred shard), so the core's next touch opens a new one.
+    /// A precompile's repeated accesses are not charged.  The one over-count is an address a
+    /// precompile touches first and the core never touches, whose entry lives only in the
+    /// deferred shard.
     #[inline]
     pub fn add_touched_address(&mut self) {
         if self.touched_addresses.is_multiple_of(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64) {

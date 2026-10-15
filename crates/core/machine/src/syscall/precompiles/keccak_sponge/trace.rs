@@ -69,7 +69,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             .iter()
             .map(|(_, e)| match e {
                 PrecompileEvent::KeccakSponge(ev) => ev.num_blocks() * NUM_ROUNDS,
-                _ => 0,
+                _ => unreachable!(),
             })
             .sum();
         let nb_rows = next_multiple_of_32(

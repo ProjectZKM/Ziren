@@ -49,6 +49,7 @@ jobs:
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo check -p zkm-core-executor --features event-allocator --all-targets
       # `ark` is optional, so the line above never compiles
       # `groth16::ark_converter` and cannot lint it.
       - run: cargo clippy -p zkm-verifier --features ark --all-targets -- -D warnings

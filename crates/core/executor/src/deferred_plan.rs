@@ -33,7 +33,9 @@ use crate::{
 /// The per-code threshold `split` cuts precompile shards at.
 ///
 /// A code with a cost model ([`area_split_threshold`]) is cut where its shard
-/// fills the area budget, and never below the count threshold it had before.
+/// fills the area budget, never below the count threshold it had before, and
+/// never above the count the per-chip height cap allows: a raised
+/// `SPLIT_THRESHOLD` cannot make a shard the recursion row cube rejects.
 #[must_use]
 pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize {
     match code {
@@ -41,7 +43,7 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
         SyscallCode::SHA_EXTEND => opts.sha_extend,
         SyscallCode::SHA_COMPRESS => opts.sha_compress,
         _ => area_split_threshold(code, opts.element_threshold)
-            .map_or(opts.deferred, |n| n.max(opts.deferred)),
+            .map_or(opts.deferred, |(n, by_height)| n.max(opts.deferred).min(by_height)),
     }
 }
 
@@ -81,8 +83,8 @@ pub const BYTE_MAIN_COLS: usize = 10;
 pub const PROGRAM_MAIN_COLS: usize = 1;
 
 /// How many events of `code` one deferred shard holds when it is cut by area,
-/// or `None` for a code without a cost model here (it keeps its count
-/// threshold).
+/// with the count the per-chip height cap allows, or `None` for a code
+/// without a cost model here (it keeps its count threshold).
 ///
 /// One event costs a row of its own AIR, a local-memory entry per touched
 /// word (four to a row), two global rows per touched word plus two for the
@@ -95,7 +97,7 @@ pub const PROGRAM_MAIN_COLS: usize = 1;
 /// not known here.  (`mips_costs` charges both their preprocessed columns
 /// too, which are not main-trace area.)  The global AIR is the tallest, so it also bounds the count by the per-chip
 /// height cap the core shards are cut at.  Rounded down to a multiple of 32.
-fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
+fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<(usize, usize)> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
     let (air, words) = weierstrass_air_and_words(code)?;
@@ -107,8 +109,8 @@ fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<u
         + costs[&MipsAirId::SyscallPrecompile];
     let fixed = (1 << 16) * BYTE_MAIN_COLS + MAX_PROGRAM_SIZE * PROGRAM_MAIN_COLS;
     let budget = element_threshold.saturating_sub(fixed);
-    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows;
-    Some((budget / per_event).min(by_height) / 32 * 32)
+    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows / 32 * 32;
+    Some(((budget / per_event).min(by_height) / 32 * 32, by_height))
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
