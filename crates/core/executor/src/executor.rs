@@ -271,6 +271,10 @@ pub struct Executor<'a> {
     /// Exact, incrementally-maintained trace area / tallest-chip height for the shard being
     /// executed. Read by [`Self::inc_shard_if_need`] as an O(1) pair of comparisons.
     pub split_acct: ShardSplitAccumulator,
+    /// Paged-memory twin of [`crate::flat_mem::FlatEntry::REOPEN`]: the words a precompile touched
+    /// after the core had them open in the current shard, whose next core touch opens a new
+    /// local-memory entry.  Registers are keyed by their number.
+    pub reopen_pending: nohash_hasher::IntSet<u32>,
 
     /// The fingerprint of the shard that just closed, waiting for
     /// [`Self::bump_record`] to stamp it on that shard's [`TraceChunk`].  Set
@@ -645,6 +649,7 @@ impl<'a> Executor<'a> {
             max_syscall_cycles,
             report: ExecutionReport::default(),
             split_acct,
+            reopen_pending: nohash_hasher::IntSet::default(),
             pending_shape_fingerprint: 0,
             pending_shape_classes: Vec::new(),
             pending_shape_area: 0,
@@ -887,11 +892,16 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
-                self.split_acct.add_touched_address();
+            if !self.unconstrained && !self.skip_replay_bookkeeping {
+                if prev.shard != shard {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                } else if local_memory_access.is_some() {
+                    e.flags |= crate::flat_mem::FlatEntry::REOPEN;
+                } else if e.flags & crate::flat_mem::FlatEntry::REOPEN != 0 {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                }
             }
             e.shard = shard;
             e.timestamp = timestamp;
@@ -934,11 +944,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = match replay_prev {
@@ -1151,11 +1167,16 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
-                self.split_acct.add_touched_address();
+            if !self.unconstrained && !self.skip_replay_bookkeeping {
+                if prev.shard != shard {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                } else if local_memory_access.is_some() {
+                    e.flags |= crate::flat_mem::FlatEntry::REOPEN;
+                } else if e.flags & crate::flat_mem::FlatEntry::REOPEN != 0 {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                }
             }
             e.value = value;
             e.shard = shard;
@@ -1207,11 +1228,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = match replay_prev {
@@ -1300,11 +1327,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = *record;
@@ -2796,6 +2829,7 @@ impl<'a> Executor<'a> {
             trace.total_cycles = next_chunk_clk;
         }
         self.split_acct.reset();
+        self.reopen_pending.clear();
         if self.executor_mode == ExecutorMode::Trace {
             for slot in self.local_reg_access.iter_mut() {
                 if let Some(event) = slot.take() {
@@ -3059,7 +3093,7 @@ impl<'a> Executor<'a> {
                         value: *value,
                         timestamp: 0,
                         shard: 0,
-                        _pad: 0,
+                        flags: 0,
                     };
                 }
             }

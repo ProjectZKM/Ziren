@@ -164,6 +164,7 @@ pub fn pad_rows_mult32<R: Clone>(
 /// Calls `row_fn` exactly once, even if no rows need to be appended.
 #[inline]
 pub fn pad_rows<R: Clone>(rows: &mut Vec<R>, row_fn: impl FnOnce() -> R, new_len: usize) {
+    assert!(rows.len() <= new_len, "padding to {new_len} rows would drop {} real rows", rows.len());
     let dummy_row = row_fn();
     rows.resize(new_len, dummy_row);
 }
