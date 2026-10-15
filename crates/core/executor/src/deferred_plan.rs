@@ -60,6 +60,10 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     })
 }
 
+/// The share of the area budget an area-cut precompile shard is sized to
+/// fill, by the cost model in [`area_split_threshold`].
+const AREA_FILL_PERCENT: usize = 90;
+
 /// How many events of `code` one deferred shard holds when it is cut by area,
 /// or `None` for a code without a cost model here (it keeps its count
 /// threshold).
@@ -68,9 +72,11 @@ fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
 /// to a row), two global rows per touched word plus one for the syscall, and
 /// a precompile-syscall row; each row is charged its AIR's width from
 /// `mips_costs`.  The byte table is in every shard and comes off the budget
-/// first.  The global AIR is the tallest, so it also bounds the count by the
-/// per-chip height cap the core shards are cut at.  Rounded down to a
-/// multiple of 32.
+/// first.  The model leaves out rows that grow with the shard, so it
+/// undercounts a full one; the count fills [`AREA_FILL_PERCENT`] of the
+/// budget to keep the real shard inside it.  The global AIR is the tallest,
+/// so it also bounds the count by the per-chip height cap the core shards
+/// are cut at.  Rounded down to a multiple of 32.
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<usize> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
@@ -82,7 +88,8 @@ fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<u
         + (2 * words + 1) * global
         + costs[&MipsAirId::SyscallPrecompile];
     let byte_table = (1 << 16) * costs[&MipsAirId::Byte];
-    let by_area = element_threshold.saturating_sub(byte_table) / cells;
+    let budget = element_threshold / 100 * AREA_FILL_PERCENT;
+    let by_area = budget.saturating_sub(byte_table) / cells;
     let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / (2 * words + 1);
     Some(by_area.min(by_height) / 32 * 32)
 }
