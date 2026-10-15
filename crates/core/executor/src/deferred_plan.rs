@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn weierstrass_codes_are_cut_by_area() {
-        let opts = SplitOpts::new(1 << 15);
+        let mut opts = SplitOpts::new(1 << 15);
+        opts.element_threshold = zkm_pcs::ELEMENT_THRESHOLD;
         let double = precompile_split_threshold(SyscallCode::SECP256K1_DOUBLE, &opts);
         let add = precompile_split_threshold(SyscallCode::SECP256K1_ADD, &opts);
         // A double touches half the words of an add, so more of them fit.
