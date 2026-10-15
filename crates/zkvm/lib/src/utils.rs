@@ -162,6 +162,9 @@ pub trait WeierstrassAffinePoint<const N: usize>: AffinePoint<N> {
     ///     4. P1 is the negation of P2
     ///     5. Default addition.
     ///
+    /// Cases 3 and 4 share `x`, and two points with the same `x` are equal or opposite, so
+    /// one comparison of `x` (then of `y` when it matches) tells all three apart.
+    ///
     /// Implements the complete addition cases according to the
     /// [Zcash complete addition spec](https://zcash.github.io/halo2/design/gadgets/ecc/addition.html#complete-addition).
     fn weierstrass_add_assign(&mut self, other: &Self) {
@@ -177,13 +180,12 @@ pub trait WeierstrassAffinePoint<const N: usize>: AffinePoint<N> {
         let p1 = self.limbs_mut();
         let p2 = other.limbs_ref();
 
-        if p1 == p2 {
-            self.double();
-            return;
-        }
-
         if p1[..N / 2] == p2[..N / 2] {
-            *self = Self::infinity();
+            if p1[N / 2..] == p2[N / 2..] {
+                self.double();
+            } else {
+                *self = Self::infinity();
+            }
             return;
         }
 
