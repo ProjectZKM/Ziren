@@ -47,6 +47,20 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
 
 /// The AIR that proves a 256-bit Weierstrass point operation, and the words
 /// one event touches: both points for an add, the one point for a double.
+///
+/// These codes are cut by area because a point operation is cheap per event:
+/// at the shared count threshold their shards held a small fraction of the
+/// area budget, so a signature-heavy block spent many mostly empty shards on
+/// them.  The model was checked against measured secp256k1 shards; secp256r1
+/// and bn254 use the same AIR layout and word count, so they share it.
+///
+/// Other curve and field precompiles keep the count threshold because none of
+/// them has been measured.  Each also touches a different set of words:
+/// BLS12-381 points are 384-bit, decompress reads a compressed point and
+/// writes the other coordinate, Ed25519 has its own AIR, and uint256 and the
+/// field operations also read a modulus.  Each would need its own word count
+/// and a measured check before it is cut by area, since a model that
+/// overestimates the count could push a shard past the height cap.
 fn weierstrass_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     let point = zkm_curves::NUM_WORDS_EC_POINT;
     Some(match code {
