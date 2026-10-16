@@ -717,7 +717,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///
     /// Bails when `compress_shape_config` is None (`FIX_RECURSION_SHAPES=false`
     /// — no classes to enumerate) or it has no shapes (defensive).
-    fn prewarm_compose_programs(&self) {
+    ///
+    /// Public so a prover built with [`Self::uninitialized`] can run it later,
+    /// for instance on a background thread while it already proves: a node
+    /// that needs a program before the pre-warm reaches it builds the program
+    /// itself, and the program cache keeps whichever copy lands first.
+    pub fn prewarm_compose_programs(&self) {
         let Some(recursion_shape_config) = self.compress_shape_config.as_ref() else {
             tracing::debug!(
                 "compose pre-warm skipped: compress_shape_config is None \
@@ -1505,6 +1510,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
+        use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
 
         let max_log_row_count = Self::pcs_max_log_row_count();
@@ -1526,8 +1532,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let compiler_span = tracing::debug_span!("compile wrap-bn254-basefold program").entered();
         let mut compiler = AsmCompiler::<WrapConfig>::default();
-        let program = compiler.compile(operations);
+        let mut program = compiler.compile(operations);
         compiler_span.exit();
+
+        // Preserve the wrap tables used by the published SNARK circuit. Other
+        // unshaped recursion programs can use the tighter multiple-of-32 padding.
+        let rows = WrapAir::<KoalaBear>::heights(&program)
+            .into_iter()
+            .filter(|(name, _)| {
+                self.wrap_prover.machine().chips().iter().any(|c| c.name() == *name)
+            })
+            .map(|(name, rows)| {
+                let rows = zkm_core_machine::utils::next_power_of_two(rows, None, &name);
+                (name, rows)
+            })
+            .collect::<BTreeMap<_, _>>();
+        *program.shape_mut() = Some(rows.into());
         Arc::new(program)
     }
 
@@ -2756,16 +2776,15 @@ pub mod tests {
     /// frozen shrink shape — so the stripes its two rounds commit are a
     /// constant of the tree, and the soundness model's wrap batch
     /// cardinality (the batching over both rounds) is pinned rather than
-    /// bounded.  Rows are what the prover pads to without a shape,
-    /// `next_multiple_of_32_rows`, and cells stack at `2^21` per stripe:
+    /// bounded. Wrap pins the legacy power-of-two table heights, and cells
+    /// stack at `2^21` per stripe:
     /// under the compress schedule the shrink proof's verifier packs into
-    /// 8 preprocessed and 8 main stripes (a count above 4 rounds up to a
-    /// multiple of 8), batch 16.
+    /// 8 preprocessed and 16 main stripes, batch 24.
     #[test]
     #[serial]
     fn wrap_committed_stripes_are_pinned() {
         use p3_air::BaseAir;
-        use zkm_core_machine::utils::next_multiple_of_32_rows;
+        use p3_matrix::Matrix;
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::shape::OrderedShape;
         use zkm_recursion_circuit::machine::{
@@ -2788,11 +2807,11 @@ pub mod tests {
         let wrap_machine = prover.wrap_prover.machine();
         let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
         let (mut main, mut prep) = (0usize, 0usize);
-        for (name, rows) in WrapAir::<KoalaBear>::heights(&program) {
-            let Some(chip) = wrap_machine.chips().iter().find(|c| c.name() == name) else {
-                continue;
-            };
-            let rows = next_multiple_of_32_rows(rows, None, &name);
+        for chip in wrap_machine.chips() {
+            let rows = program.fixed_rows(chip).expect("wrap must pin its legacy table heights");
+            assert!(rows.is_power_of_two(), "wrap chip {} has {rows} rows", chip.name());
+            let trace = chip.generate_preprocessed_trace(&program).unwrap();
+            assert_eq!(trace.height(), rows, "wrap preprocessed height for {}", chip.name());
             main += rows * <_ as BaseAir<KoalaBear>>::width(chip);
             prep += rows * <_ as MachineAir<KoalaBear>>::preprocessed_width(chip);
         }

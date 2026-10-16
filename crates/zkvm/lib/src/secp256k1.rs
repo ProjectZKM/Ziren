@@ -3,6 +3,8 @@ use crate::{
     utils::{AffinePoint, WeierstrassAffinePoint, WeierstrassPoint},
 };
 
+mod glv;
+
 /// The number of limbs in [Secp256k1Point].
 pub const N: usize = 16;
 
@@ -60,6 +62,17 @@ impl AffinePoint<N> for Secp256k1Point {
 
     fn complete_add_assign(&mut self, other: &Self) {
         self.weierstrass_add_assign(other);
+    }
+
+    /// `k·a + l·b` through the GLV endomorphism ([`glv`]): a four-point MSM over half-length
+    /// scalars, about half the doublings and two thirds of the additions of the two-point loop.
+    fn multi_scalar_multiplication(
+        a_bits_le: &[bool],
+        a: Self,
+        b_bits_le: &[bool],
+        b: Self,
+    ) -> Self {
+        glv::lincomb(a_bits_le, a, b_bits_le, b)
     }
 
     fn add_assign(&mut self, other: &Self) {

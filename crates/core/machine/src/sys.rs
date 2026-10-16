@@ -178,19 +178,17 @@ extern "C-unwind" {
         instruction: InstructionFfi,
         shard: u32,
     );
-
-    // Septic-extension self-checks inside the C++ library. Only this module's
-    // own test suite calls them, so they stay private to `sys` instead of
-    // sitting in the crate's public API.
-    fn test_mul();
-    fn test_inv();
-    fn test_sqrt();
-    fn test_curve_formula();
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::sys::{test_curve_formula, test_inv, test_mul, test_sqrt};
+    // Septic-extension self-checks inside the C++ library, used only by this test suite.
+    extern "C-unwind" {
+        fn test_mul();
+        fn test_inv();
+        fn test_sqrt();
+        fn test_curve_formula();
+    }
 
     #[test]
     fn test_septic() {

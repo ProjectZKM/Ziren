@@ -2,7 +2,6 @@
 version = "2.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.80"
 repository = "https://github.com/ProjectZKM/Ziren"
 keywords = ["zkMIPS", "zero-knowledge", "zkvm", "MIPS"]
 categories = ["cryptography"]
@@ -106,7 +105,6 @@ serde_json = "1.0.132"
 
 rand = "0.8.5"
 sha2 = { version = "0.10.8", default-features = false }
-blake3 = { version = "1.8.5", default-features = false }
 anyhow = "1.0.75"
 
 zkm-recursion-derive = { path = "crates/recursion/derive", default-features = false }
@@ -125,10 +123,7 @@ zkm-prover = { path = "crates/prover" }
 zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
 zkm-cuda = { path = "crates/cuda" }
-zkm-verifier = { path = "crates/verifier" }
-zkm-picus = { path = "crates/fv/picus" }
 
-zkm-lib = { path = "crates/zkvm/lib", default-features = false }
 zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }
 zkm-curves = { path = "crates/curves" }
 

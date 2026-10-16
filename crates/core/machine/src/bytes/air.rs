@@ -16,6 +16,9 @@ impl<F: Field> BaseAir<F> for ByteChip<F> {
     }
 }
 
+// The deferred-shard area cut charges every shard this table's main columns.
+const _: () = assert!(NUM_BYTE_MULT_COLS == zkm_core_executor::deferred_plan::BYTE_MAIN_COLS);
+
 impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

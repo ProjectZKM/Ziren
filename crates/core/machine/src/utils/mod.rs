@@ -56,16 +56,8 @@ pub fn pad_rows_fixed_with_err<R: Clone>(
     size_log2: Option<usize>,
     chip: &str,
 ) -> Result<(), CoreChipError> {
-    let nb_rows = rows.len();
-    let dummy_row = match row_fn() {
-        Ok(row) => row,
-        Err(e) => {
-            tracing::error!("failed to generate dummy row for padding: {}", e);
-            return Err(e);
-        }
-    };
-    rows.resize(next_power_of_two(nb_rows, size_log2, chip), dummy_row);
-    Ok(())
+    let new_len = next_power_of_two(rows.len(), size_log2, chip);
+    pad_rows_with_err(rows, row_fn, new_len)
 }
 
 /// Pad to a power of two, with an option to specify the power.
@@ -75,9 +67,8 @@ pub fn pad_rows_fixed<R: Clone>(
     size_log2: Option<usize>,
     chip: &str,
 ) {
-    let nb_rows = rows.len();
-    let dummy_row = row_fn();
-    rows.resize(next_power_of_two(nb_rows, size_log2, chip), dummy_row);
+    let new_len = next_power_of_two(rows.len(), size_log2, chip);
+    pad_rows(rows, row_fn, new_len);
 }
 
 /// Returns the next power of two that is >= `n` and >= 16. If `fixed_power` is set, it will return
@@ -108,8 +99,9 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
     }
 }
 
-/// Padded height: the next multiple of 32 that is `>= n` and
-/// `>= 32`.  If `fixed_power` is set, behaves exactly like
+/// Padded height: the next multiple of 32 that is `>= n`,
+/// with a minimum of 16 (so `n == 0` yields 16).
+/// If `fixed_power` is set, behaves exactly like
 /// [`next_power_of_two`] (a pinned shape height is still `2^power`).
 ///
 /// The jagged PCS commits every chip at its RAW row count
@@ -121,32 +113,27 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
 pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
     match fixed_power {
         Some(_) => next_power_of_two(n, fixed_power, chip),
-        None => n.next_multiple_of(32).max(32),
+        None => n.next_multiple_of(32).max(16),
     }
 }
 
 /// Padded height for a chip whose shape pins an EXACT row count rather than a
-/// log2 one: the next multiple of 32 that is `>= n` and `>= 32`, or the pinned
-/// count itself when the shape supplies one.
+/// log2 one. Unshaped traces round up to a multiple of 32, with a minimum of 16;
+/// shaped traces use the pinned count itself.
 ///
-/// The recursion side of [`next_multiple_of_32`].  Pinning the row count
-/// (rather than `2^log`) lets one shape fit every program tightly, so a
-/// compose program is a function of its arity alone.
+/// Individual chip heights can be arbitrary: the jagged PCS packs them before
+/// the power-of-two codeword boundary used by Merkle commitments and FRI.
 ///
 /// # Panics
 ///
-/// If the pinned count is `< n`.
-///
-/// The unshaped branch rounds to a power of two, unlike the core-side
-/// [`next_multiple_of_32`]: the recursion merkle-tree and FRI paths call
-/// `log2_strict_usize` on trace heights, which requires `h = 2^k`.
+/// If the pinned count is smaller than the number of real rows.
 pub fn next_multiple_of_32_rows(n: usize, fixed_rows: Option<usize>, chip: &str) -> usize {
     match fixed_rows {
         Some(rows) => {
             assert!(n <= rows, "chip {chip}: shape pins {rows} rows but the trace needs {n}",);
             rows
         }
-        None => next_power_of_two(n, None, chip),
+        None => next_multiple_of_32(n, None, chip),
     }
 }
 
@@ -157,9 +144,8 @@ pub fn pad_rows_exact<R: Clone>(
     fixed_rows: Option<usize>,
     chip: &str,
 ) {
-    let nb_rows = rows.len();
-    let dummy_row = row_fn();
-    rows.resize(next_multiple_of_32_rows(nb_rows, fixed_rows, chip), dummy_row);
+    let new_len = next_multiple_of_32_rows(rows.len(), fixed_rows, chip);
+    pad_rows(rows, row_fn, new_len);
 }
 
 /// [`pad_rows_fixed`] with [`next_multiple_of_32`] padding.
@@ -169,9 +155,38 @@ pub fn pad_rows_mult32<R: Clone>(
     size_log2: Option<usize>,
     chip: &str,
 ) {
-    let nb_rows = rows.len();
+    let new_len = next_multiple_of_32(rows.len(), size_log2, chip);
+    pad_rows(rows, row_fn, new_len);
+}
+
+/// Resizes a row vector to `new_len`, cloning a dummy row when growing and truncating when shrinking.
+///
+/// Calls `row_fn` exactly once, even if no rows need to be appended.
+#[inline]
+pub fn pad_rows<R: Clone>(rows: &mut Vec<R>, row_fn: impl FnOnce() -> R, new_len: usize) {
+    assert!(rows.len() <= new_len, "padding to {new_len} rows would drop {} real rows", rows.len());
     let dummy_row = row_fn();
-    rows.resize(next_multiple_of_32(nb_rows, size_log2, chip), dummy_row);
+    rows.resize(new_len, dummy_row);
+}
+
+/// Resizes a row vector like [`pad_rows`], using a fallible dummy-row generator.
+///
+/// Calls `row_fn` exactly once, even if no rows need to be appended. If it fails, logs and returns
+/// the error without modifying `rows`.
+pub fn pad_rows_with_err<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl FnOnce() -> Result<R, CoreChipError>,
+    new_len: usize,
+) -> Result<(), CoreChipError> {
+    let dummy_row = match row_fn() {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!("failed to generate dummy row for padding: {}", e);
+            return Err(e);
+        }
+    };
+    pad_rows(rows, || dummy_row, new_len);
+    Ok(())
 }
 
 pub fn chunk_vec<T>(mut vec: Vec<T>, chunk_size: usize) -> Vec<Vec<T>> {
@@ -218,6 +233,20 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
+
+    #[test]
+    fn recursion_padding_preserves_exact_shape_rows() {
+        assert_eq!(next_multiple_of_32_rows(65, None, "test"), 96);
+        assert_eq!(next_multiple_of_32_rows(0, None, "test"), 16);
+        assert_eq!(next_multiple_of_32_rows(65, Some(80), "test"), 80);
+        assert_eq!(next_multiple_of_32_rows(65, Some(128), "test"), 128);
+    }
+
+    #[test]
+    #[should_panic(expected = "shape pins 64 rows but the trace needs 65")]
+    fn recursion_padding_rejects_undersized_shape() {
+        next_multiple_of_32_rows(65, Some(64), "test");
+    }
 
     #[test]
     fn zeroed_f_vec_returns_zero_values_for_koalabear() {

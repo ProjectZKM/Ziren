@@ -14,7 +14,7 @@ use crate::syscall::precompiles::keccak_sponge::columns::{
     KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::KeccakSpongeChip;
-use crate::CoreChipError;
+use crate::{utils::next_multiple_of_32, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     type Record = ExecutionRecord;
@@ -63,6 +63,23 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         Ok(())
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_real: usize = input
+            .get_precompile_events(SyscallCode::KECCAK_SPONGE)
+            .iter()
+            .map(|(_, e)| match e {
+                PrecompileEvent::KeccakSponge(ev) => ev.num_blocks() * NUM_ROUNDS,
+                _ => unreachable!(),
+            })
+            .sum();
+        let nb_rows = next_multiple_of_32(
+            nb_real,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &Self::Record,
@@ -108,8 +125,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             dummy_chunk.push(row);
         }
 
-        let num_padded_rows =
-            if num_real_rows == 0 { 0 } else { num_real_rows.next_power_of_two() };
+        let num_padded_rows = <Self as MachineAir<F>>::num_rows(self, input).unwrap();
         for i in num_real_rows..num_padded_rows {
             rows.push(dummy_chunk[i % NUM_ROUNDS]);
         }

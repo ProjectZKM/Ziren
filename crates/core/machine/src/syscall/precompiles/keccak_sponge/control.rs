@@ -60,7 +60,10 @@ use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
     KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
 };
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 pub const NUM_KECCAK_SPONGE_CONTROL_COLS: usize = size_of::<KeccakSpongeControlCols<u8>>();
 
@@ -195,6 +198,23 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeControlChip {
         KeccakSpongeControlCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_real: usize = input
+            .get_precompile_events(SyscallCode::KECCAK_SPONGE)
+            .iter()
+            .map(|(_, event)| match event {
+                PrecompileEvent::KeccakSponge(event) => event.num_blocks(),
+                _ => unreachable!(),
+            })
+            .sum();
+        let nb_rows = next_multiple_of_32(
+            nb_real,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_dependencies(
         &self,
         input: &Self::Record,
@@ -231,11 +251,10 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeControlChip {
         }
         rows = wrapped.unwrap();
 
-        pad_rows_fixed(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_KECCAK_SPONGE_CONTROL_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <KeccakSpongeControlChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(

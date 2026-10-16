@@ -2,7 +2,7 @@ use crate::{
     air::MemoryAirBuilder,
     memory::{value_as_limbs, MemoryCols, MemoryReadCols, MemoryWriteCols},
     operations::{field::field_op::FieldOpCols, KoalaBearWordRangeChecker},
-    utils::{limbs_from_access, pad_rows_fixed, words_to_bytes_le},
+    utils::{limbs_from_access, next_multiple_of_32, pad_rows, words_to_bytes_le},
     CoreChipError,
 };
 use zkm_derive::PicusAnnotations;
@@ -103,6 +103,15 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
 
     fn picus_info(&self) -> PicusInfo {
         U256x2048MulCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::U256XU2048_MUL).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -212,7 +221,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
             output.append(&mut record);
         }
 
-        pad_rows_fixed(
+        pad_rows(
             &mut rows,
             || {
                 let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];
@@ -234,8 +243,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
 
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <U256x2048MulChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))

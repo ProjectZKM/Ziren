@@ -1,9 +1,12 @@
+#![cfg_attr(feature = "event-allocator", feature(allocator_api))]
+
 mod air;
 mod context;
 mod cost;
 /// Deferred-shard planning over event references (the controller's mirror
 /// of `ExecutionRecord::split`).
 pub mod deferred_plan;
+pub mod event_vec;
 pub mod events;
 mod executor;
 /// Flat guest memory for the minimal-trace producer (one 16-byte

@@ -21,20 +21,113 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::SplitOpts;
 
 use crate::{
-    events::{MemoryInitializeFinalizeEvent, PrecompileEvent, SyscallEvent},
+    events::{
+        MemoryInitializeFinalizeEvent, PrecompileEvent, SyscallEvent,
+        NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC,
+    },
+    executor::{CORE_SHARD_HEIGHT_THRESHOLD, MAX_PROGRAM_SIZE},
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
-    ExecutionRecord, Program,
+    ExecutionRecord, MipsAirId, Program,
 };
 
 /// The per-code threshold `split` cuts precompile shards at.
+///
+/// A code with a cost model ([`area_split_threshold`]) is cut where its shard
+/// fills the area budget, never below the count threshold it had before, and
+/// never above the count the per-chip height cap allows: a raised
+/// `SPLIT_THRESHOLD` cannot make a shard the recursion row cube rejects.
 #[must_use]
 pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize {
     match code {
         SyscallCode::KECCAK_SPONGE => opts.keccak,
         SyscallCode::SHA_EXTEND => opts.sha_extend,
         SyscallCode::SHA_COMPRESS => opts.sha_compress,
-        _ => opts.deferred,
+        _ => area_split_threshold(code, opts.element_threshold)
+            .map_or(opts.deferred, |(n, by_height)| n.max(opts.deferred).min(by_height)),
     }
+}
+
+/// The AIR that proves one event of a single-row precompile, and the words
+/// the event touches: every operand buffer the syscall reads or writes
+/// (both points for a curve add, one for a double or a decompress, both
+/// field elements for a field op, the three uint256 words of a mulmod, the
+/// four buffers of a 256x2048 multiply plus the two registers holding its
+/// output pointers, which it reads as memory).  Keccak and SHA, whose chips take
+/// several rows per event and are cut by their own thresholds, are absent.
+fn precompile_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
+    let point = zkm_curves::NUM_WORDS_EC_POINT;
+    let bn_fp = 8;
+    let bls_fp = 12;
+    let bls_point = 2 * bls_fp;
+    Some(match code {
+        SyscallCode::SECP256K1_ADD => (MipsAirId::Secp256k1AddAssign, 2 * point),
+        SyscallCode::SECP256K1_DOUBLE => (MipsAirId::Secp256k1DoubleAssign, point),
+        SyscallCode::SECP256K1_DECOMPRESS => (MipsAirId::Secp256k1Decompress, point),
+        SyscallCode::SECP256R1_ADD => (MipsAirId::Secp256r1AddAssign, 2 * point),
+        SyscallCode::SECP256R1_DOUBLE => (MipsAirId::Secp256r1DoubleAssign, point),
+        SyscallCode::SECP256R1_DECOMPRESS => (MipsAirId::Secp256r1Decompress, point),
+        SyscallCode::BN254_ADD => (MipsAirId::Bn254AddAssign, 2 * point),
+        SyscallCode::BN254_DOUBLE => (MipsAirId::Bn254DoubleAssign, point),
+        SyscallCode::BN254_FP_ADD | SyscallCode::BN254_FP_SUB | SyscallCode::BN254_FP_MUL => {
+            (MipsAirId::Bn254FpOpAssign, 2 * bn_fp)
+        }
+        SyscallCode::BN254_FP2_ADD | SyscallCode::BN254_FP2_SUB => {
+            (MipsAirId::Bn254Fp2AddSubAssign, 4 * bn_fp)
+        }
+        SyscallCode::BN254_FP2_MUL => (MipsAirId::Bn254Fp2MulAssign, 4 * bn_fp),
+        SyscallCode::BLS12381_ADD => (MipsAirId::Bls12381AddAssign, 2 * bls_point),
+        SyscallCode::BLS12381_DOUBLE => (MipsAirId::Bls12381DoubleAssign, bls_point),
+        SyscallCode::BLS12381_DECOMPRESS => (MipsAirId::Bls12381Decompress, bls_point),
+        SyscallCode::BLS12381_FP_ADD
+        | SyscallCode::BLS12381_FP_SUB
+        | SyscallCode::BLS12381_FP_MUL => (MipsAirId::Bls12381FpOpAssign, 2 * bls_fp),
+        SyscallCode::BLS12381_FP2_ADD | SyscallCode::BLS12381_FP2_SUB => {
+            (MipsAirId::Bls12831Fp2AddSubAssign, 4 * bls_fp)
+        }
+        SyscallCode::BLS12381_FP2_MUL => (MipsAirId::Bls12831Fp2MulAssign, 4 * bls_fp),
+        SyscallCode::ED_ADD => (MipsAirId::EdAddAssign, 2 * point),
+        SyscallCode::ED_DECOMPRESS => (MipsAirId::EdDecompress, point),
+        SyscallCode::UINT256_MUL => (MipsAirId::Uint256MulMod, 3 * bn_fp),
+        SyscallCode::U256XU2048_MUL => (MipsAirId::U256XU2048Mul, 2 * bn_fp + 2 * 64 + 2),
+        _ => return None,
+    })
+}
+
+/// Main columns of the byte table, which every shard carries at 2^16 rows.
+pub const BYTE_MAIN_COLS: usize = 10;
+/// Main columns of the program table, which every shard carries at one row
+/// per instruction.
+pub const PROGRAM_MAIN_COLS: usize = 1;
+
+/// How many events of `code` one deferred shard holds when it is cut by area,
+/// with the count the per-chip height cap allows, or `None` for a code
+/// without a cost model here (it keeps its count threshold).
+///
+/// One event costs a row of its own AIR, a local-memory entry per touched
+/// word (four to a row), two global rows per touched word plus two for the
+/// syscall, and a precompile-syscall row; each row is charged its AIR's width
+/// from `mips_costs`.  The precompile's own trace is padded only to a
+/// multiple of 32 (`num_rows`, which the GPU trace generator follows too);
+/// a fixed shape would pad it to a power of two, which this does not model.
+/// The byte and program tables are in every shard and come off the budget
+/// first, the program table at `MAX_PROGRAM_SIZE` rows since the program is
+/// not known here.  (`mips_costs` charges both their preprocessed columns
+/// too, which are not main-trace area.)  The global AIR is the tallest, so it also bounds the count by the per-chip
+/// height cap the core shards are cut at.  Rounded down to a multiple of 32.
+fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<(usize, usize)> {
+    static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
+        std::sync::OnceLock::new();
+    let (air, words) = precompile_air_and_words(code)?;
+    let costs = COSTS.get_or_init(crate::mips_costs);
+    let global_rows = 2 * words + 2;
+    let per_event = costs[&air]
+        + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
+        + global_rows * costs[&MipsAirId::Global]
+        + costs[&MipsAirId::SyscallPrecompile];
+    let fixed = (1 << 16) * BYTE_MAIN_COLS + MAX_PROGRAM_SIZE * PROGRAM_MAIN_COLS;
+    let budget = element_threshold.saturating_sub(fixed);
+    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows / 32 * 32;
+    Some(((budget / per_event).min(by_height) / 32 * 32, by_height))
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
@@ -316,26 +409,26 @@ mod tests {
     #[test]
     fn count_cut_matches_chunks_exact_across_pushes() {
         let mut p = DeferredPlanner::new(opts());
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "a", vec![1; 5]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "a", vec![1; 5]);
         assert!(p.split(false).is_empty());
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "b", vec![1; 7]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "b", vec![1; 7]);
         let s = p.split(false);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::SECP256K1_ADD,
+                code: SyscallCode::SYS_LINUX,
                 slices: vec![
                     EventSlice { artifact: "a".into(), from: 0, to: 5 },
                     EventSlice { artifact: "b".into(), from: 0, to: 3 }
                 ]
             }]
         );
-        p.push_precompile(SyscallCode::SECP256K1_ADD, "c", vec![1; 4]);
+        p.push_precompile(SyscallCode::SYS_LINUX, "c", vec![1; 4]);
         let s = p.split(true);
         assert_eq!(
             s,
             vec![DeferredShardPlan::Precompile {
-                code: SyscallCode::SECP256K1_ADD,
+                code: SyscallCode::SYS_LINUX,
                 slices: vec![
                     EventSlice { artifact: "b".into(), from: 3, to: 7 },
                     EventSlice { artifact: "c".into(), from: 0, to: 4 }
@@ -343,6 +436,24 @@ mod tests {
             }]
         );
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn weierstrass_codes_are_cut_by_area() {
+        let mut opts = SplitOpts::new(1 << 15);
+        opts.element_threshold = zkm_pcs::ELEMENT_THRESHOLD;
+        let double = precompile_split_threshold(SyscallCode::SECP256K1_DOUBLE, &opts);
+        let add = precompile_split_threshold(SyscallCode::SECP256K1_ADD, &opts);
+        // A double touches half the words of an add, so more of them fit.
+        assert!(double > add && add > opts.deferred);
+        assert_eq!(double % 32, 0);
+        // The global AIR, two rows per touched word plus two, stays under the
+        // per-chip height cap.
+        let words = zkm_curves::NUM_WORDS_EC_POINT;
+        assert!(add * (4 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        assert!(double * (2 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        // A code without a cost model keeps its count threshold.
+        assert_eq!(precompile_split_threshold(SyscallCode::SYS_LINUX, &opts), opts.deferred);
     }
 
     #[test]

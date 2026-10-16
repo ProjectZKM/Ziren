@@ -7,7 +7,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_machine::utils::{next_multiple_of_32_rows, pad_rows_exact};
+use zkm_core_machine::utils::{next_multiple_of_32_rows, pad_rows};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{BinomialExtension, MachineAir};
 
@@ -175,11 +175,10 @@ impl<F: PrimeField32> MachineAir<F> for PrefixSumChecksChip {
             })
             .collect::<Vec<_>>();
 
-        pad_rows_exact(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_PREFIX_SUM_CHECKS_COLS],
-            input.fixed_rows(self),
-            <PrefixSumChecksChip as MachineAir<F>>::name(self).as_str(),
+            self.num_rows(input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(

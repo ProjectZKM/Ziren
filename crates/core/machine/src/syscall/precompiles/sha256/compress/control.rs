@@ -29,7 +29,10 @@ use zkm_pcs::{
     LookupKind, Word, ZKMAirBuilder,
 };
 
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 pub const NUM_SHA_COMPRESS_CONTROL_COLS: usize = size_of::<ShaCompressControlCols<u8>>();
 
@@ -77,6 +80,15 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressControlChip {
         ShaCompressControlCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SHA_COMPRESS).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -105,11 +117,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressControlChip {
             rows.push(row);
         }
 
-        pad_rows_fixed(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_SHA_COMPRESS_CONTROL_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <ShaCompressControlChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(

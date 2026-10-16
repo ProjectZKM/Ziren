@@ -11,9 +11,12 @@ use zkm_core_executor::{
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::PicusInfo;
 
-use crate::CoreChipError;
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
-use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
+use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS, SHA_EXTEND_ROWS_PER_EVENT};
 
 impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
     type Record = ExecutionRecord;
@@ -28,6 +31,15 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
 
     fn picus_info(&self) -> PicusInfo {
         ShaExtendCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SHA_EXTEND).len() * SHA_EXTEND_ROWS_PER_EVENT,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -46,14 +58,11 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         }
 
         let mut rows = wrapped_rows.unwrap();
-        let nb_rows = rows.len();
-        let mut padded_nb_rows = nb_rows.next_power_of_two();
-        if padded_nb_rows == 2 || padded_nb_rows == 1 {
-            padded_nb_rows = 4;
-        }
-        for _ in nb_rows..padded_nb_rows {
-            rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
-        }
+        pad_rows(
+            &mut rows,
+            || [F::ZERO; NUM_SHA_EXTEND_COLS],
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
+        );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS))
     }
@@ -102,7 +111,7 @@ impl ShaExtendChip {
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_COLS]>>,
         blu: &mut impl ByteRecord,
     ) {
-        for j in 0..48usize {
+        for j in 0..SHA_EXTEND_ROWS_PER_EVENT {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;

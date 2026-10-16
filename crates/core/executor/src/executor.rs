@@ -59,8 +59,9 @@ pub const UNUSED_PC: u32 = 1;
 /// `clk += 5` per instruction, bound (2) caps any shard at `CORE_SHARD_CLK_LIMIT / 5` cycles no
 /// matter what `SHARD_SIZE` says. At the old 24-bit width that was 3.355 M cycles and it was the
 /// bound that fired: over a 60-shard reth block the close reasons were clk 52 / area 7 / final 1,
-/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits it
-/// is 6.71 M cycles and the trace-area bound (1) is the one that binds again.
+/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits
+/// (6.71 M cycles) it still closed most reth shards short of the area budget; at 26 bits, the
+/// width the memory argument checks, the trace-area bound (1) is the one that binds.
 const CORE_MAX_LOG_ROW_COUNT: usize =
     zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
@@ -74,7 +75,8 @@ const CORE_MAX_LOG_ROW_COUNT: usize =
 /// estimate, which is refreshed only every `shape_check_frequency` cycles and omits some
 /// dependency rows, so the real trace height cannot overshoot the cube between checks.
 const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
-const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
+pub(crate) const CORE_SHARD_HEIGHT_THRESHOLD: u64 =
+    (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
 
 /// The `clk` (timestamp) ceiling for a single core shard.
 ///
@@ -102,7 +104,7 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
 /// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
 /// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
-pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
 
 /// BLOCK-START RAMP.  A block's first shards decide how quickly every card can
 /// start: a card cannot prove what the parent has not cut yet.  MEASURED on 76
@@ -269,6 +271,10 @@ pub struct Executor<'a> {
     /// Exact, incrementally-maintained trace area / tallest-chip height for the shard being
     /// executed. Read by [`Self::inc_shard_if_need`] as an O(1) pair of comparisons.
     pub split_acct: ShardSplitAccumulator,
+    /// Paged-memory twin of [`crate::flat_mem::FlatEntry::REOPEN`]: the words a precompile touched
+    /// after the core had them open in the current shard, whose next core touch opens a new
+    /// local-memory entry.  Registers are keyed by their number.
+    pub reopen_pending: nohash_hasher::IntSet<u32>,
 
     /// The fingerprint of the shard that just closed, waiting for
     /// [`Self::bump_record`] to stamp it on that shard's [`TraceChunk`].  Set
@@ -292,6 +298,11 @@ pub struct Executor<'a> {
     /// `prover.core_shape_config`, which only the offline shape tooling
     /// populates.  See the `shape_match_found` note in `inc_shard_if_need`.
     pub maximal_shapes: Option<MaximalShapes>,
+
+    /// How many of a block's first shards the cutting pass closes early, at
+    /// `1 / 2^RAMP_AREA_SHIFT` of the area budget.  Defaults to `RAMP_SHARDS`;
+    /// a caller with only one card to keep busy sets 0.
+    pub ramp_shards: u32,
 
     /// The costs of the program.
     pub costs: HashMap<MipsAirId, u64>,
@@ -638,6 +649,7 @@ impl<'a> Executor<'a> {
             max_syscall_cycles,
             report: ExecutionReport::default(),
             split_acct,
+            reopen_pending: nohash_hasher::IntSet::default(),
             pending_shape_fingerprint: 0,
             pending_shape_classes: Vec::new(),
             pending_shape_area: 0,
@@ -656,6 +668,7 @@ impl<'a> Executor<'a> {
             local_memory_access: nohash_hasher::IntMap::default(),
             local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
+            ramp_shards: RAMP_SHARDS,
             costs,
             lde_size_check: false,
             lde_size_threshold: 0,
@@ -879,11 +892,16 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
-                self.split_acct.add_touched_address();
+            if !self.unconstrained && !self.skip_replay_bookkeeping {
+                if prev.shard != shard {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                } else if local_memory_access.is_some() {
+                    e.flags |= crate::flat_mem::FlatEntry::REOPEN;
+                } else if e.flags & crate::flat_mem::FlatEntry::REOPEN != 0 {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                }
             }
             e.shard = shard;
             e.timestamp = timestamp;
@@ -926,11 +944,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = match replay_prev {
@@ -1143,11 +1167,16 @@ impl<'a> Executor<'a> {
         if let Some(flat) = self.flat_mem.as_deref_mut() {
             let e = flat.get_mut(addr);
             let prev = e.mem_value();
-            if !self.unconstrained
-                && !self.skip_replay_bookkeeping
-                && (prev.shard != shard || local_memory_access.is_some())
-            {
-                self.split_acct.add_touched_address();
+            if !self.unconstrained && !self.skip_replay_bookkeeping {
+                if prev.shard != shard {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                } else if local_memory_access.is_some() {
+                    e.flags |= crate::flat_mem::FlatEntry::REOPEN;
+                } else if e.flags & crate::flat_mem::FlatEntry::REOPEN != 0 {
+                    self.split_acct.add_touched_address();
+                    e.flags = 0;
+                }
             }
             e.value = value;
             e.shard = shard;
@@ -1199,11 +1228,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = match replay_prev {
@@ -1292,11 +1327,17 @@ impl<'a> Executor<'a> {
             }
         };
 
-        if !self.unconstrained
-            && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some())
-        {
-            self.split_acct.add_touched_address();
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
+            if record.shard != shard {
+                self.split_acct.add_touched_address();
+                if !self.reopen_pending.is_empty() {
+                    self.reopen_pending.remove(&addr);
+                }
+            } else if local_memory_access.is_some() {
+                self.reopen_pending.insert(addr);
+            } else if !self.reopen_pending.is_empty() && self.reopen_pending.remove(&addr) {
+                self.split_acct.add_touched_address();
+            }
         }
 
         let prev_record = *record;
@@ -2788,6 +2829,7 @@ impl<'a> Executor<'a> {
             trace.total_cycles = next_chunk_clk;
         }
         self.split_acct.reset();
+        self.reopen_pending.clear();
         if self.executor_mode == ExecutorMode::Trace {
             for slot in self.local_reg_access.iter_mut() {
                 if let Some(event) = slot.take() {
@@ -3051,7 +3093,7 @@ impl<'a> Executor<'a> {
                         value: *value,
                         timestamp: 0,
                         shard: 0,
-                        _pad: 0,
+                        flags: 0,
                     };
                 }
             }
@@ -3461,7 +3503,7 @@ impl<'a> Executor<'a> {
     /// cutting pass already recorded.
     #[inline]
     fn ramp_split_due(&self) -> bool {
-        if self.state.current_shard > RAMP_SHARDS {
+        if self.state.current_shard > self.ramp_shards {
             return false;
         }
         let area = self.split_acct.trace_area((self.state.clk / 5) as u64);

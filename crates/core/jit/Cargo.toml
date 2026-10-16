@@ -6,13 +6,6 @@ description = "JIT compiler for the Ziren MIPS guest executor (Linux x86_64)."
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-# Field / arithmetic — kept for compatibility with existing dependents.
-p3-koala-bear = { workspace = true }
-p3-field = { workspace = true }
-
-# Tracing / diagnostics.
-tracing = { workspace = true }
-hashbrown = { workspace = true }
 thiserror = "1.0"
 serde = { workspace = true, features = ["derive"] }
 
@@ -25,6 +18,7 @@ memmap2 = "0.9"
 libc = "0.2"
 
 [dev-dependencies]
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 

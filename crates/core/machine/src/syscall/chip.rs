@@ -184,7 +184,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let events = match self.shard_kind() {
+        let events: &[SyscallEvent] = match self.shard_kind() {
             SyscallShardKind::Core => &input.syscall_events,
             SyscallShardKind::Precompile => &input
                 .precompile_events

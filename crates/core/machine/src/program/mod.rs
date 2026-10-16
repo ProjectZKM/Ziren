@@ -159,6 +159,9 @@ impl<F> BaseAir<F> for ProgramChip {
     }
 }
 
+// The deferred-shard area cut charges every shard this table's main columns.
+const _: () = assert!(NUM_PROGRAM_MULT_COLS == zkm_core_executor::deferred_plan::PROGRAM_MAIN_COLS);
+
 impl<AB> Air<AB> for ProgramChip
 where
     AB: ZKMAirBuilder,

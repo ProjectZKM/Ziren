@@ -49,6 +49,9 @@ jobs:
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
+      # The feature changes the executor's fingerprint, so `test-artifacts`
+      # reruns its build script and compiles the guests with the zkm toolchain.
+      - run: source ~/.zkm-toolchain/env && cargo check -p zkm-core-executor --features event-allocator --all-targets
       # `ark` is optional, so the line above never compiles
       # `groth16::ark_converter` and cannot lint it.
       - run: cargo clippy -p zkm-verifier --features ark --all-targets -- -D warnings

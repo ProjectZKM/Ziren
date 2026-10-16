@@ -5,6 +5,9 @@ mod trace;
 
 pub use control::{ShaCompressControlChip, ShaCompressControlCols, NUM_SHA_COMPRESS_CONTROL_COLS};
 
+/// Number of trace rows per syscall: 8 initialization, 64 compression, and 8 finalization rows.
+pub const SHA_COMPRESS_ROWS_PER_EVENT: usize = 8 + 64 + 8;
+
 pub const SHA_COMPRESS_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -64,6 +67,35 @@ pub mod compress_tests {
             Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
         ]);
         Program::new(instructions, 0, 0)
+    }
+
+    #[test]
+    fn trace_preserves_event_rows() {
+        use p3_koala_bear::KoalaBear;
+        use p3_matrix::{dense::RowMajorMatrix, Matrix};
+        use zkm_core_executor::{ExecutionRecord, Executor};
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::ZKMCoreOpts;
+
+        let mut runtime = Executor::new(sha_compress_program(), ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let chip = super::ShaCompressChip::new();
+        let mut event_count = 0;
+        for record in &runtime.records {
+            let count = record.get_precompile_events(SyscallCode::SHA_COMPRESS).len();
+            if count == 0 {
+                continue;
+            }
+            event_count += count;
+            let trace: RowMajorMatrix<KoalaBear> =
+                chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+            assert!(trace.height() >= count * super::SHA_COMPRESS_ROWS_PER_EVENT);
+            assert_eq!(
+                trace.height(),
+                <super::ShaCompressChip as MachineAir<KoalaBear>>::num_rows(&chip, record).unwrap()
+            );
+        }
+        assert!(event_count > 0);
     }
 
     #[test]

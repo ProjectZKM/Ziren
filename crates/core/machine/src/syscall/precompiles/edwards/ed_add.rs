@@ -33,7 +33,7 @@ use crate::{
         field_den::FieldDenCols, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         range::FieldLtCols,
     },
-    utils::{limbs_from_prev_access, pad_rows_fixed},
+    utils::{limbs_from_prev_access, next_multiple_of_32, pad_rows},
 };
 
 pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
@@ -121,6 +121,15 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
         EdAddAssignCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::ED_ADD).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -145,7 +154,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
             })
             .collect::<Vec<_>>();
 
-        pad_rows_fixed(
+        pad_rows(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];
@@ -161,8 +170,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
                 );
                 row
             },
-            input.fixed_log2_rows::<F, _>(self),
-            <EdAddAssignChip<E> as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ED_ADD_COLS))

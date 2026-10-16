@@ -2,7 +2,7 @@ use crate::operations::poseidon2::trace::populate_perm_deg3;
 use crate::operations::poseidon2::WIDTH;
 use crate::syscall::precompiles::poseidon2::columns::{Poseidon2MemCols, NUM_COLS};
 use crate::syscall::precompiles::poseidon2::Poseidon2PermuteChip;
-use crate::utils::pad_rows_fixed;
+use crate::utils::{next_multiple_of_32, pad_rows};
 use crate::CoreChipError;
 use itertools::Itertools;
 use p3_field::PrimeField32;
@@ -27,6 +27,15 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
 
     fn picus_info(&self) -> PicusInfo {
         Poseidon2MemCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::POSEIDON2_PERMUTE).len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -54,12 +63,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         let mut dummy_row = [F::ZERO; NUM_COLS];
         let dummy_cols: &mut Poseidon2MemCols<F> = dummy_row.as_mut_slice().borrow_mut();
         dummy_cols.poseidon2 = populate_perm_deg3([F::ZERO; WIDTH], None);
-        pad_rows_fixed(
-            &mut rows,
-            || dummy_row,
-            input.fixed_log2_rows::<F, _>(self),
-            <Poseidon2PermuteChip as MachineAir<F>>::name(self).as_str(),
-        );
+        pad_rows(&mut rows, || dummy_row, <Self as MachineAir<F>>::num_rows(self, input).unwrap());
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }

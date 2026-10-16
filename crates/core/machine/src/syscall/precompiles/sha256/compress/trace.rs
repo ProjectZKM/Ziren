@@ -14,9 +14,12 @@ use zkm_pcs::{air::MachineAir, Word};
 
 use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},
-    ShaCompressChip, SHA_COMPRESS_K,
+    ShaCompressChip, SHA_COMPRESS_K, SHA_COMPRESS_ROWS_PER_EVENT,
 };
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_multiple_of_32, pad_rows},
+    CoreChipError,
+};
 
 impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
     type Record = ExecutionRecord;
@@ -31,6 +34,16 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
 
     fn picus_info(&self) -> PicusInfo {
         ShaCompressCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_multiple_of_32(
+            input.get_precompile_events(SyscallCode::SHA_COMPRESS).len()
+                * SHA_COMPRESS_ROWS_PER_EVENT,
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -53,11 +66,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
 
         let num_real_rows = rows.len();
 
-        pad_rows_fixed(
+        pad_rows(
             &mut rows,
             || [F::ZERO; NUM_SHA_COMPRESS_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-            <ShaCompressChip as MachineAir<F>>::name(self).as_str(),
+            <Self as MachineAir<F>>::num_rows(self, input).unwrap(),
         );
 
         let mut octet_num = 0;

@@ -33,6 +33,46 @@ pub mod sponge_tests {
     use zkm_core_executor::Program;
     use zkm_pcs::CpuProver;
     #[test]
+    fn trace_preserves_event_rows() {
+        use p3_koala_bear::KoalaBear;
+        use p3_matrix::{dense::RowMajorMatrix, Matrix};
+        use zkm_core_executor::{
+            events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Executor,
+        };
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::ZKMCoreOpts;
+
+        let mut runtime =
+            Executor::new(Program::from(KECCAK_SPONGE_ELF).unwrap(), ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let chip = super::KeccakSpongeControlChip;
+        let mut block_count = 0;
+        for record in &runtime.records {
+            let events = record.get_precompile_events(SyscallCode::KECCAK_SPONGE);
+            if events.is_empty() {
+                continue;
+            }
+            let blocks: usize = events
+                .iter()
+                .map(|(_, event)| match event {
+                    PrecompileEvent::KeccakSponge(event) => event.num_blocks(),
+                    _ => unreachable!(),
+                })
+                .sum();
+            block_count += blocks;
+            let trace: RowMajorMatrix<KoalaBear> =
+                chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+            assert!(trace.height() >= blocks);
+            assert_eq!(
+                trace.height(),
+                <super::KeccakSpongeControlChip as MachineAir<KoalaBear>>::num_rows(&chip, record)
+                    .unwrap()
+            );
+        }
+        assert!(block_count > 0);
+    }
+
+    #[test]
     fn test_keccak_sponge_program_prove() {
         utils::setup_logger();
         let program = Program::from(KECCAK_SPONGE_ELF).unwrap();
