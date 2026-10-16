@@ -51,7 +51,8 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
 /// the event touches: every operand buffer the syscall reads or writes
 /// (both points for a curve add, one for a double or a decompress, both
 /// field elements for a field op, the three uint256 words of a mulmod, the
-/// four buffers of a 256x2048 multiply).  Keccak and SHA, whose chips take
+/// four buffers of a 256x2048 multiply plus the two registers holding its
+/// output pointers, which it reads as memory).  Keccak and SHA, whose chips take
 /// several rows per event and are cut by their own thresholds, are absent.
 fn precompile_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
     let point = zkm_curves::NUM_WORDS_EC_POINT;
@@ -87,7 +88,7 @@ fn precompile_air_and_words(code: SyscallCode) -> Option<(MipsAirId, usize)> {
         SyscallCode::ED_ADD => (MipsAirId::EdAddAssign, 2 * point),
         SyscallCode::ED_DECOMPRESS => (MipsAirId::EdDecompress, point),
         SyscallCode::UINT256_MUL => (MipsAirId::Uint256MulMod, 3 * bn_fp),
-        SyscallCode::U256XU2048_MUL => (MipsAirId::U256XU2048Mul, 2 * bn_fp + 2 * 64),
+        SyscallCode::U256XU2048_MUL => (MipsAirId::U256XU2048Mul, 2 * bn_fp + 2 * 64 + 2),
         _ => return None,
     })
 }
