@@ -109,14 +109,14 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
 /// A query into a code of rate `ρ` is worth `-log2((1 + ρ)/2) < 1` bit, so a
 /// round with `q` queries and `pow` bits of query grind gives
 /// `q·(-log2((1 + ρ)/2)) + pow` bits.  Round `r` queries the codeword committed
-/// by round `r - 1` (round 0: the stripe trees at `ρ = 2^-2`), and each round
+/// by round `r - 1` (round 0: the stripe trees at `ρ = 2^-1`), and each round
 /// commits at `ρ` three halvings below the last.  At the default target and
 /// grinding the solver returns:
 ///
 /// ```text
-///   ρ = 2^-2 : 124 · 0.678072 + 22 = 106.08
-///   ρ = 2^-5 :  88 · 0.955606 + 22 = 106.09
-///   ρ = 2^-8 :  85 · 0.994375 + 22 = 106.52   (final queries)
+///   ρ = 2^-1 : 203 · 0.415037 + 22 = 106.25
+///   ρ = 2^-4 :  93 · 0.912537 + 22 = 106.87
+///   ρ = 2^-7 :  85 · 0.988773 + 22 = 106.05   (final queries)
 /// ```
 ///
 /// Each count is the least integer reaching the target, so one query fewer in
@@ -177,16 +177,26 @@ pub fn whir_batch_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_WHIR_BATCH_GRINDING_BITS", 14)
 }
 
-/// The rate of the first committed oracle, `2^-START_LOG_INV_RATE`.
-const START_LOG_INV_RATE: usize = 2;
+/// The rate of the first committed oracle of the core schedule, `2^-rate`;
+/// `ZIREN_WHIR_START_LOG_INV_RATE` overrides the default of 1.
+///
+/// Every stage below the root commits under this schedule, and the root keeps
+/// the compress schedule, so the published proof is unchanged.  The query
+/// counts are solved from the rate, so rate `2^-1` buys its soundness back
+/// with queries (`[203, 93]` and 85 final at the default target and grinding,
+/// against `[124, 88]` and 85 at `2^-2`).  MEASURED on two RTX 5090s, six
+/// mainnet blocks warm, two interleaved pairs: a core shard's commit 57 ->
+/// 33 ms, a leaf +10 ms, the blocks 93.0 -> 90.0 s (-3.3%).
+fn start_log_inv_rate() -> usize {
+    crate::params::env_usize("ZIREN_WHIR_START_LOG_INV_RATE", 1)
+}
 
 /// The schedule at stacking height `lsh`, before the batching grind.
 ///
 /// The query counts are solved, not listed: a round is worth
 /// `q · bits_per_query(rate) + pow` bits, so listing `q` while `pow` and the
 /// target are overridable would let an override weaken a round silently.  At
-/// the defaults this yields the schedule it replaces, `[124, 88]` and 85 final
-/// queries.
+/// the defaults this yields `[203, 93]` and 85 final queries.
 fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
     const ROUND0_FF: usize = 3;
     let mut rem =
@@ -197,9 +207,9 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rem -= 6;
     }
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
-    config.starting_log_inv_rate = START_LOG_INV_RATE;
+    config.starting_log_inv_rate = start_log_inv_rate();
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
-        rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
+        rp.log_inv_rate = start_log_inv_rate() + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
     let pow = query_grinding_bits();
@@ -223,7 +233,7 @@ pub fn bits_per_query(log_inv_rate: usize) -> f64 {
 /// rate, round `r` the rate round `r - 1` committed, and the final queries the
 /// last committed round's rate.
 fn queried_log_inv_rate(r: usize) -> usize {
-    START_LOG_INV_RATE + 3 * r
+    start_log_inv_rate() + 3 * r
 }
 
 /// The least query count reaching [`per_component_target_bits`] at this rate
@@ -343,7 +353,7 @@ pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
 ///   rho = 2^-9  : 19 · 4.3845 + 26 = 109.3   (final queries)
 /// ```
 ///
-/// against `[124, 88]` and 85 under the core schedule.
+/// against `[203, 93]` and 85 under the core schedule.
 /// Folds are `[2, 6, 6]` with seven final variables.
 pub fn compress_whir_config(lsh: usize) -> WhirConfig {
     let rate = compress_log_inv_rate();
