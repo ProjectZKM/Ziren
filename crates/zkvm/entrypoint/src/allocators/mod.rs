@@ -4,6 +4,8 @@
 
 #[cfg(all(feature = "bump", not(feature = "embedded")))]
 mod bump;
+#[cfg(all(feature = "bump", not(feature = "embedded")))]
+pub(crate) use bump::alloc_untouched;
 
 #[cfg(feature = "embedded")]
 mod embedded;
