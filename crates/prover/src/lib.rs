@@ -3252,6 +3252,104 @@ pub mod tests {
         )
     }
 
+    /// A prover runs the program on an initial memory other than its image
+    /// and proves against the image's verifying key: it sets up on the
+    /// altered image, puts the honest image's initial global sum into the
+    /// proving key so the transcript matches the honest key, and moves the
+    /// difference between the two initial sums into the Global chip's
+    /// declared global sum (`chip_cumulative_sums`) of one shard.  The leaf
+    /// witness carries the declared sum as the chip's opened global sum, and
+    /// nothing constrains it (the shard prover has no permutation trace, so
+    /// `eval_permutation_constraints` returns before its last-row check), so
+    /// a leaf summing those would cancel the difference.  The leaf sums the
+    /// shard public values, which the public-values AIR binds to the Global
+    /// chip's digest chain, so the tree cannot close.
+    ///
+    /// `cargo test -r -p zkm-prover compress_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
+    #[test]
+    #[serial]
+    #[ignore]
+    fn compress_rejects_a_proof_over_a_different_initial_memory() -> Result<()> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        use zkm_pcs::septic_curve::SepticCurveComplete;
+        use zkm_pcs::septic_digest::SepticDigest;
+
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, _, program, vk) = prover.setup(elf);
+
+        let text = program.pc_base..program.pc_base + 4 * program.instructions.len() as u32;
+        let (&addr, &word) = program
+            .image
+            .iter()
+            .rev()
+            .find(|(addr, _)| !text.contains(addr))
+            .expect("an image word outside the text segment");
+        let mut altered = program.clone();
+        altered.image.insert(addr, word ^ 1);
+
+        let (altered_pk_d, altered_vk) = prover.core_prover.setup(&altered);
+        let honest_initial = vk.vk.initial_global_cumulative_sum;
+        let altered_initial = altered_vk.initial_global_cumulative_sum;
+        assert_ne!(honest_initial, altered_initial, "the altered word must move the initial sum");
+        let mut pk = prover.core_prover.pk_to_host(&altered_pk_d);
+        pk.initial_global_cumulative_sum = honest_initial;
+        let pk_d = prover.core_prover.pk_to_device(&pk);
+
+        let mut core =
+            prover.prove_core(&pk_d, altered, &fib_stdin(10), opts, ZKMContext::default())?;
+
+        let shift = |d: SepticDigest<KoalaBear>| {
+            SepticDigest(
+                (SepticCurveComplete::Affine(d.0)
+                    + SepticCurveComplete::Affine(altered_initial.0)
+                    + SepticCurveComplete::Affine(honest_initial.0.neg()))
+                .point(),
+            )
+        };
+        let shard = core
+            .proof
+            .0
+            .iter()
+            .position(|sp| {
+                sp.jagged_shard_proof.chip_cumulative_sums.values().any(|s| !s.global.is_zero())
+            })
+            .expect("a shard with global interactions");
+        for sums in core.proof.0[shard]
+            .jagged_shard_proof
+            .chip_cumulative_sums
+            .values_mut()
+            .filter(|s| !s.global.is_zero())
+        {
+            sums.global = shift(sums.global);
+        }
+        tracing::info!(
+            "altered image word {addr:#x}: {word:#x} -> {:#x}; shifted shard {shard}",
+            word ^ 1
+        );
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+            let compressed = prover.compress(&vk, core, vec![], opts)?;
+            prover.verify_compressed(&compressed, &vk)?;
+            Ok(())
+        }));
+        tracing::info!(
+            "outcome: {}",
+            match &outcome {
+                Ok(Ok(())) => "ACCEPTED".to_string(),
+                Ok(Err(e)) => format!("rejected: {e}"),
+                Err(_) => "rejected: the recursion program panicked".to_string(),
+            }
+        );
+        assert!(
+            !matches!(outcome, Ok(Ok(()))),
+            "a proof over an altered initial memory verified against the image's key"
+        );
+        Ok(())
+    }
+
     /// Compress a keccak (precompile + multi-shard) workload with unpadded
     /// core shapes: exercises non-core chips (KeccakPermute/precompile/memory)
     /// and the multi-shard global cumulative-sum chain through the recursion
