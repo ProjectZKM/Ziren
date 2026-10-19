@@ -300,6 +300,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (prefix_sum_checks.clone(), rows(163_840)),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
+            HashMap::from([
+                (mem_var.clone(), rows(524_288)),
+                (select.clone(), rows(294_912)),
+                (mem_const.clone(), rows(8_192)),
+                (base_alu.clone(), rows(1_014_144)),
+                (ext_alu.clone(), rows(1_295_744)),
+                (poseidon2_wide.clone(), rows(139_264)),
+                (ext2felt.clone(), rows(137_024)),
+                (prefix_sum_checks.clone(), rows(327_680)),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+            ]),
         ];
         assert_eq!(allowed_shapes.len(), zkm_pcs::jagged::RECURSION_PIN_CLASSES.len());
         for (index, shape) in allowed_shapes.iter().enumerate() {

@@ -970,7 +970,7 @@ pub mod tests {
             largest.main.area,
         );
         assert_eq!(
-            rec_batch, 64,
+            rec_batch, 128,
             "the recursion pin classes moved; update the soundness model's \
              compress batch cardinality to {rec_batch}",
         );
