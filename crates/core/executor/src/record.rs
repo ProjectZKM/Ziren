@@ -478,6 +478,9 @@ impl ExecutionRecord {
                 }
             }
 
+            for record in &mut shards_input {
+                record.precompile_events.merge_chained_local_mem_events();
+            }
             shards.extend(shards_input);
         }
 
