@@ -119,10 +119,10 @@ impl<T: Copy> MemoryInstrCommonCols<T> {
 /// Returns the aligned-address expression (`addr_word.reduce() - addr_ls_two_bits`).
 /// It is sound because `most_sig_bytes_zero = 1 ⇒ is_real = 1`, so the
 /// `addr_word ≥ NUM_REGISTERS` byte lookup fires only on real rows.
-pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
+pub fn eval_memory_common<AB: ZKMCoreAirBuilder, E: Into<AB::Expr> + Clone>(
     builder: &mut AB,
     cols: &MemoryInstrCommonCols<AB::Var>,
-    memory_access: &impl crate::memory::MemoryCols<AB::Var>,
+    memory_access: &impl crate::memory::MemoryCols<E>,
     is_real: AB::Expr,
 ) -> AB::Expr {
     AddOperation::<AB::F>::eval_check_value_only(

@@ -46,8 +46,10 @@ pub struct StoreWordColumns<T> {
     pub common: MemoryInstrCommonCols<T>,
 
     /// Memory consistency columns.  Stores WRITE, so the previous value is a
-    /// separate word from the written one.
-    pub memory_access: crate::memory::MemoryReadWriteCols<T>,
+    /// separate word from the written one; the written word is `op_a`'s previous
+    /// value (`SW` keeps `op_a`, `SC` stores it and then overwrites `op_a`), so it
+    /// has no columns of its own.
+    pub memory_access: crate::memory::MemoryStoreCols<T>,
 
     /// Whether this is a store word instruction.
     #[picus(selector)]
@@ -82,13 +84,14 @@ where
         builder.assert_bool(local.is_sc);
         builder.assert_bool(is_real.clone());
 
-        eval_memory_common(builder, common, &local.memory_access, is_real.clone());
+        let mem_val = common.prev_a_val().map(Into::<AB::Expr>::into);
+        let memory_access = local.memory_access.with_value(mem_val.clone());
+        eval_memory_common(builder, common, &memory_access, is_real.clone());
         assert_word_aligned(builder, common, is_real.clone());
 
         let a_val = common.a_val();
-        let mem_val = *local.memory_access.value();
 
-        builder.when(local.is_sw).assert_word_eq(mem_val, a_val);
+        builder.when(local.is_sw).assert_word_eq(mem_val.clone(), a_val);
 
         builder.when(local.is_sc).assert_word_eq(mem_val, common.prev_a_val());
         let sc_flag_gate = local.is_sc * (AB::Expr::ONE - common.frame.op_a_0);
