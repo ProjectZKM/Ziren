@@ -893,6 +893,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         )
     }
 
+    /// Whether this machine anchors its shards' public values: some chip of
+    /// the machine uses a bus `eval_public_values` closes (the core machine
+    /// does; the recursion machines do not).  Decided over every chip of the
+    /// machine, so a shard cannot opt out by the chip set its proof names.
+    pub fn has_public_value_buses(&self) -> bool {
+        crate::shard_level::verifier::chips_touch_public_value_buses(self.chips.iter())
+    }
+
     /// The preprocessed round's chip set: every chip with preprocessed columns,
     /// BY NAME -- exactly what `setup` commits, and in the order it commits it.
     ///
@@ -1081,6 +1089,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let prep_chip_dims = self.preprocessed_chip_dims();
         let prep_chip_dims = &prep_chip_dims;
+        let has_pv_buses = self.has_public_value_buses();
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
@@ -1098,6 +1107,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &mut shard_challenger,
                         shard_proof,
                         self.recursion_pins(),
+                        has_pv_buses,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })

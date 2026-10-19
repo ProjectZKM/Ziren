@@ -906,6 +906,25 @@ pub mod tests {
     /// below `2^MAX_ROUND_LOG_AREA`, so a soundness model of the batch has to
     /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` fence,
     /// which only has to lie inside it.
+    /// The shard verifier anchors a shard's public values to the trace iff the
+    /// MACHINE has a bus `eval_public_values` closes, whatever chips the shard
+    /// names.  The core machine has them; a chip set such as the Byte table
+    /// alone has none, so a verifier deciding from the shard's chips would
+    /// leave such a shard's public values (its global cumulative sum among
+    /// them) bound to nothing.
+    #[test]
+    fn core_machine_anchors_public_values_for_every_shard() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shard_level::verifier::chips_touch_public_value_buses;
+
+        let machine =
+            MipsAir::machine(zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default());
+        assert!(machine.has_public_value_buses());
+        let byte = machine.chips().iter().filter(|chip| chip.name() == "Byte").collect::<Vec<_>>();
+        assert_eq!(byte.len(), 1, "the core machine has one Byte chip");
+        assert!(!chips_touch_public_value_buses(byte.iter().copied()));
+    }
+
     #[test]
     fn committed_stripe_bound_over_both_rounds() {
         use zkm_pcs::air::MachineAir;
