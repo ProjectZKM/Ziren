@@ -23,7 +23,7 @@ use twirp::{
 };
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof, utils::ZKMCoreProverError};
 use zkm_prover::{
-    CompressedSC, InnerSC, OuterSC, ZKMCoreProof, ZKMProvingKey, ZKMRecursionProverError,
+    CompressedSC, OuterSC, ShrinkSC, ZKMCoreProof, ZKMProvingKey, ZKMRecursionProverError,
     ZKMVerifyingKey,
 };
 
@@ -135,7 +135,7 @@ pub struct ShrinkRequestPayload {
 /// This object is used to serialize and deserialize the payloads for the GPU server.
 #[derive(Serialize, Deserialize)]
 pub struct WrapRequestPayload {
-    pub reduced_proof: ZKMReduceProof<InnerSC>,
+    pub reduced_proof: ZKMReduceProof<ShrinkSC>,
 }
 
 /// Defines how the GPU server is created.
@@ -485,14 +485,14 @@ impl ZKMCudaProver {
     pub fn shrink(
         &self,
         reduced_proof: ZKMReduceProof<CompressedSC>,
-    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
+    ) -> Result<ZKMReduceProof<ShrinkSC>, ZKMRecursionProverError> {
         let payload = ShrinkRequestPayload { reduced_proof: reduced_proof.clone() };
         let data = bincode::serialize(&payload)
             .map_err(|e| rec_codec("shrink", "encode the request", e))?;
         let request = crate::api::ShrinkRequest { data };
         let response = block_on(async { self.client.shrink(request).await })
             .map_err(|e| rec_transport("shrink", e))?;
-        let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result)
+        let proof: ZKMReduceProof<ShrinkSC> = bincode::deserialize(&response.result)
             .map_err(|e| rec_codec("shrink", "decode the response", e))?;
         Ok(proof)
     }
@@ -502,7 +502,7 @@ impl ZKMCudaProver {
     /// You will need at least 24GB of VRAM to run this method.
     pub fn wrap_bn254(
         &self,
-        reduced_proof: ZKMReduceProof<InnerSC>,
+        reduced_proof: ZKMReduceProof<ShrinkSC>,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let payload = WrapRequestPayload { reduced_proof: reduced_proof.clone() };
         let data = bincode::serialize(&payload)
@@ -667,7 +667,7 @@ mod tests {
         let msg = format!("{e}");
         assert!(msg.contains("prove_core") && msg.contains("version mismatch"), "got: {msg}");
 
-        let Err(e) = bincode::deserialize::<ZKMReduceProof<InnerSC>>(&garbage)
+        let Err(e) = bincode::deserialize::<ZKMReduceProof<zkm_prover::InnerSC>>(&garbage)
             .map_err(|e| rec_codec("compress", "decode the response", e))
         else {
             panic!("garbage must not decode")
