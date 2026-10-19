@@ -1534,7 +1534,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.shrink_prover.machine(),
             self.vk_verification,
             max_log_row_count,
-            PublicValuesOutputDigest::Root,
+            PublicValuesOutputDigest::ReduceToRoot,
         );
         let operations = builder.into_operations();
         builder_span.exit();

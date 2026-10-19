@@ -275,6 +275,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
         &wrap_machine,
         max_log_row_count,
         PublicValuesOutputDigest::Root,
+        None,
     );
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
