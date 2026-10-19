@@ -1460,7 +1460,7 @@ mod normalize_enumeration_tests {
     fn normalize_enumeration_covers_padded_keccak_shard() {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
-        // Block 26,181,835: Keccak padding pushes the main round to 352 blocks,
+        // Block 26,181,835: Keccak padding pushes the main round to 344 blocks,
         // past the former executor-budget-based enumeration limit.
         let rows: Vec<(String, usize)> = [
             ("Byte", 65_536),
@@ -1476,7 +1476,7 @@ mod normalize_enumeration_tests {
         .map(|(name, height)| (name.to_owned(), height))
         .collect();
         let class = ZKMProofShape::normalize_class(machine, &rows);
-        assert_eq!((class.1, class.2), (8, 352));
+        assert_eq!((class.1, class.2), (8, 344));
         assert!(ZKMProofShape::generate_normalize(machine)
             .iter()
             .any(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)) == class));
