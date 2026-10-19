@@ -346,6 +346,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
+        if *public_values.vk_root() != self.recursion_vk_root {
+            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
+        }
+
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm_vk_digest() != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
