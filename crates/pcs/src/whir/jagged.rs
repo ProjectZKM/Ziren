@@ -129,7 +129,23 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
 /// costs a factor in the adversary's oracle queries, which no schedule here
 /// buys back.
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
-    let mut config = core_whir_config_without_batch_grind(lsh);
+    core_schedule(lsh, start_log_inv_rate())
+}
+
+/// The starting rate the shrink proof keeps, `2^-2`.
+pub const SHRINK_START_LOG_INV_RATE: usize = 2;
+
+/// The core schedule at the starting rate [`SHRINK_START_LOG_INV_RATE`]:
+/// the shrink proof's schedule.  The wrap program verifies the shrink proof,
+/// so the shrink schedule fixes the wrap's committed geometry and the circuit
+/// behind it; keeping shrink at `2^-2` leaves both unchanged while the stages
+/// below the root move to [`start_log_inv_rate`].
+pub fn shrink_whir_config(lsh: usize) -> WhirConfig {
+    core_schedule(lsh, SHRINK_START_LOG_INV_RATE)
+}
+
+fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
+    let mut config = core_whir_config_without_batch_grind(lsh, start);
     config.batch_pow_bits = whir_batch_grinding_bits();
     config
 }
@@ -191,13 +207,14 @@ fn start_log_inv_rate() -> usize {
     crate::params::env_usize("ZIREN_WHIR_START_LOG_INV_RATE", 1)
 }
 
-/// The schedule at stacking height `lsh`, before the batching grind.
+/// The schedule at stacking height `lsh` and starting rate `2^-start`,
+/// before the batching grind.
 ///
 /// The query counts are solved, not listed: a round is worth
 /// `q · bits_per_query(rate) + pow` bits, so listing `q` while `pow` and the
 /// target are overridable would let an override weaken a round silently.  At
 /// the defaults this yields `[203, 93]` and 85 final queries.
-fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
+fn core_whir_config_without_batch_grind(lsh: usize, start: usize) -> WhirConfig {
     const ROUND0_FF: usize = 3;
     let mut rem =
         lsh.checked_sub(ROUND0_FF).expect("stacking height must exceed the round-0 folding factor");
@@ -207,18 +224,18 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rem -= 6;
     }
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
-    config.starting_log_inv_rate = start_log_inv_rate();
+    config.starting_log_inv_rate = start;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
-        rp.log_inv_rate = start_log_inv_rate() + 3 * (r + 1);
+        rp.log_inv_rate = start + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
     let pow = query_grinding_bits();
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
-        rp.num_queries = min_queries(queried_log_inv_rate(r), pow);
+        rp.num_queries = min_queries(queried_log_inv_rate(start, r), pow);
         rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
     }
-    config.final_queries = min_queries(queried_log_inv_rate(num_rounds - 1), pow);
+    config.final_queries = min_queries(queried_log_inv_rate(start, num_rounds - 1), pow);
     config.final_pow_bits = pow;
     config
 }
@@ -229,11 +246,11 @@ pub fn bits_per_query(log_inv_rate: usize) -> f64 {
     -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
 }
 
-/// The rate of the codeword round `r` queries: round 0 queries the starting
-/// rate, round `r` the rate round `r - 1` committed, and the final queries the
-/// last committed round's rate.
-fn queried_log_inv_rate(r: usize) -> usize {
-    start_log_inv_rate() + 3 * r
+/// The rate of the codeword round `r` queries under a schedule starting at
+/// `2^-start`: round 0 queries the starting rate, round `r` the rate round
+/// `r - 1` committed, and the final queries the last committed round's rate.
+fn queried_log_inv_rate(start: usize, r: usize) -> usize {
+    start + 3 * r
 }
 
 /// The least query count reaching [`per_component_target_bits`] at this rate
@@ -260,6 +277,9 @@ pub enum WhirProfile {
     /// challenges ground ([`compress_whir_config`]).  Every parameter can be
     /// set for a different security requirement.
     Compress,
+    /// The core schedule at the starting rate `2^-2`, for the shrink proof,
+    /// whose verifier is the wrap program ([`shrink_whir_config`]).
+    Shrink,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -267,6 +287,7 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
     match profile {
         WhirProfile::Core => core_whir_config(lsh),
         WhirProfile::Compress => compress_whir_config(lsh),
+        WhirProfile::Shrink => shrink_whir_config(lsh),
     }
 }
 

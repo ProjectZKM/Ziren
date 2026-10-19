@@ -41,7 +41,9 @@ use zkm_core_machine::{
 use zkm_pcs::MachineProvingKey;
 use zkm_pcs::{
     air::PublicValues,
-    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    koala_bear_poseidon2::{
+        KoalaBearPoseidon2, KoalaBearPoseidon2Compress, KoalaBearPoseidon2Shrink,
+    },
     Challenge, MachineProver, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
     Val, Word, ZKMCoreOpts, ZKMProverOpts, DIGEST_SIZE,
 };
@@ -98,9 +100,16 @@ pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 pub type CoreSC = KoalaBearPoseidon2;
 
 /// The configuration for the inner prover (D=4, 100-bit security): every
-/// recursion node below the root (leaves, interior composes, deferred nodes)
-/// and the shrink, under the core WHIR schedule, tuned for prover time.
+/// recursion node below the root (leaves, interior composes, deferred nodes),
+/// under the core WHIR schedule, tuned for prover time.
 pub type InnerSC = KoalaBearPoseidon2;
+
+/// The configuration of the shrink: the same field, hash and transcript as
+/// [`InnerSC`] under the core schedule at its former starting rate `2^-2`
+/// ([`zkm_pcs::whir::jagged::WhirProfile::Shrink`]).  The wrap program
+/// verifies the shrink proof, so this ring fixes the wrap's geometry and the
+/// circuit behind it independently of the core schedule's rate.
+pub type ShrinkSC = KoalaBearPoseidon2Shrink;
 
 /// The configuration of the ROOT, the closing compose whose proof is the
 /// published compressed proof: the same field, hash and transcript as
@@ -619,7 +628,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let compress_machine = CompressAir::compress_machine(InnerSC::default());
         let compress_prover = C::CompressProver::new(compress_machine);
 
-        let shrink_machine = ShrinkAir::shrink_machine(InnerSC::compressed());
+        let shrink_machine = ShrinkAir::shrink_machine(ShrinkSC::compressed());
         let shrink_prover = C::ShrinkProver::new(shrink_machine);
 
         let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
@@ -1508,7 +1517,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// per end-to-end proof, so the per-call build cost is acceptable.
     pub fn wrap_bn254_program_basefold(
         &self,
-        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+        input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
@@ -1519,7 +1528,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut builder = Builder::<WrapConfig>::new(RecursionProgramType::Wrap);
         let input_var = input.read(&mut builder);
 
-        verify_wrap_basefold::<WrapConfig, InnerSC, _>(
+        verify_wrap_basefold::<WrapConfig, ShrinkSC, _>(
             &mut builder,
             input_var,
             self.shrink_prover.machine(),
@@ -2032,7 +2041,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         reduced_proof: ZKMReduceProof<CompressedSC>,
         opts: ZKMProverOpts,
-    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
+    ) -> Result<ZKMReduceProof<ShrinkSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
         let basefold_proof = *compressed_proof.jagged_shard_proof;
         let vk_merkle_data =
@@ -2078,7 +2087,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     #[instrument(name = "wrap_bn254", level = "info", skip_all)]
     pub fn wrap_bn254(
         &self,
-        compressed_proof: ZKMReduceProof<InnerSC>,
+        compressed_proof: ZKMReduceProof<ShrinkSC>,
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
@@ -2801,7 +2810,7 @@ pub mod tests {
         let shape =
             ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height: VK_MERKLE_TREE_HEIGHT };
         let input =
-            ZKMWrapBasefoldWitnessValues::<InnerSC>::dummy(prover.shrink_prover.machine(), &shape);
+            ZKMWrapBasefoldWitnessValues::<ShrinkSC>::dummy(prover.shrink_prover.machine(), &shape);
         let program = prover.wrap_bn254_program_basefold(&input);
 
         let wrap_machine = prover.wrap_prover.machine();
