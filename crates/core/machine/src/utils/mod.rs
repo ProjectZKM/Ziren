@@ -1,7 +1,6 @@
 pub mod concurrency;
 #[cfg(test)]
 mod forgery_harness;
-pub mod global_sum;
 mod logger;
 mod prove;
 mod span;

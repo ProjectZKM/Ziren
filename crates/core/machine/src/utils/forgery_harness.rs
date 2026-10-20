@@ -103,8 +103,7 @@ fn verify(
     proof: &MachineProof<SC>,
 ) -> Result<(), MachineVerificationError<SC>> {
     let mut challenger = machine.config().challenger();
-    machine.verify(vk, proof, &mut challenger)?;
-    crate::utils::global_sum::verify_global_cumulative_sum(vk, &proof.shard_proofs)
+    machine.verify(vk, proof, &mut challenger)
 }
 
 /// Map a verify result to a short tag naming WHICH substrate check

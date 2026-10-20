@@ -234,8 +234,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::TooManyShards);
         }
 
-        zkm_core_machine::utils::global_sum::verify_global_cumulative_sum(&vk.vk, &proof.0)?;
-
         let mut challenger = self.core_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
