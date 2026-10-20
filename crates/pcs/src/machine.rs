@@ -1141,11 +1141,29 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             result?;
         }
 
+        // Only machines that anchor their public values carry a bound cross-shard digest: the
+        // public-values AIR ties `global_cumulative_sum` to the end of the Global chip's running
+        // digest. The per-chip sums a shard proof declares are not bound by anything.
+        // Recursion machines have no Global-scope chip and do not use these public-value buses,
+        // so they skip this cross-shard check.
+        if !has_pv_buses {
+            return Ok(());
+        }
+
         tracing::debug_span!("verify global cumulative sum is 0").in_scope(|| {
-            let sum = proof
+            let shard_sums = proof
                 .shard_proofs
                 .iter()
-                .map(ShardProof::global_cumulative_sum)
+                .map(|shard_proof| {
+                    crate::air::public_values_from_slice(&shard_proof.public_values)
+                        .map(|public_values| public_values.global_cumulative_sum)
+                        .ok_or(MachineVerificationError::InvalidPublicValues(
+                            "public values do not hold a core public-values layout",
+                        ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let sum = shard_sums
+                .into_iter()
                 .chain(once(vk.initial_global_cumulative_sum))
                 .sum::<SepticDigest<Val<SC>>>();
 
