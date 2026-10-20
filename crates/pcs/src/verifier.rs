@@ -25,7 +25,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     ///   shard's chip subset or the key.
     /// * `pinned`: the machine's pins (`StarkMachine::recursion_pins`); `Some`
     ///   means the rounds are pinned.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
     pub fn verify_shard(
         _config: &SC,
         vk: &StarkVerifyingKey<SC>,

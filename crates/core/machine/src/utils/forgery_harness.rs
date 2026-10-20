@@ -35,7 +35,6 @@
 //!
 //! The tests are `#[ignore]`d: each proves a real core proof (seconds).
 
-#![cfg(test)]
 #![allow(clippy::type_complexity)]
 
 use p3_field::PrimeCharacteristicRing;
