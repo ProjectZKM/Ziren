@@ -428,7 +428,6 @@ mod parity_tests {
             shift_left_imm_event_to_row_koalabear,
             |row: &mut [F]| {
                 let cols: &mut ShiftLeftImmCols<F> = row.borrow_mut();
-                cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
                 cols.bit_shift_multiplier = F::ONE;
             }
@@ -582,7 +581,12 @@ mod parity_tests {
     }
 
     fn run_and_check(program: Program, label: &str) {
+        run_and_check_with_input(program, &[], label);
+    }
+
+    fn run_and_check_with_input(program: Program, input: &[Vec<u8>], label: &str) {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.write_vecs(input);
         runtime.run().unwrap();
         for (i, record) in runtime.records.iter().enumerate() {
             tracing::info!(
@@ -619,7 +623,9 @@ mod parity_tests {
 
     #[test]
     fn test_all_instruction_chips_ffi_eq_rust_fibonacci() {
-        run_and_check(fibonacci_program(), "fibonacci");
+        let mut stdin = crate::io::ZKMStdin::new();
+        stdin.write(&10u32);
+        run_and_check_with_input(fibonacci_program(), &stdin.buffer, "fibonacci");
     }
 
     #[test]
