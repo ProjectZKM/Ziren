@@ -114,7 +114,7 @@ impl JumpChip {
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
         if matches!(event.opcode, Opcode::JumpDirect) {
-            cols.target_add.populate(blu, event.next_pc, event.b);
+            crate::operations::AddOperation::<F>::default().populate(blu, event.next_pc, event.b);
         }
     }
 }

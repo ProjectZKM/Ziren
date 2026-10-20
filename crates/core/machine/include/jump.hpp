@@ -27,10 +27,5 @@ __ZKM_HOSTDEV__ void event_to_row(
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
     write_word_from_u32<F>(cols.next_next_pc, event.next_next_pc);
     populate_range_checker(cols.next_next_pc_range_checker, event.next_next_pc);
-
-    // The inlined BAL target addition — mirrors control_flow/jump/trace.rs.
-    if (event.opcode == Opcode::JumpDirect) {
-        add_sub::populate<F>(cols.target_add, event.next_pc, event.b);
-    }
 }
 }  // namespace zkm::jump
