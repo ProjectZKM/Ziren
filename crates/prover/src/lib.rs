@@ -3271,7 +3271,7 @@ pub mod tests {
     /// so `eval_permutation_constraints` returns before its last-row check),
     /// so a verifier summing those would cancel the difference.  Returns the
     /// forged core proof and the honest image's verifying key.
-    fn prove_core_over_altered_image(
+    fn forge_core_proof_over_altered_image(
         prover: &ZKMProver<DefaultProverComponents>,
         opts: ZKMProverOpts,
     ) -> Result<(ZKMCoreProof, ZKMVerifyingKey)> {
@@ -3335,7 +3335,7 @@ pub mod tests {
 
     /// The leaf sums the shard public values, which the public-values AIR
     /// binds to the Global chip's digest chain, so the tree over the proof of
-    /// [`prove_core_over_altered_image`] cannot close.
+    /// [`forge_core_proof_over_altered_image`] cannot close.
     ///
     /// `cargo test -r -p zkm-prover compress_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
     #[test]
@@ -3347,7 +3347,7 @@ pub mod tests {
         setup_logger();
         let opts = ZKMProverOpts::default();
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        let (core, vk) = prove_core_over_altered_image(&prover, opts)?;
+        let (core, vk) = forge_core_proof_over_altered_image(&prover, opts)?;
 
         let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
             let compressed = prover.compress(&vk, core, vec![], opts)?;
@@ -3371,7 +3371,7 @@ pub mod tests {
 
     /// The host verifier sums the shard public values rather than the declared
     /// per-chip sums, so the core machine's verifier rejects the proof of
-    /// [`prove_core_over_altered_image`] on its own, without recursion and
+    /// [`forge_core_proof_over_altered_image`] on its own, without recursion and
     /// without any check outside `StarkMachine::verify`.
     ///
     /// `cargo test -r -p zkm-prover core_verify_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
@@ -3384,7 +3384,7 @@ pub mod tests {
         setup_logger();
         let opts = ZKMProverOpts::default();
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        let (core, vk) = prove_core_over_altered_image(&prover, opts)?;
+        let (core, vk) = forge_core_proof_over_altered_image(&prover, opts)?;
 
         let machine = prover.core_prover.machine();
         let mut challenger = machine.config().challenger();
@@ -3396,7 +3396,7 @@ pub mod tests {
                 machine_result,
                 Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
             ),
-            "the core machine verifier must reject a proof over an altered initial memory"
+            "the core machine verifier must reject a proof over an altered initial memory; got {machine_result:?}"
         );
 
         let prover_result = prover.verify(&core.proof, &vk);
@@ -3405,10 +3405,11 @@ pub mod tests {
                 prover_result,
                 Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
             ),
-            "ZKMProver::verify must reject a proof over an altered initial memory"
+            "ZKMProver::verify must reject a proof over an altered initial memory; got {prover_result:?}"
         );
         Ok(())
     }
+
     /// Compress a keccak (precompile + multi-shard) workload with unpadded
     /// core shapes: exercises non-core chips (KeccakPermute/precompile/memory)
     /// and the multi-shard global cumulative-sum chain through the recursion

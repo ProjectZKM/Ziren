@@ -1144,6 +1144,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // Only machines that anchor their public values carry a bound cross-shard digest: the
         // public-values AIR ties `global_cumulative_sum` to the end of the Global chip's running
         // digest. The per-chip sums a shard proof declares are not bound by anything.
+        // Recursion machines have no Global-scope chip and do not use these public-value buses,
+        // so they skip this cross-shard check.
         if !has_pv_buses {
             return Ok(());
         }
