@@ -126,7 +126,12 @@ impl GlobalChip {
 pub struct GlobalCols<T: Copy> {
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
+    /// A real row is exactly one of a receive or a send (`is_real = is_send + is_receive`), so
+    /// the two flags are the row's selectors: the determinism extraction proves each kind of
+    /// real row separately, as it did with the former `is_real` column specialized to one.
+    #[picus(selector)]
     pub is_receive: T,
+    #[picus(selector)]
     pub is_send: T,
     /// Option 2: running real-row index for the GlobalAccumulation bus
     /// chain.  Set to the row's position by trace-gen.  Placed before
