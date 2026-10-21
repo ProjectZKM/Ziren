@@ -1,0 +1,65 @@
+    // Private on-chain weight layout: word0 is the term count; each following
+    // group has four radix-64 scalar rows (one per E4 coefficient). Within a
+    // row, term weights appear in reverse order for the convolution's top limb.
+    // The factory zero-pads the last group. No witness supplies these weights.
+    function firstWeights(uint256[] memory lambda,uint256 r) internal pure returns(uint256[] memory weights){
+        if(lambda.length>32767)revert InvalidNativeWhirMath();
+        weights=new uint256[](1+4*((lambda.length+1)/2));
+        // Each lambda contributes the original (1-r)*lambda and r*lambda.
+        weights[0]=2*lambda.length;
+        for(uint256 row;row<lambda.length;row+=2){
+            uint256 b=F.mul(lambda[row],r);uint256 a=F.sub(lambda[row],b);
+            uint256 c;uint256 d;
+            if(row+1<lambda.length){d=F.mul(lambda[row+1],r);c=F.sub(lambda[row+1],d);}
+            assembly("memory-safe"){
+                let dst:=add(add(weights,64),mul(div(row,2),128))
+                let m:=0xffffffff
+                mstore(dst,or(or(and(d,m),shl(64,and(c,m))),or(shl(128,and(b,m)),shl(192,and(a,m)))))
+                mstore(add(dst,32),or(or(and(shr(32,d),m),shl(64,and(shr(32,c),m))),or(shl(128,and(shr(32,b),m)),shl(192,and(shr(32,a),m)))))
+                mstore(add(dst,64),or(or(and(shr(64,d),m),shl(64,and(shr(64,c),m))),or(shl(128,and(shr(64,b),m)),shl(192,and(shr(64,a),m)))))
+                mstore(add(dst,96),or(or(shr(96,d),shl(64,shr(96,c))),or(shl(128,shr(96,b)),shl(192,shr(96,a)))))
+            }
+        }
+    }
+    function firstDot(bytes memory source,uint256 offset,uint256[] memory weights) internal pure returns(uint256 result){
+        if(weights.length==0)revert InvalidNativeWhirMath();
+        uint256 n=weights[0];
+        if(n>65534 || weights.length!=1+4*((n+3)/4) || offset>source.length || n>(source.length-offset)/4)revert InvalidNativeWhirMath();
+        assembly("memory-safe"){
+            function operand(w) -> value {
+                let mask:=0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff
+                w:=or(shl(8,and(w,mask)),and(shr(8,w),mask))
+                mask:=0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff
+                w:=or(shl(16,and(w,mask)),and(shr(16,w),mask))
+                // Four decoded BE32 fields are spread without overlapping
+                // product slots, matching the reversed transposed weights.
+                w:=shr(128,w)
+                value:=or(shr(96,w),and(mul(and(w,0xffffffffffffffffffffffff),0x1000000000000000000000001000000000000000000000001),0xffffffff00000000ffffffff00000000ffffffff0000000000000000))
+            }
+            let src:=add(add(source,32),offset)
+            let ptr:=add(weights,64)
+            let end:=add(ptr,mul(div(n,4),128))
+            let a0:=0 let a1:=0 let a2:=0 let a3:=0
+            for{}lt(ptr,end){ptr:=add(ptr,128) src:=add(src,16)}{
+                let x:=operand(mload(src))
+                a0:=add(a0,shr(192,mul(x,mload(ptr))))
+                a1:=add(a1,shr(192,mul(x,mload(add(ptr,32)))))
+                a2:=add(a2,shr(192,mul(x,mload(add(ptr,64)))))
+                a3:=add(a3,shr(192,mul(x,mload(add(ptr,96)))))
+            }
+            // Every scalar dot is below4*p^2<2^64; accumulate at most
+            // 65536 scalar products per coefficient, strictly below2^78.
+            let tail:=mod(n,4)
+            if tail {
+                // Reading past the last group never contributes extra fields.
+                let mask:=not(sub(shl(sub(256,mul(tail,32)),1),1))
+                let x:=operand(and(mload(src),mask))
+                a0:=add(a0,shr(192,mul(x,mload(ptr))))
+                a1:=add(a1,shr(192,mul(x,mload(add(ptr,32)))))
+                a2:=add(a2,shr(192,mul(x,mload(add(ptr,64)))))
+                a3:=add(a3,shr(192,mul(x,mload(add(ptr,96)))))
+            }
+            let p:=0x7f000001
+            result:=or(or(mod(a0,p),shl(32,mod(a1,p))),or(shl(64,mod(a2,p)),shl(96,mod(a3,p))))
+        }
+    }

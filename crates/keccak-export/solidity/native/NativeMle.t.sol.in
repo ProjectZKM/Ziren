@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {KoalaBear as F} from "../src/KoalaBear.sol";
+import {ReferenceKoalaBear as R} from "../src/ReferenceKoalaBear.sol";
+
+contract NativeMleHarness {
+    function evaluate(uint256[] memory values,uint256[] memory point) external pure returns(uint256) {
+        return F.mle(values,point);
+    }
+}
+
+contract NativeMleTest {
+    NativeMleHarness evaluator=new NativeMleHarness();
+    function field(bytes32 seed,uint256 i) private pure returns(uint256 value) {
+        uint256 raw=uint256(keccak256(abi.encode(seed,i)));
+        for(uint256 lane;lane<4;++lane)value|=((raw>>(lane*32))&0xffffffff)%R.P<<(lane*32);
+    }
+    function testFuzzOwnedMleMatchesOriginal(bytes32 seed,uint8 logSize) public pure {
+        uint256 log=uint256(logSize)%8;
+        uint256[] memory values=new uint256[](1<<log);uint256[] memory point=new uint256[](log);
+        for(uint256 i;i<values.length;++i)values[i]=field(seed,i);
+        for(uint256 i;i<point.length;++i)point[i]=field(seed,1000+i);
+        bytes32 before=keccak256(abi.encode(values,point));
+        require(F.mle(values,point)==R.mle(values,point),"MLE mismatch");
+        require(before==keccak256(abi.encode(values,point)),"MLE changed owned inputs");
+    }
+    function testMleEdgeCoordinatesAndMaximalLanes() public pure {
+        uint256[] memory values=new uint256[](64);uint256[] memory point=new uint256[](6);
+        uint256 maximum=(R.P-1)*0x1000000010000000100000001;
+        for(uint256 i;i<values.length;++i)values[i]=i%2==0?maximum:0;
+        for(uint256 edge;edge<3;++edge){
+            for(uint256 i;i<point.length;++i)point[i]=edge==2?maximum:edge;
+            require(F.mle(values,point)==R.mle(values,point),"edge MLE mismatch");
+        }
+    }
+    function testMleRejectsEmptyOverflowedShapeAndOrdinaryMismatch() public view {
+        uint256[] memory values=new uint256[](0);
+        for(uint256 length=256;length<=257;++length){
+            (bool ok,bytes memory error)=address(evaluator).staticcall(abi.encodeCall(evaluator.evaluate,(values,new uint256[](length))));
+            require(!ok && error.length>0,"overflowed MLE shape accepted or OOG");
+        }
+        (bool ok,bytes memory error)=address(evaluator).staticcall(abi.encodeCall(evaluator.evaluate,(new uint256[](3),new uint256[](1))));
+        require(!ok && error.length>0,"bad MLE shape accepted or OOG");
+    }
+}

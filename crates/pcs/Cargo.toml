@@ -8,6 +8,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
+p3-keccak = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+blake3 = { version = "1", optional = true }
 p3-air = { workspace = true  }
 p3-field = { workspace = true  }
 p3-challenger = { workspace = true  }
@@ -48,6 +51,7 @@ sysinfo = "0.30.13"
 p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 
 [features]
+compact-shrink = ["dep:p3-keccak", "dep:sha2", "dep:blake3"]
 # gpu feature flag reserved for GPU jagged-WHIR prover integration
 # (ziren-gpu/core/src/jagged_whir/). No-op until the GPU port lands;
 # downstream crates can plumb "--features gpu" without a cascading

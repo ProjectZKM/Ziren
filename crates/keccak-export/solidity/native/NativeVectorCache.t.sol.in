@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {NativeProofCache as ReferenceCache} from "../src/NativeProofCache.sol";
+
+interface VectorCacheVm {
+    function envString(string calldata) external returns(string memory);
+    function readFileBinary(string calldata) external view returns(bytes memory);
+}
+
+contract NativeVectorCacheTest {
+    address cache;
+    constructor(){
+        VectorCacheVm vm=VectorCacheVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+        bytes memory creation=vm.readFileBinary(string.concat(vm.envString("NATIVE_BUILD"),"/proof-cache-creation.bin"));
+        address created;
+        assembly("memory-safe"){created:=create(0,add(creation,32),mload(creation))}
+        require(created.codehash==CACHE_HASH,"cache runtime binding");cache=created;
+    }
+    function testFuzzVectorCacheMatchesOriginalOnFullWidthWords(bytes32 seed) public view {
+        bytes memory fields=new bytes(4*FIELD_COUNT);
+        for(uint256 at;at<fields.length;at+=32){
+            bytes32 value=keccak256(abi.encode(seed,at));
+            assembly("memory-safe"){mstore(add(add(fields,32),at),value)}
+        }
+        uint256 rawLength=38+fields.length;
+        bytes memory context=new bytes(32+rawLength+CACHE_BYTES);
+        assembly("memory-safe") {
+            mstore(add(context,32),rawLength)
+            mcopy(add(context,102),add(fields,32),mload(fields))
+        }
+        ReferenceCache.populate(context,32,FIELD_COUNT,hex"CACHE_RANGES");
+        (bool ok,bytes memory actual)=cache.staticcall(fields);
+        bytes32 expected;
+        assembly("memory-safe"){expected:=keccak256(add(add(context,64),rawLength),CACHE_BYTES)}
+        require(ok && actual.length==CACHE_BYTES && keccak256(actual)==expected,"vector cache mismatch");
+    }
+    function testVectorCacheExactLengthGuard() public view {
+        (bool shortOk,)=cache.staticcall(new bytes(4*FIELD_COUNT-1));
+        (bool longOk,)=cache.staticcall(new bytes(4*FIELD_COUNT+1));
+        require(!shortOk && !longOk,"cache accepted changed field count");
+    }
+}

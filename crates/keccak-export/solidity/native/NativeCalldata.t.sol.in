@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {NativeWhirMath as N} from "../src/NativeWhirMath.sol";
+import {NativeMerklePath as M} from "../src/NativeMerklePath.sol";
+import {KoalaBear as F} from "../src/KoalaBear.sol";
+
+contract NativeCalldataTest {
+    function field(bytes32 seed,uint256 i) private pure returns(uint256 value){
+        uint256 raw=uint256(keccak256(abi.encode(seed,i)));
+        for(uint256 j;j<4;++j)value|=(uint256(uint32(raw>>(32*j)))%F.P)<<(32*j);
+    }
+    function dot(bytes calldata source,uint256 offset,uint256[] memory weights) external pure returns(uint256){
+        return N.firstDotCalldata(source,offset,weights);
+    }
+    function decode(bytes calldata source,uint256 offset,uint256 count) external pure returns(uint256[] memory){
+        return N.packedExtensionsCalldata(source,offset,count);
+    }
+    function walk(bytes calldata source,uint256 offset,uint256 index,uint256 height,bytes32 leaf) external pure returns(bytes32){
+        require(height<=24 && index<1<<height && offset<=source.length && height<=(source.length-offset)/32,"path bounds");
+        uint256 pointer;assembly("memory-safe"){pointer:=add(source.offset,offset)}
+        return M.walkCalldata(leaf,index,height,pointer);
+    }
+    function testFuzzCalldataDotMatchesScalar(bytes32 seed,uint8 length,uint8 alignment) public view {
+        uint256 n=uint256(length)%65;uint256 offset=uint256(alignment)%65;
+        bytes memory source=new bytes(offset+4*n+19);uint256[] memory weights=new uint256[](2*n);uint256 expected;
+        for(uint256 i;i<n;++i){
+            uint256 x=uint256(keccak256(abi.encode(seed,i,1)))%F.P;uint256 w=field(seed,i);
+            weights[2*i]=uint256(uint32(w))|(uint256(uint32(w>>32))<<80)|(uint256(uint32(w>>64))<<160);
+            weights[2*i+1]=w>>96;expected=F.add(expected,F.scale(w,x));
+            for(uint256 j;j<4;++j)source[offset+4*i+j]=bytes1(uint8(x>>(8*j)));
+        }
+        require(this.dot(source,offset,weights)==expected,"calldata scalar dot mismatch");
+    }
+    function testFuzzCalldataDecodeMatchesOriginal(bytes32 seed,uint8 length,uint8 alignment) public view {
+        uint256 n=uint256(length)%33;uint256 offset=uint256(alignment)%65;
+        bytes memory source=new bytes(offset+16*n+19);uint256[] memory expected=new uint256[](n);
+        for(uint256 i;i<n;++i){
+            uint256 value=field(seed,i);expected[i]=value;
+            for(uint256 j;j<16;++j)source[offset+16*i+j]=bytes1(uint8(value>>(8*j)));
+        }
+        uint256[] memory actual=this.decode(source,offset,n);
+        require(keccak256(abi.encode(actual))==keccak256(abi.encode(expected)),"calldata scalar decode mismatch");
+        require(keccak256(abi.encode(actual))==keccak256(abi.encode(F.packedExtensions(source,offset,n))),"calldata original decode mismatch");
+    }
+    function testFuzzCalldataPathMatchesFullHashes(bytes32 seed,uint8 size,uint8 alignment,uint32 rawIndex) public view {
+        uint256 height=uint256(size)%25;uint256 offset=uint256(alignment)%65;uint256 index=uint256(rawIndex)% (1<<height);
+        bytes memory source=new bytes(offset+32*height+19);bytes32 leaf=keccak256(abi.encode(seed,"leaf"));bytes32 expected=leaf;uint256 at=index;
+        for(uint256 i;i<height;++i){
+            bytes32 sibling=keccak256(abi.encode(seed,i));
+            assembly("memory-safe"){mstore(add(add(source,32),add(offset,mul(i,32))),sibling)}
+            expected=at&1==0?keccak256(abi.encodePacked(expected,sibling)):keccak256(abi.encodePacked(sibling,expected));at>>=1;
+        }
+        require(this.walk(source,offset,index,height,leaf)==expected,"calldata path mismatch");
+    }
+    function testCalldataBoundsRejected() public view {
+        bytes memory source=new bytes(31);uint256[] memory weights=new uint256[](2);
+        (bool ok,bytes memory error)=address(this).staticcall(abi.encodeCall(this.dot,(source,32,weights)));
+        require(!ok && error.length>0,"calldata dot bounds");
+        (ok,error)=address(this).staticcall(abi.encodeCall(this.decode,(source,16,1)));
+        require(!ok && error.length>0,"calldata decode bounds");
+        (ok,error)=address(this).staticcall(abi.encodeCall(this.walk,(source,0,0,1,bytes32(0))));
+        require(!ok && error.length>0,"calldata path bounds");
+    }
+}

@@ -28,6 +28,7 @@ members = [
     "crates/recursion/gnark-ffi",
     "crates/sdk",
     "crates/pcs",
+    "crates/keccak-export",
     "crates/test-artifacts",
     "crates/verifier",
     "crates/zkvm/*",

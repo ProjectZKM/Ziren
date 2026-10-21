@@ -1,0 +1,25 @@
+// Canonical E4 coefficients, X^4=3. The caller owns 160 bytes at `at`.
+// Four canonical matrix rows use radix 2^64. Each scalar dot is strictly
+// below 4*p^2<2^64, so the highest MUL limb is the exact four-term sum.
+function prepareMatrix(q,at){
+    let m:=0xffffffff let p:=0x7f000001
+    let b0:=and(q,m) let b1:=and(shr(32,q),m)
+    let b2:=and(shr(64,q),m) let b3:=shr(96,q)
+    let c1:=mod(mul(3,b1),p) let c2:=mod(mul(3,b2),p) let c3:=mod(mul(3,b3),p)
+    mstore(at,or(or(b0,shl(64,c3)),or(shl(128,c2),shl(192,c1))))
+    mstore(add(at,32),or(or(b1,shl(64,b0)),or(shl(128,c3),shl(192,c2))))
+    mstore(add(at,64),or(or(b2,shl(64,b1)),or(shl(128,b0),shl(192,c3))))
+    mstore(add(at,96),or(or(b3,shl(64,b2)),or(shl(128,b1),shl(192,b0))))
+    mstore(add(at,128),q)
+}
+function matrixTimes(a,at)->result{
+    let q:=mload(add(at,128))
+    if or(lt(a,2),lt(q,2)){result:=mul(a,q) leave}
+    let m:=0xffffffff let p:=0x7f000001
+    // Drop a3 before multiplying: the remaining three coefficient positions
+    // create distinct 32-bit slots in the low 256 bits. Select a0/a1/a2
+    // at offsets 192/128/64, then insert a3 at offset zero. This is exact
+    // for arbitrary uint128 inputs, without arithmetic carries.
+    let reverse:=or(shr(96,a),and(mul(and(a,0xffffffffffffffffffffffff),0x1000000000000000000000001000000000000000000000001),0xffffffff00000000ffffffff00000000ffffffff0000000000000000))
+    result:=or(or(mod(shr(192,mul(reverse,mload(at))),p),shl(32,mod(shr(192,mul(reverse,mload(add(at,32)))),p))),or(shl(64,mod(shr(192,mul(reverse,mload(add(at,64)))),p)),shl(96,mod(shr(192,mul(reverse,mload(add(at,96)))),p))))
+}

@@ -1,0 +1,30 @@
+name: Keccak terminal
+
+on:
+  pull_request:
+    paths:
+      - 'crates/pcs/**'
+      - 'crates/prover/**'
+      - 'crates/keccak-export/**'
+      - 'Cargo.*'
+      - '.github/workflows/keccak-terminal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/keccak-target
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-17
+      - run: cargo test --locked -p zkm-pcs --features keccak-terminal --lib kb31_keccak
+      - run: cargo test --locked -p zkm-pcs --features keccak-terminal --lib keccak_params
+      - run: cargo test --locked -p zkm-keccak-export --lib
+      - run: python3 crates/keccak-export/solidity/test-compiler.py

@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {NativeTerminalVerifier} from "../src/NativeTerminalVerifier.sol";
+
+contract DenseFrameKernel {
+    uint256 private immutable mode;
+    bool private immutable second;
+    constructor(uint256 selected,bool isSecond){mode=selected;second=isSecond;}
+    fallback() external {
+        uint256 selected=mode;bool next=second;
+        assembly("memory-safe") {
+            let result:=mload(0x40)
+            calldatacopy(result,160,288)
+            let size:=384
+            switch next
+            case 0 {
+                mstore(result,0x111)
+                mstore(add(result,288),calldataload(448))
+                mstore(add(result,320),0x12345678)
+                mstore(add(result,352),not(0))
+            }
+            default {
+                if iszero(eq(calldataload(160),0x111)){revert(0,0)}
+                mstore(result,0x222)
+                mstore(add(result,288),not(calldataload(0)))
+                mstore(add(result,320),calldataload(32))
+                size:=352
+            }
+            switch selected
+            case 1 { return(result,287) }
+            case 2 { return(result,sub(size,1)) }
+            case 3 { return(result,add(size,1)) }
+            case 4 { return(result,add(size,32)) }
+            case 5 { mstore(0,0xdeadbeef) revert(28,4) }
+            return(result,size)
+        }
+    }
+}
+
+contract DenseFrameHarness is NativeTerminalVerifier {
+    constructor(address[] memory modules) NativeTerminalVerifier(
+        modules,keccak256(abi.encode(uint256(2),modules[0].codehash,modules[1].codehash)),2,bytes32(0)
+    ) {}
+    function _prefixLength() internal pure override returns(uint256){return 480;}
+    function _maxReturnLength() internal pure override returns(uint256){return 384;}
+    function _initialize(bytes calldata wire,bytes32 output) internal pure override returns(bytes memory context){
+        context=new bytes(512+wire.length);
+        assembly("memory-safe") {
+            let state:=add(context,32)
+            mstore(add(state,64),0xabcdef)
+            mstore(add(state,160),0xaaa)
+            mstore(add(state,448),output)
+            mstore(add(state,480),wire.length)
+            calldatacopy(add(state,512),wire.offset,wire.length)
+        }
+    }
+    function _finish(bytes memory context) internal pure override returns(bool valid){
+        assembly("memory-safe") {
+            let state:=add(context,32)
+            let output:=mload(add(state,448))
+            valid:=and(and(eq(mload(state),output),eq(mload(add(state,32)),not(output))),
+                and(and(eq(mload(add(state,64)),0xabcdef),eq(mload(add(state,96)),not(0))),
+                and(and(eq(mload(add(state,128)),0x12345678),eq(mload(add(state,160)),0x222)),
+                and(eq(mload(add(state,480)),3),eq(shr(232,mload(add(state,512))),0xaabbcc)))))
+        }
+    }
+    DENSE_DRIVER
+}
+
+contract NativeDenseFramesTest {
+    function harness(uint256 firstMode,uint256 secondMode) private returns(DenseFrameHarness){
+        address[] memory modules=new address[](2);
+        modules[0]=address(new DenseFrameKernel(firstMode,false));
+        modules[1]=address(new DenseFrameKernel(secondMode,true));
+        return new DenseFrameHarness(modules);
+    }
+    function testFuzzDenseFramesPreserveFullWordsAndProof(bytes32 output) public {
+        require(harness(0,0).verify(hex"aabbcc",output),"dense frame corrupted context");
+    }
+    function testMalformedDenseFramesRejectedAtEitherBoundary() public {
+        for(uint256 index;index<2;++index)for(uint256 mode=1;mode<=4;++mode){
+            DenseFrameHarness target=harness(index==0?mode:0,index==1?mode:0);
+            (bool ok,bytes memory error)=address(target).staticcall(abi.encodeCall(target.verify,(hex"aabbcc",bytes32(uint256(1)<<255))));
+            require(!ok && keccak256(error)==keccak256(abi.encodeWithSelector(NativeTerminalVerifier.InvalidKernel.selector,index)),"bad dense frame accepted or wrong failure");
+        }
+    }
+    function testDenseKernelRevertPropagates() public {
+        for(uint256 index;index<2;++index){
+            DenseFrameHarness target=harness(index==0?5:0,index==1?5:0);
+            (bool ok,bytes memory error)=address(target).staticcall(abi.encodeCall(target.verify,(hex"aabbcc",bytes32(0))));
+            require(!ok && keccak256(error)==keccak256(hex"deadbeef"),"kernel revert changed");
+        }
+    }
+}

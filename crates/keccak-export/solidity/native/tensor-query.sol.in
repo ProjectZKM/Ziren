@@ -1,0 +1,93 @@
+    // The caller checks point length/canonicality and the complete field range.
+    // Basis index i uses point[j] exactly when bit j of i is set.
+    function prepareBasis(uint256[] calldata point) private pure returns(uint256[] memory prepared){
+        uint256 width=1<<point.length;
+        uint256[] memory weights=new uint256[](width);
+        weights[0]=1;
+        for(uint256 j;j<point.length;++j){
+            uint256 n=1<<j;
+            for(uint256 i;i<n;++i){
+                uint256 a=weights[i];
+                uint256 b=F.mul(a,point[j]);
+                weights[i]=F.sub(a,b);
+                weights[i+n]=b;
+            }
+        }
+        prepared=new uint256[](4*width);
+        assembly("memory-safe"){
+            // Four canonical rows of multiplication by q in E4, X^4=3.
+            // Each row uses radix 2^64; it occupies exactly one EVM word.
+            function prepareMatrix(q,at){
+                let m:=0xffffffff let p:=0x7f000001
+                let b0:=and(q,m) let b1:=and(shr(32,q),m)
+                let b2:=and(shr(64,q),m) let b3:=shr(96,q)
+                let c1:=mod(mul(3,b1),p) let c2:=mod(mul(3,b2),p) let c3:=mod(mul(3,b3),p)
+                mstore(at,or(or(b0,shl(64,c3)),or(shl(128,c2),shl(192,c1))))
+                mstore(add(at,32),or(or(b1,shl(64,b0)),or(shl(128,c3),shl(192,c2))))
+                mstore(add(at,64),or(or(b2,shl(64,b1)),or(shl(128,b0),shl(192,c3))))
+                mstore(add(at,96),or(or(b3,shl(64,b2)),or(shl(128,b1),shl(192,b0))))
+            }
+            let end:=add(add(weights,32),mul(width,32))
+            let dst:=add(prepared,32)
+            for{let at:=add(weights,32)}lt(at,end){at:=add(at,32) dst:=add(dst,128)}{
+                prepareMatrix(mload(at),dst)
+            }
+        }
+    }
+
+    function foldBasis(bytes calldata fields,uint256 offset,uint256 width,uint256[] memory prepared)
+        private pure returns(uint256 folded){
+        assembly("memory-safe"){
+            // Input holds four BE32 coefficients in the low 128 bits.
+            // Insert empty 32-bit lanes, preserving their order, to obtain
+            // v3 + v2*2^64 + v1*2^128 + v0*2^192 from the LE32 wire row.
+            function spread(value) -> result {
+                value:=or(shl(64,and(value,0xffffffffffffffff0000000000000000)),and(value,0xffffffffffffffff))
+                result:=or(shl(32,and(value,0xffffffff000000000000000000000000ffffffff00000000)),and(value,0xffffffff000000000000000000000000ffffffff))
+            }
+            let src:=add(fields.offset,offset)
+            let at:=add(prepared,32)
+            let end:=add(at,mul(width,128))
+            let a0:=0 let a1:=0 let a2:=0 let a3:=0
+            let fullEnd:=sub(end,mul(and(width,1),128))
+            for{}lt(at,fullEnd){at:=add(at,128) src:=add(src,32)}{
+                let w:=calldataload(src)
+                let evenBytes:=0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff
+                w:=or(shl(8,and(w,evenBytes)),and(shr(8,w),evenBytes))
+                let evenPairs:=0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff
+                w:=or(shl(16,and(w,evenPairs)),and(shr(16,w),evenPairs))
+                {
+                    let reverse:=spread(shr(128,w))
+                    a0:=add(a0,shr(192,mul(reverse,mload(at))))
+                    a1:=add(a1,shr(192,mul(reverse,mload(add(at,32)))))
+                    a2:=add(a2,shr(192,mul(reverse,mload(add(at,64)))))
+                    a3:=add(a3,shr(192,mul(reverse,mload(add(at,96)))))
+                }
+                at:=add(at,128)
+                {
+                    let reverse:=spread(and(w,0xffffffffffffffffffffffffffffffff))
+                    a0:=add(a0,shr(192,mul(reverse,mload(at))))
+                    a1:=add(a1,shr(192,mul(reverse,mload(add(at,32)))))
+                    a2:=add(a2,shr(192,mul(reverse,mload(add(at,64)))))
+                    a3:=add(a3,shr(192,mul(reverse,mload(add(at,96)))))
+                }
+            }
+            // Only width=1 has a tail. The other half-word never contributes.
+            if lt(at,end) {
+                let w:=calldataload(src)
+                let evenBytes:=0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff
+                w:=or(shl(8,and(w,evenBytes)),and(shr(8,w),evenBytes))
+                let evenPairs:=0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff
+                w:=or(shl(16,and(w,evenPairs)),and(shr(16,w),evenPairs))
+                let reverse:=spread(shr(128,w))
+                a0:=add(a0,shr(192,mul(reverse,mload(at))))
+                a1:=add(a1,shr(192,mul(reverse,mload(add(at,32)))))
+                a2:=add(a2,shr(192,mul(reverse,mload(add(at,64)))))
+                a3:=add(a3,shr(192,mul(reverse,mload(add(at,96)))))
+            }
+            // Each individual dot is <4*p^2<2^64. Width<=2^24 makes the
+            // accumulated nonnegative scalar <2^88, without uint256 overflow.
+            let p:=0x7f000001
+            folded:=or(or(mod(a0,p),shl(32,mod(a1,p))),or(shl(64,mod(a2,p)),shl(96,mod(a3,p))))
+        }
+    }
