@@ -62,10 +62,11 @@ fn main() {
             machine.recursion_pins(),
             machine.has_public_value_buses(),
             machine.global_round(),
+            None,
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());
         match result {
-            Ok(()) => println!("  VERDICT: ACCEPT -- sound under this key; the circuit diverges"),
+            Ok(_) => println!("  VERDICT: ACCEPT -- sound under this key; the circuit diverges"),
             Err(e) => println!("  VERDICT: REJECT -- {e:?}"),
         }
     };
