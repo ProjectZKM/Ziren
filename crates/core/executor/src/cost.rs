@@ -18,7 +18,6 @@ pub const MEMORY_BUMP_ROWS_PER_SHARD: u64 =
 pub fn estimate_mips_event_counts(
     cpu_cycles: u64,
     touched_addresses: u64,
-    syscalls_sent: u64,
     opcode_counts: EnumMap<Opcode, u64>,
 ) -> EnumMap<MipsAirId, u64> {
     let mut events_counts: EnumMap<MipsAirId, u64> = EnumMap::default();
@@ -89,8 +88,6 @@ pub fn estimate_mips_event_counts(
 
     events_counts[MipsAirId::SyscallCore] = opcode_counts[Opcode::SYSCALL];
 
-    events_counts[MipsAirId::Global] = 2 * touched_addresses + 2 * syscalls_sent;
-
     events_counts
 }
 
@@ -103,8 +100,7 @@ pub fn estimate_mips_event_counts(
 /// Returns `None` for the opcodes that [`estimate_mips_event_counts`] does not attribute to
 /// any chip: `MOD` / `MODU` (the estimator's `DivRem` count is `DIV + DIVU` only) and
 /// `UNIMPL`.  A `SYSCALL` also charges a `SyscallCore` row (see `charge_instruction` in the
-/// executor), and two `Global` rows when the core sends on it, which depends on the syscall
-/// code; see [`ShardSplitAccumulator::add_sent_syscall`].
+/// executor).
 #[must_use]
 pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
     Some(match opcode {
@@ -170,7 +166,7 @@ pub const fn mips_imm_air_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
 /// state rather than a periodic O(chips) re-estimate.
 ///
 /// The state equals [`estimate_mips_event_counts`] exactly at every cycle, since that
-/// estimator is a pure function of `(clk / 5, local_mem, syscalls_sent, opcode counts)`, all
+/// estimator is a pure function of `(clk / 5, local_mem, opcode counts)`, all
 /// maintained incrementally by the executor; no padding for a check window is needed.
 ///
 /// The `Cpu` term is not accumulated: its row count is `clk / 5` and `clk` is exact executor
@@ -188,7 +184,7 @@ pub struct ShardSplitAccumulator {
     /// Main-trace width per chip, as an array (no hashing per check).
     costs: EnumMap<MipsAirId, u64>,
     /// Distinct addresses touched in this shard, i.e. `LocalCounts::local_mem`. Kept here so
-    /// the `MemoryLocal` `div_ceil` and the `Global` row count stay O(1).
+    /// the `MemoryLocal` `div_ceil` stays O(1).
     touched_addresses: u64,
     /// The trace-area budget for one shard (`ELEMENT_THRESHOLD`).
     element_threshold: u64,
@@ -265,8 +261,7 @@ impl ShardSplitAccumulator {
         self.bump(air, count);
     }
 
-    /// Record one local-memory entry the core shard opens, charging the `MemoryLocal` and
-    /// `Global` chips.
+    /// Record one local-memory entry the core shard opens, charging the `MemoryLocal` chip.
     ///
     /// The executor calls it on an address's first access in the shard, from the core or from
     /// a precompile, and again when the core touches an address a precompile touched since:
@@ -281,17 +276,6 @@ impl ShardSplitAccumulator {
             self.bump(MipsAirId::MemoryLocal, 1);
         }
         self.touched_addresses += 1;
-        self.bump(MipsAirId::Global, 2);
-    }
-
-    /// Record one syscall the core shard sends on: the two `Global` rows (the call and its
-    /// result) the core `SyscallChip` emits for it.  Its `SyscallCore` row is charged with
-    /// every `SYSCALL`, sent or not, as the chip's height counts them all.
-    ///
-    /// Sent means [`syscall_is_sent`] holds for the syscall code.
-    #[inline]
-    pub fn add_sent_syscall(&mut self) {
-        self.bump(MipsAirId::Global, 2);
     }
 
     /// Whether this shard has reached its trace-area budget / its per-chip height cap.
@@ -426,7 +410,6 @@ mod tests {
         let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX);
         let mut reference: EnumMap<Opcode, u64> = EnumMap::default();
         let mut touched: u64 = 0;
-        let mut sent: u64 = 0;
 
         let mut rng: u64 = 0x243f_6a88_85a3_08d3;
         for step in 0..20_000u64 {
@@ -438,10 +421,6 @@ mod tests {
             reference[opcode] += count;
             if opcode == Opcode::SYSCALL {
                 acc.add_air(MipsAirId::SyscallCore, count);
-                for _ in 0..(rng >> 40) % (count + 1) {
-                    acc.add_sent_syscall();
-                    sent += 1;
-                }
             }
 
             if rng.is_multiple_of(3) {
@@ -450,7 +429,7 @@ mod tests {
             }
 
             let cpu_cycles = step * 5 / 5;
-            let expected = estimate_mips_event_counts(cpu_cycles, touched, sent, reference);
+            let expected = estimate_mips_event_counts(cpu_cycles, touched, reference);
             assert_eq!(
                 acc.event_counts(cpu_cycles),
                 expected,
@@ -485,7 +464,7 @@ mod tests {
 
         acc.reset();
         assert_eq!(acc.event_counts(0), fresh);
-        assert_eq!(acc.event_counts(0), estimate_mips_event_counts(0, 0, 0, EnumMap::default()));
+        assert_eq!(acc.event_counts(0), estimate_mips_event_counts(0, 0, EnumMap::default()));
     }
 
     /// The split test must fire exactly at the threshold, on whichever limit is reached first.

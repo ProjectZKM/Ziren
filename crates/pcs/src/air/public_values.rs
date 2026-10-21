@@ -58,7 +58,7 @@ pub struct PublicValues<W, T> {
 
     // Boundary-anchor fields, emitted by the public-values AIR
     // (`eval_public_values`) as the endpoints of the control-bus
-    // interactions (State / GlobalAccumulation / MemoryGlobalInit/Finalize)
+    // interactions (State / MemoryGlobalInit/Finalize)
     // that chain rows locally instead of via `when_transition`.
     /// Initial CPU timestamp (clk) for this shard — the `State`-bus
     /// initial endpoint (`send_state`).
@@ -83,12 +83,9 @@ pub struct PublicValues<W, T> {
     /// Number of global-memory-finalize rows —
     /// `MemoryGlobalFinalizeControl` chain length endpoint.
     pub global_finalize_count: T,
-    /// Number of global interactions — `GlobalAccumulation` chain
-    /// length endpoint.
+    /// Unused; zero.
     pub global_count: T,
-    /// The shard's global cumulative sum — the `GlobalAccumulation`
-    /// final digest endpoint.  Replaces the verifier's per-chip
-    /// last-row digest sum (machine.rs).
+    /// Unused; the zero digest.
     pub global_cumulative_sum: SepticDigest<T>,
 
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.

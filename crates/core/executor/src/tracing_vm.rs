@@ -226,9 +226,6 @@ impl<'a> TracingVM<'a> {
         if sub.records.len() == 1 && self.record.cpu_events.is_empty() {
             let mut only = sub.records.pop().expect("one record");
             only.public_values = self.record.public_values;
-            only.global_cumulative_sum.clear();
-            only.global_digests.clear();
-            only.global_byte_lookups.clear();
             std::mem::swap(self.record, &mut only);
             drop(only);
         } else {

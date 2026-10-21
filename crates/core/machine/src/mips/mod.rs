@@ -1,6 +1,5 @@
 use crate::{
-    global::GlobalChip,
-    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip},
+    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip, MemoryProgramChip},
     syscall::precompiles::{
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
@@ -77,6 +76,8 @@ pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 pub enum MipsAir<F: PrimeField32> {
     /// An AIR that contains a preprocessed program table and a lookup for the instructions.
     Program(ProgramChip),
+    /// A table for the program's memory image.
+    MemoryProgram(MemoryProgramChip),
     /// An AIR for the register-form MIPS ADD and SUB instructions.
     Add(AddSubChip),
     /// An AIR for the immediate-form MIPS ADD and SUB instructions.
@@ -139,8 +140,6 @@ pub enum MipsAir<F: PrimeField32> {
     SyscallCore(SyscallChip),
     /// A table for all the precompile invocations.
     SyscallPrecompile(SyscallChip),
-    /// A table for all the global lookups.
-    Global(GlobalChip),
     /// A precompile for sha256 extend.
     Sha256Extend(ShaExtendChip),
     /// The control chip bookending the sha256-extend `PrecompileChain` state bus.
@@ -204,7 +203,13 @@ pub enum MipsAir<F: PrimeField32> {
 impl<F: PrimeField32> MipsAir<F> {
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
+        let global_round = chips
+            .iter()
+            .filter(|chip| chip.sends().iter().chain(chip.receives()).any(|l| l.is_global()))
+            .map(|chip| chip.name())
+            .collect::<std::collections::BTreeSet<_>>();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
+            .with_global_round(Some(global_round))
     }
 
     /// Get all the different MIPS AIRs.
@@ -233,6 +238,10 @@ impl<F: PrimeField32> MipsAir<F> {
         let program = Chip::new(MipsAir::Program(ProgramChip::default()));
         costs.insert(program.name(), program.cost());
         chips.push(program);
+
+        let memory_program = Chip::new(MipsAir::MemoryProgram(MemoryProgramChip::new()));
+        costs.insert(memory_program.name(), memory_program.cost());
+        chips.push(memory_program);
 
         let sha_extend = Chip::new(MipsAir::Sha256Extend(ShaExtendChip::default()));
         costs.insert(sha_extend.name(), 48 * sha_extend.cost());
@@ -494,10 +503,6 @@ impl<F: PrimeField32> MipsAir<F> {
         let memory_bump = Chip::new(MipsAir::MemoryBump(MemoryBumpChip::new()));
         costs.insert(memory_bump.name(), memory_bump.cost());
         chips.push(memory_bump);
-
-        let global = Chip::new(MipsAir::Global(GlobalChip));
-        costs.insert(global.name(), global.cost());
-        chips.push(global);
 
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());

@@ -40,9 +40,6 @@ pub enum LookupKind {
     /// Lookup with a syscall.
     Syscall = 6,
 
-    /// Lookup with the global table.
-    Global = 7,
-
     /// Lookup connecting syscall result and argument bytes between SyscallInstrsChip,
     /// SyscallChip, and SysLinuxChip.
     SyscallResult = 8,
@@ -55,12 +52,6 @@ pub enum LookupKind {
     /// Boundary endpoints (initial / final pc, clk) are emitted by the
     /// public-values AIR.
     State = 9,
-
-    /// Running global-digest accumulation chain.  Each `GlobalChip` row
-    /// receives `(index, running_digest)` and sends
-    /// `(index+1, running_digest + this_point)`; anchored at both ends by
-    /// the public-values AIR.
-    GlobalAccumulation = 10,
 
     /// Global-memory-init ordering control bus (index, prev_addr, valid).
     MemoryGlobalInitControl = 11,
@@ -92,10 +83,8 @@ impl LookupKind {
             LookupKind::Byte,
             LookupKind::Range,
             LookupKind::Syscall,
-            LookupKind::Global,
             LookupKind::SyscallResult,
             LookupKind::State,
-            LookupKind::GlobalAccumulation,
             LookupKind::MemoryGlobalInitControl,
             LookupKind::MemoryGlobalFinalizeControl,
         ]
@@ -110,7 +99,6 @@ impl LookupKind {
             self,
             LookupKind::Byte
                 | LookupKind::State
-                | LookupKind::GlobalAccumulation
                 | LookupKind::MemoryGlobalInitControl
                 | LookupKind::MemoryGlobalFinalizeControl
         )
@@ -213,10 +201,8 @@ impl Display for LookupKind {
             LookupKind::Byte => write!(f, "Byte"),
             LookupKind::Range => write!(f, "Range"),
             LookupKind::Syscall => write!(f, "Syscall"),
-            LookupKind::Global => write!(f, "Global"),
             LookupKind::SyscallResult => write!(f, "SyscallResult"),
             LookupKind::State => write!(f, "State"),
-            LookupKind::GlobalAccumulation => write!(f, "GlobalAccumulation"),
             LookupKind::MemoryGlobalInitControl => write!(f, "MemoryGlobalInitControl"),
             LookupKind::MemoryGlobalFinalizeControl => write!(f, "MemoryGlobalFinalizeControl"),
             LookupKind::PrecompileChain => write!(f, "PrecompileChain"),

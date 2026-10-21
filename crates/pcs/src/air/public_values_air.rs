@@ -4,7 +4,6 @@
 //! multiset-balanced control-bus chain `receive(s_i) → send(s_{i+1})`, and
 //! [`eval_public_values`] emits the two boundary endpoints `(s_0, s_n)` of
 //! each chain from the public values:
-//!   * `GlobalAccumulation`: the global cumulative sum;
 //!   * `State`: initial / final `(shard, clk, pc, next_pc)` (MIPS carries the
 //!     delay-slot lookahead `next_pc`);
 //!   * `MemoryGlobalInit/FinalizeControl`: the address-ordering chains.
@@ -15,13 +14,11 @@
 //! [`crate::lookup::LookupKind::appears_in_eval_public_values`].
 
 use core::borrow::Borrow;
-use core::iter::once;
 
 use p3_field::PrimeCharacteristicRing;
 
 use crate::air::{AirLookup, LookupScope, PublicValues, ZKMAirBuilder, ZKM_PROOF_NUM_PV_ELTS};
 use crate::lookup::LookupKind;
-use crate::septic_digest::SepticDigest;
 use crate::Word;
 
 /// Emit the public-values boundary interactions that close the local-only
@@ -32,7 +29,6 @@ pub fn eval_public_values<AB: ZKMAirBuilder>(builder: &mut AB) {
         core::array::from_fn(|i| builder.public_values()[i]);
     let pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> = pv_slice.as_slice().borrow();
 
-    eval_global_sum::<AB>(builder, pv);
     eval_state::<AB>(builder, pv);
     eval_global_memory_init::<AB>(builder, pv);
     eval_global_memory_finalize::<AB>(builder, pv);
@@ -156,36 +152,5 @@ fn eval_state<AB: ZKMAirBuilder>(
         pv.next_pc,
         pv.next_next_pc,
         AB::Expr::ONE,
-    );
-}
-
-/// `GlobalAccumulation` boundary: anchor the running-digest chain.
-///
-/// The `GlobalChip` rows form a chain `receive(index, running) ->
-/// send(index+1, running + point)`.  This sends the initial endpoint
-/// `(0, ZERO_DIGEST)` (received by row 0) and receives the final endpoint
-/// `(global_count, global_cumulative_sum)` (sent by the last row).  The
-/// multiset balances iff the prover laid down a contiguous `index=0..N`
-/// chain whose final digest equals the public `global_cumulative_sum` —
-/// the local-only replacement for the verifier's per-chip last-row sum.
-fn eval_global_sum<AB: ZKMAirBuilder>(
-    builder: &mut AB,
-    pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
-) {
-    let initial = SepticDigest::<AB::Expr>::zero().0;
-    let send_values: Vec<AB::Expr> =
-        once(AB::Expr::ZERO).chain(initial.x.0).chain(initial.y.0).collect();
-    builder.send(
-        AirLookup::new(send_values, AB::Expr::ONE, LookupKind::GlobalAccumulation),
-        LookupScope::Local,
-    );
-
-    let recv_values: Vec<AB::Expr> = once(pv.global_count.into())
-        .chain(pv.global_cumulative_sum.0.x.0.into_iter().map(Into::into))
-        .chain(pv.global_cumulative_sum.0.y.0.into_iter().map(Into::into))
-        .collect();
-    builder.receive(
-        AirLookup::new(recv_values, AB::Expr::ONE, LookupKind::GlobalAccumulation),
-        LookupScope::Local,
     );
 }

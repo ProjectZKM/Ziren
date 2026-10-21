@@ -21,7 +21,6 @@ pub mod bytes;
 pub mod cluster;
 pub mod control_flow;
 pub mod frame;
-pub mod global;
 pub mod instruction;
 pub mod io;
 pub mod memory;

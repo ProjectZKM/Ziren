@@ -47,7 +47,7 @@ use super::types::{consts, CoreProofShape, MachineShape};
 /// column space (`recursive_jagged_pcs.rs` insertion index 11849 > len
 /// 11847) and put every real normalize vk outside the map.
 fn preprocessed_chips() -> &'static [&'static str] {
-    &["Program", "Byte", "Range"]
+    &["Program", "MemoryProgram", "Byte", "Range"]
 }
 
 /// Baseline core-CPU chip set that every workload includes.  This is
@@ -87,7 +87,7 @@ fn core_base_chips() -> &'static [&'static str] {
 /// Memory-shard chip set — adds the global memory init/finalize chips
 /// that only appear in the first and last shards.
 fn memory_cluster_extras() -> &'static [&'static str] {
-    &["MemoryGlobalInit", "MemoryGlobalFinalize", "Global"]
+    &["MemoryGlobalInit", "MemoryGlobalFinalize"]
 }
 
 /// Per-precompile chip family extras.  Each is added on top of
@@ -159,21 +159,13 @@ pub fn build_mips_machine_shape() -> MachineShape {
     };
     let memory = extend_cluster(&core_base, memory_cluster_extras());
 
-    let main_exec = extend_cluster(&core_base, &["Global"]);
     let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
-    let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize", "Global"]);
-    let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit", "Global"]);
-    let precompile_base =
-        extend_cluster(&preprocessed, &["Global", "MemoryLocal", "SyscallPrecompile"]);
+    let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize"]);
+    let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit"]);
+    let precompile_base = extend_cluster(&preprocessed, &["MemoryLocal", "SyscallPrecompile"]);
 
-    let mut clusters: Vec<BTreeSet<String>> = vec![
-        core_base.clone(),
-        main_exec,
-        memory.clone(),
-        memory_min,
-        memory_finalize_only,
-        memory_init_only,
-    ];
+    let mut clusters: Vec<BTreeSet<String>> =
+        vec![core_base.clone(), memory.clone(), memory_min, memory_finalize_only, memory_init_only];
     for (_, extras) in precompile_families() {
         clusters.push(extend_cluster(&memory, extras));
         clusters.push(extend_cluster(&precompile_base, extras));
@@ -273,14 +265,14 @@ mod tests {
     #[test]
     fn machine_shape_has_expected_cluster_count() {
         let ms = build_mips_machine_shape();
-        let expected = 6 + 2 * precompile_families().len();
+        let expected = 5 + 2 * precompile_families().len();
         assert_eq!(
             ms.chip_clusters.len(),
             expected,
-            "cluster count drifted from 6 base + 2×{} families",
+            "cluster count drifted from 5 base + 2×{} families",
             precompile_families().len(),
         );
-        assert_eq!(ms.chip_clusters.len(), 26);
+        assert_eq!(ms.chip_clusters.len(), 25);
     }
 
     /// A multi-shard run emits global-memory init and finalize events in
@@ -297,7 +289,6 @@ mod tests {
             [("finalize-only", "MemoryGlobalFinalize"), ("init-only", "MemoryGlobalInit")]
         {
             let mut want = prep.clone();
-            want.insert("Global".to_string());
             want.insert(only.to_string());
             assert!(
                 ms.chip_clusters.contains(&want),
@@ -311,12 +302,17 @@ mod tests {
         let ms = build_mips_machine_shape();
         for cluster in &ms.chip_clusters {
             assert!(cluster.contains("Program"), "cluster missing Program: {:?}", cluster);
+            assert!(
+                cluster.contains("MemoryProgram"),
+                "cluster missing MemoryProgram: {:?}",
+                cluster
+            );
             assert!(cluster.contains("Byte"), "cluster missing Byte: {:?}", cluster);
             assert!(cluster.contains("Range"), "cluster missing Range: {:?}", cluster);
         }
     }
 
-    /// The 26-cluster model includes MINIMAL multi-shard cluster types
+    /// The 25-cluster model includes MINIMAL multi-shard cluster types
     /// (the `memory_min` and `precompile_base`-derived clusters) that are
     /// intentionally CPU-FREE — a memory shard or precompile shard carries
     /// no core/CPU chips.  So the old "every cluster has Cpu" invariant is
@@ -366,7 +362,7 @@ mod tests {
             shapes.len(),
             upper,
         );
-        assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
+        assert_eq!(shapes.len(), 90_000, "expected 25 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
 

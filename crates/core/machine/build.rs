@@ -117,7 +117,6 @@ mod sys {
             .include_item("GlobalCols")
             .include_item("GlobalInteractionEvent")
             .include_item("GlobalInteractionOperation")
-            .include_item("GlobalLookupEvent")
             .include_item("INTERACTION_KIND_GLOBAL")
             .include_item("InstructionFfi")
             .include_item("JumpColumns")
