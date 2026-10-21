@@ -17,6 +17,13 @@ These vkeys are the same as those found locally in
 `~/.zkm/circuits/<circuit_name>/<version>/<circuit_name>_vk.bin`, and should be automatically
 updated after every release.
 
+## Compact shrink Solidity verifiers
+
+The Solidity verifiers for compact shrink proofs are maintained in
+[ProjectZKM/zkOP](https://github.com/ProjectZKM/zkOP), alongside their compiler,
+tests and deployment tools. See the [verification guide](../../docs/src/dev/verifier.md#compact-shrink-solidity-verifiers)
+for a short introduction and the [current implementation](https://github.com/ProjectZKM/zkOP/pull/1).
+
 ## Tests
 
 Run tests with the following command:
