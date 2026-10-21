@@ -1,7 +1,7 @@
 use zkm_core_machine::mips::MipsAir;
 use zkm_pcs::{CpuProver, MachineProver, StarkGenericConfig};
 
-use crate::{CompressAir, CompressedSC, CoreSC, InnerSC, OuterSC, ShrinkAir, WrapAir};
+use crate::{CompressAir, CompressedSC, CoreSC, InnerSC, OuterSC, ShrinkAir, ShrinkSC, WrapAir};
 
 pub trait ZKMProverComponents: Send + Sync {
     /// The prover for making Ziren core proofs.
@@ -15,7 +15,7 @@ pub trait ZKMProverComponents: Send + Sync {
         + Sync;
 
     /// The prover for shrinking compressed proofs.
-    type ShrinkProver: MachineProver<InnerSC, ShrinkAir<<InnerSC as StarkGenericConfig>::Val>>
+    type ShrinkProver: MachineProver<ShrinkSC, ShrinkAir<<ShrinkSC as StarkGenericConfig>::Val>>
         + Send
         + Sync;
 
@@ -36,7 +36,7 @@ pub struct DefaultProverComponents;
 impl ZKMProverComponents for DefaultProverComponents {
     type CoreProver = CpuProver<CoreSC, MipsAir<<CoreSC as StarkGenericConfig>::Val>>;
     type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
-    type ShrinkProver = CpuProver<InnerSC, ShrinkAir<<InnerSC as StarkGenericConfig>::Val>>;
+    type ShrinkProver = CpuProver<ShrinkSC, ShrinkAir<<ShrinkSC as StarkGenericConfig>::Val>>;
     type WrapProver = CpuProver<OuterSC, WrapAir<<OuterSC as StarkGenericConfig>::Val>>;
     type RootProver =
         CpuProver<CompressedSC, CompressAir<<CompressedSC as StarkGenericConfig>::Val>>;

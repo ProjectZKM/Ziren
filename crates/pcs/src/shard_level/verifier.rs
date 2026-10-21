@@ -18,6 +18,53 @@ use crate::lookup::LookupKind;
 use crate::types::ShardOpenedValues;
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
+/// The degree bits a shard proof must open for a chip of `height` rows:
+/// `bit_len` bits of the height, most significant first.
+///
+/// They set the padding masks (`full_geq`) of the LogUp-GKR reconstruction
+/// and of the zerocheck, and the proof carries them beside the heights the
+/// transcript observes, so the verifier requires exactly these: bits it did
+/// not derive from an observed height would let a prover move the masks after
+/// the challenges are fixed.
+fn height_bits<EF: Field>(height: usize, bit_len: usize) -> Vec<EF> {
+    (0..bit_len)
+        .map(|i| {
+            let shift = bit_len - 1 - i;
+            let bit = if shift < usize::BITS as usize { (height >> shift) & 1 } else { 0 };
+            if bit == 1 {
+                EF::ONE
+            } else {
+                EF::ZERO
+            }
+        })
+        .collect()
+}
+
+/// Whether any of `chips` sends or receives on a bus whose endpoints
+/// `eval_public_values` anchors to the public values: the State chain, the
+/// Global accumulation, and the global memory init and finalize controls.
+///
+/// The shard verifier anchors a shard's public values iff this holds for its
+/// MACHINE.  Pass every chip of the machine, never a shard's: a shard proof
+/// names its own chip set, so a prover could pick one without these buses and
+/// leave that shard's public values (its global cumulative sum, program
+/// counters and memory-control endpoints) bound to nothing.
+pub fn chips_touch_public_value_buses<'a, F: Field + 'a, A: MachineAir<F> + 'a>(
+    chips: impl IntoIterator<Item = &'a Chip<F, A>>,
+) -> bool {
+    chips.into_iter().any(|chip| {
+        chip.sends().iter().chain(chip.receives().iter()).any(|lk| {
+            matches!(
+                lk.kind,
+                LookupKind::State
+                    | LookupKind::GlobalAccumulation
+                    | LookupKind::MemoryGlobalInitControl
+                    | LookupKind::MemoryGlobalFinalizeControl
+            )
+        })
+    })
+}
+
 /// Errors emitted by the host-side shard-level BaseFold verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JaggedShardVerifyError {
@@ -134,6 +181,7 @@ impl JaggedShardVerifier {
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
         pinned: Option<crate::jagged::RecursionPins>,
+        machine_has_pv_buses: bool,
     ) -> Result<(), JaggedShardVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
@@ -206,6 +254,25 @@ impl JaggedShardVerifier {
             }
         }
 
+        if proof.opened_values.chips.len() != chips.len() {
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
+                "opened values for {} chips, the shard names {}",
+                proof.opened_values.chips.len(),
+                chips.len()
+            )));
+        }
+        for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
+            let name = chip.name();
+            let h = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
+            let expected = height_bits::<Challenge<SC>>(h, self.max_log_row_count + 1);
+            if opening.quotient.first().map(|v| v.as_slice()) != Some(expected.as_slice()) {
+                return Err(JaggedShardVerifyError::LogupGkr(format!(
+                    "chip '{name}': the opened degree bits are not the bits of its observed \
+                     height {h}"
+                )));
+            }
+        }
+
         let max_arity = chips
             .iter()
             .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
@@ -213,18 +280,6 @@ impl JaggedShardVerifier {
             .max()
             .unwrap_or(1);
         let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
-
-        let machine_has_pv_buses = chips.iter().any(|chip| {
-            chip.sends().iter().chain(chip.receives().iter()).any(|lk| {
-                matches!(
-                    lk.kind,
-                    LookupKind::State
-                        | LookupKind::GlobalAccumulation
-                        | LookupKind::MemoryGlobalInitControl
-                        | LookupKind::MemoryGlobalFinalizeControl
-                )
-            })
-        });
 
         let max_log_row_count = self.max_log_row_count;
 
@@ -259,48 +314,51 @@ impl JaggedShardVerifier {
                 && TypeId::of::<SC::Challenger>()
                     == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
             if inner_ring {
-                if let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof {
-                    let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+                let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof else {
+                    return Err(JaggedShardVerifyError::JaggedPcs(
+                        "an inner-ring shard must carry its opening as a bundle: only a bundle's \
+                         commitment is bound to the main commitment the transcript observed"
+                            .into(),
+                    ));
+                };
+                let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
 
-                    let (rc_g, cc_g): (Vec<usize>, Vec<usize>) =
-                        match bundle.packing.round_counts.last() {
-                            Some(main_round) => main_round.iter().copied().unzip(),
-                            None => crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing),
-                        };
-                    let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
-                    if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
-                        return Err(JaggedShardVerifyError::JaggedPcs(
-                            "jagged hash-bind: count >= F::ORDER (BaseFieldOverflow)".into(),
-                        ));
-                    }
-                    let area: usize = rc_g
-                        .iter()
-                        .zip(cc_g.iter())
-                        .map(|(r, c)| r.saturating_mul(*c))
-                        .fold(0usize, |a, b| a.saturating_add(b));
-                    if area == 0 || area >= (1usize << crate::jagged::MAX_ROUND_LOG_AREA) {
-                        return Err(JaggedShardVerifyError::JaggedPcs(
-                            "jagged hash-bind: area out of bounds (0 < area < 2^30) \
-                             (AreaOutOfBounds)"
-                                .into(),
-                        ));
-                    }
-
-                    let recomputed =
-                        crate::jagged_pcs::jagged_hash_bind_modified(raw_inner, &rc_g, &cc_g);
-                    let observed_inner: [InnerVal; 8] = unsafe {
-                        core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(
-                            &proof.main_commitment,
-                        )
+                let (rc_g, cc_g): (Vec<usize>, Vec<usize>) =
+                    match bundle.packing.round_counts.last() {
+                        Some(main_round) => main_round.iter().copied().unzip(),
+                        None => crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing),
                     };
-                    if recomputed != observed_inner {
-                        return Err(JaggedShardVerifyError::JaggedPcs(
-                            "jagged hash-bind mismatch: recomputed \
-                             compress([raw_root, hash(counts)]) != observed \
-                             main_commitment (IncorrectTableSizes)"
-                                .into(),
-                        ));
-                    }
+                let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
+                if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
+                    return Err(JaggedShardVerifyError::JaggedPcs(
+                        "jagged hash-bind: count >= F::ORDER (BaseFieldOverflow)".into(),
+                    ));
+                }
+                let area: usize = rc_g
+                    .iter()
+                    .zip(cc_g.iter())
+                    .map(|(r, c)| r.saturating_mul(*c))
+                    .fold(0usize, |a, b| a.saturating_add(b));
+                if area == 0 || area >= (1usize << crate::jagged::MAX_ROUND_LOG_AREA) {
+                    return Err(JaggedShardVerifyError::JaggedPcs(
+                        "jagged hash-bind: area out of bounds (0 < area < 2^30) \
+                         (AreaOutOfBounds)"
+                            .into(),
+                    ));
+                }
+
+                let recomputed =
+                    crate::jagged_pcs::jagged_hash_bind_modified(raw_inner, &rc_g, &cc_g);
+                let observed_inner: [InnerVal; 8] = unsafe {
+                    core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(&proof.main_commitment)
+                };
+                if recomputed != observed_inner {
+                    return Err(JaggedShardVerifyError::JaggedPcs(
+                        "jagged hash-bind mismatch: recomputed \
+                         compress([raw_root, hash(counts)]) != observed \
+                         main_commitment (IncorrectTableSizes)"
+                            .into(),
+                    ));
                 }
             }
         }

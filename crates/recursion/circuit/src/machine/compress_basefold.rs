@@ -759,7 +759,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                 _compress_public_values,
             )
         }
-        super::compress::PublicValuesOutputDigest::Root => {
+        super::compress::PublicValuesOutputDigest::Root
+        | super::compress::PublicValuesOutputDigest::ReduceToRoot => {
             crate::machine::root_public_values_digest::<C, SC>(builder, _compress_public_values)
         }
     };

@@ -166,29 +166,35 @@ impl AreaPin {
 }
 
 /// The largest pin class — the compress machine's DEFAULT pins, what a
-/// program that names no class (and the root) commits under.  32 stacking blocks (`2^26` cells) per round — the area the single
-/// 115.6 M-cell shape already committed at, so the commit costs what it did —
-/// with the gap split into `2^26 / 2^22 = 16` columns of at most one row cube.
-/// Organic maxima observed in production (Sep 11): main 44 M, preprocessed
-/// 44 M cells (the leaf verifying the largest core shard); the arity-4 compose
-/// is 36 M / 21 M.  `AreaPin::apply` panics past the pin.
+/// program that names no class commits under.  64 stacking blocks (`2^27`
+/// cells) per round, with the gap split into `2^27 / 2^22 = 32` columns of
+/// at most one row cube.  It exists for the leaf verifying a chip-dense core
+/// shard at the core profile's starting rate `2^-1`: that leaf opens 203
+/// first-round queries where `2^-2` opened 124, so its Merkle-path chips grow
+/// by about a fifth and its main round passes `2^26` cells.  The root never
+/// takes it ([`RecursionPins::ROOT_CLASS`]).  `AreaPin::apply` panics past
+/// the pin.
 pub const RECURSION_PINS: RecursionPins = RecursionPins {
-    prep: AreaPin { area: 1 << 26, pad_columns: 16 },
-    main: AreaPin { area: 1 << 26, pad_columns: 16 },
+    prep: AreaPin { area: 1 << 27, pad_columns: 32 },
+    main: AreaPin { area: 1 << 27, pad_columns: 32 },
 };
 
 /// The pin CLASSES a recursion node can commit under, smallest first.  A
 /// node takes the smallest class both of its rounds fit
 /// (`RecursionPins::class_for_committed`), so the common node — a leaf, or a
 /// compose over a few of them (main p50 19 M, p90 25 M cells; compose-3
-/// 27 M) — commits at 2^25 and only the rare large one (a leaf verifying a
-/// chip-dense core shard, ~44 M; the root, by construction) at 2^26.  The
-/// program verifying a node is a function of the class, so a compose program
-/// is keyed by its children's class tuple; every tuple is enumerable.
-pub const RECURSION_PIN_CLASSES: [RecursionPins; 2] = [
+/// 27 M) — commits at 2^25, a large one (a leaf verifying a chip-dense core
+/// shard) at 2^26, and only the densest leaves at 2^27.  The program
+/// verifying a node is a function of the class, so a compose program is keyed
+/// by its children's class tuple; every tuple is enumerable.
+pub const RECURSION_PIN_CLASSES: [RecursionPins; 3] = [
     RecursionPins {
         prep: AreaPin { area: 1 << 25, pad_columns: 8 },
         main: AreaPin { area: 1 << 25, pad_columns: 8 },
+    },
+    RecursionPins {
+        prep: AreaPin { area: 1 << 26, pad_columns: 16 },
+        main: AreaPin { area: 1 << 26, pad_columns: 16 },
     },
     RECURSION_PINS,
 ];
@@ -855,7 +861,10 @@ mod tests {
         assert_eq!(RecursionPins::class_for_committed(small.main.area + 1, 1), Some(1));
         assert_eq!(RecursionPins::class_for_committed(1, small.prep.area + 1), Some(1));
         assert_eq!(RecursionPins::class_for_committed(large.main.area + 1, 1), None);
-        assert_eq!(RecursionPins::class(1), RECURSION_PINS);
+        let middle = RECURSION_PIN_CLASSES[1];
+        assert_eq!(RecursionPins::class_for_committed(middle.main.area, middle.prep.area), Some(1));
+        assert_eq!(RecursionPins::class_for_committed(middle.main.area + 1, 1), Some(2));
+        assert_eq!(RecursionPins::class(RecursionPins::LAST_CLASS), RECURSION_PINS);
         assert_eq!(large.class_index(), Some(RecursionPins::LAST_CLASS));
         let cube = 1usize << 22;
         for c in RECURSION_PIN_CLASSES {

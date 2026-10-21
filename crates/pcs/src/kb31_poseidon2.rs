@@ -160,6 +160,10 @@ pub mod koala_bear_poseidon2 {
     /// stage below wrap.
     pub const WHIR_PROFILE_COMPRESS: u8 = 1;
 
+    /// The `P` of the ring that proves under the shrink WHIR schedule
+    /// ([`crate::whir::jagged::WhirProfile::Shrink`]): the shrink proof.
+    pub const WHIR_PROFILE_SHRINK: u8 = 2;
+
     /// The inner ring: KoalaBear, its quartic extension, the Poseidon2
     /// sponge, and the jagged-WHIR PCS.  `P` selects the WHIR schedule the
     /// ring commits, opens and verifies under; the hash, the field and the
@@ -181,6 +185,9 @@ pub mod koala_bear_poseidon2 {
     /// The inner ring under the compress schedule: the recursion machines
     /// (normalize, compose, shrink).
     pub type KoalaBearPoseidon2Compress = KoalaBearPoseidon2Ring<WHIR_PROFILE_COMPRESS>;
+
+    /// The inner ring under the shrink schedule: the shrink machine.
+    pub type KoalaBearPoseidon2Shrink = KoalaBearPoseidon2Ring<WHIR_PROFILE_SHRINK>;
 
     /// A shard proof of ring `P` as a shard proof of ring `Q`.  The two rings
     /// share the field, the hash and the commitment type, so the proof's data
@@ -405,6 +412,8 @@ pub mod koala_bear_poseidon2 {
 
         const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
             crate::whir::jagged::WhirProfile::Compress
+        } else if P == WHIR_PROFILE_SHRINK {
+            crate::whir::jagged::WhirProfile::Shrink
         } else {
             crate::whir::jagged::WhirProfile::Core
         };

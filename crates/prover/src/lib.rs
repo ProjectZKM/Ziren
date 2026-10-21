@@ -41,7 +41,9 @@ use zkm_core_machine::{
 use zkm_pcs::MachineProvingKey;
 use zkm_pcs::{
     air::PublicValues,
-    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    koala_bear_poseidon2::{
+        KoalaBearPoseidon2, KoalaBearPoseidon2Compress, KoalaBearPoseidon2Shrink,
+    },
     Challenge, MachineProver, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
     Val, Word, ZKMCoreOpts, ZKMProverOpts, DIGEST_SIZE,
 };
@@ -98,9 +100,16 @@ pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 pub type CoreSC = KoalaBearPoseidon2;
 
 /// The configuration for the inner prover (D=4, 100-bit security): every
-/// recursion node below the root (leaves, interior composes, deferred nodes)
-/// and the shrink, under the core WHIR schedule, tuned for prover time.
+/// recursion node below the root (leaves, interior composes, deferred nodes),
+/// under the core WHIR schedule, tuned for prover time.
 pub type InnerSC = KoalaBearPoseidon2;
+
+/// The configuration of the shrink: the same field, hash and transcript as
+/// [`InnerSC`] under the core schedule at its former starting rate `2^-2`
+/// ([`zkm_pcs::whir::jagged::WhirProfile::Shrink`]).  The wrap program
+/// verifies the shrink proof, so this ring fixes the wrap's geometry and the
+/// circuit behind it independently of the core schedule's rate.
+pub type ShrinkSC = KoalaBearPoseidon2Shrink;
 
 /// The configuration of the ROOT, the closing compose whose proof is the
 /// published compressed proof: the same field, hash and transcript as
@@ -619,7 +628,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let compress_machine = CompressAir::compress_machine(InnerSC::default());
         let compress_prover = C::CompressProver::new(compress_machine);
 
-        let shrink_machine = ShrinkAir::shrink_machine(InnerSC::compressed());
+        let shrink_machine = ShrinkAir::shrink_machine(ShrinkSC::compressed());
         let shrink_prover = C::ShrinkProver::new(shrink_machine);
 
         let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
@@ -1508,7 +1517,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// per end-to-end proof, so the per-call build cost is acceptable.
     pub fn wrap_bn254_program_basefold(
         &self,
-        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+        input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
@@ -1519,13 +1528,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut builder = Builder::<WrapConfig>::new(RecursionProgramType::Wrap);
         let input_var = input.read(&mut builder);
 
-        verify_wrap_basefold::<WrapConfig, InnerSC, _>(
+        verify_wrap_basefold::<WrapConfig, ShrinkSC, _>(
             &mut builder,
             input_var,
             self.shrink_prover.machine(),
             self.vk_verification,
             max_log_row_count,
-            PublicValuesOutputDigest::Root,
+            PublicValuesOutputDigest::ReduceToRoot,
         );
         let operations = builder.into_operations();
         builder_span.exit();
@@ -2032,7 +2041,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         reduced_proof: ZKMReduceProof<CompressedSC>,
         opts: ZKMProverOpts,
-    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
+    ) -> Result<ZKMReduceProof<ShrinkSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
         let basefold_proof = *compressed_proof.jagged_shard_proof;
         let vk_merkle_data =
@@ -2078,7 +2087,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     #[instrument(name = "wrap_bn254", level = "info", skip_all)]
     pub fn wrap_bn254(
         &self,
-        compressed_proof: ZKMReduceProof<InnerSC>,
+        compressed_proof: ZKMReduceProof<ShrinkSC>,
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
@@ -2801,7 +2810,7 @@ pub mod tests {
         let shape =
             ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height: VK_MERKLE_TREE_HEIGHT };
         let input =
-            ZKMWrapBasefoldWitnessValues::<InnerSC>::dummy(prover.shrink_prover.machine(), &shape);
+            ZKMWrapBasefoldWitnessValues::<ShrinkSC>::dummy(prover.shrink_prover.machine(), &shape);
         let program = prover.wrap_bn254_program_basefold(&input);
 
         let wrap_machine = prover.wrap_prover.machine();
@@ -3250,6 +3259,155 @@ pub mod tests {
             opts,
             Test::Compress,
         )
+    }
+
+    /// A prover runs the program on an initial memory other than its image
+    /// and proves against the image's verifying key: it sets up on the
+    /// altered image, puts the honest image's initial global sum into the
+    /// proving key so the transcript matches the honest key, and moves the
+    /// difference between the two initial sums into the Global chip's
+    /// declared global sum (`chip_cumulative_sums`) of one shard.  Nothing
+    /// constrains the declared sum (the shard prover has no permutation trace,
+    /// so `eval_permutation_constraints` returns before its last-row check),
+    /// so a verifier summing those would cancel the difference.  Returns the
+    /// forged core proof and the honest image's verifying key.
+    fn forge_core_proof_over_altered_image(
+        prover: &ZKMProver<DefaultProverComponents>,
+        opts: ZKMProverOpts,
+    ) -> Result<(ZKMCoreProof, ZKMVerifyingKey)> {
+        use zkm_pcs::septic_curve::SepticCurveComplete;
+        use zkm_pcs::septic_digest::SepticDigest;
+
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let (_, _, program, vk) = prover.setup(elf);
+
+        let text = program.pc_base..program.pc_base + 4 * program.instructions.len() as u32;
+        let (&addr, &word) = program
+            .image
+            .iter()
+            .rev()
+            .find(|(addr, _)| !text.contains(addr))
+            .expect("an image word outside the text segment");
+        let mut altered = program.clone();
+        altered.image.insert(addr, word ^ 1);
+
+        let (altered_pk_d, altered_vk) = prover.core_prover.setup(&altered);
+        let honest_initial = vk.vk.initial_global_cumulative_sum;
+        let altered_initial = altered_vk.initial_global_cumulative_sum;
+        assert_ne!(honest_initial, altered_initial, "the altered word must move the initial sum");
+        let mut pk = prover.core_prover.pk_to_host(&altered_pk_d);
+        pk.initial_global_cumulative_sum = honest_initial;
+        let pk_d = prover.core_prover.pk_to_device(&pk);
+
+        let mut core =
+            prover.prove_core(&pk_d, altered, &fib_stdin(10), opts, ZKMContext::default())?;
+
+        let shift = |d: SepticDigest<KoalaBear>| {
+            SepticDigest(
+                (SepticCurveComplete::Affine(d.0)
+                    + SepticCurveComplete::Affine(altered_initial.0)
+                    + SepticCurveComplete::Affine(honest_initial.0.neg()))
+                .point(),
+            )
+        };
+        let shard = core
+            .proof
+            .0
+            .iter()
+            .position(|sp| {
+                sp.jagged_shard_proof.chip_cumulative_sums.values().any(|s| !s.global.is_zero())
+            })
+            .expect("a shard with global interactions");
+        for sums in core.proof.0[shard]
+            .jagged_shard_proof
+            .chip_cumulative_sums
+            .values_mut()
+            .filter(|s| !s.global.is_zero())
+        {
+            sums.global = shift(sums.global);
+        }
+        tracing::info!(
+            "altered image word {addr:#x}: {word:#x} -> {:#x}; shifted shard {shard}",
+            word ^ 1
+        );
+        Ok((core, vk))
+    }
+
+    /// The leaf sums the shard public values, which the public-values AIR
+    /// binds to the Global chip's digest chain, so the tree over the proof of
+    /// [`forge_core_proof_over_altered_image`] cannot close.
+    ///
+    /// `cargo test -r -p zkm-prover compress_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
+    #[test]
+    #[serial]
+    #[ignore]
+    fn compress_rejects_a_proof_over_a_different_initial_memory() -> Result<()> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (core, vk) = forge_core_proof_over_altered_image(&prover, opts)?;
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+            let compressed = prover.compress(&vk, core, vec![], opts)?;
+            prover.verify_compressed(&compressed, &vk)?;
+            Ok(())
+        }));
+        tracing::info!(
+            "outcome: {}",
+            match &outcome {
+                Ok(Ok(())) => "ACCEPTED".to_string(),
+                Ok(Err(e)) => format!("rejected: {e}"),
+                Err(_) => "rejected: the recursion program panicked".to_string(),
+            }
+        );
+        assert!(
+            !matches!(outcome, Ok(Ok(()))),
+            "a proof over an altered initial memory verified against the image's key"
+        );
+        Ok(())
+    }
+
+    /// The host verifier sums the shard public values rather than the declared
+    /// per-chip sums, so the core machine's verifier rejects the proof of
+    /// [`forge_core_proof_over_altered_image`] on its own, without recursion and
+    /// without any check outside `StarkMachine::verify`.
+    ///
+    /// `cargo test -r -p zkm-prover core_verify_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
+    #[test]
+    #[serial]
+    #[ignore]
+    fn core_verify_rejects_a_proof_over_a_different_initial_memory() -> Result<()> {
+        use zkm_pcs::{air::LookupScope, MachineProof, MachineVerificationError};
+
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (core, vk) = forge_core_proof_over_altered_image(&prover, opts)?;
+
+        let machine = prover.core_prover.machine();
+        let mut challenger = machine.config().challenger();
+        let machine_proof = MachineProof { shard_proofs: core.proof.0.clone() };
+        let machine_result = machine.verify(&vk.vk, &machine_proof, &mut challenger);
+        tracing::info!("StarkMachine::verify: {machine_result:?}");
+        assert!(
+            matches!(
+                machine_result,
+                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
+            ),
+            "the core machine verifier must reject a proof over an altered initial memory; got {machine_result:?}"
+        );
+
+        let prover_result = prover.verify(&core.proof, &vk);
+        assert!(
+            matches!(
+                prover_result,
+                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
+            ),
+            "ZKMProver::verify must reject a proof over an altered initial memory; got {prover_result:?}"
+        );
+        Ok(())
     }
 
     /// Compress a keccak (precompile + multi-shard) workload with unpadded

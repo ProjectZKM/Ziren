@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::{
-    air::{LookupScope, PublicValues, POSEIDON_NUM_WORDS},
+    air::{PublicValues, POSEIDON_NUM_WORDS},
     shard_level::shard_proof::JaggedShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
@@ -204,10 +204,7 @@ pub fn verify_core_basefold<C, SC, A>(
     let basefold_shard_verifier_ref = &basefold_shard_verifier;
     let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
 
-    let verify_outputs: Vec<(
-        Vec<Felt<C::F>>,
-        Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>>,
-    )> = shard_proof_tuples
+    let verify_outputs: Vec<Vec<Felt<C::F>>> = shard_proof_tuples
         .into_iter()
         .enumerate()
         .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (i, proof_tuple)| {
@@ -528,19 +525,13 @@ pub fn verify_core_basefold<C, SC, A>(
             );
             }
 
-            let mut shard_globals = Vec::new();
-            for (chip, chip_values) in shard_chips.iter().zip(opened_values.chips.iter()) {
-                if chip.commit_scope() == LookupScope::Global {
-                    shard_globals.push(chip_values.global_cumulative_sum);
-                }
-            }
-            (public_values_raw, shard_globals)
+            public_values_raw
         });
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
-        let (public_values_raw, shard_globals) = verify_outputs
+        let public_values_raw = verify_outputs
             .into_iter()
             .next()
             .expect("single-shard normalize has exactly one verify output");
@@ -750,7 +741,7 @@ pub fn verify_core_basefold<C, SC, A>(
 
         C::range_check_felt(builder, public_values.shard, MAX_LOG_NUMBER_OF_SHARDS);
 
-        global_cumulative_sums.extend(shard_globals);
+        global_cumulative_sums.push(public_values.global_cumulative_sum);
     }
 
     builder.cycle_tracker_v2_exit();

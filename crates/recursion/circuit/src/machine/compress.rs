@@ -14,12 +14,23 @@
 
 use zkm_pcs::shape::OrderedShape;
 
-/// Selector tag passed to the basefold compose verifiers to choose between
-/// [`super::recursion_public_values_digest`] (the standard reduce digest used
-/// at intermediate compress layers) and [`super::root_public_values_digest`]
-/// (used at the root layer, which is wrap's input).
+/// Which digest a verifier program checks its child's public values against
+/// and which it commits: [`super::recursion_public_values_digest`] (the
+/// reduce digest, over every hashed public value) or
+/// [`super::root_public_values_digest`] (the root digest, over the values the
+/// outer circuit exposes).
+///
+/// The recursion AIR binds only the digest slots of a proof's public values,
+/// so a verifier ties a child's other public values to the child proof only
+/// by recomputing the digest the child committed and asserting it equal.
 pub enum PublicValuesOutputDigest {
+    /// The child committed a reduce digest; commit a reduce digest.
     Reduce,
+    /// The child committed a reduce digest; commit a root digest (the wrap
+    /// program over the shrink proof).
+    ReduceToRoot,
+    /// The child committed a root digest; commit it (the outer circuit over
+    /// the wrap proof).
     Root,
 }
 

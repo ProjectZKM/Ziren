@@ -28,7 +28,7 @@ use crate::{
     build::zkm_imm_wrap_vk_mode,
     components::ZKMProverComponents,
     utils::{is_recursion_public_values_valid, is_root_public_values_valid},
-    CompressedSC, CoreSC, HashableKey, InnerSC, OuterSC, ZKMCoreProofData, ZKMProver,
+    CompressedSC, CoreSC, HashableKey, OuterSC, ShrinkSC, ZKMCoreProofData, ZKMProver,
     ZKMVerifyingKey,
 };
 
@@ -234,8 +234,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::TooManyShards);
         }
 
-        zkm_core_machine::utils::global_sum::verify_global_cumulative_sum(&vk.vk, &proof.0)?;
-
         let mut challenger = self.core_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
@@ -287,9 +285,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a shrink proof.
     pub fn verify_shrink(
         &self,
-        proof: &ZKMReduceProof<InnerSC>,
+        proof: &ZKMReduceProof<ShrinkSC>,
         vk: &ZKMVerifyingKey,
-    ) -> Result<(), MachineVerificationError<InnerSC>> {
+    ) -> Result<(), MachineVerificationError<ShrinkSC>> {
         let mut challenger = self.shrink_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
         self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
@@ -344,6 +342,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         if *public_values.is_complete() != KoalaBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
+        }
+
+        if *public_values.vk_root() != self.recursion_vk_root {
+            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
         let vkey_hash = vk.hash_koalabear();

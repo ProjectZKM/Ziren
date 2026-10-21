@@ -60,6 +60,7 @@ fn main() {
             &mut challenger,
             &proof,
             machine.recursion_pins(),
+            machine.has_public_value_buses(),
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());
         match result {

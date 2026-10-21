@@ -19,6 +19,7 @@ use zkm_pcs::{
 };
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
+use zkm_recursion_core::DIGEST_SIZE;
 
 use crate::{
     hash::{FieldHasher, FieldHasherVariable},
@@ -120,6 +121,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         vk_merkle_data,
     } = input;
 
+    let vk_root = vk_merkle_data.root;
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
@@ -133,6 +135,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         machine,
         max_log_row_count,
         output_digest_kind,
+        Some(vk_root),
     );
 }
 
@@ -172,6 +175,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
+    vk_root: Option<[Felt<C::F>; DIGEST_SIZE]>,
 ) where
     SC: KoalaBearFriParametersVariable<C, Val = InnerVal> + FieldHasherVariable<C>,
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
@@ -287,6 +291,13 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             commit_root,
             preceding_roots,
         } => {
+            let limbs = crate::challenger::split_32(builder, commit_root[0], 4);
+            for (limb, observed) in limbs.iter().zip(main_commit.iter()) {
+                builder.assert_felt_eq(*limb, *observed);
+            }
+            for observed in main_commit.iter().skip(limbs.len()) {
+                builder.assert_felt_eq(*observed, C::F::ZERO);
+            }
             outer_pack_info = Some((
                 host.packing.offsets.len().saturating_sub(1),
                 host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
@@ -529,8 +540,25 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
 
     builder.assert_felt_eq(inner.is_complete, C::F::ONE);
 
+    if let Some(vk_root) = vk_root {
+        for (expected, actual) in vk_root.iter().zip(inner.vk_root.iter()) {
+            builder.assert_felt_eq(*expected, *actual);
+        }
+    }
+
     match output_digest_kind {
         PublicValuesOutputDigest::Root => {
+            let expected = root_public_values_digest::<C, SC>(builder, &inner);
+            for (value, recomputed) in inner.digest.iter().copied().zip(expected) {
+                builder.assert_felt_eq(value, recomputed);
+            }
+            inner.digest = expected;
+        }
+        PublicValuesOutputDigest::ReduceToRoot => {
+            let expected = recursion_public_values_digest::<C, SC>(builder, &inner);
+            for (value, recomputed) in inner.digest.iter().copied().zip(expected) {
+                builder.assert_felt_eq(value, recomputed);
+            }
             inner.digest = root_public_values_digest::<C, SC>(builder, &inner);
         }
         PublicValuesOutputDigest::Reduce => {

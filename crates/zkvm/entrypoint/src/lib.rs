@@ -91,7 +91,7 @@ pub extern "C" fn read_vec_raw() -> ReadVecResult {
             } else if #[cfg(feature = "bump")] {
                 let layout = std::alloc::Layout::from_size_align(capacity, 4).expect("vec is too large");
 
-                let ptr = unsafe { std::alloc::alloc(layout) };
+                let ptr = unsafe { crate::allocators::alloc_untouched(layout) };
 
                 syscall_hint_read(ptr as *mut u8, len);
 

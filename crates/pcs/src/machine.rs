@@ -893,6 +893,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         )
     }
 
+    /// Whether this machine anchors its shards' public values: some chip of
+    /// the machine uses a bus `eval_public_values` closes (the core machine
+    /// does; the recursion machines do not).  Decided over every chip of the
+    /// machine, so a shard cannot opt out by the chip set its proof names.
+    pub fn has_public_value_buses(&self) -> bool {
+        crate::shard_level::verifier::chips_touch_public_value_buses(self.chips.iter())
+    }
+
     /// The preprocessed round's chip set: every chip with preprocessed columns,
     /// BY NAME -- exactly what `setup` commits, and in the order it commits it.
     ///
@@ -1081,6 +1089,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let prep_chip_dims = self.preprocessed_chip_dims();
         let prep_chip_dims = &prep_chip_dims;
+        let has_pv_buses = self.has_public_value_buses();
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
@@ -1098,6 +1107,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &mut shard_challenger,
                         shard_proof,
                         self.recursion_pins(),
+                        has_pv_buses,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })
@@ -1131,11 +1141,29 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             result?;
         }
 
+        // Only machines that anchor their public values carry a bound cross-shard digest: the
+        // public-values AIR ties `global_cumulative_sum` to the end of the Global chip's running
+        // digest. The per-chip sums a shard proof declares are not bound by anything.
+        // Recursion machines have no Global-scope chip and do not use these public-value buses,
+        // so they skip this cross-shard check.
+        if !has_pv_buses {
+            return Ok(());
+        }
+
         tracing::debug_span!("verify global cumulative sum is 0").in_scope(|| {
-            let sum = proof
+            let shard_sums = proof
                 .shard_proofs
                 .iter()
-                .map(ShardProof::global_cumulative_sum)
+                .map(|shard_proof| {
+                    crate::air::public_values_from_slice(&shard_proof.public_values)
+                        .map(|public_values| public_values.global_cumulative_sum)
+                        .ok_or(MachineVerificationError::InvalidPublicValues(
+                            "public values do not hold a core public-values layout",
+                        ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let sum = shard_sums
+                .into_iter()
                 .chain(once(vk.initial_global_cumulative_sum))
                 .sum::<SepticDigest<Val<SC>>>();
 
