@@ -17,6 +17,8 @@ pub fn estimate_mips_lde_size(
 
     cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::Program];
 
+    cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::MemoryProgram];
+
     cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
         * costs_per_air[&MipsAirId::AddSub];
 
@@ -81,9 +83,6 @@ pub fn estimate_mips_lde_size(
 
     cells += (num_events_per_air[MipsAirId::SyscallCore]).next_power_of_two()
         * costs_per_air[&MipsAirId::SyscallCore];
-
-    cells += (num_events_per_air[MipsAirId::Global]).next_power_of_two()
-        * costs_per_air[&MipsAirId::Global];
 
     cells * ((core::mem::size_of::<KoalaBear>() << 1) as u64)
 }
@@ -162,8 +161,6 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::CloClz] = opcode_counts[Opcode::CLO] + opcode_counts[Opcode::CLZ];
 
     events_counts[MipsAirId::SyscallCore] = syscalls_sent;
-
-    events_counts[MipsAirId::Global] = 2 * touched_addresses + syscalls_sent;
 
     events_counts
 }
@@ -251,7 +248,7 @@ pub struct ShardSplitAccumulator {
     /// Main-trace width per chip, as an array (no hashing per check).
     costs: EnumMap<MipsAirId, u64>,
     /// Distinct addresses touched in this shard, i.e. `LocalCounts::local_mem`. Kept here so
-    /// the `MemoryLocal` `div_ceil` and the `Global` row count stay O(1).
+    /// the `MemoryLocal` `div_ceil` stays O(1).
     touched_addresses: u64,
     /// The trace-area budget for one shard (`ELEMENT_THRESHOLD`).
     element_threshold: u64,
@@ -328,8 +325,7 @@ impl ShardSplitAccumulator {
         self.bump(air, count);
     }
 
-    /// Record one local-memory entry the core shard opens, charging the `MemoryLocal` and
-    /// `Global` chips.
+    /// Record one local-memory entry the core shard opens, charging the `MemoryLocal` chip.
     ///
     /// The executor calls it on an address's first access in the shard, from the core or from
     /// a precompile, and again when the core touches an address a precompile touched since:
@@ -344,7 +340,6 @@ impl ShardSplitAccumulator {
             self.bump(MipsAirId::MemoryLocal, 1);
         }
         self.touched_addresses += 1;
-        self.bump(MipsAirId::Global, 2);
     }
 
     /// Whether this shard has reached its trace-area budget / its per-chip height cap.
@@ -477,7 +472,6 @@ pub fn pad_mips_event_counts(
         MipsAirId::MiscInstrs => *v += 8 * num_cycles,
         MipsAirId::CloClz => *v += 3 * num_cycles,
         MipsAirId::SyscallCore => *v += 2 * num_cycles,
-        MipsAirId::Global => *v += 64 * num_cycles,
         _ => (),
     });
     event_counts

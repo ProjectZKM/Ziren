@@ -18,8 +18,8 @@
 //! ```
 //!
 //! Reading a `buses` report: a bus is healthy when it prints BALANCED.  The
-//! public-values boundary buses (`State`, `GlobalAccumulation`,
-//! `MemoryGlobalInitControl`, `MemoryGlobalFinalizeControl`) are the exception —
+//! public-values boundary buses (`State`, `MemoryGlobalInitControl`,
+//! `MemoryGlobalFinalizeControl`) are the exception —
 //! they are closed by the public-values AIR, which this tool does not evaluate,
 //! so each should show exactly TWO unmatched keys (the initial endpoint at `-1`
 //! and the final endpoint at `+1`).  More than two means the chip chain failed
@@ -51,10 +51,8 @@ const ALL_KINDS: &[LookupKind] = &[
     LookupKind::Byte,
     LookupKind::Range,
     LookupKind::Syscall,
-    LookupKind::Global,
     LookupKind::SyscallResult,
     LookupKind::State,
-    LookupKind::GlobalAccumulation,
     LookupKind::MemoryGlobalInitControl,
     LookupKind::MemoryGlobalFinalizeControl,
     LookupKind::PrecompileChain,

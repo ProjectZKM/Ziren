@@ -21,6 +21,8 @@ pub enum MipsAirId {
     Cpu = 0,
     /// The program chip.
     Program = 1,
+    /// The program memory image chip.
+    MemoryProgram = 66,
     /// The SHA-256 extend chip.
     ShaExtend = 2,
     /// The SHA-256 extend control chip (bookends the `PrecompileChain` state bus).
@@ -147,8 +149,6 @@ pub enum MipsAirId {
     MemoryLocal = 43,
     /// The memory bump chip: one shadow read per (register, shard).
     MemoryBump = 59,
-    /// The global chip.
-    Global = 44,
     /// The byte chip.
     Byte = 45,
     /// The parametric bit-width range table.
@@ -197,7 +197,6 @@ impl MipsAirId {
             MipsAirId::MovCond,
             MipsAirId::MiscInstrs,
             MipsAirId::SyscallCore,
-            MipsAirId::Global,
         ]
     }
 
@@ -207,6 +206,7 @@ impl MipsAirId {
         match self {
             Self::Cpu => "Cpu",
             Self::Program => "Program",
+            Self::MemoryProgram => "MemoryProgram",
             Self::ShaExtend => "ShaExtend",
             Self::ShaCompress => "ShaCompress",
             Self::ShaCompressControl => "ShaCompressControl",
@@ -263,7 +263,6 @@ impl MipsAirId {
             Self::MemoryGlobalFinalize => "MemoryGlobalFinalize",
             Self::MemoryLocal => "MemoryLocal",
             Self::MemoryBump => "MemoryBump",
-            Self::Global => "Global",
             Self::Byte => "Byte",
             Self::Range => "Range",
             Self::SysLinux => "SysLinux",

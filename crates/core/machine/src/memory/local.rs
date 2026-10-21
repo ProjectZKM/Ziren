@@ -12,7 +12,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, MemoryLocalEvent};
+use zkm_core_executor::events::{ByteRecord, MemoryLocalEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
@@ -142,38 +142,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
             .get_local_mem_events()
             .for_each(|mem_event| local_entry_blu_events(mem_event, output));
 
-        let events = &mut output.global_lookup_events;
-        events.reserve(2 * input.get_local_mem_events().count());
-
-        input.get_local_mem_events().for_each(|mem_event| {
-            events.push(GlobalLookupEvent {
-                message: [
-                    mem_event.initial_mem_access.shard,
-                    mem_event.initial_mem_access.timestamp,
-                    mem_event.addr,
-                    mem_event.initial_mem_access.value & 255,
-                    (mem_event.initial_mem_access.value >> 8) & 255,
-                    (mem_event.initial_mem_access.value >> 16) & 255,
-                    (mem_event.initial_mem_access.value >> 24) & 255,
-                ],
-                is_receive: true,
-                kind: LookupKind::Memory as u8,
-            });
-            events.push(GlobalLookupEvent {
-                message: [
-                    mem_event.final_mem_access.shard,
-                    mem_event.final_mem_access.timestamp,
-                    mem_event.addr,
-                    mem_event.final_mem_access.value & 255,
-                    (mem_event.final_mem_access.value >> 8) & 255,
-                    (mem_event.final_mem_access.value >> 16) & 255,
-                    (mem_event.final_mem_access.value >> 24) & 255,
-                ],
-                is_receive: false,
-                kind: LookupKind::Memory as u8,
-            });
-        });
-
         Ok(())
     }
 
@@ -290,45 +258,9 @@ where
                 AirLookup::new(values.clone(), local.is_real.into(), LookupKind::Memory),
                 LookupScope::Local,
             );
-
-            builder.send(
-                AirLookup::new(
-                    vec![
-                        local.initial_shard.into(),
-                        local.initial_clk.into(),
-                        local.addr.into(),
-                        local.initial_value[0].into(),
-                        local.initial_value[1].into(),
-                        local.initial_value[2].into(),
-                        local.initial_value[3].into(),
-                        local.is_real.into() * AB::Expr::ZERO,
-                        local.is_real.into() * AB::Expr::ONE,
-                        AB::Expr::from_u8(LookupKind::Memory as u8),
-                    ],
-                    local.is_real.into(),
-                    LookupKind::Global,
-                ),
-                LookupScope::Local,
-            );
-
-            builder.send(
-                AirLookup::new(
-                    vec![
-                        local.final_shard.into(),
-                        local.final_clk.into(),
-                        local.addr.into(),
-                        local.final_value[0].into(),
-                        local.final_value[1].into(),
-                        local.final_value[2].into(),
-                        local.final_value[3].into(),
-                        local.is_real.into() * AB::Expr::ONE,
-                        local.is_real.into() * AB::Expr::ZERO,
-                        AB::Expr::from_u8(LookupKind::Memory as u8),
-                    ],
-                    local.is_real.into(),
-                    LookupKind::Global,
-                ),
-                LookupScope::Local,
+            builder.receive(
+                AirLookup::new(values, local.is_real.into(), LookupKind::Memory),
+                LookupScope::Global,
             );
 
             let mut values =
@@ -337,6 +269,10 @@ where
             builder.send(
                 AirLookup::new(values.clone(), local.is_real.into(), LookupKind::Memory),
                 LookupScope::Local,
+            );
+            builder.send(
+                AirLookup::new(values, local.is_real.into(), LookupKind::Memory),
+                LookupScope::Global,
             );
         }
     }

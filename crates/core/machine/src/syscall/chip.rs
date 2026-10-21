@@ -12,7 +12,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
-use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
+use zkm_core_executor::events::{ByteRecord, PrecompileEvent};
 use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::AirLookup;
@@ -125,9 +125,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        let is_receive = self.shard_kind == SyscallShardKind::Precompile;
-
-        let event_triples: Vec<(&SyscallEvent, u32, u32)> = match self.shard_kind {
+        let events: Vec<&SyscallEvent> = match self.shard_kind {
             SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
@@ -135,45 +133,15 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     (e.a_record.prev_value.to_le_bytes()[2] == 1)
                         || (e.a_record.prev_value.to_le_bytes()[1] != 0)
                 })
-                .map(|event| {
-                    let is_linux = event.a_record.prev_value.to_le_bytes()[1] != 0;
-                    let (rlo, rhi) = if is_linux {
-                        Self::pack_result_halves(event.a_record.value)
-                    } else {
-                        (0, 0)
-                    };
-                    (event, rlo, rhi)
-                })
                 .collect(),
-            SyscallShardKind::Precompile => input
-                .precompile_events
-                .all_events()
-                .map(|(event, precompile)| {
-                    let (rlo, rhi) = match precompile {
-                        PrecompileEvent::Linux(le) => Self::pack_result_halves(le.v0),
-                        _ => (0, 0),
-                    };
-                    (event, rlo, rhi)
-                })
-                .collect(),
+            SyscallShardKind::Precompile => {
+                input.precompile_events.all_events().map(|(event, _)| event).collect()
+            }
         };
 
-        for &(event, rlo, rhi) in &event_triples {
+        for event in events {
             let (a1_lo, a1_hi) = Self::pack_result_halves(event.arg1);
             let (a2_lo, a2_hi) = Self::pack_result_halves(event.arg2);
-
-            output.global_lookup_events.push(GlobalLookupEvent {
-                message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
-                is_receive,
-                kind: LookupKind::Syscall as u8,
-            });
-
-            output.global_lookup_events.push(GlobalLookupEvent {
-                message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
-                is_receive,
-                kind: LookupKind::SyscallResult as u8,
-            });
-
             output.add_u16_range_check(a1_lo as u16);
             output.add_u16_range_check(a1_hi as u16);
             output.add_u16_range_check(a2_lo as u16);
@@ -347,6 +315,23 @@ where
             local.is_real,
         );
 
+        let syscall_message: Vec<AB::Expr> = vec![
+            local.shard.into(),
+            local.clk.into(),
+            local.syscall_id.into(),
+            local.arg1_lo.into(),
+            local.arg1_hi.into(),
+            local.arg2_lo.into(),
+            local.arg2_hi.into(),
+        ];
+        let result_message: Vec<AB::Expr> = vec![
+            local.shard.into(),
+            local.clk.into(),
+            local.syscall_id.into(),
+            local.result_lo.into(),
+            local.result_hi.into(),
+        ];
+
         match self.shard_kind {
             SyscallShardKind::Core => {
                 builder.receive_syscall_halves(
@@ -375,42 +360,19 @@ where
 
                 builder.send(
                     AirLookup::new(
-                        vec![
-                            local.shard.into(),
-                            local.clk.into(),
-                            local.syscall_id.into(),
-                            local.arg1_lo.into(),
-                            local.arg1_hi.into(),
-                            local.arg2_lo.into(),
-                            local.arg2_hi.into(),
-                            local.is_real.into() * AB::Expr::one(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_u8(LookupKind::Syscall as u8),
-                        ],
+                        syscall_message.clone(),
                         local.is_real.into(),
-                        LookupKind::Global,
+                        LookupKind::Syscall,
                     ),
-                    LookupScope::Local,
+                    LookupScope::Global,
                 );
-
                 builder.send(
                     AirLookup::new(
-                        vec![
-                            local.shard.into(),
-                            local.clk.into(),
-                            local.syscall_id.into(),
-                            local.result_lo.into(),
-                            local.result_hi.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
-                        ],
+                        result_message.clone(),
                         local.is_real.into(),
-                        LookupKind::Global,
+                        LookupKind::SyscallResult,
                     ),
-                    LookupScope::Local,
+                    LookupScope::Global,
                 );
             }
             SyscallShardKind::Precompile => {
@@ -437,44 +399,21 @@ where
                     LookupScope::Local,
                 );
 
-                builder.send(
+                builder.receive(
                     AirLookup::new(
-                        vec![
-                            local.shard.into(),
-                            local.clk.into(),
-                            local.syscall_id.into(),
-                            local.arg1_lo.into(),
-                            local.arg1_hi.into(),
-                            local.arg2_lo.into(),
-                            local.arg2_hi.into(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_u8(LookupKind::Syscall as u8),
-                        ],
+                        syscall_message.clone(),
                         local.is_real.into(),
-                        LookupKind::Global,
+                        LookupKind::Syscall,
                     ),
-                    LookupScope::Local,
+                    LookupScope::Global,
                 );
-
-                builder.send(
+                builder.receive(
                     AirLookup::new(
-                        vec![
-                            local.shard.into(),
-                            local.clk.into(),
-                            local.syscall_id.into(),
-                            local.result_lo.into(),
-                            local.result_hi.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
-                        ],
+                        result_message.clone(),
                         local.is_real.into(),
-                        LookupKind::Global,
+                        LookupKind::SyscallResult,
                     ),
-                    LookupScope::Local,
+                    LookupScope::Global,
                 );
             }
         }

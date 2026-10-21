@@ -11,7 +11,7 @@ use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use std::{fmt::Debug, iter::once, time::Instant};
+use std::{fmt::Debug, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -946,6 +946,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .any(|chip| chip.sends().iter().chain(chip.receives().iter()).any(Lookup::is_global))
     }
 
+    /// The cross-shard challenge of a proof under the verifying key
+    /// `vk_challenger` has observed (the machine's challenger after the key);
+    /// `None` for a machine without global lookups.
+    pub fn global_challenge(
+        &self,
+        vk_challenger: &SC::Challenger,
+    ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
+    {
+        self.has_global_lookups().then(|| {
+            crate::logup_gkr::GlobalChallenge::derive(
+                self.config.challenger(),
+                crate::logup_gkr::global_digest(vk_challenger.clone()),
+                self.global_beta_seed_dim(),
+            )
+        })
+    }
+
     /// The β seed dimension of the global challenge: `log2` of the widest
     /// global lookup's arity (its values plus the kind slot), rounded up
     /// to a power of two. A property of the machine, so every shard
@@ -1112,8 +1129,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
     /// Verify that a proof is complete and valid given a verifying key and a claimed digest.
     ///
-    /// For a machine without global-scope lookups; see
-    /// [`Self::verify_with_global`].
+    /// A machine with global-scope lookups verifies under the challenge
+    /// [`Self::global_challenge`] derives; see [`Self::verify_with_global`].
     #[allow(clippy::match_bool)]
     pub fn verify(
         &self,
@@ -1146,7 +1163,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 >>::Commitment,
             >,
     {
-        self.verify_with_global(vk, proof, challenger, None)
+        let global = {
+            let mut vk_challenger = challenger.clone();
+            vk.observe_into(&mut vk_challenger);
+            self.global_challenge(&vk_challenger)
+        };
+        self.verify_with_global(vk, proof, challenger, global.as_ref())
     }
 
     /// Verify that a proof is complete and valid given a verifying key, under
@@ -1306,39 +1328,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             }
         }
 
-        // Only machines that anchor their public values carry a bound cross-shard digest: the
-        // public-values AIR ties `global_cumulative_sum` to the end of the Global chip's running
-        // digest. The per-chip sums a shard proof declares are not bound by anything.
-        // Recursion machines have no Global-scope chip and do not use these public-value buses,
-        // so they skip this cross-shard check.
-        if !has_pv_buses {
-            return Ok(());
-        }
-
-        tracing::debug_span!("verify global cumulative sum is 0").in_scope(|| {
-            let shard_sums = proof
-                .shard_proofs
-                .iter()
-                .map(|shard_proof| {
-                    crate::air::public_values_from_slice(&shard_proof.public_values)
-                        .map(|public_values| public_values.global_cumulative_sum)
-                        .ok_or(MachineVerificationError::InvalidPublicValues(
-                            "public values do not hold a core public-values layout",
-                        ))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let sum = shard_sums
-                .into_iter()
-                .chain(once(vk.initial_global_cumulative_sum))
-                .sum::<SepticDigest<Val<SC>>>();
-
-            if !sum.is_zero() {
-                tracing::error!("global cumulative sum: {:?}", sum);
-                return Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0));
-            }
-
-            Ok(())
-        })
+        Ok(())
     }
 }
 

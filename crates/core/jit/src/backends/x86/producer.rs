@@ -141,10 +141,6 @@ pub struct ProducerInstr {
 pub struct ProducerConfig {
     /// Address of instruction 0.
     pub pc_base: u32,
-    /// `MipsAirId::Global`'s slot and per-row cost.
-    pub global_slot: u8,
-    /// See `global_slot`.
-    pub global_cost: i64,
     /// `MipsAirId::MemoryLocal`'s slot and per-row cost.
     pub memory_local_slot: u8,
     /// See `memory_local_slot`.
@@ -482,12 +478,8 @@ pub fn build_producer(
             for h in heights {
                 check_slot(&mut t, h.slot);
             }
-            if memory {
-                for slot in [cfg.global_slot, cfg.memory_local_slot] {
-                    if !charged(slot) {
-                        check_slot(&mut t, slot);
-                    }
-                }
+            if memory && !charged(cfg.memory_local_slot) {
+                check_slot(&mut t, cfg.memory_local_slot);
             }
             if plan.delay_slot {
                 for &slot in &plan.pred_slots[..plan.n_pred as usize] {
@@ -836,20 +828,16 @@ fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig
     );
 
     let ml_off = HEIGHT_LEFT_OFFSET + i32::from(cfg.memory_local_slot) * 8;
-    let g_off = HEIGHT_LEFT_OFFSET + i32::from(cfg.global_slot) * 8;
     let ml_cost = i32::try_from(cfg.memory_local_cost).expect("MemoryLocal cost fits i32");
-    let g_cost2 = i32::try_from(cfg.global_cost * 2).expect("Global cost fits i32");
     dynasm!(t.assembler ; .arch x64
         ; =>touch
         ; mov rcx, QWORD [Rq(CONTEXT) + TOUCHED_OFFSET]
         ; add QWORD [Rq(CONTEXT) + TOUCHED_OFFSET], 1
         ; test cl, 3
-        ; jnz >global
+        ; jnz >done
         ; sub Rq(AREA_LEFT), DWORD ml_cost
         ; sub QWORD [Rq(CONTEXT) + ml_off], 1
-        ; global:
-        ; sub Rq(AREA_LEFT), DWORD g_cost2
-        ; sub QWORD [Rq(CONTEXT) + g_off], 2
+        ; done:
         ; ret
     );
 }

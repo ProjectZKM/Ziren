@@ -17,10 +17,8 @@
 //!    | `State` (shard, clk, pc, …) | next state = outputs      | current state = inputs    |
 //!    | `Syscall`                   | outputs (the call)        | inputs (the callee)       |
 //!    | `SyscallResult`             | result = outputs of the chip computing it (`SysLinux`, `SyscallPrecompile`), inputs elsewhere; args = inputs | same |
-//!    | `Global`, `is_receive` = 1  | inputs (from another shard) | —                       |
-//!    | `Global`, `is_send` = 1     | outputs (to another shard)  | —                       |
-//!    | `Global`, flags are columns | outputs                   | inputs                    |
-//!    | chaining buses (`GlobalAccumulation`, `MemoryGlobal*Control`, `PrecompileChain`, …) | outputs | inputs |
+//!    | global scope (cross-shard)  | outputs (to another shard), image words = inputs | inputs (from another shard) |
+//!    | chaining buses (`MemoryGlobal*Control`, `PrecompileChain`, …) | outputs | inputs |
 //!    | `Byte`                      | lowered to range / bit constraints or abstract calls  |
 //!
 //!    That is the "interaction-driven" interface: whatever a row consumes from another table is
@@ -92,8 +90,8 @@ pub struct PicusBuilder {
     main: RowMajorMatrix<SymbolicVariable<Felt>>,
     public_values: Vec<SymbolicVariable<Felt>>,
     pub constraints: Vec<SymbolicExpression<Felt>>,
-    pub sends: Vec<AirLookup<SymbolicExpression<Felt>>>,
-    pub receives: Vec<AirLookup<SymbolicExpression<Felt>>>,
+    pub sends: Vec<(AirLookup<SymbolicExpression<Felt>>, LookupScope)>,
+    pub receives: Vec<(AirLookup<SymbolicExpression<Felt>>, LookupScope)>,
     /// Gadgets the AIR marked, in evaluation order (see `MessageBuilder::annotate`).
     pub gadgets: Vec<(&'static str, Vec<AirLookup<SymbolicExpression<Felt>>>)>,
 }
@@ -171,12 +169,12 @@ impl AirBuilder for PicusBuilder {
 }
 
 impl MessageBuilder<AirLookup<SymbolicExpression<Felt>>> for PicusBuilder {
-    fn send(&mut self, message: AirLookup<SymbolicExpression<Felt>>, _scope: LookupScope) {
-        self.sends.push(message);
+    fn send(&mut self, message: AirLookup<SymbolicExpression<Felt>>, scope: LookupScope) {
+        self.sends.push((message, scope));
     }
 
-    fn receive(&mut self, message: AirLookup<SymbolicExpression<Felt>>, _scope: LookupScope) {
-        self.receives.push(message);
+    fn receive(&mut self, message: AirLookup<SymbolicExpression<Felt>>, scope: LookupScope) {
+        self.receives.push((message, scope));
     }
 
     fn annotate<O: FnOnce() -> Vec<AirLookup<SymbolicExpression<Felt>>>>(
@@ -203,7 +201,7 @@ const SYSCALL_RESULT_PRODUCERS: &[&str] = &["SysLinux", "SyscallPrecompile"];
 /// are not computed from anything: the program image is fixed by the verifying key and the
 /// hint words are the prover's input, so the tuple is an input of the row and determinism is
 /// stated for what the row derives from it.
-const INITIAL_MEMORY_TABLES: &[&str] = &["MemoryGlobalInit"];
+const INITIAL_MEMORY_TABLES: &[&str] = &["MemoryGlobalInit", "MemoryProgram"];
 
 /// Chips whose rows stand at a shard boundary for the accesses the shard cannot see.  Their
 /// memory-bus messages carry the timestamps the row forwards, so every field is a port: the
@@ -214,10 +212,7 @@ const SHARD_BOUNDARY_TABLES: &[&str] = &["MemoryLocal"];
 
 /// Columns the determinism statement takes as inputs although no bus carries them, as
 /// `(chip, field, column within the field, origin)`: witness freedom the protocol accepts by
-/// design, which the statement names instead of quantifying away.  The Global chip's `lift_x`
-/// offset is a byte the prover picks among those that lift the message to a curve point
-/// (`GlobalLookupOperation::offset`, the first column of `lookup`); any such offset is sound
-/// because `values[6] < 2^16` keeps the encoding injective, as in SP1.
+/// design, which the statement names instead of quantifying away.
 ///
 /// `KeccakSpongeControl` spreads one call over a chain of rows, one per absorbed block, and a
 /// row's place in that chain (`is_first_block`, `is_final_block`) is fixed by the other ends of
@@ -225,7 +220,6 @@ const SHARD_BOUNDARY_TABLES: &[&str] = &["MemoryLocal"];
 /// receives it, and a block is final when the call's length `(block + 1)·rate` is reached, which
 /// the bus-B chain from the first row enforces.  Determinism is stated given that place.
 const CHOSEN_INPUTS: &[(&str, &str, usize, &str)] = &[
-    ("Global", "lookup", 0, "column.lookup.offset"),
     ("KeccakSpongeControl", "is_first_block", 0, "column.is_first_block"),
     ("KeccakSpongeControl", "is_final_block", 0, "column.is_final_block"),
 ];
@@ -644,37 +638,23 @@ impl<'a> Emitter<'a> {
         self.bind_ports(port, values, &multiplicity, &format!("{kind}_{dir}"));
     }
 
-    /// Global-bus messages are `[message (7), is_send, is_receive, kind]`, always sent on the
-    /// local bus to the Global chip; the cross-shard direction is the flag pair.  A message whose
-    /// `is_receive` flag is set (the constant one, or the lookup's own multiplicity when a row
-    /// packs several gated entries) carries values produced in another shard, so its fields are inputs of this row; one whose `is_send` flag is the
-    /// constant one carries values this row produces, so its fields are outputs.  Flags that
-    /// are columns (the Global chip itself) keep the direction of the local lookup.
+    /// A cross-shard lookup: what the row receives is an input, what it sends an output,
+    /// except the initial memory words, which are inputs of the row.
     fn handle_global(&mut self, multiplicity: PicusExpr, values: &[PicusExpr], is_send: bool) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
         }
-        if is_send && values.len() == 10 {
-            let set = |e: &PicusExpr| matches!(e, PicusExpr::Const(1)) || *e == multiplicity;
-            let clear = |e: &PicusExpr| matches!(e, PicusExpr::Const(0));
-            let receive = set(&values[8]) && clear(&values[7]);
-            let send = set(&values[7]) && clear(&values[8]);
-            if receive || send {
-                let chip = self.module.name.split("__").next().unwrap_or_default();
-                let image = send && INITIAL_MEMORY_TABLES.contains(&chip);
-                let port = if receive || image { Port::Input } else { Port::Output };
-                let dir = if image {
-                    "image"
-                } else if receive {
-                    "recv"
-                } else {
-                    "send"
-                };
-                self.bind_ports(port, &values[..7], &multiplicity, &format!("global_{dir}"));
-                return;
-            }
-        }
-        self.handle_chain("global", multiplicity, values, is_send);
+        let chip = self.module.name.split("__").next().unwrap_or_default();
+        let image = is_send && INITIAL_MEMORY_TABLES.contains(&chip);
+        let port = if !is_send || image { Port::Input } else { Port::Output };
+        let dir = if image {
+            "image"
+        } else if is_send {
+            "send"
+        } else {
+            "recv"
+        };
+        self.bind_ports(port, values, &multiplicity, &format!("global_{dir}"));
     }
 
     /// Syscall lookups are `[shard, clk, syscall_id, arg1, arg2]`; timing is routing metadata.
@@ -728,12 +708,16 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    fn handle_lookup(&mut self, lookup: &AirLookup<PicusExpr>, is_send: bool) {
+    fn handle_lookup(&mut self, lookup: &AirLookup<PicusExpr>, scope: LookupScope, is_send: bool) {
         if self.cfg.submodule_mode == SubmoduleMode::Ignore {
             return;
         }
         let m = lookup.multiplicity.clone();
         let v = &lookup.values;
+        if scope == LookupScope::Global {
+            self.handle_global(m, v, is_send);
+            return;
+        }
         match lookup.kind {
             LookupKind::Byte => {
                 if is_send {
@@ -755,7 +739,6 @@ impl<'a> Emitter<'a> {
                 )
             }
             LookupKind::Range => self.handle_chain("range", m, v, is_send),
-            LookupKind::Global => self.handle_global(m, v, is_send),
             other => {
                 let kind = format!("{other:?}").to_lowercase();
                 self.handle_chain(&kind, m, v, is_send)
@@ -815,8 +798,10 @@ where
     };
     let constraints: Vec<PicusExpr> =
         builder.constraints.iter().map(|e| lowerer.lower(e)).collect();
-    let sends: Vec<_> = builder.sends.iter().map(|l| lower_lookup(&mut lowerer, l)).collect();
-    let receives: Vec<_> = builder.receives.iter().map(|l| lower_lookup(&mut lowerer, l)).collect();
+    let sends: Vec<_> =
+        builder.sends.iter().map(|(l, scope)| (lower_lookup(&mut lowerer, l), *scope)).collect();
+    let receives: Vec<_> =
+        builder.receives.iter().map(|(l, scope)| (lower_lookup(&mut lowerer, l), *scope)).collect();
     let bindings = std::mem::take(&mut lowerer.bindings);
     drop(lowerer);
     let mut plain = Lowerer::new(&builder.layout, 0);
@@ -868,13 +853,13 @@ where
             l.kind,
         )
     };
-    for l in sends {
+    for (l, scope) in sends {
         let l = specialize_lookup(&em, l);
-        em.handle_lookup(&l, true);
+        em.handle_lookup(&l, scope, true);
     }
-    for l in receives {
+    for (l, scope) in receives {
         let l = specialize_lookup(&em, l);
-        em.handle_lookup(&l, false);
+        em.handle_lookup(&l, scope, false);
     }
 
     let info = chip.picus_info();

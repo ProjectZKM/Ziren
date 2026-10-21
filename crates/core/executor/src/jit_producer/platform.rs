@@ -312,8 +312,6 @@ fn build(exec: &Executor<'_>) -> Built {
     let plans = build_plans(&exec.split_acct, &program.instructions, &instrs);
     let cfg = ProducerConfig {
         pc_base: program.pc_base,
-        global_slot: slot(MipsAirId::Global),
-        global_cost: exec.split_acct.cost(MipsAirId::Global) as i64,
         memory_local_slot: slot(MipsAirId::MemoryLocal),
         memory_local_cost: exec.split_acct.cost(MipsAirId::MemoryLocal) as i64,
         max_memory: MAX_MEMORY as u32,

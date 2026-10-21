@@ -41,14 +41,14 @@ fn height_bits<EF: Field>(height: usize, bit_len: usize) -> Vec<EF> {
 }
 
 /// Whether any of `chips` sends or receives on a bus whose endpoints
-/// `eval_public_values` anchors to the public values: the State chain, the
-/// Global accumulation, and the global memory init and finalize controls.
+/// `eval_public_values` anchors to the public values: the State chain and the
+/// global memory init and finalize controls.
 ///
 /// The shard verifier anchors a shard's public values iff this holds for its
 /// MACHINE.  Pass every chip of the machine, never a shard's: a shard proof
 /// names its own chip set, so a prover could pick one without these buses and
-/// leave that shard's public values (its global cumulative sum, program
-/// counters and memory-control endpoints) bound to nothing.
+/// leave that shard's public values (its program counters and
+/// memory-control endpoints) bound to nothing.
 pub fn chips_touch_public_value_buses<'a, F: Field + 'a, A: MachineAir<F> + 'a>(
     chips: impl IntoIterator<Item = &'a Chip<F, A>>,
 ) -> bool {
@@ -57,7 +57,6 @@ pub fn chips_touch_public_value_buses<'a, F: Field + 'a, A: MachineAir<F> + 'a>(
             matches!(
                 lk.kind,
                 LookupKind::State
-                    | LookupKind::GlobalAccumulation
                     | LookupKind::MemoryGlobalInitControl
                     | LookupKind::MemoryGlobalFinalizeControl
             )

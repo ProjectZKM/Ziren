@@ -247,9 +247,6 @@ impl<'a> TracingVM<'a> {
             only.public_values = self.record.public_values;
             only.shape = None;
             only.counts = None;
-            only.global_cumulative_sum.clear();
-            only.global_digests.clear();
-            only.global_byte_lookups.clear();
             std::mem::swap(self.record, &mut only);
             drop(only);
         } else {

@@ -5,178 +5,24 @@ use itertools::{EitherOrBoth, Itertools};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use zkm_pcs::{
     air::{MachineAir, PublicValues},
-    septic_curve::{SepticCurve, SepticCurveComplete},
+    septic_curve::SepticCurve,
     septic_digest::SepticDigest,
-    septic_extension::SepticExtension,
     shape::Shape,
     MachineRecord, SplitOpts, ZKMCoreOpts,
 };
 
 use serde::{Deserialize, Serialize};
-use std::{
-    mem::take,
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
+use std::{mem::take, str::FromStr, sync::Arc};
 
 use crate::{
     events::{
-        AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, CpuEvent,
-        GlobalLookupEvent, JumpEvent, MemInstrEvent, MemoryBumpEvent,
-        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
-        PrecompileEvent, PrecompileEvents, SyscallEvent,
+        AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, CpuEvent, JumpEvent,
+        MemInstrEvent, MemoryBumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+        MemoryRecordEnum, MiscEvent, MovCondEvent, PrecompileEvent, PrecompileEvents, SyscallEvent,
     },
     syscalls::SyscallCode,
     MipsAirId, Program,
 };
-
-/// Carrier for the shard's global cumulative-sum digest.
-///
-/// The digest is NEVER re-derived at commit time: `GlobalChip::generate_trace`
-/// — which has already scanned every interaction point to fill the
-/// `GlobalAccumulation` column — writes it here, and `public_values()` is a
-/// pure read of it.
-///
-/// Ziren previously computed that scan and then THREW THE RESULT AWAY, so
-/// `public_values()` re-folded every `GlobalLookupEvent` from scratch — a
-/// `lift_x` (a square root in the degree-7 extension) plus a curve addition per
-/// event, once per shard, on the shard prover's serial critical path with the
-/// GPU idle.  This cell restores the publish-once shape: the trace generator
-/// publishes, `public_values()` reads.
-///
-/// Interior mutability is required because both trace generators take the
-/// record by shared reference (`generate_trace(&self, input: &Self::Record, ..)`).
-///
-/// Two safety properties:
-/// * `Clone` DEEP-copies (never shares the cell), so a cloned record can never
-///   observe a digest published against a different event vector.
-/// * The published value is tagged with the event count it was derived from;
-///   [`ExecutionRecord::public_values`] only trusts it when the count still
-///   matches `global_lookup_events.len()`, and otherwise recomputes.  Events are
-///   only ever appended in this codebase, so a length match is a sound guard.
-///
-/// A miss is a pure slowdown, never a wrong answer.
-#[derive(Debug, Default)]
-pub struct GlobalCumulativeSumCell(Mutex<Option<(usize, SepticDigest<u32>)>>);
-
-impl GlobalCumulativeSumCell {
-    /// Publish `digest`, derived from exactly `nb_events` global lookup events.
-    #[inline]
-    pub fn publish(&self, nb_events: usize, digest: SepticDigest<u32>) {
-        *self.0.lock().unwrap() = Some((nb_events, digest));
-    }
-
-    /// Read the digest iff it was derived from exactly `nb_events` events.
-    #[inline]
-    #[must_use]
-    pub fn get(&self, nb_events: usize) -> Option<SepticDigest<u32>> {
-        match *self.0.lock().unwrap() {
-            Some((n, digest)) if n == nb_events => Some(digest),
-            _ => None,
-        }
-    }
-
-    /// Drop any published digest.
-    #[inline]
-    pub fn clear(&self) {
-        *self.0.lock().unwrap() = None;
-    }
-}
-
-/// One `GlobalChip` row's digest data, computed once per event by whichever
-/// side (host `generate_dependencies` or the device trace generator) got there
-/// first, shared with the other consumers of the same record.  Mirrors
-/// `zkm_core_machine::operations::GlobalDigestRow` field for field (the machine
-/// crate depends on this one, so the layout lives here).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct GlobalDigestRowRaw {
-    pub x: [u32; 7],
-    pub y: [u32; 7],
-    pub offset: u8,
-    pub y6_top: u8,
-    pub y6_mid8: u8,
-    pub y6_lo16: u16,
-}
-
-/// Carrier for the per-event digest rows of this shard's `global_lookup_events`
-/// (host path: `GlobalChip::generate_dependencies` computes them for the byte
-/// lookups, `generate_trace` reuses them instead of a second `lift_x` per event).
-/// Same length-tag + deep-clone discipline as [`GlobalCumulativeSumCell`].
-#[derive(Debug, Default)]
-pub struct GlobalDigestCell(Mutex<Option<(usize, Arc<Vec<GlobalDigestRowRaw>>)>>);
-
-impl GlobalDigestCell {
-    #[inline]
-    pub fn publish(&self, nb_events: usize, rows: Arc<Vec<GlobalDigestRowRaw>>) {
-        debug_assert_eq!(rows.len(), nb_events);
-        *self.0.lock().unwrap() = Some((nb_events, rows));
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn get(&self, nb_events: usize) -> Option<Arc<Vec<GlobalDigestRowRaw>>> {
-        match &*self.0.lock().unwrap() {
-            Some((n, rows)) if *n == nb_events => Some(rows.clone()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn clear(&self) {
-        *self.0.lock().unwrap() = None;
-    }
-}
-
-impl Clone for GlobalDigestCell {
-    fn clone(&self) -> Self {
-        Self(Mutex::new(self.0.lock().unwrap().clone()))
-    }
-}
-
-/// Byte-table multiplicities that the `GlobalChip` DEVICE trace generator
-/// derived on the GPU (the three range-check lookups of every real row need
-/// `lift_x`, which the host does not repeat when the chip is device-generated:
-/// `zkm_core_machine::global::global_byte_lookups_on_device()`).  Triples are
-/// `(byte-table row, opcode, multiplicity)` in the Byte chip's own scatter
-/// coordinates; the Byte chip's trace generator folds them in AFTER the Global
-/// chip has published (the shard prover orders the two).  Tagged with the event
-/// count like the other cells.
-#[derive(Debug, Default)]
-pub struct GlobalByteLookupCell(Mutex<Option<(usize, Arc<Vec<(u32, u8, u32)>>)>>);
-
-impl GlobalByteLookupCell {
-    #[inline]
-    pub fn publish(&self, nb_events: usize, triples: Arc<Vec<(u32, u8, u32)>>) {
-        *self.0.lock().unwrap() = Some((nb_events, triples));
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn get(&self, nb_events: usize) -> Option<Arc<Vec<(u32, u8, u32)>>> {
-        match &*self.0.lock().unwrap() {
-            Some((n, t)) if *n == nb_events => Some(t.clone()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn clear(&self) {
-        *self.0.lock().unwrap() = None;
-    }
-}
-
-impl Clone for GlobalByteLookupCell {
-    fn clone(&self) -> Self {
-        Self(Mutex::new(self.0.lock().unwrap().clone()))
-    }
-}
-
-impl Clone for GlobalCumulativeSumCell {
-    fn clone(&self) -> Self {
-        Self(Mutex::new(*self.0.lock().unwrap()))
-    }
-}
 
 /// A record of the execution of a program.
 ///
@@ -253,20 +99,6 @@ pub struct ExecutionRecord {
     pub bump_memory_events: Vec<MemoryBumpEvent>,
     /// A trace of all the syscall events.
     pub syscall_events: EventVec<SyscallEvent>,
-    /// A trace of all the global lookup events.
-    pub global_lookup_events: EventVec<GlobalLookupEvent>,
-    /// Carrier for the global cumulative-sum digest, published by whichever
-    /// `GlobalChip` trace generator ran for this shard.  See
-    /// [`GlobalCumulativeSumCell`].
-    #[serde(skip)]
-    pub global_cumulative_sum: GlobalCumulativeSumCell,
-    /// Per-event digest rows (host path).  See [`GlobalDigestCell`].
-    #[serde(skip)]
-    pub global_digests: GlobalDigestCell,
-    /// Device-derived Byte-table multiplicities of the Global chip (device path).
-    /// See [`GlobalByteLookupCell`].
-    #[serde(skip)]
-    pub global_byte_lookups: GlobalByteLookupCell,
     /// The public values.
     pub public_values: PublicValues<u32, u32>,
     /// The shape of the proof.
@@ -690,9 +522,6 @@ impl MachineRecord for ExecutionRecord {
         self.global_memory_finalize_events.append(&mut other.global_memory_finalize_events);
         self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
         self.bump_memory_events.append(&mut other.bump_memory_events);
-        self.global_lookup_events.append(&mut other.global_lookup_events);
-        self.global_cumulative_sum.clear();
-        other.global_cumulative_sum.clear();
     }
 
     fn byte_multiplicity_planes(&self) -> Option<(Vec<u32>, Vec<u32>)> {
@@ -719,73 +548,15 @@ impl MachineRecord for ExecutionRecord {
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
         let mut pv = self.public_values;
-        pv.global_count = self.global_lookup_events.len() as u32;
+        pv.global_count = 0;
         pv.global_init_count = self.global_memory_initialize_events.len() as u32;
         pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
-        pv.global_cumulative_sum =
-            match self.global_cumulative_sum.get(self.global_lookup_events.len()) {
-                Some(digest) => digest,
-                None => compute_global_cumulative_sum(&self.global_lookup_events),
-            };
+        pv.global_cumulative_sum = SepticDigest(SepticCurve::convert(
+            SepticDigest::<p3_koala_bear::KoalaBear>::zero().0,
+            |x| x.as_canonical_u32(),
+        ));
         pv.to_vec()
     }
-}
-
-/// Compute the global cumulative-sum digest from the populated global lookup
-/// events.  Mirrors `GlobalChip::generate_trace` and
-/// `GlobalLookupOperation::get_digest`: each event
-/// lifts to a septic-curve point (negated for a send), and the digest is the
-/// running sum seeded by the `SepticDigest::zero()` offset — exactly the value
-/// the last real `GlobalChip` row sends on the GlobalAccumulation bus.  The
-/// septic curve is over the base field, so this is computed over `KoalaBear`
-/// and stored as canonical `u32` coordinates (lifted to `F` by `to_vec`).
-///
-/// PERF: this runs on the shard prover's critical path — `public_values()` is
-/// called from the GPU `commit()` (`ziren-gpu` `shard-prover/src/lib.rs`, the
-/// `construct main data` step), i.e. AFTER the device trace-gen has been
-/// dispatched, so a serial fold here stalls the whole prove window with the GPU
-/// idle.  Measured on this box (single RTX 5090, `nsys` + host phase marks):
-/// the serial fold cost 10.27 s of goat's 18.20 s core prove loop (56%) and
-/// 3.73 s of tendermint's 38.99 s (10%), during which the GPU ran at ~3%.
-///
-/// The per-event work (`lift_x` — a square root in the degree-7 extension) is a
-/// pure function of the event, and `SepticCurveComplete`'s `Add` is the COMPLETE
-/// curve group law (it handles infinity, `x1 != x2`, doubling and `P + (-P)`),
-/// so the fold is over an abelian group: associativity + commutativity make any
-/// reduction tree yield the bit-identical digest.  Field arithmetic is exact
-/// (no floating point), so this is byte-neutral, not merely
-/// numerically-equivalent.
-///
-/// Mirrors the reduction the rest of the codebase already uses for exactly this
-/// accumulation — `GlobalChip::generate_trace`
-/// (`crates/core/machine/src/global/mod.rs`, `into_par_iter().with_min_len(1 <<
-/// 15)`) and `Program::global_cumulative_sum`
-/// (`crates/core/executor/src/program.rs`, `into_par_iter().reduce(||
-/// SepticCurveComplete::Infinity, ...)`).  `with_min_len` keeps small shards on
-/// a single worker so the rayon split cost cannot dominate.
-fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u32> {
-    use p3_field::BasedVectorSpace;
-    use p3_koala_bear::KoalaBear;
-    use p3_maybe_rayon::prelude::{
-        IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator,
-    };
-    type F = KoalaBear;
-
-    let acc = events
-        .par_iter()
-        .with_min_len(1 << 12)
-        .map(|event| {
-            let x_start =
-                SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(event.message[i]))
-                    + SepticExtension::from(F::from_u32((event.kind as u32) << 16));
-            let (point, _offset) = SepticCurve::<F>::lift_x(x_start);
-            let point = if event.is_receive { point } else { point.neg() };
-            SepticCurveComplete::Affine(point)
-        })
-        .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b);
-    let acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0) + acc;
-    let final_digest = acc.point();
-    SepticDigest(SepticCurve::convert(final_digest, |x: F| x.as_canonical_u32()))
 }
 
 impl ByteRecord for ExecutionRecord {

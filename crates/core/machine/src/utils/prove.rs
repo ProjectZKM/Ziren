@@ -133,6 +133,7 @@ where
 
         let mut challenger = prover.machine().config().challenger();
         pk.observe_into(&mut challenger);
+        let global = prover.machine().global_challenge(&challenger);
 
         let p2_record_gen_sync = Arc::new(TurnBasedSync::new());
         let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
@@ -440,8 +441,9 @@ where
                                         });
 
                                     let t_commit = std::time::Instant::now();
-                                    let main_data =
+                                    let mut main_data =
                                         prover.commit(&record, main_traces, cluster_widths);
+                                    main_data.global_challenge.clone_from(&global);
                                     let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();

@@ -113,6 +113,22 @@ pub struct GlobalChallenge<F, EF> {
 /// fresh challenger.
 const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
 
+/// Separates the global digest from every other use of the verifying key's
+/// transcript.
+const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
+
+/// The digest `h_star` a [`GlobalChallenge`] is derived from, sampled from
+/// `challenger`: the machine's challenger after it has observed the verifying
+/// key.
+pub fn global_digest<F, C>(mut challenger: C) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_DIGEST_DOMAIN));
+    core::array::from_fn(|_| challenger.sample())
+}
+
 impl<F, EF> GlobalChallenge<F, EF>
 where
     F: p3_field::Field,

@@ -98,35 +98,39 @@ pub const BYTE_MAIN_COLS: usize = 10;
 /// Main columns of the program table, which every shard carries at one row
 /// per instruction.
 pub const PROGRAM_MAIN_COLS: usize = 1;
+/// Main columns of the program memory image table, which every shard carries
+/// at one row per word of the image.
+pub const MEMORY_PROGRAM_MAIN_COLS: usize = 3;
 
 /// How many events of `code` one deferred shard holds when it is cut by area,
 /// with the count the per-chip height cap allows, or `None` for a code
 /// without a cost model here (it keeps its count threshold).
 ///
 /// One event costs a row of its own AIR, a local-memory entry per touched
-/// word (four to a row), two global rows per touched word plus two for the
-/// syscall, and a precompile-syscall row; each row is charged its AIR's width
-/// from `mips_costs`.  The precompile's own trace is padded only to a
-/// multiple of 32 (`num_rows`, which the GPU trace generator follows too);
-/// a fixed shape would pad it to a power of two, which this does not model.
-/// The byte and program tables are in every shard and come off the budget
-/// first, the program table at `MAX_PROGRAM_SIZE` rows since the program is
-/// not known here.  (`mips_costs` charges both their preprocessed columns
-/// too, which are not main-trace area.)  The global AIR is the tallest, so it also bounds the count by the per-chip
-/// height cap the core shards are cut at.  Rounded down to a multiple of 32.
+/// word (four to a row) and a precompile-syscall row; each row is charged its
+/// AIR's width from `mips_costs`.  The precompile's own trace is padded only
+/// to a multiple of 32 (`num_rows`, which the GPU trace generator follows
+/// too); a fixed shape would pad it to a power of two, which this does not
+/// model.  The byte, program and program memory image tables are in every
+/// shard and come off the budget first, the program and image tables at
+/// `MAX_PROGRAM_SIZE` rows since the program is not known here.
+/// (`mips_costs` charges their preprocessed columns too, which are not
+/// main-trace area.)  The local-memory AIR is the tallest, so it also bounds
+/// the count by the per-chip height cap the core shards are cut at.  Rounded
+/// down to a multiple of 32.
 fn area_split_threshold(code: SyscallCode, element_threshold: usize) -> Option<(usize, usize)> {
     static COSTS: std::sync::OnceLock<hashbrown::HashMap<MipsAirId, usize>> =
         std::sync::OnceLock::new();
     let (air, words) = precompile_air_and_words(code)?;
     let costs = COSTS.get_or_init(crate::mips_costs);
-    let global_rows = 2 * words + 2;
+    let local_rows = words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC);
     let per_event = costs[&air]
-        + words.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC) * costs[&MipsAirId::MemoryLocal]
-        + global_rows * costs[&MipsAirId::Global]
+        + local_rows * costs[&MipsAirId::MemoryLocal]
         + costs[&MipsAirId::SyscallPrecompile];
-    let fixed = (1 << 16) * BYTE_MAIN_COLS + MAX_PROGRAM_SIZE * PROGRAM_MAIN_COLS;
+    let fixed = (1 << 16) * BYTE_MAIN_COLS
+        + MAX_PROGRAM_SIZE * (PROGRAM_MAIN_COLS + MEMORY_PROGRAM_MAIN_COLS);
     let budget = element_threshold.saturating_sub(fixed);
-    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / global_rows / 32 * 32;
+    let by_height = CORE_SHARD_HEIGHT_THRESHOLD as usize / local_rows.max(1) / 32 * 32;
     Some(((budget / per_event).min(by_height) / 32 * 32, by_height))
 }
 
@@ -447,11 +451,12 @@ mod tests {
         // A double touches half the words of an add, so more of them fit.
         assert!(double > add && add > opts.deferred);
         assert_eq!(double % 32, 0);
-        // The global AIR, two rows per touched word plus two, stays under the
+        // The local-memory AIR, four touched words to a row, stays under the
         // per-chip height cap.
         let words = zkm_curves::NUM_WORDS_EC_POINT;
-        assert!(add * (4 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
-        assert!(double * (2 * words + 2) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        let rows = |w: usize| w.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC);
+        assert!(add * rows(2 * words) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
+        assert!(double * rows(words) <= CORE_SHARD_HEIGHT_THRESHOLD as usize);
         // A code without a cost model keeps its count threshold.
         assert_eq!(precompile_split_threshold(SyscallCode::SYS_LINUX, &opts), opts.deferred);
     }

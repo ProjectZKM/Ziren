@@ -10,7 +10,7 @@ use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
+use zkm_core_executor::events::MemoryInitializeFinalizeEvent;
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
@@ -64,39 +64,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
 
     fn generate_dependencies(
         &self,
-        input: &ExecutionRecord,
-        output: &mut ExecutionRecord,
+        _input: &ExecutionRecord,
+        _output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        let mut memory_events = match self.kind {
-            MemoryChipType::Initialize => input.global_memory_initialize_events.clone(),
-            MemoryChipType::Finalize => input.global_memory_finalize_events.clone(),
-        };
-
-        let is_receive = match self.kind {
-            MemoryChipType::Initialize => false,
-            MemoryChipType::Finalize => true,
-        };
-
-        memory_events.sort_by_key(|event| event.addr);
-
-        let events = memory_events.into_iter().map(|event| {
-            let lookup_shard = if is_receive { event.shard } else { 0 };
-            let lookup_clk = if is_receive { event.timestamp } else { 0 };
-            GlobalLookupEvent {
-                message: [
-                    lookup_shard,
-                    lookup_clk,
-                    event.addr,
-                    (event.value & 255) as u32,
-                    ((event.value >> 8) & 255) as u32,
-                    ((event.value >> 16) & 255) as u32,
-                    ((event.value >> 24) & 255) as u32,
-                ],
-                is_receive,
-                kind: LookupKind::Memory as u8,
-            }
-        });
-        output.global_lookup_events.extend(events);
         Ok(())
     }
 
@@ -289,44 +259,18 @@ where
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
+            let mut values = vec![AB::Expr::ZERO, AB::Expr::ZERO, local.addr.into()];
+            values.extend(value);
             builder.send(
-                AirLookup::new(
-                    vec![
-                        AB::Expr::ZERO,
-                        AB::Expr::ZERO,
-                        local.addr.into(),
-                        value[0].clone(),
-                        value[1].clone(),
-                        value[2].clone(),
-                        value[3].clone(),
-                        local.is_real.into() * AB::Expr::ONE,
-                        local.is_real.into() * AB::Expr::ZERO,
-                        AB::Expr::from_u8(LookupKind::Memory as u8),
-                    ],
-                    local.is_real.into(),
-                    LookupKind::Global,
-                ),
-                LookupScope::Local,
+                AirLookup::new(values, local.is_real.into(), LookupKind::Memory),
+                LookupScope::Global,
             );
         } else {
-            builder.send(
-                AirLookup::new(
-                    vec![
-                        local.shard.into(),
-                        local.timestamp.into(),
-                        local.addr.into(),
-                        value[0].clone(),
-                        value[1].clone(),
-                        value[2].clone(),
-                        value[3].clone(),
-                        local.is_real.into() * AB::Expr::ZERO,
-                        local.is_real.into() * AB::Expr::ONE,
-                        AB::Expr::from_u8(LookupKind::Memory as u8),
-                    ],
-                    local.is_real.into(),
-                    LookupKind::Global,
-                ),
-                LookupScope::Local,
+            let mut values = vec![local.shard.into(), local.timestamp.into(), local.addr.into()];
+            values.extend(value);
+            builder.receive(
+                AirLookup::new(values, local.is_real.into(), LookupKind::Memory),
+                LookupScope::Global,
             );
         }
 

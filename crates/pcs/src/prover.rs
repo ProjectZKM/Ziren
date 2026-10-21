@@ -579,6 +579,7 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
+        let global = self.machine().global_challenge(challenger);
 
         let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
             records
@@ -592,7 +593,8 @@ where
                     let trace_gen_ms = t0.elapsed().as_millis();
 
                     let t1 = std::time::Instant::now();
-                    let shard_data = self.commit(&record, named_traces, None);
+                    let mut shard_data = self.commit(&record, named_traces, None);
+                    shard_data.global_challenge.clone_from(&global);
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();

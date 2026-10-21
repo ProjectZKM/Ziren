@@ -44,7 +44,6 @@ fn main() {
                 }
                 small_shape.insert(MipsAirId::MemoryGlobalInit, *log2_memory_height);
                 small_shape.insert(MipsAirId::MemoryGlobalFinalize, *log2_memory_height);
-                small_shape.insert(MipsAirId::Global, log2_memory_height + 1);
                 small_shapes.push(small_shape);
             }
         }

@@ -17,7 +17,6 @@ use zkm_pcs::{
 
 use super::mips::mips_chips::SyscallChip;
 use crate::{
-    global::GlobalChip,
     memory::{MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     mips::MipsAir,
 };
@@ -147,6 +146,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     fn raw_chip_set_cluster_shape(&self, record: &ExecutionRecord) -> Option<Shape<MipsAirId>> {
         let mut shape: Shape<MipsAirId> = Shape::from_log2_heights(&[]);
         shape.insert(MipsAirId::Program, 1);
+        shape.insert(MipsAirId::MemoryProgram, 1);
         shape.insert(MipsAirId::Byte, 1);
         shape.insert(MipsAirId::Range, 1);
         let num_preprocessed = shape.len();
@@ -158,7 +158,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             }
         }
         for (air, (_, _)) in self.partial_precompile_shapes.iter() {
-            if let Some((height, _, _)) = air.precompile_heights(record) {
+            if let Some((height, _)) = air.precompile_heights(record) {
                 if height > 0 {
                     if let Ok(id) = MipsAirId::from_str(&MachineAir::<F>::name(air)) {
                         shape.insert(id, 1);
@@ -224,9 +224,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         for (air, (memory_events_per_row, allowed_log2_heights)) in
             self.partial_precompile_shapes.iter()
         {
-            let Some((height, num_memory_local_events, num_global_events)) =
-                air.precompile_heights(record)
-            else {
+            let Some((height, num_memory_local_events)) = air.precompile_heights(record) else {
                 continue;
             };
             for allowed_log2_height in allowed_log2_heights {
@@ -238,10 +236,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                         *allowed_log2_height,
                     ) {
                         let mem_events_height = cand[2].1;
-                        let global_events_height = cand[3].1;
                         if num_memory_local_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
                             <= (1 << mem_events_height)
-                            && num_global_events <= (1 << global_events_height)
                         {
                             shape.extend(
                                 cand.iter().map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
@@ -280,17 +276,14 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 continue;
             }
             let Ok(id) = MipsAirId::from_str(name) else { continue };
-            if matches!(id, MipsAirId::Program | MipsAirId::Byte) {
+            if matches!(id, MipsAirId::Program | MipsAirId::MemoryProgram | MipsAirId::Byte) {
                 continue;
             }
             let log_h = rows.next_power_of_two().trailing_zeros() as usize;
             shape.insert(id, log_h);
             if !matches!(
                 id,
-                MipsAirId::SyscallPrecompile
-                    | MipsAirId::MemoryLocal
-                    | MipsAirId::Global
-                    | MipsAirId::SyscallCore
+                MipsAirId::SyscallPrecompile | MipsAirId::MemoryLocal | MipsAirId::SyscallCore
             ) && !Self::is_core_or_memory_id(id)
             {
                 saw_precompile_worker = true;
@@ -358,7 +351,10 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let is_packed = has_cpu
             && (get(&MipsAirId::MemoryGlobalInit) > 0 || get(&MipsAirId::MemoryGlobalFinalize) > 0);
         let prep_heights: Vec<(MipsAirId, usize)> =
-            [MipsAirId::Program, MipsAirId::Byte].into_iter().map(|id| (id, get(&id))).collect();
+            [MipsAirId::Program, MipsAirId::MemoryProgram, MipsAirId::Byte]
+                .into_iter()
+                .map(|id| (id, get(&id)))
+                .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
         if !has_cpu
             && get(&MipsAirId::MemoryGlobalInit) == 0
@@ -393,7 +389,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
             MipsAirId::CloClz,
-            MipsAirId::Global,
             MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
@@ -401,10 +396,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         if is_packed {
             heights.push((MipsAirId::MemoryGlobalInit, get(&MipsAirId::MemoryGlobalInit)));
             heights.push((MipsAirId::MemoryGlobalFinalize, get(&MipsAirId::MemoryGlobalFinalize)));
-            heights.push((
-                MipsAirId::Global,
-                get(&MipsAirId::MemoryGlobalInit) + get(&MipsAirId::MemoryGlobalFinalize),
-            ));
         }
         let log2_shard_size = get(&MipsAirId::Cpu).next_power_of_two().ilog2() as usize;
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
@@ -432,7 +423,10 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let is_packed = has_cpu
             && (get(&MipsAirId::MemoryGlobalInit) > 0 || get(&MipsAirId::MemoryGlobalFinalize) > 0);
         let prep_heights: Vec<(MipsAirId, usize)> =
-            [MipsAirId::Program, MipsAirId::Byte].into_iter().map(|id| (id, get(&id))).collect();
+            [MipsAirId::Program, MipsAirId::MemoryProgram, MipsAirId::Byte]
+                .into_iter()
+                .map(|id| (id, get(&id)))
+                .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
         if !has_cpu
             && get(&MipsAirId::MemoryGlobalInit) == 0
@@ -467,7 +461,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
             MipsAirId::CloClz,
-            MipsAirId::Global,
             MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
@@ -475,10 +468,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         if is_packed {
             heights.push((MipsAirId::MemoryGlobalInit, get(&MipsAirId::MemoryGlobalInit)));
             heights.push((MipsAirId::MemoryGlobalFinalize, get(&MipsAirId::MemoryGlobalFinalize)));
-            heights.push((
-                MipsAirId::Global,
-                get(&MipsAirId::MemoryGlobalInit) + get(&MipsAirId::MemoryGlobalFinalize),
-            ));
         }
         let log2_shard_size = get(&MipsAirId::Cpu).next_power_of_two().ilog2() as usize;
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
@@ -840,9 +829,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         for (air, (memory_events_per_row, allowed_log2_heights)) in
             self.partial_precompile_shapes.iter()
         {
-            if let Some((height, num_memory_local_events, num_global_events)) =
-                air.precompile_heights(record)
-            {
+            if let Some((height, num_memory_local_events)) = air.precompile_heights(record) {
                 for allowed_log2_height in allowed_log2_heights {
                     let allowed_height = 1 << allowed_log2_height;
                     if height <= allowed_height {
@@ -852,10 +839,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                             *allowed_log2_height,
                         ) {
                             let mem_events_height = shape[2].1;
-                            let global_events_height = shape[3].1;
                             if num_memory_local_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
                                 <= (1 << mem_events_height)
-                                && num_global_events <= (1 << global_events_height)
                             {
                                 record.shape.as_mut().unwrap().extend(
                                     shape.iter().map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
@@ -908,21 +893,12 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                             .ilog2() as usize)
                             .max(4),
                     ),
-                    (
-                        MipsAir::<F>::Global(GlobalChip).name(),
-                        ((2 * num_local_mem_events
-                            + (1 << allowed_log2_height).div_ceil(&air.rows_per_event()))
-                        .next_power_of_two()
-                        .ilog2() as usize)
-                            .max(4),
-                    ),
                 ];
                 if let Some(control) = air.precompile_control_air() {
                     shape.push((control.name(), syscall_height));
                 }
                 shape
             })
-            .filter(|shape| shape[3].1 <= 22)
             .collect::<Vec<_>>()
     }
 
@@ -1086,7 +1062,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     .map(|(air, log_height)| (MipsAirId::from_str(&air).unwrap(), log_height))
                     .collect::<Shape<MipsAirId>>()
             })
-            .filter(|shape| shape.log2_height(&MipsAirId::Global).unwrap() < 21)
             .collect();
 
         self.maximal_core_shapes(max_log_shard_size).into_iter().chain(precompile_shapes).collect()
@@ -1117,6 +1092,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 
         let allowed_preprocessed_log2_heights = HashMap::from([
             (MipsAirId::Program, vec![Some(19), Some(20), Some(21), Some(22)]),
+            (MipsAirId::MemoryProgram, vec![Some(19), Some(20), Some(21), Some(22)]),
             (MipsAirId::Byte, vec![Some(16)]),
             (MipsAirId::Range, vec![Some(crate::range::NUM_RANGE_ROWS.ilog2() as usize)]),
         ]);
@@ -1143,7 +1119,6 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                     MipsAirId::MemoryGlobalFinalize,
                     vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)],
                 ),
-                (MipsAirId::Global, vec![None, Some(11), Some(17), Some(19), Some(21), Some(22)]),
             ]
             .map(|(air, log_heights)| (air, log_heights)),
         );
@@ -1270,9 +1245,6 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     let syscall_core_log_height = shape.log2_height(&MipsAirId::SyscallCore);
     maybe_log2_heights.insert(MipsAirId::SyscallCore, heuristic(syscall_core_log_height, 0));
 
-    let global_log_height = shape.log2_height(&MipsAirId::Global);
-    maybe_log2_heights.insert(MipsAirId::Global, heuristic(global_log_height, 1));
-
     assert!(maybe_log2_heights.len() >= shape.len(), "not all chips were included in the shape");
 
     ShapeCluster::new(maybe_log2_heights)
@@ -1387,9 +1359,10 @@ pub mod tests {
 
         let main_traces = prover.generate_traces(&record).unwrap();
 
-        let main_data = prover.commit(&record, main_traces, None);
+        let mut main_data = prover.commit(&record, main_traces, None);
 
         let mut challenger = prover.machine().config().challenger();
+        main_data.global_challenge = prover.machine().global_challenge(&challenger);
 
         prover.open(&pk, main_data, &mut challenger).unwrap();
     }
@@ -1420,7 +1393,7 @@ pub mod tests {
             ("CloClz", 10),
             ("Cpu", 14),
             ("DivRem", 10),
-            ("Global", 9),
+            ("MemoryProgram", 19),
             ("Jump", 10),
             ("Lt", 12),
             ("LoadNarrow", 10),
@@ -1483,7 +1456,7 @@ pub mod tests {
             ("CloClz", 1),
             ("Cpu", 8369),
             ("DivRem", 1000),
-            ("Global", 450),
+            ("MemoryProgram", 1 << 14),
             ("Jump", 70),
             ("Lt", 3296),
             ("LoadNarrow", 501),
@@ -1521,7 +1494,7 @@ pub mod tests {
             ("CloClz", 10),
             ("Cpu", 14),
             ("DivRem", 10),
-            ("Global", 9),
+            ("MemoryProgram", 19),
             ("Jump", 10),
             ("Lt", 12),
             ("LtImm", 12),
@@ -1624,7 +1597,7 @@ pub mod tests {
             ("CloClz", 10),
             ("Cpu", 14),
             ("DivRem", 10),
-            ("Global", 9),
+            ("MemoryProgram", 19),
             ("Jump", 10),
             ("Lt", 12),
             ("LoadNarrow", 10),
@@ -1691,7 +1664,6 @@ pub mod tests {
             "CloClz",
             "Cpu",
             "DivRem",
-            "Global",
             "Jump",
             "Lt",
             "LoadNarrow",
@@ -1716,7 +1688,7 @@ pub mod tests {
                         "Cpu" => cpu,
                         "AddSub" | "Lt" | "Mul" | "DivRem" => big,
                         "Bitwise" | "Branch" | "LoadNarrow" | "LoadWord" | "StoreNarrow"
-                        | "StoreWord" | "MemoryUnaligned" | "Global" => mid,
+                        | "StoreWord" | "MemoryUnaligned" => mid,
                         _ => small,
                     };
                     m.insert(n.to_string(), v.max(1));
@@ -1820,7 +1792,8 @@ pub mod tests {
 
         setup_logger();
 
-        let preprocessed_log_heights = [(MipsAirId::Program, 10), (MipsAirId::Byte, 16)];
+        let preprocessed_log_heights =
+            [(MipsAirId::Program, 10), (MipsAirId::MemoryProgram, 10), (MipsAirId::Byte, 16)];
 
         let core_log_heights = [
             (MipsAirId::Cpu, 11),
@@ -1834,7 +1807,6 @@ pub mod tests {
             (MipsAirId::CloClz, 10),
             (MipsAirId::MemoryLocal, 10),
             (MipsAirId::SyscallCore, 10),
-            (MipsAirId::Global, 10),
         ];
 
         let height_map =
@@ -1864,7 +1836,6 @@ pub mod tests {
             (MipsAirId::Branch, 17),
             (MipsAirId::Byte, 16),
             (MipsAirId::Cpu, 21),
-            (MipsAirId::Global, 16),
             (MipsAirId::Jump, 17),
             (MipsAirId::Lt, 18),
             (MipsAirId::LoadNarrow, 20),
@@ -1902,6 +1873,7 @@ pub mod tests {
             MipsAirId::ShiftLeftImm,
             MipsAirId::ShiftRightImm,
             MipsAirId::Range,
+            MipsAirId::MemoryProgram,
         ];
         for id in must {
             assert!(canon.contains(&id), "canonicalize must add {id:?}");
@@ -1934,7 +1906,7 @@ pub mod tests {
         let raw: BTreeMap<String, usize> = [
             ("Byte", 1 << 16),
             ("Program", 1 << 19),
-            ("Global", 128),
+            ("MemoryProgram", 1 << 19),
             ("MemoryLocal", 16),
             ("SyscallPrecompile", 16),
             ("ShaExtend", 64),
@@ -1957,9 +1929,9 @@ pub mod tests {
             "ShaCompressControl",
             "SyscallPrecompile",
             "MemoryLocal",
-            "Global",
             "Byte",
             "Program",
+            "MemoryProgram",
         ] {
             assert!(
                 present.contains(must),
@@ -2008,7 +1980,7 @@ pub mod tests {
             let mut m: BTreeMap<String, usize> = [
                 ("Byte", 1 << 16),
                 ("Program", 1 << 18),
-                ("Global", 128),
+                ("MemoryProgram", 1 << 18),
                 ("MemoryLocal", 16),
                 ("SyscallPrecompile", 16),
             ]
