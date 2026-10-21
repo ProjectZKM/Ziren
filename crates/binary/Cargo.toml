@@ -1,0 +1,40 @@
+[package]
+name = "zkm-binary-stark"
+description = "The binary stage: a multi-STARK over GF(2^128) under Boolean WHIR and Blake3"
+readme = "README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-field-current = { package = "p3-field", git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", features = ["parallel"] }
+p3-binary-pcs = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", features = ["parallel"] }
+p3-blake3 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-lookup = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-bus = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-koala-bear = { workspace = true }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", features = ["parallel"] }
+p3-multi-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", features = ["parallel"] }
+p3-sumcheck = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", features = ["parallel"] }
+postcard = { version = "1.1", features = ["alloc"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+zkm-derive = { workspace = true }
+zkm-primitives = { workspace = true }
+zkm-recursion-core = { workspace = true }
+
+[dev-dependencies]
+p3-symmetric-current = { package = "p3-symmetric", git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+p3-blake3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+zkm-pcs = { workspace = true }
