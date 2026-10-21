@@ -244,7 +244,12 @@ See the [current implementation and verifier documentation](https://github.com/P
 
 The Solidity backend currently supports the Keccak256 suite. Deployments must
 use an independently approved verifying key/profile and bind the application's
-expected public values. The reference verifier is for conformance; generated
+expected public values. `verify_shrink_with` binds the recursion root, the
+application key, the completion and exit flags and every byte of the committed
+public-values digest. It does not recompute the Poseidon2 digest of the
+recursion public values: the wrap program checks and commits that digest
+in-circuit and the shrink statement does not use it, so verifiers that only
+implement the byte-hash suite need no Poseidon2. The reference verifier is for conformance; generated
 modules require their own deployment-size and transaction-gas checks. The saved
 Fibonacci fixture does not establish production Metis costs.
 
