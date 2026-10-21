@@ -64,11 +64,12 @@ integration gates. GC tape generation belongs to the GC consumer repository.
 
 ## Ownership and validation
 
-Ziren owns the shrinker, suites, typed proof/key APIs, adapter boundary and
-reusable Solidity primitives in `crates/verifier/solidity/shrink`. The compact
-calldata codec, exporter and Python/Yul compiler live in ProjectZKM/zkOP's
-`crates/shrink-export` and `contracts/keccak-wire`. PCS/prover depend on neither
-exporter nor consumer package.
+Ziren owns the shrinker, suites, typed proof/key APIs, native verification and
+adapter boundary. [ProjectZKM/zkOP](https://github.com/ProjectZKM/zkOP) owns the
+Solidity verifiers/libraries, compact calldata codec, exporter, Python/Yul
+compiler, verifier tests and deployment tooling in `crates/shrink-export` and
+`contracts/keccak-wire`. See the [current implementation](https://github.com/ProjectZKM/zkOP/pull/1).
+PCS/prover depend on neither exporter nor consumer package.
 
 Suite tests prove and verify small multi-round WHIR components for all three
 hashes, reject relabeled cross-suite proofs, changed claims/leaves/final
