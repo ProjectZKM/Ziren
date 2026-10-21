@@ -1,5 +1,5 @@
-//! Terminal-only WHIR schedules. Child core/compress proofs retain their own
-//! parameters. The resolved configuration is bound by `terminal_key_digest`.
+//! Compact shrink WHIR schedules. Child core/compress proofs retain their own
+//! parameters. The resolved configuration is bound by `shrink_key_digest`.
 
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use super::jagged::{bits_per_query_johnson, whir_config_for_fold_schedule};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct KeccakWhirParameters {
+pub struct CompactWhirParameters {
     pub folds: Vec<usize>,
     /// Rates of the oracles actually queried, including the final query phase.
     pub queried_log_inv_rates: Vec<usize>,
@@ -22,7 +22,7 @@ pub struct KeccakWhirParameters {
     pub ood_samples: usize,
 }
 
-impl Default for KeccakWhirParameters {
+impl Default for CompactWhirParameters {
     fn default() -> Self {
         Self {
             folds: vec![1, 3, 4, 4, 4],
@@ -37,7 +37,7 @@ impl Default for KeccakWhirParameters {
     }
 }
 
-impl KeccakWhirParameters {
+impl CompactWhirParameters {
     /// Validate geometry and solve query counts. This is not a complete
     /// soundness validator: an approved schedule must also account for folding,
     /// batching, OOD and the actual stripe count (see the Solidity package parameter model).
@@ -53,7 +53,7 @@ impl KeccakWhirParameters {
             return fail("Johnson m must be 1..=64; retain at least two OOD samples");
         }
         if !self.component_target_bits.is_finite() || self.component_target_bits < 106.0 {
-            return fail("terminal component target must not be reduced below 106 bits");
+            return fail("compact component target must not be reduced below 106 bits");
         }
         if [self.query_grinding_bits, self.folding_grinding_bits, self.batching_grinding_bits]
             .into_iter()
@@ -105,11 +105,11 @@ impl KeccakWhirParameters {
     }
 }
 
-/// Version-one terminal schedule. It is fixed by the ring type, shared by
+/// Version-one compact shrink schedule. It is fixed by the ring type, shared by
 /// commitment, opening, verification, key identity and export. Environment
 /// variables and submitted proofs cannot select its parameters.
-pub fn keccak_whir_config(lsh: usize) -> WhirConfig {
-    KeccakWhirParameters::default().resolve(lsh).expect("valid Keccak WHIR parameters")
+pub fn compact_whir_config(lsh: usize) -> WhirConfig {
+    CompactWhirParameters::default().resolve(lsh).expect("valid compact WHIR parameters")
 }
 
 #[cfg(test)]
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn actual_final_rate_drives_final_queries() {
-        let p = KeccakWhirParameters {
+        let p = CompactWhirParameters {
             folds: vec![2, 6, 6],
             queried_log_inv_rates: vec![3, 6, 9],
             johnson_m: 6,
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn interleaved_height_allows_rate_four_at_first_fold_one() {
-        let p = KeccakWhirParameters::default();
+        let p = CompactWhirParameters::default();
         let cfg = p.resolve(21).unwrap();
         assert_eq!(cfg.final_poly_log_degree, 5);
         assert_eq!(cfg.final_queries, 14);
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn reject_malformed_and_query_target_downgrades() {
-        let original = KeccakWhirParameters::default();
+        let original = CompactWhirParameters::default();
         let mut p = original.clone();
         p.component_target_bits = 100.0;
         assert!(p.resolve(21).is_err());

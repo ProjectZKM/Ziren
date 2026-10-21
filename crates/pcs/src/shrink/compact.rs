@@ -1,112 +1,86 @@
-//! A final KoalaBear/Keccak-256 ring for the existing shrink computation.
-//! Merkle leaves use canonical little-endian field words, the transcript is
-//! domain separated, and WHIR uses a terminal-specific immutable schedule.
-//! Keccak runs on the host; no Keccak AIR or binary-field stage is introduced.
-//! This ring is terminal: existing recursive circuits do not verify it.
-
-use alloc::vec;
-use alloc::vec::Vec;
-
+//! Shared KoalaBear compact shrink proof configuration.
+//! Hash suites define commitments, transcript conventions and key identity.
+//! Consumer adapters and export formats are independent of this module.
+use super::suites::{HashSuite, SuiteHasher};
+use crate::config::{BasefoldRing, PrepCommitRoot, StarkGenericConfig, ZeroCommitment};
+use crate::jagged_pcs::jagged::{PrecomputedJaggedCommitGeneric, WhirDenseOpen};
+use crate::jagged_pcs::{JaggedDft, JaggedVal};
+use crate::Com;
+use alloc::{vec, vec::Vec};
 use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32, PrimeField64};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
-use p3_keccak::Keccak256Hash;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, Hash, MerkleCap};
 use serde::{Deserialize, Serialize};
-
-use crate::config::{BasefoldRing, PrepCommitRoot, StarkGenericConfig, ZeroCommitment};
-use crate::jagged_pcs::jagged::{PrecomputedJaggedCommitGeneric, WhirDenseOpen};
-use crate::jagged_pcs::{JaggedDft, JaggedVal};
-use crate::Com;
-
-/// Bytes of a Keccak digest.
-pub const KECCAK_DIGEST_BYTES: usize = 32;
-
-/// Field elements a Keccak root is observed as.
-pub const KECCAK_DIGEST_FELTS: usize = 8;
-
+pub const DIGEST_BYTES: usize = 32;
+pub const DIGEST_FELTS: usize = 8;
 pub type Val = KoalaBear;
 pub type Challenge = BinomialExtensionField<Val, 4>;
-pub type KeccakDigest = [u8; KECCAK_DIGEST_BYTES];
-pub type KeccakHash = CanonicalKeccak;
-pub type KeccakCompress = CompressionFunctionFromHasher<Keccak256Hash, 2, KECCAK_DIGEST_BYTES>;
-pub type KeccakMmcs = MerkleTreeMmcs<Val, u8, KeccakHash, KeccakCompress, 2, KECCAK_DIGEST_BYTES>;
-pub type KeccakChallengeMmcs = ExtensionMmcs<Val, Challenge, KeccakMmcs>;
-pub type KeccakDft = Radix2DitParallel<Val>;
-pub type KeccakPcs = TwoAdicFriPcs<Val, KeccakDft, KeccakMmcs, KeccakChallengeMmcs>;
-
+pub type Digest = [u8; DIGEST_BYTES];
+pub type CompactCompress<S> = CompressionFunctionFromHasher<SuiteHasher<S>, 2, DIGEST_BYTES>;
+pub type CompactMmcs<S> =
+    MerkleTreeMmcs<Val, u8, CanonicalHash<S>, CompactCompress<S>, 2, DIGEST_BYTES>;
+pub type CompactChallengeMmcs<S> = ExtensionMmcs<Val, Challenge, CompactMmcs<S>>;
+pub type CompactDft = Radix2DitParallel<Val>;
+pub type CompactPcs<S> = TwoAdicFriPcs<Val, CompactDft, CompactMmcs<S>, CompactChallengeMmcs<S>>;
+const SQUEEZE_WORDS: usize = DIGEST_BYTES / 4;
 /// Keccak over the canonical bytes of field elements, four little-endian
 /// bytes each: the bytes the transcript observes and an EVM verifier hashes.
 /// The field's serializing hasher writes the Montgomery form instead,
 /// which no circuit over the canonical value reproduces.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct CanonicalKeccak;
+pub struct CanonicalHash<S: HashSuite>(core::marker::PhantomData<S>);
 
-impl CryptographicHasher<Val, KeccakDigest> for CanonicalKeccak {
-    fn hash_iter<I: IntoIterator<Item = Val>>(&self, input: I) -> KeccakDigest {
-        Keccak256Hash.hash_iter(input.into_iter().flat_map(|v| v.as_canonical_u32().to_le_bytes()))
+impl<S: HashSuite> CryptographicHasher<Val, Digest> for CanonicalHash<S> {
+    fn hash_iter<I: IntoIterator<Item = Val>>(&self, input: I) -> Digest {
+        S::hash(
+            &input.into_iter().flat_map(|v| v.as_canonical_u32().to_le_bytes()).collect::<Vec<_>>(),
+        )
     }
 }
 
-/// The ring's Merkle commitment scheme.
+/// The suite's Merkle commitment scheme.
 #[must_use]
-pub fn keccak_mmcs() -> KeccakMmcs {
-    KeccakMmcs::new(CanonicalKeccak, CompressionFunctionFromHasher::new(Keccak256Hash), 0)
+pub fn compact_mmcs<S: HashSuite>() -> CompactMmcs<S> {
+    CompactMmcs::<S>::new(
+        CanonicalHash::<S>::default(),
+        CompressionFunctionFromHasher::new(SuiteHasher::<S>::default()),
+        0,
+    )
 }
 
-/// The ring's transcript, empty.
-#[must_use]
-pub fn keccak_challenger() -> KeccakChallenger {
-    KeccakChallenger::new()
-}
-
-/// Words a squeeze yields.
-const SQUEEZE_WORDS: usize = KECCAK_DIGEST_BYTES / 4;
-
-/// Whether every fold of the transcript is logged for verifier parity checks
-/// (`ZIREN_TRACE_KECCAK_TRANSCRIPT`).
-pub fn transcript_trace_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("ZIREN_TRACE_KECCAK_TRANSCRIPT").is_some())
-}
-
-/// Maximum buffered payload: a 32-byte state plus 100 bytes and Keccak
-/// padding fit in one 136-byte rate block.
-pub const ABSORB_CAP_BYTES: usize = 100;
-
-/// Versioned Fiat–Shamir domain for this terminal.
-pub const TRANSCRIPT_DOMAIN: &[u8] = b"ziren-koalabear-keccak-terminal-v1";
-
-/// A Keccak hash-chain transcript with canonical LE32 field observations.
+/// A suite-defined hash-chain transcript with canonical LE32 field observations.
 /// Digest words are consumed little-endian, in order. Base-field challenges
 /// use 31-bit rejection sampling for an exactly uniform KoalaBear element;
 /// extension challenges sample four independent coefficients. Bit challenges
 /// consume one full word, masking to the requested width. An observation
 /// invalidates unread output. The protocol is specific to this terminal.
 #[derive(Clone, Debug)]
-pub struct KeccakChallenger {
-    state: KeccakDigest,
+pub struct CompactChallenger<S: HashSuite> {
+    suite: core::marker::PhantomData<S>,
+    state: Digest,
     buffer: Vec<u8>,
     words_left: usize,
 }
 
-impl Default for KeccakChallenger {
+impl<S: HashSuite> Default for CompactChallenger<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl KeccakChallenger {
+impl<S: HashSuite> CompactChallenger<S> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            state: Keccak256Hash.hash_iter(TRANSCRIPT_DOMAIN.iter().copied()),
+            suite: core::marker::PhantomData,
+            state: S::hash(S::TRANSCRIPT_DOMAIN),
             buffer: Vec::new(),
             words_left: 0,
         }
@@ -116,16 +90,17 @@ impl KeccakChallenger {
         self.words_left = 0;
         for byte in bytes {
             self.buffer.push(*byte);
-            if self.buffer.len() == ABSORB_CAP_BYTES {
+            if self.buffer.len() == S::ABSORB_CAP_BYTES {
                 self.fold();
             }
         }
     }
 
     fn fold(&mut self) {
-        let digest: KeccakDigest =
-            Keccak256Hash.hash_iter(self.state.iter().copied().chain(self.buffer.iter().copied()));
-        if transcript_trace_enabled() {
+        let digest: Digest = S::hash(
+            &self.state.iter().copied().chain(self.buffer.iter().copied()).collect::<Vec<_>>(),
+        );
+        if std::env::var_os("ZIREN_TRACE_SHRINK_TRANSCRIPT").is_some() {
             tracing::info!(
                 "KECCAKHOST fold buffered={} state={}",
                 self.buffer.len(),
@@ -164,39 +139,39 @@ impl KeccakChallenger {
 
     /// The state digest.
     #[must_use]
-    pub fn state(&self) -> &KeccakDigest {
+    pub fn state(&self) -> &Digest {
         &self.state
     }
 }
 
-impl CanObserve<Val> for KeccakChallenger {
+impl<S: HashSuite> CanObserve<Val> for CompactChallenger<S> {
     fn observe(&mut self, value: Val) {
         self.absorb(&value.as_canonical_u32().to_le_bytes());
     }
 }
 
-impl CanObserve<Hash<Val, u8, KECCAK_DIGEST_BYTES>> for KeccakChallenger {
-    fn observe(&mut self, value: Hash<Val, u8, KECCAK_DIGEST_BYTES>) {
-        let bytes: KeccakDigest = value.into();
+impl<S: HashSuite> CanObserve<Hash<Val, u8, DIGEST_BYTES>> for CompactChallenger<S> {
+    fn observe(&mut self, value: Hash<Val, u8, DIGEST_BYTES>) {
+        let bytes: Digest = value.into();
         self.absorb(&bytes);
     }
 }
 
-impl CanObserve<&MerkleCap<Val, KeccakDigest>> for KeccakChallenger {
-    fn observe(&mut self, cap: &MerkleCap<Val, KeccakDigest>) {
+impl<S: HashSuite> CanObserve<&MerkleCap<Val, Digest>> for CompactChallenger<S> {
+    fn observe(&mut self, cap: &MerkleCap<Val, Digest>) {
         for root in cap.roots() {
             self.absorb(root);
         }
     }
 }
 
-impl CanObserve<MerkleCap<Val, KeccakDigest>> for KeccakChallenger {
-    fn observe(&mut self, cap: MerkleCap<Val, KeccakDigest>) {
+impl<S: HashSuite> CanObserve<MerkleCap<Val, Digest>> for CompactChallenger<S> {
+    fn observe(&mut self, cap: MerkleCap<Val, Digest>) {
         self.observe(&cap);
     }
 }
 
-impl CanSample<Val> for KeccakChallenger {
+impl<S: HashSuite> CanSample<Val> for CompactChallenger<S> {
     fn sample(&mut self) -> Val {
         loop {
             let word = self.next_word() & 0x7fff_ffff;
@@ -207,13 +182,13 @@ impl CanSample<Val> for KeccakChallenger {
     }
 }
 
-impl CanSample<Challenge> for KeccakChallenger {
+impl<S: HashSuite> CanSample<Challenge> for CompactChallenger<S> {
     fn sample(&mut self) -> Challenge {
         Challenge::from_basis_coefficients_fn(|_| CanSample::<Val>::sample(self))
     }
 }
 
-impl CanSampleBits<usize> for KeccakChallenger {
+impl<S: HashSuite> CanSampleBits<usize> for CompactChallenger<S> {
     fn sample_bits(&mut self, bits: usize) -> usize {
         assert!(bits <= 32, "a word carries at most 32 bits");
         let word = u64::from(self.next_word());
@@ -221,7 +196,7 @@ impl CanSampleBits<usize> for KeccakChallenger {
     }
 }
 
-impl GrindingChallenger for KeccakChallenger {
+impl<S: HashSuite> GrindingChallenger for CompactChallenger<S> {
     type Witness = Val;
 
     fn grind(&mut self, bits: usize) -> Val {
@@ -247,14 +222,14 @@ impl GrindingChallenger for KeccakChallenger {
     }
 }
 
-impl FieldChallenger<Val> for KeccakChallenger {}
+impl<S: HashSuite> FieldChallenger<Val> for CompactChallenger<S> {}
 
 /// Domain-separated compression of the full 256-bit root into the shard's
 /// eight-felt seed. No raw-root bits are silently discarded. The seed has the
 /// native eight-felt capacity; the Merkle proof still authenticates full roots.
 #[must_use]
-pub fn root_felts(root: &KeccakDigest) -> [Val; KECCAK_DIGEST_FELTS] {
-    let digest = Keccak256Hash.hash_iter(b"ziren-keccak-root-felts-v1".iter().chain(root).copied());
+pub fn root_felts<S: HashSuite>(root: &Digest) -> [Val; DIGEST_FELTS] {
+    let digest = S::hash(&S::ROOT_DOMAIN.iter().chain(root).copied().collect::<Vec<_>>());
     core::array::from_fn(|i| {
         Val::from_u64(u64::from(u32::from_le_bytes(digest[4 * i..4 * i + 4].try_into().unwrap())))
     })
@@ -262,7 +237,7 @@ pub fn root_felts(root: &KeccakDigest) -> [Val; KECCAK_DIGEST_FELTS] {
 
 /// The FRI parameters of the two-adic PCS the config carries; the ring
 /// commits and opens under jagged WHIR, so these are never exercised.
-fn keccak_fri_params() -> FriParameters<KeccakChallengeMmcs> {
+fn compact_fri_params<S: HashSuite>() -> FriParameters<CompactChallengeMmcs<S>> {
     FriParameters {
         log_blowup: 1,
         log_final_poly_len: 0,
@@ -270,73 +245,75 @@ fn keccak_fri_params() -> FriParameters<KeccakChallengeMmcs> {
         num_queries: 100,
         commit_proof_of_work_bits: 0,
         query_proof_of_work_bits: 0,
-        mmcs: KeccakChallengeMmcs::new(keccak_mmcs()),
+        mmcs: CompactChallengeMmcs::<S>::new(compact_mmcs::<S>()),
     }
 }
 
-/// The Keccak ring.
+/// Compact shrink configuration over KoalaBear with a selected hash suite.
 #[derive(Deserialize)]
-#[serde(from = "core::marker::PhantomData<KoalaBearKeccak>")]
-pub struct KoalaBearKeccak {
-    pcs: KeccakPcs,
-    fri_config: FriParameters<KeccakChallengeMmcs>,
+#[serde(bound = "")]
+#[serde(from = "core::marker::PhantomData<CompactShrink<S>>")]
+pub struct CompactShrink<S: HashSuite> {
+    pcs: CompactPcs<S>,
+    fri_config: FriParameters<CompactChallengeMmcs<S>>,
 }
 
-impl KoalaBearKeccak {
+impl<S: HashSuite> CompactShrink<S> {
     #[must_use]
     pub fn new() -> Self {
-        let fri_config = keccak_fri_params();
-        let pcs = KeccakPcs::new(KeccakDft::default(), keccak_mmcs(), fri_config.clone());
+        let fri_config = compact_fri_params::<S>();
+        let pcs =
+            CompactPcs::<S>::new(CompactDft::default(), compact_mmcs::<S>(), fri_config.clone());
         Self { pcs, fri_config }
     }
 
     /// The unused two-adic PCS's FRI parameters.
     #[must_use]
-    pub fn get_fri_config(&self) -> &FriParameters<KeccakChallengeMmcs> {
+    pub fn get_fri_config(&self) -> &FriParameters<CompactChallengeMmcs<S>> {
         &self.fri_config
     }
 }
 
-impl Default for KoalaBearKeccak {
+impl<S: HashSuite> Default for CompactShrink<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Clone for KoalaBearKeccak {
+impl<S: HashSuite> Clone for CompactShrink<S> {
     fn clone(&self) -> Self {
         Self::new()
     }
 }
 
-impl Serialize for KoalaBearKeccak {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl<S: HashSuite> Serialize for CompactShrink<S> {
+    fn serialize<T>(&self, serializer: T) -> Result<T::Ok, T::Error>
     where
-        S: serde::Serializer,
+        T: serde::Serializer,
     {
-        core::marker::PhantomData::<KoalaBearKeccak>.serialize(serializer)
+        core::marker::PhantomData::<CompactShrink<S>>.serialize(serializer)
     }
 }
 
-impl From<core::marker::PhantomData<KoalaBearKeccak>> for KoalaBearKeccak {
-    fn from(_: core::marker::PhantomData<KoalaBearKeccak>) -> Self {
+impl<S: HashSuite> From<core::marker::PhantomData<CompactShrink<S>>> for CompactShrink<S> {
+    fn from(_: core::marker::PhantomData<CompactShrink<S>>) -> Self {
         Self::new()
     }
 }
 
-impl StarkGenericConfig for KoalaBearKeccak {
+impl<S: HashSuite> StarkGenericConfig for CompactShrink<S> {
     type Val = Val;
-    type Domain = <KeccakPcs as p3_commit::Pcs<Challenge, KeccakChallenger>>::Domain;
-    type Pcs = KeccakPcs;
+    type Domain = <CompactPcs<S> as p3_commit::Pcs<Challenge, CompactChallenger<S>>>::Domain;
+    type Pcs = CompactPcs<S>;
     type Challenge = Challenge;
-    type Challenger = KeccakChallenger;
+    type Challenger = CompactChallenger<S>;
 
     fn pcs(&self) -> &Self::Pcs {
         &self.pcs
     }
 
     fn challenger(&self) -> Self::Challenger {
-        keccak_challenger()
+        CompactChallenger::<S>::new()
     }
 
     fn prep_commit(
@@ -349,7 +326,7 @@ impl StarkGenericConfig for KoalaBearKeccak {
         ))
     }
 
-    type PrepPrecomputed = PrecomputedJaggedCommitGeneric<KeccakMmcs>;
+    type PrepPrecomputed = PrecomputedJaggedCommitGeneric<CompactMmcs<S>>;
 
     fn prep_precompute(
         named_preprocessed_traces: &[(alloc::string::String, RowMajorMatrix<JaggedVal>)],
@@ -364,22 +341,25 @@ impl StarkGenericConfig for KoalaBearKeccak {
 /// The raw root, as the wrap ring's: the verifier binds the preprocessed
 /// round's root to the key by equality, and derives the round's geometry from
 /// the key's chip heights.
-impl PrepCommitRoot<KoalaBearKeccak> for PrecomputedJaggedCommitGeneric<KeccakMmcs> {
-    fn commit_root(&self) -> Com<KoalaBearKeccak> {
+impl<S: HashSuite> PrepCommitRoot<CompactShrink<S>>
+    for PrecomputedJaggedCommitGeneric<CompactMmcs<S>>
+{
+    fn commit_root(&self) -> Com<CompactShrink<S>> {
         self.commit.original_commitment.clone()
     }
 }
 
-impl ZeroCommitment<KoalaBearKeccak> for KeccakPcs {
-    fn zero_commitment(&self) -> Com<KoalaBearKeccak> {
-        MerkleCap::new(vec![[0u8; KECCAK_DIGEST_BYTES]])
+impl<S: HashSuite> ZeroCommitment<CompactShrink<S>> for CompactPcs<S> {
+    fn zero_commitment(&self) -> Com<CompactShrink<S>> {
+        MerkleCap::new(vec![[0u8; DIGEST_BYTES]])
     }
 }
 
-impl BasefoldRing for KoalaBearKeccak {
+impl<S: HashSuite> BasefoldRing for CompactShrink<S> {
     const WHIR_INNER_PCS: bool = true;
 
-    const WHIR_PROFILE: crate::whir::jagged::WhirProfile = crate::whir::jagged::WhirProfile::Keccak;
+    const WHIR_PROFILE: crate::whir::jagged::WhirProfile =
+        crate::whir::jagged::WhirProfile::CompactShrink;
 
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
@@ -387,10 +367,10 @@ impl BasefoldRing for KoalaBearKeccak {
         prep
     }
 
-    type BfMmcs = KeccakMmcs;
+    type BfMmcs = CompactMmcs<S>;
 
     fn bf_mmcs() -> Self::BfMmcs {
-        keccak_mmcs()
+        compact_mmcs::<S>()
     }
 
     fn vk_commit_is_preceding_root(
@@ -402,10 +382,10 @@ impl BasefoldRing for KoalaBearKeccak {
 
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
-    ) -> [JaggedVal; KECCAK_DIGEST_FELTS] {
+    ) -> [JaggedVal; DIGEST_FELTS] {
         let roots = commit.roots();
-        assert_eq!(roots.len(), 1, "the terminal uses a single-root cap");
-        root_felts(&roots[0])
+        assert_eq!(roots.len(), 1, "the compact shrinker uses a single-root cap");
+        root_felts::<S>(&roots[0])
     }
 
     fn whir_committed_bf_prover_data(
@@ -439,11 +419,13 @@ impl BasefoldRing for KoalaBearKeccak {
     }
 }
 
-/// Stable fingerprint of the terminal key and the resolved verifier parameters.
+/// Stable fingerprint of the compact shrink key and the resolved verifier parameters.
 /// HashMap iteration order and Montgomery serialization never enter this codec.
 /// Applications must obtain this ID from trusted setup, not from a proof.
 #[must_use]
-pub fn terminal_key_digest(vk: &crate::StarkVerifyingKey<KoalaBearKeccak>) -> [u8; 32] {
+pub fn shrink_key_digest<S: HashSuite>(
+    vk: &crate::StarkVerifyingKey<CompactShrink<S>>,
+) -> [u8; 32] {
     fn integer(bytes: &mut Vec<u8>, value: usize) {
         bytes.extend(u64::try_from(value).expect("key integer fits u64").to_le_bytes());
     }
@@ -451,11 +433,17 @@ pub fn terminal_key_digest(vk: &crate::StarkVerifyingKey<KoalaBearKeccak>) -> [u
         integer(bytes, value.len());
         bytes.extend(value.as_bytes());
     }
-    // Version two distinguishes the current-main port from the historical
-    // staging fixture and binds the complete child transcript profile too.
-    let mut bytes = b"ziren-keccak-terminal-key-v2".to_vec();
-    integer(&mut bytes, TRANSCRIPT_DOMAIN.len());
-    bytes.extend(TRANSCRIPT_DOMAIN);
+    // The descriptor codec binds every suite convention as well as the key.
+    // Domain bytes of the proof transcript remain unchanged by API naming.
+    let mut bytes = b"ziren-compact-shrink-key-v3".to_vec();
+    name(&mut bytes, S::ID);
+    integer(&mut bytes, S::ABSORB_CAP_BYTES);
+    integer(&mut bytes, S::KEY_DOMAIN.len());
+    bytes.extend(S::KEY_DOMAIN);
+    integer(&mut bytes, S::ROOT_DOMAIN.len());
+    bytes.extend(S::ROOT_DOMAIN);
+    integer(&mut bytes, S::TRANSCRIPT_DOMAIN.len());
+    bytes.extend(S::TRANSCRIPT_DOMAIN);
     for value in crate::profile::transcript_profile_digest() {
         bytes.extend(value.as_canonical_u32().to_le_bytes());
     }
@@ -468,7 +456,7 @@ pub fn terminal_key_digest(vk: &crate::StarkVerifyingKey<KoalaBearKeccak>) -> [u
     integer(&mut bytes, crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize);
     integer(&mut bytes, crate::logup_gkr::gkr_grinding_bits());
     let config = crate::whir::jagged::whir_config_for_profile(
-        <KoalaBearKeccak as BasefoldRing>::WHIR_PROFILE,
+        <CompactShrink<S> as BasefoldRing>::WHIR_PROFILE,
         crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
     );
     // This structure consists only of integers/vectors of integers. Bincode's
@@ -501,7 +489,7 @@ pub fn terminal_key_digest(vk: &crate::StarkVerifyingKey<KoalaBearKeccak>) -> [u
         name(&mut bytes, chip);
         integer(&mut bytes, *index);
     }
-    Keccak256Hash.hash_iter(bytes)
+    S::hash(&bytes)
 }
 
 #[cfg(test)]
@@ -509,6 +497,26 @@ mod tests {
     use p3_challenger::{CanObserve, FieldChallenger};
 
     use super::*;
+    use crate::shrink::suites::Keccak256Suite;
+    use p3_keccak::Keccak256Hash;
+    type KoalaBearKeccak = CompactShrink<Keccak256Suite>;
+    type KeccakChallenger = CompactChallenger<Keccak256Suite>;
+    type KeccakMmcs = CompactMmcs<Keccak256Suite>;
+    const KECCAK_DIGEST_BYTES: usize = DIGEST_BYTES;
+    const ABSORB_CAP_BYTES: usize = Keccak256Suite::ABSORB_CAP_BYTES;
+    fn keccak_challenger() -> KeccakChallenger {
+        KeccakChallenger::new()
+    }
+    fn keccak_mmcs() -> KeccakMmcs {
+        compact_mmcs::<Keccak256Suite>()
+    }
+    fn terminal_key_digest(vk: &crate::StarkVerifyingKey<KoalaBearKeccak>) -> Digest {
+        shrink_key_digest(vk)
+    }
+    fn root_felts(root: &Digest) -> [Val; 8] {
+        super::root_felts::<Keccak256Suite>(root)
+    }
+
     use crate::jagged_pcs::jagged::{
         build_jagged_verify_inputs, verify_jagged_inner_generic_with_profile, JaggedOpenRound,
     };
@@ -537,7 +545,7 @@ mod tests {
     #[test]
     fn leaves_hash_canonical_bytes() {
         let values = [Val::from_u32(3), Val::from_u32(0x7eff_ffff), Val::ONE];
-        let digest: KeccakDigest = CanonicalKeccak.hash_iter(values);
+        let digest: Digest = CanonicalHash::<Keccak256Suite>::default().hash_iter(values);
         let bytes: Vec<u8> =
             values.iter().flat_map(|v| v.as_canonical_u32().to_le_bytes()).collect();
         assert_eq!(digest, Keccak256Hash.hash_iter(bytes));
@@ -644,7 +652,7 @@ mod tests {
             "99e3c77bf268e09f4881b038e1cb3d630aa5dc6b0460b7dc6dcbae4b9c0c727f"
         );
         assert_eq!(
-            digest(CanonicalKeccak.hash_iter([
+            digest(CanonicalHash::<Keccak256Suite>::default().hash_iter([
                 Val::from_u32(3),
                 Val::from_u32(0x7eff_ffff),
                 Val::ONE
@@ -804,7 +812,7 @@ mod tests {
                 <KoalaBearKeccak as BasefoldRing>::fri_config(),
                 &[(prep_root.clone(), prep.prover_data.area)],
                 opened,
-                Some(crate::whir::jagged::WhirProfile::Keccak),
+                Some(crate::whir::jagged::WhirProfile::CompactShrink),
             )
         };
         let honest = bundle.y_per_chip.clone();
