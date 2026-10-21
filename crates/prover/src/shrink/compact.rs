@@ -17,8 +17,8 @@ use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_core::{air::RecursionPublicValues, Runtime};
 
 use crate::{
-    components::ZKMProverComponents, CompactShrink, CompressedSC, InnerSC, ShrinkAir, ZKMProver,
-    ZKMRecursionProverError, ZKMVerifyingKey,
+    components::ZKMProverComponents, utils::is_recursion_public_values_valid, CompactShrink,
+    CompressedSC, InnerSC, ShrinkAir, ZKMProver, ZKMRecursionProverError, ZKMVerifyingKey,
 };
 
 /// Construct only when this optional shrink is needed. Existing prover
@@ -117,14 +117,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &MachineProof { shard_proofs: vec![proof.proof.clone()] },
             &mut challenger,
         )?;
-        // The statement is bound field by field: recursion root, application key,
-        // completion flags, exit code and the full committed-value digest. The
-        // wrap program (`PublicValuesOutputDigest::Reduce`) checks the child's
-        // Poseidon2 digest and commits `pv.digest` itself, and nothing below
-        // reads `pv.digest`, so it is not recomputed here. Byte-hash verifiers
-        // (`HashSuite`) therefore need no Poseidon2 implementation.
         let pv: &RecursionPublicValues<_> = proof.proof.public_values.as_slice().borrow();
-        if pv.vk_root != self.recursion_vk_root
+        if !is_recursion_public_values_valid(self.compress_prover.machine().config(), pv)
+            || pv.vk_root != self.recursion_vk_root
             || pv.zkm_vk_digest != application_vk.hash_koalabear()
             || pv.is_complete != KoalaBear::ONE
             || pv.contains_execution_shard != KoalaBear::ONE
