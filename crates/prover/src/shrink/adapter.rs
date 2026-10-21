@@ -1,7 +1,7 @@
 //! Typed boundary between a compact shrink proof and a binary proving backend.
 //! The backend proves verification of the input; field conversion is never a
 //! reinterpretation of KoalaBear proof elements as binary-field elements.
-use super::ShrinkStrategy;
+use super::CompactShrinkStrategy;
 use crate::{components::ZKMProverComponents, HashableKey, ZKMProver, ZKMVerifyingKey};
 use zkm_core_executor::ZKMReduceProof;
 use zkm_pcs::{
@@ -77,7 +77,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         trusted_binary: &B::VerifierData,
     ) -> Result<B::Proof, BinaryAdapterError<T::Suite, B::Error>>
     where
-        T: ShrinkStrategy,
+        T: CompactShrinkStrategy,
         B: BinaryAdapterBackend<T::Suite>,
     {
         use p3_field::PrimeField32;
