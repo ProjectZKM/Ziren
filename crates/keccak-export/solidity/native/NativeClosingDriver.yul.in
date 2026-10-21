@@ -1,0 +1,131 @@
+// Auxiliary closing arithmetic only. Strict canonical ABI; no proof validity result.
+// Owned memory: scratch/free pointer below 128, 25 cache pointers in [128,928).
+// memoryguard reserves compiler spills before the wide polynomial, MLE row and caches.
+object "NativeClosingDriver" {code {datacopy(0,dataoffset("R"),datasize("R")) return(0,datasize("R"))} object "R" {code {
+mstore(0x40,memoryguard(928))
+if or(lt(calldatasize(),196),iszero(eq(shr(224,calldataload(0)),EVALUATE_SELECTOR))){driverFail()}
+if iszero(eq(calldataload(4),96)){driverFail()}
+let nativeRLength:=calldataload(100)
+if gt(nativeRLength,24){driverFail()}
+if iszero(eq(calldataload(36),add(128,mul(nativeRLength,32)))){driverFail()}
+if gt(add(164,mul(nativeRLength,32)),calldatasize()){driverFail()}
+let nativePolyLength:=calldataload(add(132,mul(nativeRLength,32)))
+if or(or(iszero(nativePolyLength),and(nativePolyLength,sub(nativePolyLength,1))),gt(nativePolyLength,0x1000000)){driverFail()}
+let finalLog:=0
+for{let tmp:=nativePolyLength}gt(tmp,1){tmp:=shr(1,tmp)}{finalLog:=add(finalLog,1)}
+if gt(nativeRLength,sub(24,finalLog)){driverFail()}
+if iszero(eq(calldataload(68),add(160,mul(add(nativeRLength,nativePolyLength),32)))){driverFail()}
+let nativeRStart:=132
+let nativePolyStart:=add(164,mul(nativeRLength,32))
+let nativeRequestsLengthAt:=add(164,mul(add(nativeRLength,nativePolyLength),32))
+if gt(add(nativeRequestsLengthAt,32),calldatasize()){driverFail()}
+let nativeRequestsLength:=calldataload(nativeRequestsLengthAt)
+let nativeRequestsStart:=add(nativeRequestsLengthAt,32)
+if gt(nativeRequestsLength,div(sub(calldatasize(),nativeRequestsStart),32)){driverFail()}
+if iszero(eq(calldatasize(),add(nativeRequestsStart,mul(nativeRequestsLength,32)))){driverFail()}
+let nativeWideData:=mload(0x40)
+let nativeRowData:=add(nativeWideData,mul(nativePolyLength,32))
+mstore(0x40,add(nativeRowData,mul(nativePolyLength,32)))
+
+        DRIVER_ARITHMETIC
+
+
+        FACTOR_CORE
+        HORNER_CORE
+        function driverCanonical(a)->valid {
+            let flags:=and(or(a,add(a,0x00ffffff00ffffff00ffffff00ffffff)),0x80000000800000008000000080000000)
+            valid:=iszero(or(shr(128,a),flags))
+        }
+        function driverFail(){mstore(0,shl(224,INVALID_CLOSING)) revert(0,4)}
+        function driverPrepare(rStart,rCount,foldCount)->cacheData {
+            let pairCount:=div(foldCount,2)
+            cacheData:=mload(0x40)
+            mstore(0x40,add(cacheData,mul(add(mul(pairCount,4),1),32)))
+            let rAt:=add(rStart,mul(sub(rCount,foldCount),32))
+            let cacheAt:=cacheData
+            for{let j:=0}lt(j,pairCount){j:=add(j,1) rAt:=add(rAt,64) cacheAt:=add(cacheAt,128)}{
+                let r:=calldataload(rAt) let s:=calldataload(add(rAt,32))
+                let rs:=driverTimes(r,s)
+                let a:=driverPlus(driverMinus(driverMinus(1,r),s),rs)
+                let b:=driverMinus(r,rs) let c:=driverMinus(s,rs)
+                for{let lane:=0}lt(lane,128){lane:=add(lane,32)}{
+                    let mask:=0xffffffff
+                    mstore(add(cacheAt,lane),or(or(and(shr(lane,a),mask),shl(64,and(shr(lane,b),mask))),or(shl(128,and(shr(lane,c),mask)),shl(192,and(shr(lane,rs),mask)))))
+                }
+            }
+            mstore(cacheAt,0)
+            if and(foldCount,1){mstore(cacheAt,calldataload(rAt))}
+        }
+        function driverMle(polyStart,polyLength,pointStart,pointLength,rowData)->value {
+            calldatacopy(rowData,polyStart,mul(polyLength,32))
+            let n:=polyLength
+            let pointEnd:=add(pointStart,mul(pointLength,32))
+            for{let pAt:=pointStart}lt(pAt,pointEnd){pAt:=add(pAt,32)}{
+                n:=shr(1,n)
+                let x:=calldataload(pAt)
+                let rowEnd:=add(rowData,mul(n,32))
+                for{let dst:=rowData let src:=rowData}lt(dst,rowEnd){dst:=add(dst,32) src:=add(src,64)}{
+                    let a:=mload(src)
+                    mstore(dst,driverPlus(a,driverTimes(x,driverMinus(mload(add(src,32)),a))))
+                }
+            }
+            value:=mload(rowData)
+        }
+        let closingRStart:=nativeRStart
+        let closingRCount:=nativeRLength
+        let closingPolyStart:=nativePolyStart
+        let closingPolyLength:=nativePolyLength
+        let closingWide:=nativeWideData
+        let closingRow:=nativeRowData
+        let closingTables:=128
+        for{let rAt:=closingRStart let rEnd:=add(closingRStart,mul(closingRCount,32))}lt(rAt,rEnd){rAt:=add(rAt,32)}{
+            if iszero(driverCanonical(calldataload(rAt))){driverFail()}
+        }
+        for{let j:=0}lt(j,closingPolyLength){j:=add(j,1)}{
+            let value:=calldataload(add(closingPolyStart,mul(j,32)))
+            if iszero(driverCanonical(value)){driverFail()}
+            let mask:=0xffffffff
+            mstore(add(closingWide,mul(j,32)),or(or(and(value,mask),shl(64,and(shr(32,value),mask))),or(shl(128,and(shr(64,value),mask)),shl(192,shr(96,value)))))
+        }
+        let closingCursor:=nativeRequestsStart
+        let closingEnd:=add(closingCursor,mul(nativeRequestsLength,32))
+        let closingTotal:=0
+        for{}lt(closingCursor,closingEnd){}{
+            let header:=calldataload(closingCursor) closingCursor:=add(closingCursor,32)
+            let coeff:=and(header,0xffffffffffffffffffffffffffffffff)
+            let vars:=and(shr(128,header),255)
+            let monomial:=and(shr(136,header),1)
+            let x:=and(shr(160,header),0xffffffff)
+            if or(or(shr(192,header),and(shr(137,header),0x7fffff)),or(iszero(driverCanonical(coeff)),or(lt(vars,finalLog),gt(vars,add(closingRCount,finalLog))))){driverFail()}
+            let foldCount:=sub(vars,finalLog)
+            let factor:=1 let evaluation:=0
+            switch monomial
+            case 1 {
+                if iszero(lt(x,0x7f000001)){driverFail()}
+                let tableAt:=add(closingTables,mul(foldCount,32))
+                let cacheData:=mload(tableAt)
+                if iszero(cacheData){cacheData:=driverPrepare(closingRStart,closingRCount,foldCount) mstore(tableAt,cacheData)}
+                let finalPoint
+                factor,finalPoint:=factorCore(cacheData,foldCount,x)
+                evaluation:=hornerCore(closingWide,closingPolyLength,finalPoint)
+            }
+            default {
+                if or(x,gt(vars,div(sub(closingEnd,closingCursor),32))){driverFail()}
+                let pointEnd:=add(closingCursor,mul(vars,32))
+                for{let at:=closingCursor}lt(at,pointEnd){at:=add(at,32)}{
+                    if iszero(driverCanonical(calldataload(at))){driverFail()}
+                }
+                let rAt:=add(closingRStart,mul(sub(closingRCount,foldCount),32))
+                for{let j:=0}lt(j,foldCount){j:=add(j,1) rAt:=add(rAt,32)}{
+                    let y:=calldataload(rAt)
+                    let pointValue:=calldataload(add(closingCursor,mul(j,32)))
+                    let term:=driverPlus(driverMinus(1,y),driverTimes(pointValue,driverMinus(driverPlus(y,y),1)))
+                    factor:=driverTimes(factor,term)
+                }
+                evaluation:=driverMle(closingPolyStart,closingPolyLength,add(closingCursor,mul(foldCount,32)),finalLog,closingRow)
+                closingCursor:=pointEnd
+            }
+            closingTotal:=driverPlus(closingTotal,driverTimes(coeff,driverTimes(factor,evaluation)))
+        }
+        mstore(0,closingTotal) return(0,32)
+    }}}

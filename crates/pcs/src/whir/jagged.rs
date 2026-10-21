@@ -280,6 +280,9 @@ pub enum WhirProfile {
     /// The core schedule at the starting rate `2^-2`, for the shrink proof,
     /// whose verifier is the wrap program ([`shrink_whir_config`]).
     Shrink,
+    /// Host Keccak commitments/transcript for the unchanged shrink computation.
+    #[cfg(feature = "keccak-terminal")]
+    Keccak,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -288,6 +291,8 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
         WhirProfile::Core => core_whir_config(lsh),
         WhirProfile::Compress => compress_whir_config(lsh),
         WhirProfile::Shrink => shrink_whir_config(lsh),
+        #[cfg(feature = "keccak-terminal")]
+        WhirProfile::Keccak => super::keccak_params::keccak_whir_config(lsh),
     }
 }
 

@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {NativeClosingEvaluator as C} from "../src/NativeClosingEvaluator.sol";
+import {ReferenceKoalaBear as F} from "../src/ReferenceKoalaBear.sol";
+
+interface ClosingDriverVm {
+    function envString(string calldata) external returns(string memory);
+    function readFileBinary(string calldata) external view returns(bytes memory);
+    function store(address target,bytes32 slot,bytes32 value) external;
+}
+
+contract NativeClosingDriverTest {
+    ClosingDriverVm constant vm=ClosingDriverVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    C evaluator;
+    address driver;
+    constructor(){
+        bytes memory creation=vm.readFileBinary(string.concat(vm.envString("NATIVE_BUILD"),"/closing-creation.bin"));
+        address deployed;
+        assembly("memory-safe"){deployed:=create(0,add(creation,32),mload(creation))}
+        require(deployed!=address(0),"closing deployment");
+        evaluator=C(deployed);driver=evaluator.closingDriver();
+        require(driver.codehash==DRIVER_HASH && driver.code.length<=24576,"native driver binding");
+    }
+    function frame() private pure returns(bytes memory){
+        uint256[] memory r=new uint256[](2);r[0]=7;r[1]=9;
+        uint256[] memory poly=new uint256[](32);for(uint256 i;i<32;++i)poly[i]=i+1;
+        uint256[] memory requests=new uint256[](1);
+        requests[0]=1|(uint256(7)<<128)|(uint256(1)<<136)|(uint256(3)<<160);
+        return abi.encodeCall(C.evaluate,(r,poly,requests));
+    }
+    function writeWord(bytes memory data,uint256 at,uint256 value) private pure {
+        require(at+32<=data.length,"test mutation out of bounds");
+        assembly("memory-safe"){mstore(add(add(data,32),at),value)}
+    }
+    function rejected(bytes memory data) private view {
+        (bool ok,bytes memory error)=driver.staticcall{gas:200000}(data);
+        require(!ok && keccak256(error)==keccak256(abi.encodeWithSelector(C.InvalidClosingInput.selector)),"malformed native frame accepted or wrong failure");
+    }
+    function testNativeDriverCanonicalAbiAndMalformedEnvelopes() public view {
+        bytes memory honest=frame();
+        (bool ok,bytes memory result)=driver.staticcall(honest);
+        (bool parentOk,bytes memory parentResult)=address(evaluator).staticcall(honest);
+        require(ok && parentOk && result.length==32 && keccak256(result)==keccak256(parentResult),"honest native ABI");
+        uint256[9] memory offsets=[uint256(4),36,68,100,196,196,196,1252,1252];
+        uint256[9] memory values=[uint256(64),96,96,25,0,3,type(uint256).max,2,type(uint256).max];
+        for(uint256 i;i<offsets.length;++i){bytes memory bad=frame();writeWord(bad,offsets[i],values[i]);rejected(bad);}
+        rejected(bytes.concat(honest,hex"00"));
+        bytes memory shortFrame=frame();assembly("memory-safe"){mstore(shortFrame,sub(mload(shortFrame),1))}rejected(shortFrame);
+        rejected("");rejected(hex"786ee57e");
+        bytes memory wrongSelector=frame();wrongSelector[0]^=bytes1(uint8(1));rejected(wrongSelector);
+    }
+    function testFuzzNativeDriverRejectsAliasedArrayOffset(uint256 offset) public view {
+        if(offset==96)return;
+        bytes memory bad=frame();writeWord(bad,4,offset);rejected(bad);
+    }
+    function testNativeDriverRejectsUpperLanesAndReservedHeaderBits() public view {
+        uint256[7] memory offsets=[uint256(132),164,228,1252+32,1252+32,1252+32,1252+32];
+        uint256[7] memory values=[uint256(1)<<128,0x7f000001,uint256(1)<<255,
+            uint256(1)|(uint256(7)<<128)|(uint256(1)<<136)|(uint256(1)<<137),
+            uint256(1)|(uint256(7)<<128)|(uint256(1)<<136)|(uint256(1)<<192),
+            uint256(1)|(uint256(7)<<128)|(uint256(1)<<136)|(uint256(0x7f000001)<<160),
+            uint256(1)|(uint256(7)<<128)];
+        for(uint256 i;i<offsets.length;++i){bytes memory bad=frame();writeWord(bad,offsets[i],values[i]);rejected(bad);}
+    }
+    function testNativeDriverMaximalLanesAcrossPolynomialShapes() public view {
+        uint256 maximum=(F.P-1)*0x1000000010000000100000001;
+        for(uint256 log;log<7;++log){
+            uint256 n=24-log;
+            uint256[] memory r=new uint256[](n);for(uint256 i;i<n;++i)r[i]=maximum;
+            uint256[] memory poly=new uint256[](1<<log);for(uint256 i;i<poly.length;++i)poly[i]=maximum;
+            uint256[5] memory dims=[uint256(0),1,2,n-1,n];
+            for(uint256 d;d<dims.length;++d)for(uint256 edge;edge<3;++edge){
+                uint256 k=dims[d];uint256 x=edge==2?F.P-1:edge;uint256 power=x;uint256 factor=1;
+                for(uint256 j;j<k;++j){factor=F.mul(factor,F.add(F.sub(1,maximum),F.scale(maximum,power)));power=mulmod(power,power,F.P);}
+                uint256[] memory requests=new uint256[](1);
+                requests[0]=maximum|((k+log)<<128)|(uint256(1)<<136)|(x<<160);
+                uint256 expected=F.mul(maximum,F.mul(factor,F.hornerBase(poly,power)));
+                require(evaluator.evaluate(r,poly,requests)==expected,"native closing maximal-lane mismatch");
+            }
+        }
+    }
+    function testParentRejectsChangedChildEvenWithIdenticalParentRuntime() public {
+        bytes32 parentHash=address(evaluator).codehash;
+        vm.store(address(evaluator),bytes32(0),bytes32(uint256(uint160(address(this)))));
+        require(address(evaluator).codehash==parentHash,"test changed parent code");
+        (bool ok,bytes memory error)=address(evaluator).staticcall(frame());
+        require(!ok && keccak256(error)==keccak256(abi.encodeWithSignature("Error(string)","closing driver code hash")),"child hash guard missing");
+    }
+}

@@ -1,0 +1,215 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+import {CompiledTerminalVerifier} from "../src/CompiledTerminalVerifier.sol";
+import {CompiledWhirVerifier} from "../src/CompiledWhirVerifier.sol";
+import {KeccakTerminalVerifier} from "../src/KeccakTerminalVerifier.sol";
+
+interface NativeVm {
+    function envString(string calldata) external returns(string memory);
+    function readFileBinary(string calldata) external view returns(bytes memory);
+    function readFile(string calldata) external view returns(string memory);
+    function parseJsonString(string calldata,string calldata) external pure returns(string memory);
+    function parseJsonUint(string calldata,string calldata) external pure returns(uint256);
+    function parseJsonBytes32(string calldata,string calldata) external pure returns(bytes32);
+    function toString(uint256) external pure returns(string memory);
+}
+
+contract NativeTerminalTest {
+    NativeVm constant vm=NativeVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    CompiledTerminalVerifier nativeVerifier;
+    KeccakTerminalVerifier referenceVerifier;
+    CompiledWhirVerifier tail;
+    address[] modules;
+    bytes packet;
+    bytes program;
+    bytes32 digest;
+    string fixture;
+    event log_named_uint(string name,uint256 value);
+
+    function setUp() public {
+        fixture=vm.envString("WIRE_FIXTURE");
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory deployment=vm.readFile(string.concat(build,"/deployment-files.json"));
+        uint256 count=vm.parseJsonUint(deployment,".count");
+        for(uint256 i;i<count;++i){
+            string memory name=vm.parseJsonString(deployment,string.concat(".names[",vm.toString(i),"]"));
+            bytes memory code=vm.readFileBinary(string.concat(build,"/kernels/",name,".bin"));
+            address module;
+            assembly("memory-safe"){module:=create(0,add(code,32),mload(code))}
+            require(module!=address(0),"kernel deployment failed");
+            require(module.code.length<=24576,"kernel EIP170 violation");
+            modules.push(module);
+        }
+        tail=new CompiledWhirVerifier();
+        require(address(tail).code.length<=24576,"tail EIP170 violation");
+        nativeVerifier=new CompiledTerminalVerifier(modules,address(tail));
+        require(address(nativeVerifier).code.length<=24576,"entry EIP170 violation");
+        require(nativeVerifier.kernelCount()==count,"table count mismatch");
+        address table=nativeVerifier.kernelTable();
+        require(table.code.length==1+20*count && table.code[0]==0,"kernel table shape");
+        for(uint256 i;i<count;++i) require(nativeVerifier.kernels(i)==modules[i],"kernel table order");
+        (bool tableCall,)=table.staticcall("");require(tableCall,"table STOP");
+        packet=vm.readFileBinary(string.concat(fixture,"/raw.bin"));
+        program=vm.readFileBinary(string.concat(fixture,"/compiled/program.bin"));
+        digest=vm.parseJsonBytes32(vm.readFile(string.concat(fixture,"/compiled/statement.json")),".output_digest");
+        referenceVerifier=new KeccakTerminalVerifier(keccak256(program));
+    }
+
+    function testCompleteNativeAndReferenceAgree() public view {
+        require(nativeVerifier.verifierProgramHash()==keccak256(program),"source program identity");
+        require(referenceVerifier.verify(program,packet,digest));
+        require(nativeVerifier.verify(packet,digest));
+    }
+
+    function testHashDictionaryMatchesRawAndRejectsInvalidInputs() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        bytes memory packed=vm.readFileBinary(string.concat(build,"/hash-dictionary.bin"));
+        string memory shape=vm.readFile(string.concat(build,"/hash-dictionary.json"));
+        uint256 prefix=vm.parseJsonUint(shape,".prefix");
+        require(nativeVerifier.verify(packed,digest),"packed complete verification");
+        uint256 count=((uint256(uint8(packed[prefix]))<<8)|uint8(packed[prefix+1]))&0x7fff;
+        uint256 firstIndex=prefix+2+32*count;
+        bytes memory bad=bytes.concat(packed);
+        bad[firstIndex]=bytes1(uint8(count>>8));bad[firstIndex+1]=bytes1(uint8(count));
+        rejectNative(bad,digest);
+        rejectNative(bytes.concat(packed,hex"00"),digest);
+        bad=bytes.concat(packed);assembly("memory-safe"){mstore(bad,sub(mload(bad),1))}
+        rejectNative(bad,digest);
+        bad=bytes.concat(packed);bad[6]^=0x01;rejectNative(bad,digest);
+        bad=bytes.concat(packed);bad[38]=0x01;bad[39]=0;bad[40]=0;bad[41]=0x7f;
+        rejectNative(bad,digest);
+        bad=bytes.concat(packed);bad[prefix+2]^=0x01;rejectNative(bad,digest);
+        rejectNative(packed,bytes32(uint256(digest)^1));
+    }
+
+    function rejectNative(bytes memory bad,bytes32 output) private view {
+        (bool ok,bytes memory error)=address(nativeVerifier).staticcall(abi.encodeCall(nativeVerifier.verify,(bad,output)));
+        require(!ok && error.length>0,"native accepted invalid input or OOG");
+    }
+
+    function rejectBoth(bytes memory bad,bytes32 output) private view {
+        (bool ok,bytes memory error)=address(nativeVerifier).staticcall(abi.encodeCall(nativeVerifier.verify,(bad,output)));
+        require(!ok && error.length>0,"native accepted invalid input or OOG");
+        (ok,error)=address(referenceVerifier).staticcall(abi.encodeCall(referenceVerifier.verify,(program,bad,output)));
+        require(!ok && error.length>0,"reference accepted invalid input or OOG");
+    }
+
+    function testWrongStatementAndMachineMerkleMutations() public {
+        rejectBoth(packet,bytes32(uint256(digest)^1));
+        string memory mutations=vm.readFile(string.concat(fixture,"/compiled/mutations.json"));
+        for(uint256 i;i<2;++i){
+            uint256 at=38+4*vm.parseJsonUint(mutations,i==0?".gkr_field":".merkle_field");
+            packet[at]^=0x01;rejectBoth(packet,digest);packet[at]^=0x01;
+        }
+        packet[38]^=0x01;rejectBoth(packet,digest);packet[38]^=0x01;
+    }
+
+    function testCheckedEqualityFactsRemainAuthenticated() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory mutations=vm.readFile(string.concat(build,"/native-mutations.json"));
+        uint256 count=vm.parseJsonUint(mutations,".assertion_fact_count");
+        for(uint256 i;i<count;++i){
+            uint256 field=vm.parseJsonUint(mutations,string.concat(".assertion_fact_fields[",vm.toString(i),"]"));
+            uint256 at=38+4*field;uint256 value;
+            for(uint256 j;j<4;++j)value|=uint256(uint8(packet[at+j]))<<(8*j);
+            uint256 changed=(value+1)%0x7f000001;
+            bytes memory bad=bytes.concat(packet);
+            for(uint256 j;j<4;++j)bad[at+j]=bytes1(uint8(changed>>(8*j)));
+            rejectBoth(bad,digest);
+        }
+    }
+
+    function testCanonicalityLengthAndProfileBinding() public view {
+        rejectBoth(bytes.concat(packet,hex"00"),digest);
+        bytes memory bad=bytes.concat(packet);
+        assembly("memory-safe"){mstore(bad,sub(mload(bad),1))}
+        rejectBoth(bad,digest);
+        bad=bytes.concat(packet);bad[38]=0x01;bad[39]=0;bad[40]=0;bad[41]=0x7f;
+        rejectBoth(bad,digest);
+        bad=bytes.concat(packet);bad[6]^=0x01;rejectBoth(bad,digest);
+    }
+
+    function testAirZerocheckJaggedAndZeroDenominatorRejected() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory mutations=vm.readFile(string.concat(build,"/native-mutations.json"));
+        for(uint256 i;i<6;++i){
+            uint256 at=38+4*vm.parseJsonUint(mutations,string.concat(".fields[",vm.toString(i),"]"));
+            bytes memory bad=bytes.concat(packet);
+            uint256 value=uint8(bad[at])|(uint256(uint8(bad[at+1]))<<8)|(uint256(uint8(bad[at+2]))<<16)|(uint256(uint8(bad[at+3]))<<24);
+            value=(value+1)%0x7f000001;
+            for(uint256 j;j<4;++j)bad[at+j]=bytes1(uint8(value>>(8*j)));
+            rejectBoth(bad,digest);
+        }
+        bytes memory zero=bytes.concat(packet);
+        uint256 start=38+4*vm.parseJsonUint(mutations,".zero_denominator");
+        for(uint256 i;i<16;++i)zero[start+i]=0;
+        rejectBoth(zero,digest);
+    }
+
+    function testKernelOrderAndCodeHashBinding() public {
+        address[] memory bad=modules;
+        bad[0]=modules[modules.length-1];
+        try new CompiledTerminalVerifier(bad,address(tail)) returns(CompiledTerminalVerifier){revert("wrong kernel accepted");}
+        catch(bytes memory error){require(error.length>0,"constructor OOG");}
+        bad[0]=address(0x1234);
+        try new CompiledTerminalVerifier(bad,address(tail)) returns(CompiledTerminalVerifier){revert("missing kernel accepted");}
+        catch(bytes memory error){require(error.length>0,"constructor OOG");}
+    }
+
+    function testKernelCountBinding() public {
+        address[] memory bad=new address[](modules.length-1);
+        for(uint256 i;i<bad.length;++i)bad[i]=modules[i];
+        try new CompiledTerminalVerifier(bad,address(tail)) returns(CompiledTerminalVerifier){revert("short kernel list accepted");}
+        catch(bytes memory error){require(error.length>0,"constructor OOG");}
+        (bool ok,bytes memory boundsError)=address(nativeVerifier).staticcall(abi.encodeCall(nativeVerifier.kernels,(modules.length)));
+        require(!ok && boundsError.length>0,"out of range table read accepted or OOG");
+    }
+
+    function testNoncanonicalDirectTranscriptFieldsRejected() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory mutations=vm.readFile(string.concat(build,"/native-mutations.json"));
+        for(uint256 i;i<2;++i){
+            uint256 at=38+4*vm.parseJsonUint(mutations,string.concat(".direct_observation_fields[",vm.toString(i),"]"));
+            bytes memory bad=bytes.concat(packet);
+            bad[at]=0x01;bad[at+1]=0;bad[at+2]=0;bad[at+3]=0x7f;
+            rejectBoth(bad,digest);
+        }
+    }
+
+    function testAllRoundsLeafCanonicalityCheckedAtCompleteEntry() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory mutations=vm.readFile(string.concat(build,"/leaf-field-mutations.json"));
+        uint256 count=vm.parseJsonUint(mutations,".count");
+        for(uint256 mode;mode<2;++mode){
+            bytes memory bad=mode==0?bytes.concat(packet):vm.readFileBinary(string.concat(build,"/hash-dictionary.bin"));
+            for(uint256 i;i<count;++i){
+                uint256 at=38+4*vm.parseJsonUint(mutations,string.concat(".fields[",vm.toString(i),"]"));
+                bytes4 original;
+                assembly("memory-safe"){original:=mload(add(add(bad,32),at))}
+                for(uint256 edge;edge<2;++edge){
+                    uint256 value=edge==0?0x7f000001:0xffffffff;
+                    for(uint256 j;j<4;++j)bad[at+j]=bytes1(uint8(value>>(8*j)));
+                    (bool ok,bytes memory error)=address(nativeVerifier).staticcall(abi.encodeCall(nativeVerifier.verify,(bad,digest)));
+                    require(!ok && error.length==4 && bytes4(error)==bytes4(keccak256("InvalidFieldBuffer()")),"leaf not rejected by global field check");
+                }
+                for(uint256 j;j<4;++j)bad[at+j]=original[j];
+            }
+        }
+    }
+
+    function testEveryRoundFirstAndLastMerklePathWordsRejected() public {
+        string memory build=vm.envString("NATIVE_BUILD");
+        string memory mutations=vm.readFile(string.concat(build,"/merkle-path-mutations.json"));
+        uint256 count=vm.parseJsonUint(mutations,".count");
+        for(uint256 i;i<count;++i){
+            uint256 at=vm.parseJsonUint(mutations,string.concat(".byte_offsets[",vm.toString(i),"]"));
+            bytes memory bad=bytes.concat(packet);bad[at]^=0x01;
+            rejectBoth(bad,digest);
+        }
+    }
+
+    function testWhirTailCodeHashBinding() public {
+        try new CompiledTerminalVerifier(modules,modules[0]) returns(CompiledTerminalVerifier){revert("wrong tail accepted");}
+        catch(bytes memory error){require(error.length>0,"constructor OOG");}
+    }
+}

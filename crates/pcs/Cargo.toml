@@ -8,6 +8,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
+p3-keccak = { workspace = true, optional = true }
 p3-air = { workspace = true  }
 p3-field = { workspace = true  }
 p3-challenger = { workspace = true  }
@@ -45,6 +46,7 @@ num-traits = "0.2.19"
 sysinfo = "0.30.13"
 
 [features]
+keccak-terminal = ["dep:p3-keccak"]
 # gpu feature flag reserved for GPU basefold prover integration
 # (ziren-gpu/core/src/basefold/). No-op until the GPU port lands;
 # downstream crates can plumb "--features gpu" without a cascading

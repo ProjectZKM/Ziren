@@ -31,6 +31,8 @@ pub mod full_prover;
 #[cfg(test)]
 pub mod interleaved;
 pub mod jagged;
+#[cfg(feature = "keccak-terminal")]
+pub mod keccak_params;
 pub mod monomial;
 pub mod proof;
 #[cfg(test)]

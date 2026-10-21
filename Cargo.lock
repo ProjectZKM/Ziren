@@ -6145,6 +6145,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-keccak-export"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "hex",
+ "p3-air",
+ "p3-field",
+ "p3-keccak",
+ "p3-koala-bear",
+ "p3-symmetric",
+ "p3-uni-stark",
+ "serde",
+ "serde_json",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-pcs",
+ "zkm-primitives",
+ "zkm-prover",
+ "zkm-recursion-core",
+]
+
+[[package]]
 name = "zkm-lib"
 version = "2.0.0"
 dependencies = [

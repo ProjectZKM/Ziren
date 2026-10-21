@@ -2385,7 +2385,48 @@ pub mod jagged {
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
+    {
+        verify_jagged_inner_generic_with_profile(
+            chip_infos,
+            r_row_per_chip,
+            z_row,
+            bundle,
+            challenger,
+            mmcs,
+            skip_commit_observe,
+            fri,
+            preceding_rounds,
+            opened_main,
+            None,
+        )
+    }
+
+    /// Generic single-group verifier with an explicitly selected PCS family.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_inner_generic_with_profile<Challenger, MT>(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        bundle: &JaggedPcsProofGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        skip_commit_observe: bool,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
+        preceding_rounds: &[(
+            <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+            usize,
+        )],
+        opened_main: &[Vec<InnerChallenge>],
+        whir_profile: Option<crate::whir::jagged::WhirProfile>,
+    ) -> bool
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
     {
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
             tracing::info!("[basefold verify] {why}");
@@ -2395,7 +2436,19 @@ pub mod jagged {
         if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
-        debug_assert_eq!(bundle.num_groups(), 1, "wrap verify expects a single-GROUP bundle",);
+        // Generic host terminals support one canonical group. Reject extra
+        // messages in release builds too; the ring chooses the PCS family.
+        if bundle.num_groups() != 1
+            || !bundle.extra_basefold_proof.is_empty()
+            || !bundle.extra_commit.is_empty()
+            || !bundle.extra_packing.is_empty()
+            || !bundle.extra_jagged_eval.is_empty()
+            || bundle.groups_or_identity(chip_infos.len())
+                != vec![(0..chip_infos.len()).collect::<Vec<_>>()]
+            || whir_profile.is_some() != bundle.whir_proof.is_some()
+        {
+            return false;
+        }
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
         }
@@ -2454,6 +2507,20 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
+        if let (Some(profile), Some(proof)) = (whir_profile, &bundle.whir_proof) {
+            return crate::whir::jagged::verify_jagged_whir_rounds(
+                mmcs,
+                crate::whir::jagged::whir_config_for_profile(profile, stack_dim),
+                bundle.commit.log_stacking_height,
+                &commitments,
+                &areas,
+                &extended_z_star,
+                proof,
+                q_at_z_adj,
+                challenger,
+            )
+            .is_ok();
+        }
         let res = crate::jagged_pcs::verify_jagged_pcs_rounds_generic::<Challenger, MT>(
             &commitments,
             &areas,

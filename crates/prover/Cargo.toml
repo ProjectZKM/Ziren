@@ -112,6 +112,7 @@ name = "find_recursion_shapes"
 path = "scripts/find_recursion_shapes.rs"
 
 [features]
+keccak-terminal = ["zkm-pcs/keccak-terminal"]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
 debug = ["zkm-core-machine/debug"]

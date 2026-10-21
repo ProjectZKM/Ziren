@@ -1,0 +1,10 @@
+{
+  "folds": [1, 3, 4, 4, 4],
+  "queried_log_inv_rates": [4, 6, 8, 10, 12],
+  "johnson_m": 3,
+  "component_target_bits": 106.0,
+  "query_grinding_bits": 27,
+  "folding_grinding_bits": 27,
+  "batching_grinding_bits": 27,
+  "ood_samples": 2
+}

@@ -17,6 +17,8 @@ pub mod jagged_eval_sumcheck;
 pub mod jagged_long;
 pub mod jagged_pcs;
 pub mod jagged_sumcheck;
+#[cfg(feature = "keccak-terminal")]
+pub mod kb31_keccak;
 mod kb31_poseidon2;
 pub mod logup_gkr;
 mod lookup;
@@ -52,6 +54,8 @@ pub use chip::*;
 pub use config::*;
 pub use debug::*;
 pub use folder::*;
+#[cfg(feature = "keccak-terminal")]
+pub use kb31_keccak::KoalaBearKeccak;
 pub use kb31_poseidon2::*;
 pub use lookup::*;
 pub use machine::*;
