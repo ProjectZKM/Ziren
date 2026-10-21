@@ -20,9 +20,8 @@ updated after every release.
 ## Compact shrink Solidity verifiers
 
 The Solidity verifiers for compact shrink proofs are maintained in
-[ProjectZKM/zkOP](https://github.com/ProjectZKM/zkOP), alongside their compiler,
-tests and deployment tools. See the [verification guide](../../docs/src/dev/verifier.md#compact-shrink-solidity-verifiers)
-for a short introduction and the [current implementation](https://github.com/ProjectZKM/zkOP/pull/1).
+[ProjectZKM/OPSuccinct](https://github.com/ProjectZKM/OPSuccinct), alongside their compiler,
+tests and deployment tools. See the [verification guide](../../docs/src/dev/verifier.md#compact-shrink-solidity-verifiers).
 
 ## Tests
 

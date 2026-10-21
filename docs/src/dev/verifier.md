@@ -236,11 +236,11 @@ Then deploy the application contract with the verifier's address and the program
 
 ### Compact shrink Solidity verifiers
 
-[ProjectZKM/zkOP](https://github.com/ProjectZKM/zkOP) maintains the experimental
+[ProjectZKM/OPSuccinct](https://github.com/ProjectZKM/OPSuccinct) maintains the experimental
 Solidity verifiers for `CompactShrink<Keccak256Suite>`, including the reference
 verifier, generated deployment modules, tests, calldata codec and deployment
 tools. Ziren provides the shared Rust shrinker and native verification APIs.
-See the [current implementation and verifier documentation](https://github.com/ProjectZKM/zkOP/pull/1).
+See the [current implementation and verifier documentation](https://github.com/ProjectZKM/OPSuccinct/pull/1).
 
 The Solidity backend currently supports the Keccak256 suite. Deployments must
 use an independently approved verifying key/profile and bind the application's
