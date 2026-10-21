@@ -26,8 +26,9 @@ const DEFAULT_TRACE_GEN_WORKERS: usize = 1;
 const DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY: usize = 128;
 const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 8;
 
-/// The threshold for splitting deferred events.
-pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
+/// The threshold for splitting deferred events, and the floor of the `SPLIT_THRESHOLD`
+/// override. The keccak, SHA and memory cuts of [`SplitOpts::new`] scale with it.
+pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 3 << 14;
 
 /// The default per-shard trace-area cap `T` (raw main-trace cells).
 ///
