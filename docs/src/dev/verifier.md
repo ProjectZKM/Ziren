@@ -22,9 +22,9 @@ Within a host, `client.verify(&proof, &vk)` verifies any proof kind. The rest of
 
 ## On-chain verification
 
-A verifier smart contract lets anyone check a proof on an EVM chain. The proof is generated off-chain; the chain only pays for verification, whose cost does not depend on the size of the proved computation.
+A verifier smart contract lets anyone check a proof on an EVM chain. The proof is generated off-chain; the chain pays for verification. For the release Groth16 and PLONK wrappers, verification cost does not depend on the size of the proved computation.
 
-STARK proofs are too large to verify economically on Ethereum, so Ziren wraps them into Groth16 or PLONK proofs over BN254. A Groth16 proof is 260 bytes and a PLONK proof about 868 bytes, and both are checked with a constant number of BN254 precompile calls. Every on-chain proof has three public inputs:
+Ziren's release EVM path wraps STARK proofs into Groth16 or PLONK proofs over BN254. A Groth16 proof is 260 bytes and a PLONK proof about 868 bytes, and both are checked with a constant number of BN254 precompile calls. Both wrapped proof formats have three public inputs:
 
 1. the program verifying key hash (`vk.bytes32()`);
 2. the digest of the public values: SHA-256 of the committed bytes, masked to 253 bits so it fits in a BN254 field element;
@@ -233,6 +233,20 @@ forge script script/ZKMVerifierGroth16.s.sol:ZKMVerifierGroth16Script \
 ```
 
 Then deploy the application contract with the verifier's address and the program verifying key hash. Anyone can then call `verifyProof` (directly or through the application contract) with a proof; the call reverts if the proof is invalid.
+
+### Compact shrink Solidity verifiers
+
+[ProjectZKM/zkOP](https://github.com/ProjectZKM/zkOP) maintains the experimental
+Solidity verifiers for `CompactShrink<Keccak256Suite>`, including the reference
+verifier, generated deployment modules, tests, calldata codec and deployment
+tools. Ziren provides the shared Rust shrinker and native verification APIs.
+See the [current implementation and verifier documentation](https://github.com/ProjectZKM/zkOP/pull/1).
+
+The Solidity backend currently supports the Keccak256 suite. Deployments must
+use an independently approved verifying key/profile and bind the application's
+expected public values. The reference verifier is for conformance; generated
+modules require their own deployment-size and transaction-gas checks. The saved
+Fibonacci fixture does not establish production Metis costs.
 
 ## Off-chain verification
 
