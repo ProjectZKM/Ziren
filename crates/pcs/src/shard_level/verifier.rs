@@ -170,7 +170,15 @@ impl JaggedShardVerifier {
     /// off its padding layout and checked against the rows. `global_round` is
     /// the machine's global-round chip set (`StarkMachine::global_round`): a
     /// shard naming any of its chips commits them in a main round of their
-    /// own, observed as `C_global` before `C_main`.
+    /// own, observed as `C_global` before `C_main`. `global_challenge` is the
+    /// cross-shard challenge of the global-scope lookups; its digest
+    /// `h_star` opens the transcript.
+    ///
+    /// Returns the shard's global sum `S`: the sum of the fractions of its
+    /// global-scope lookups under `global_challenge`, read off the GKR
+    /// output, which keeps one fraction per lookup column. The balance
+    /// against the public values covers the other columns only; the global
+    /// sums of all shards must add to zero.
     ///
     /// The `unsafe` reinterprets are sound because `[InnerVal; 8] = [Val<SC>; 8]`
     /// under the inner-config gate.
@@ -186,7 +194,8 @@ impl JaggedShardVerifier {
         pinned: Option<crate::jagged::RecursionPins>,
         machine_has_pv_buses: bool,
         global_round: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<(), JaggedShardVerifyError>
+        global_challenge: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
+    ) -> Result<Challenge<SC>, JaggedShardVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
         A: MachineAir<Val<SC>>
@@ -250,6 +259,9 @@ impl JaggedShardVerifier {
             )));
         }
 
+        for &h in global_challenge.iter().flat_map(|g| g.h_star.iter()) {
+            challenger.observe(h);
+        }
         for &pv in proof.public_values.iter() {
             challenger.observe(pv);
         }
@@ -303,7 +315,7 @@ impl JaggedShardVerifier {
 
         let max_log_row_count = self.max_log_row_count;
 
-        verify_logup_gkr_host::<SC, A>(
+        let global_sum = verify_logup_gkr_host::<SC, A>(
             &proof.logup_gkr_proof,
             chips,
             &proof.opened_values,
@@ -312,6 +324,7 @@ impl JaggedShardVerifier {
             proof.fold_orientation,
             &proof.public_values,
             machine_has_pv_buses,
+            global_challenge,
             challenger,
         )?;
 
@@ -453,7 +466,7 @@ impl JaggedShardVerifier {
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
         )?;
 
-        Ok(())
+        Ok(global_sum)
     }
 }
 
@@ -1651,6 +1664,10 @@ where
 ///                                  (λ·(n0·d1 + n1·d0) + d0·d1)`
 ///      - observe (n0, n1, d0, d1) into the transcript
 ///      - sample line challenge, extend eval_point, update n/d evals
+///
+/// A global-scope lookup is evaluated under `global` instead of the
+/// shard's `(α, β)`. The public-values balance covers the other lookup
+/// columns; the global ones are summed and returned.
 #[allow(clippy::too_many_arguments)]
 fn verify_logup_gkr_host<SC, A>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
@@ -1661,8 +1678,9 @@ fn verify_logup_gkr_host<SC, A>(
     fold_orientation: FoldOrientation,
     public_values: &[Val<SC>],
     machine_has_pv_buses: bool,
+    global: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
     challenger: &mut SC::Challenger,
-) -> Result<(), JaggedShardVerifyError>
+) -> Result<Challenge<SC>, JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -1703,11 +1721,34 @@ where
         crate::zerocheck_prover::eq_mle_table::<Challenge<SC>>(&beta_seed)
     };
 
-    {
-        let gkr_sum: Challenge<SC> = numerator
-            .iter()
-            .zip(denominator.iter())
-            .fold(Challenge::<SC>::ZERO, |acc, (n, d)| acc + *n / *d);
+    let lookups: Vec<(&crate::Lookup<Val<SC>>, bool)> = chips
+        .iter()
+        .flat_map(|chip| {
+            chip.sends().iter().map(|s| (s, true)).chain(chip.receives().iter().map(|r| (r, false)))
+        })
+        .collect();
+    let columns = numerator.len() / 2;
+    if lookups.len() > columns {
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
+            "circuit_output holds {columns} lookup columns, the chips have {}",
+            lookups.len()
+        )));
+    }
+    let global_sum: Challenge<SC> = {
+        let mut local_sum = Challenge::<SC>::ZERO;
+        let mut global_sum = Challenge::<SC>::ZERO;
+        for (k, (n, d)) in numerator.iter().zip(denominator.iter()).enumerate() {
+            let inverse = d.try_inverse().ok_or_else(|| {
+                JaggedShardVerifyError::LogupGkr("circuit_output has a zero denominator".into())
+            })?;
+            let column_is_global =
+                lookups.get(k % columns).is_some_and(|(lookup, _)| lookup.is_global());
+            if column_is_global {
+                global_sum += *n * inverse;
+            } else {
+                local_sum += *n * inverse;
+            }
+        }
         let pv_digest = if machine_has_pv_buses {
             crate::air::eval_public_values_digest_host::<Val<SC>, Challenge<SC>>(
                 &alpha,
@@ -1718,12 +1759,13 @@ where
         } else {
             Challenge::<SC>::ZERO
         };
-        if gkr_sum != -pv_digest {
+        if local_sum != -pv_digest {
             return Err(JaggedShardVerifyError::LogupGkr(
                 "public-values balance failed (sum circuit_output num/den != -PV_digest)".into(),
             ));
         }
-    }
+        global_sum
+    };
 
     for &n in numerator.iter() {
         for basis in n.as_basis_coefficients_slice() {
@@ -1882,17 +1924,33 @@ where
         let padding_prep: Option<Vec<Challenge<SC>>> =
             prep.as_ref().map(|p| vec![Challenge::<SC>::ZERO; p.len()]);
 
-        for (interaction, is_send) in
+        for (lookup, is_send) in
             chip.sends().iter().map(|s| (s, true)).chain(chip.receives().iter().map(|r| (r, false)))
         {
-            let (real_numerator, real_denominator) = interaction
-                .eval::<Challenge<SC>, Challenge<SC>>(prep.as_deref(), &main, alpha, &beta_powers);
-            let (padding_numerator, padding_denominator) = interaction
+            let Some((a, betas)) = crate::logup_gkr::GlobalChallenge::select(
+                global,
+                lookup.scope,
+                (alpha, beta_powers.as_slice()),
+            ) else {
+                return Err(JaggedShardVerifyError::LogupGkr(format!(
+                    "chip '{name}' has a global lookup but no global challenge was given"
+                )));
+            };
+            if betas.len() <= lookup.values.len() {
+                return Err(JaggedShardVerifyError::LogupGkr(format!(
+                    "chip '{name}': a lookup of {} values does not fit a β table of {}",
+                    lookup.values.len(),
+                    betas.len(),
+                )));
+            }
+            let (real_numerator, real_denominator) =
+                lookup.eval::<Challenge<SC>, Challenge<SC>>(prep.as_deref(), &main, a, betas);
+            let (padding_numerator, padding_denominator) = lookup
                 .eval::<Challenge<SC>, Challenge<SC>>(
                     padding_prep.as_deref(),
                     &padding_main,
-                    alpha,
-                    &beta_powers,
+                    a,
+                    betas,
                 );
 
             let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
@@ -1942,7 +2000,7 @@ where
         &proof.logup_evaluations,
     );
 
-    Ok(())
+    Ok(global_sum)
 }
 
 #[cfg(test)]

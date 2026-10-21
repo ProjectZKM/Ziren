@@ -87,6 +87,70 @@ where
     challenger.check_witness(bits, from_f(witness))
 }
 
+/// The cross-shard LogUp challenge: the `(α_g, β_g)` every shard of one
+/// execution uses for its global-scope lookups
+/// ([`crate::air::LookupScope::Global`]), in place of its own `(α, β)`.
+///
+/// It is derived from a single digest `h_star` that binds every shard's
+/// global-round commitment, so it is fixed before any shard proof starts and
+/// is the same in every shard. Each shard's transcript absorbs `h_star` first,
+/// which ties the proof to the statement whose global lookups it closes.
+/// `betas` is the eq-table of the β seed, sized by the machine's widest
+/// global lookup ([`crate::StarkMachine::global_beta_seed_dim`]), so the
+/// fingerprint of a global message is the same in every shard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalChallenge<F, EF> {
+    /// The digest the challenge is derived from.
+    pub h_star: [F; 8],
+    /// `α_g`.
+    pub alpha: EF,
+    /// `β_g`: `betas[0]` weights the lookup kind, `betas[k + 1]` the
+    /// message's `k`-th value.
+    pub betas: alloc::vec::Vec<EF>,
+}
+
+/// Separates the global challenge's derivation from every other use of a
+/// fresh challenger.
+const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
+
+impl<F, EF> GlobalChallenge<F, EF>
+where
+    F: p3_field::Field,
+    EF: p3_field::ExtensionField<F> + Send + Sync,
+{
+    /// Derives the challenge from `h_star` on `challenger`, which must be a
+    /// fresh challenger of the machine's configuration.
+    pub fn derive<C>(mut challenger: C, h_star: [F; 8], beta_seed_dim: usize) -> Self
+    where
+        C: p3_challenger::FieldChallenger<F>,
+    {
+        challenger.observe(F::from_u32(GLOBAL_CHALLENGE_DOMAIN));
+        challenger.observe_slice(&h_star);
+        let alpha: EF = challenger.sample_algebra_element::<EF>();
+        let seed: alloc::vec::Vec<EF> =
+            (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<EF>()).collect();
+        let betas = if seed.is_empty() {
+            alloc::vec![EF::ONE]
+        } else {
+            crate::zerocheck_prover::eq_mle_table::<EF>(&seed)
+        };
+        Self { h_star, alpha, betas }
+    }
+
+    /// The `(α, β)` pair a lookup of `scope` uses: this challenge for
+    /// a global lookup, `local` otherwise.
+    pub fn select<'a>(
+        global: Option<&'a Self>,
+        scope: crate::air::LookupScope,
+        local: (EF, &'a [EF]),
+    ) -> Option<(EF, &'a [EF])> {
+        match scope {
+            crate::air::LookupScope::Global => global.map(|g| (g.alpha, g.betas.as_slice())),
+            crate::air::LookupScope::Local => Some(local),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -243,6 +243,7 @@ where
         public_values,
         commit_data,
         global_round,
+        global_challenge,
     } = data;
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
     let max_log_row_count =
@@ -294,6 +295,7 @@ where
     {
         observe_transcript_prologue_with_global::<SC, A>(
             challenger,
+            global_challenge.map(|g| &g.h_star),
             &public_values,
             global_commitment.as_ref(),
             &main_commitment,
@@ -310,6 +312,7 @@ where
             max_log_row_count,
             challenger,
             shared_trace_mles,
+            global_challenge,
         )
     };
     tracing::info!(
@@ -495,6 +498,7 @@ pub fn observe_transcript_prologue<SC, A>(
 {
     observe_transcript_prologue_with_global::<SC, A>(
         challenger,
+        None,
         public_values,
         None,
         main_commitment,
@@ -503,12 +507,15 @@ pub fn observe_transcript_prologue<SC, A>(
     );
 }
 
-/// [`observe_transcript_prologue`] for a shard that may commit a global main
-/// round: its digest `C_global` is observed between the public values and
-/// `C_main`, so the order is `public_values → [C_global] → C_main → num_chips
-/// → per-chip {height_felt, name_len, name_bytes}`.
+/// [`observe_transcript_prologue`] for a shard that may use the cross-shard
+/// challenge and commit a global main round: the challenge's digest `h_star`
+/// opens the transcript, and the global round's digest `C_global` is observed
+/// between the public values and `C_main`, so the order is `[h_star] →
+/// public_values → [C_global] → C_main → num_chips → per-chip {height_felt,
+/// name_len, name_bytes}`.
 pub fn observe_transcript_prologue_with_global<SC, A>(
     challenger: &mut SC::Challenger,
+    h_star: Option<&[Val<SC>; 8]>,
     public_values: &[Val<SC>],
     global_commitment: Option<&[Val<SC>; 8]>,
     main_commitment: &[Val<SC>; 8],
@@ -518,6 +525,9 @@ pub fn observe_transcript_prologue_with_global<SC, A>(
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
+    for &h in h_star.into_iter().flatten() {
+        challenger.observe(h);
+    }
     for &pv in public_values.iter() {
         challenger.observe(pv);
     }

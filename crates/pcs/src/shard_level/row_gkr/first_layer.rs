@@ -58,6 +58,13 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
 /// `main_values.len() / main_width` (the chip's main-trace rows sourced
 /// from the shared trace-MLE inner).  When `preprocessed_trace` is
 /// `None`, the per-row preprocessed slice is treated as empty.
+///
+/// A global-scope lookup fingerprints under `global`, every other one
+/// under `(alpha, betas)`.
+///
+/// # Panics
+/// When a global-scope lookup has no `global` pair, or a lookup is
+/// wider than the β table its pair carries.
 pub fn build_chip_interaction_tables<
     F: PrimeField + Send + Sync,
     EF: ExtensionField<F> + Send + Sync,
@@ -68,9 +75,27 @@ pub fn build_chip_interaction_tables<
     preprocessed_trace: Option<crate::basefold::TraceRef<'_, F>>,
     alpha: EF,
     betas: &[EF],
+    global: Option<(EF, &[EF])>,
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
     let height = main_values.len().checked_div(main_width).unwrap_or(0);
     let num_interactions = interactions.len();
+    let challenges: Vec<(EF, &[EF])> = interactions
+        .iter()
+        .map(|(lookup, _)| {
+            let (a, b) = if lookup.is_global() {
+                global.expect("a global-scope lookup needs the global challenge")
+            } else {
+                (alpha, betas)
+            };
+            assert!(
+                b.len() > lookup.values.len(),
+                "a lookup of {} values does not fit a β table of {}",
+                lookup.values.len(),
+                b.len(),
+            );
+            (a, b)
+        })
+        .collect();
 
     let total = height * num_interactions;
     let mut numer_evals: Vec<F> = vec![F::ZERO; total];
@@ -91,14 +116,11 @@ pub fn build_chip_interaction_tables<
                     Some(pv) if prep_w > 0 => &pv[row_idx * prep_w..(row_idx + 1) * prep_w],
                     _ => &[],
                 };
-                for (col_idx, (interaction, is_send)) in interactions.iter().enumerate() {
+                for (col_idx, ((lookup, is_send), (a, b))) in
+                    interactions.iter().zip(challenges.iter()).enumerate()
+                {
                     let (numer, denom) = generate_interaction_vals::<F, EF>(
-                        interaction,
-                        prep_row,
-                        main_row,
-                        *is_send,
-                        alpha,
-                        betas,
+                        lookup, prep_row, main_row, *is_send, *a, b,
                     );
                     numer_row[col_idx] = numer;
                     denom_row[col_idx] = denom;
@@ -168,6 +190,8 @@ fn split_real_parity<F: Clone>(
 /// - `alpha`, `betas`: post-commit challenges.  `betas` length must be
 ///   `1 + max_interaction_arity` (slot 0 is for `argument_index`,
 ///   slots 1..=arity are for the per-column values).
+/// - `global`: the cross-shard `(α_g, β_g)` the global-scope lookups
+///   use instead; `None` when the chips have none.
 /// - `num_row_variables`: `log₂` of the per-shard padded row count
 ///   (max chip height, rounded up).  Must satisfy `>= 1`.
 ///
@@ -184,6 +208,7 @@ pub fn generate_first_layer<F, EF, A>(
     shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
+    global: Option<(EF, &[EF])>,
     num_row_variables: usize,
 ) -> LogUpGkrCpuLayer<F, EF>
 where
@@ -223,6 +248,7 @@ where
             prep_trace.real_trace_ref(),
             alpha,
             betas,
+            global,
         );
 
         let chip_height: usize = numer_mat.values.len().checked_div(num_interactions).unwrap_or(0);

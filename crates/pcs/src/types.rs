@@ -31,6 +31,10 @@ pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
+    /// The cross-shard challenge the shard's global-scope lookups use.
+    /// `commit()` leaves it `None`; a caller proving shards with global
+    /// lookups sets it before `open()`.
+    pub global_challenge: Option<crate::logup_gkr::GlobalChallenge<SC::Val, SC::Challenge>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

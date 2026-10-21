@@ -133,6 +133,12 @@ impl<F: Field> Lookup<F> {
         self.kind as usize
     }
 
+    /// Whether the lookup crosses shards: its fraction uses the cross-shard
+    /// global challenge rather than the shard's own.
+    pub fn is_global(&self) -> bool {
+        self.scope == LookupScope::Global
+    }
+
     /// Evaluate this lookup's `(numerator, denominator)` fraction from a
     /// point-evaluation of the chip's traces.
     ///

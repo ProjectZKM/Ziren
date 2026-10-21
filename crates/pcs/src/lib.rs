@@ -11,6 +11,8 @@ mod config;
 mod debug;
 pub mod device_byte_lookups;
 pub mod folder;
+#[cfg(test)]
+mod global_lookup_tests;
 pub mod jagged;
 pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;

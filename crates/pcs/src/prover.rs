@@ -151,6 +151,12 @@ where
     /// the shard's chips named in it commit in a main round of their own,
     /// ahead of the rest. `None` = a single main round.
     pub global_round: Option<&'a std::collections::BTreeSet<String>>,
+    /// The cross-shard challenge the shard's global-scope lookups use;
+    /// its digest `h_star` opens the transcript. `None` when the shard has
+    /// no global lookups.
+    pub global_challenge: Option<
+        &'a crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    >,
 }
 
 /// What `commit()` retains for the shard prove — the jagged hash-bind digest
@@ -514,6 +520,7 @@ where
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
+            global_challenge: None,
         }
     }
 
@@ -543,6 +550,7 @@ where
             &basefold_challenger_snapshot,
             data.main_data,
             self.machine().global_round(),
+            data.global_challenge.as_ref(),
         );
 
         Ok(ShardProof::<SC> {
@@ -650,8 +658,9 @@ impl Error for CpuProverError {}
 /// precomputed commitment, opened as the first round of every shard proof,
 /// and the main round's area pin (the program's class). `commit_data` is the
 /// main-round commitment `commit` retained, together with the name-keyed
-/// traces it was built over, and `global_round` the machine's global-round
-/// chip set.
+/// traces it was built over, `global_round` the machine's global-round chip
+/// set, and `global_challenge` the cross-shard challenge of the shard's
+/// global-scope lookups.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
@@ -665,6 +674,9 @@ fn prove_shard_with_data_boxed<SC, A>(
     challenger: &SC::Challenger,
     commit_data: Option<RetainedJaggedCommit<SC>>,
     global_round: Option<&std::collections::BTreeSet<String>>,
+    global_challenge: Option<
+        &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    >,
 ) -> Box<
     crate::shard_level::shard_proof::JaggedShardProof<
         Val<SC>,
@@ -741,6 +753,7 @@ where
             public_values,
             commit_data,
             global_round,
+            global_challenge,
         },
         &mut shard_challenger,
     );

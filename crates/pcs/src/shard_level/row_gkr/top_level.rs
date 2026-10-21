@@ -31,6 +31,8 @@ use crate::Chip;
 ///   width 0) whose cells come from the per-shard device provider.  The
 ///   full-point opening evaluates the inner via `PaddedMle::eval_at`, which
 ///   equals `evaluate_trace_columns_at_point`.
+/// * `global`: the cross-shard challenge the global-scope lookups use;
+///   `None` when the chips have none.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
@@ -38,6 +40,7 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     max_log_row_count: usize,
     challenger: &mut Challenger,
     shared_trace_mles: &[PaddedMle<F>],
+    global: Option<&crate::logup_gkr::GlobalChallenge<F, EF>>,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -88,6 +91,7 @@ where
         shared_trace_mles,
         alpha,
         &betas,
+        global.map(|g| (g.alpha, g.betas.as_slice())),
         num_row_variables,
     );
     let num_interaction_variables =

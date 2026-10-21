@@ -243,9 +243,8 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         permutation_challenges.iter().map(|x| (*x).into()).collect();
     let local_cumulative_sum = builder.local_cumulative_sum();
 
-    let random_elements = &random_elements[0..2];
-    let (alpha, beta) = (&random_elements[0], &random_elements[1]);
     if !local_sends.is_empty() || !local_receives.is_empty() {
+        let (alpha, beta) = (&random_elements[0], &random_elements[1]);
         let lookup_chunks = &local_sends
             .iter()
             .map(|int| (int, true))
