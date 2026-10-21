@@ -17,8 +17,6 @@ pub mod jagged_eval_sumcheck;
 pub mod jagged_long;
 pub mod jagged_pcs;
 pub mod jagged_sumcheck;
-#[cfg(feature = "keccak-terminal")]
-pub mod kb31_keccak;
 mod kb31_poseidon2;
 pub mod logup_gkr;
 mod lookup;
@@ -36,6 +34,8 @@ pub mod septic_digest;
 pub mod septic_extension;
 pub mod shape;
 pub mod shard_level;
+#[cfg(feature = "compact-shrink")]
+pub mod shrink;
 pub mod stacked_shapes;
 #[cfg(test)]
 mod stark_testing;
@@ -54,8 +54,6 @@ pub use chip::*;
 pub use config::*;
 pub use debug::*;
 pub use folder::*;
-#[cfg(feature = "keccak-terminal")]
-pub use kb31_keccak::KoalaBearKeccak;
 pub use kb31_poseidon2::*;
 pub use lookup::*;
 pub use machine::*;
@@ -64,6 +62,8 @@ pub use permutation::*;
 pub use proof::*;
 pub use prover::*;
 pub use record::*;
+#[cfg(feature = "compact-shrink")]
+pub use shrink::{Blake3Suite, CompactShrink, HashSuite, Keccak256Suite, Sha256Suite};
 pub use traces::Traces;
 pub use types::*;
 pub use verifier::*;

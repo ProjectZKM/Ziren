@@ -122,13 +122,13 @@ pub type CompressedSC = KoalaBearPoseidon2Compress;
 /// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
 
-/// Optional host Keccak terminal; no recursive circuit consumes this proof.
-#[cfg(feature = "keccak-terminal")]
-pub type ShrinkKeccakSC = zkm_pcs::KoalaBearKeccak;
-#[cfg(feature = "keccak-terminal")]
-mod keccak_terminal;
-#[cfg(feature = "keccak-terminal")]
-pub use keccak_terminal::keccak_terminal_prover;
+/// Configurable compact shrinker over KoalaBear.
+#[cfg(feature = "compact-shrink")]
+pub use zkm_pcs::shrink::{Blake3Suite, CompactShrink, Keccak256Suite, Sha256Suite};
+#[cfg(feature = "compact-shrink")]
+pub mod shrink;
+#[cfg(feature = "compact-shrink")]
+pub use shrink::{compact_shrink_prover, ShrinkStrategy};
 
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
     KoalaBearPoseidon2,
