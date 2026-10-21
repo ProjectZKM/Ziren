@@ -126,8 +126,22 @@ pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
 /// at half the cut keeps most of the idle win for a third of the extra shards.
 const RAMP_SHARDS: u32 = 8;
 /// The first [`RAMP_SHARDS`] shards close at `1 / 2^RAMP_AREA_SHIFT` of the area
-/// budget.
+/// budget, and the first three at `1/16`, `1/8` and `1/4` of it
+/// ([`ramp_area_shift`]): the block's first card work waits for the first
+/// shard's replay, 0.74 s for a half-budget shard, so the head of the ramp is
+/// cut geometrically and the cards start after a sixteenth of that.
 const RAMP_AREA_SHIFT: u32 = 1;
+
+/// The area shift of the `shard`-th shard (1-based) of the block-start ramp:
+/// 4, 3, 2 for the first three, [`RAMP_AREA_SHIFT`] after.
+const fn ramp_area_shift(shard: u32) -> u32 {
+    match shard {
+        0 | 1 => RAMP_AREA_SHIFT + 3,
+        2 => RAMP_AREA_SHIFT + 2,
+        3 => RAMP_AREA_SHIFT + 1,
+        _ => RAMP_AREA_SHIFT,
+    }
+}
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
@@ -3507,7 +3521,7 @@ impl<'a> Executor<'a> {
             return false;
         }
         let area = self.split_acct.trace_area((self.state.clk / 5) as u64);
-        area >= (self.split_acct.element_threshold() >> RAMP_AREA_SHIFT)
+        area >= (self.split_acct.element_threshold() >> ramp_area_shift(self.state.current_shard))
     }
 
     pub(crate) fn inc_shard_if_need(&mut self) -> bool {
