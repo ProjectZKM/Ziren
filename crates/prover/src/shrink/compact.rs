@@ -11,13 +11,15 @@ use zkm_pcs::{
     ZKMProverOpts,
 };
 use zkm_primitives::io::ZKMPublicValues;
-use zkm_recursion_circuit::machine::ZKMWrapBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::{
+    PublicValuesOutputDigest, RootPublicValues, ZKMWrapBasefoldWitnessValues,
+};
 use zkm_recursion_circuit::witness::Witnessable;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_core::{air::RecursionPublicValues, Runtime};
 
 use crate::{
-    components::ZKMProverComponents, utils::is_recursion_public_values_valid, CompactShrink,
+    components::ZKMProverComponents, utils::is_root_public_values_valid, CompactShrink,
     CompressedSC, InnerSC, ShrinkAir, ZKMProver, ZKMRecursionProverError, ZKMVerifyingKey,
 };
 
@@ -47,11 +49,15 @@ impl<S: HashSuite> ShrinkStrategy for CompactShrink<S> {
             vk_merkle_data,
         };
         let program = std::sync::Arc::new(
-            zkm_recursion_circuit::machine::basefold_programs::build_wrap_basefold_program(
+            // The compact shrink is terminal: commit the root digest, which
+            // byte-hash verifiers recompute with 7 Poseidon2 permutations
+            // instead of 28.
+            zkm_recursion_circuit::machine::basefold_programs::build_wrap_basefold_program_with_digest(
                 prover.root_prover.machine(),
                 &input,
                 ZKMProver::<C>::pcs_max_log_row_count(),
                 prover.vk_verification,
+                PublicValuesOutputDigest::ReduceToRoot,
             ),
         );
         let mut runtime = Runtime::<zkm_pcs::Val<InnerSC>, zkm_pcs::Challenge<InnerSC>, _>::new(
@@ -117,8 +123,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &MachineProof { shard_proofs: vec![proof.proof.clone()] },
             &mut challenger,
         )?;
+        // The shrink AIR constrains only `pv.digest`. The compact shrink commits
+        // the root digest (`ReduceToRoot`), so recomputing it binds exactly the
+        // statement fields: application key, committed-value digest, exit code
+        // and recursion root. Completeness, including the execution-shard flag,
+        // is enforced in-circuit; the flag checks below are defensive.
+        let root: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
         let pv: &RecursionPublicValues<_> = proof.proof.public_values.as_slice().borrow();
-        if !is_recursion_public_values_valid(self.compress_prover.machine().config(), pv)
+        if !is_root_public_values_valid(self.compress_prover.machine().config(), root)
             || pv.vk_root != self.recursion_vk_root
             || pv.zkm_vk_digest != application_vk.hash_koalabear()
             || pv.is_complete != KoalaBear::ONE
