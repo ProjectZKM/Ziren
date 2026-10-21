@@ -200,6 +200,8 @@ pub enum DslIr<C: Config> {
     /// Decompose a field element into bits (bits = num2bits(felt)). Should only be used when
     /// target is a gnark circuit.
     CircuitNum2BitsF(Felt<C::F>, Vec<Var<C::N>>),
+    /// The least significant base-`F::ORDER` limbs of a variable, as felts (circuit only).
+    CircuitVar2FeltLimbs(Var<C::N>, Vec<Felt<C::F>>),
     /// Convert a Felt to a Var in a circuit. Avoids decomposing to bits and then reconstructing.
     CircuitFelt2Var(Felt<C::F>, Var<C::N>),
 
@@ -361,6 +363,11 @@ pub enum DslIr<C: Config> {
     /// `par_iter` once the memory layer is thread-safe). Emitted by
     /// callers via the `IrIter::ir_par_map_collect` extension trait.
     Parallel(Vec<DslIrBlock<C>>),
+    /// One Blake3 compression over 16-bit limbs: `(output, chaining value,
+    /// block, block length, flags)`; the counter is zero.
+    CircuitV2Blake3Compress(Box<([Felt<C::F>; 16], [Felt<C::F>; 16], [Felt<C::F>; 32], u32, u32)>),
+    /// The two 16-bit limbs of an element's canonical value: `(limbs, element)`.
+    CircuitV2FeltLimbs([Felt<C::F>; 2], Felt<C::F>),
 }
 
 /// A linearly ordered block of DSL IR ops together with the range of

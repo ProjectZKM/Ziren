@@ -1,0 +1,275 @@
+//! The binary stage: a multi-STARK over `GF(2^128)` whose traces are committed
+//! with Boolean WHIR under Blake3, so that its verifier is cheap as a boolean
+//! circuit: Blake3 Merkle paths and `GF(2^128)` sumcheck arithmetic, no prime
+//! field and no algebraic hash.
+//!
+//! The machine proves an independently approved recursion program. The
+//! CompactShrink verifier frontend is separate work: this engine by itself
+//! does not verify a compact proof. See the package README for that boundary.
+
+pub mod air;
+pub mod arith;
+pub mod config;
+pub mod ext;
+pub mod machine;
+pub mod machine_builder;
+pub mod poseidon2;
+pub mod word;
+
+pub use air::BinaryAir;
+use p3_binary_field::{BinaryChallenger, BinaryField128, BinaryField2, Ghash128};
+pub use p3_binary_pcs::whir::BinaryWhirBudget;
+use p3_binary_pcs::whir::BinaryWhirProfile;
+use p3_blake3::Blake3;
+use p3_challenger::HashChallenger;
+
+/// The radius used to derive the binary WHIR query schedule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WhirRegime {
+    UniqueDecoding,
+    Johnson,
+}
+
+use p3_multi_stark::config::{PcsError, PcsProverError};
+use p3_multi_stark::{
+    prove_with_backend, security_report, setup, verify, MultiStarkProof, ProverInstance,
+    ProverInstances, ProvingError, ProvingKey, ReprBackend, SecurityError, SubfieldBackend,
+    VerificationError, VerifierInstance, VerifierInstances, VerifyingKey,
+};
+use p3_sumcheck::layout::Table;
+use p3_sumcheck::TableShape;
+
+/// The field every trace cell and every challenge lives in.
+pub type F = BinaryField128;
+
+/// A field the machine's constraints can be evaluated over: `GF(2^128)`
+/// itself, or a type that records the evaluation, given the constants the
+/// constraints use.
+pub trait BinaryBase: p3_field::Field {
+    /// The constant `value` of `GF(2^128)`.
+    fn from_native(value: F) -> Self;
+}
+
+impl BinaryBase for F {
+    fn from_native(value: F) -> Self {
+        value
+    }
+}
+
+/// The transcript: Blake3 over bytes, sampling `GF(2^128)` challenges.
+pub type Challenger = BinaryChallenger<F, HashChallenger<u8, Blake3, 32>>;
+
+/// The configuration the stage proves under: Boolean WHIR with a Blake3
+/// Merkle tree of arity 2.
+pub type Config = config::MachineConfig;
+
+/// A proof of the stage.
+pub type Proof = MultiStarkProof<Config>;
+
+/// The proving and verifying keys of an AIR under a [`Config`].
+pub type Keys = (ProvingKey<Config>, VerifyingKey<Config>);
+
+/// What proving can fail with.
+pub type ProveError = ProvingError<PcsProverError<Config>>;
+
+/// What verification can fail with.
+pub type VerifyError = VerificationError<PcsError<Config>>;
+
+/// The domain separator of the stage's transcript.
+pub const TRANSCRIPT_DOMAIN: &[u8] = b"zkm-binary-stage-v1";
+
+/// The Boolean WHIR schedule of the stage, with the levers that trade proof
+/// size against prover time at a fixed security level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BinarySchedule {
+    /// The decoding regime the queries are counted under.  Unique decoding
+    /// asks more queries of the verifier but almost no proof-of-work of the
+    /// prover, where the Johnson bound's folding grinds grow with the
+    /// witness, past forty bits at a real program's size.
+    pub regime: WhirRegime,
+    /// `-log2` of the first oracle's rate.
+    pub log_inv_rate: usize,
+    /// Variables folded per WHIR round.
+    pub folding: usize,
+    /// The per-term target the schedule is derived for, under the Johnson
+    /// bound.
+    pub term_security_bits: usize,
+    /// The composed security the whole proof must reach.
+    pub security_bits: usize,
+    /// Consumer budget for queries, proof bytes and grinding. The machine
+    /// currently enforces the grinding ceiling; transport consumers must
+    /// enforce the query and byte limits separately.
+    pub budget: BinaryWhirBudget,
+}
+
+impl BinarySchedule {
+    /// The ceiling a unique-decoding schedule holds to at a real program's
+    /// size: a commitment over `2^28` packed variables opens `574`
+    /// positions along `15,226` digests, half a megabyte of proof, after a
+    /// fourteen-bit grind.  Each figure leaves a size class of headroom.
+    pub const BUDGET: BinaryWhirBudget =
+        BinaryWhirBudget { max_stir_queries: 768, max_proof_bytes: 1 << 20, max_grinding_bits: 30 };
+}
+
+impl Default for BinarySchedule {
+    fn default() -> Self {
+        Self {
+            regime: WhirRegime::UniqueDecoding,
+            log_inv_rate: 5,
+            folding: 4,
+            term_security_bits: 108,
+            security_bits: 100,
+            budget: Self::BUDGET,
+        }
+    }
+}
+
+impl BinarySchedule {
+    /// The profile of the schedule's commitment at its regime.
+    #[must_use]
+    pub fn profile(&self) -> BinaryWhirProfile {
+        match self.regime {
+            WhirRegime::UniqueDecoding => BinaryWhirProfile::unique_decoding(
+                self.term_security_bits,
+                self.log_inv_rate,
+                self.folding,
+            ),
+            _ => BinaryWhirProfile::proven_list_decoding(
+                self.term_security_bits,
+                self.log_inv_rate,
+                self.folding,
+            ),
+        }
+    }
+
+    /// The configuration of `air` at `shape` under the schedule.
+    pub fn config<A: BinaryAir>(
+        &self,
+        air: &A,
+        shape: TableShape,
+    ) -> Result<Config, config::MachineConfigError> {
+        assert_eq!(p3_air::BaseAir::<F>::width(air), shape.width());
+        assert_eq!(p3_air::BaseAir::<F>::num_public_values(air), 0);
+        assert_eq!(p3_air::BaseAir::<F>::preprocessed_width(air), 0);
+        Config::new(&[shape], &[], self)
+    }
+}
+
+/// A fresh transcript of the stage.
+#[must_use]
+pub fn challenger() -> Challenger {
+    Challenger::from_hasher(TRANSCRIPT_DOMAIN.to_vec(), Blake3)
+}
+
+/// The proving and verifying keys of `air` under `config`.
+pub fn keys<A: BinaryAir>(config: &Config, air: &A) -> Result<Keys, ProveError> {
+    setup(config, &[air], &mut challenger())
+}
+
+/// The composed security of proving `air` at `2^log_height` rows under
+/// `config`, which must reach `security_bits`.
+pub fn security<A: BinaryAir>(
+    config: &Config,
+    air: &A,
+    vk: &VerifyingKey<Config>,
+    log_height: usize,
+    security_bits: usize,
+) -> Result<f64, SecurityError> {
+    let public_values: [F; 0] = [];
+    let instances =
+        VerifierInstances::new(vec![VerifierInstance::new(air, vk, log_height, &public_values)]);
+    let report = security_report(config, &instances)?;
+    report.require_security(security_bits)?;
+    Ok(report.security_bits().unwrap_or(0.0))
+}
+
+/// Prove `table`, one row per step of `air`, under `config`.
+///
+/// The polynomial-basis backend runs where the host multiplies in
+/// `GF(2^128)` with a carry-less multiply; the subfield backend elsewhere.
+pub fn prove<A: BinaryAir>(
+    config: &Config,
+    air: &A,
+    pk: &ProvingKey<Config>,
+    table: Table<F>,
+) -> Result<Proof, ProveError> {
+    let public_values: [F; 0] = [];
+    let instances = ProverInstances::new(vec![ProverInstance::new(air, table, pk, &public_values)]);
+    if p3_binary_field::poly_basis::HAS_HARDWARE_CLMUL {
+        prove_with_backend::<_, _, ReprBackend<BinaryField2, Ghash128, true>>(
+            config,
+            instances,
+            0,
+            &mut challenger(),
+        )
+    } else {
+        prove_with_backend::<_, _, SubfieldBackend<BinaryField2>>(
+            config,
+            instances,
+            0,
+            &mut challenger(),
+        )
+    }
+}
+
+/// Verify `proof` as a proof of `air` at `2^log_height` rows under `config`.
+pub fn verify_proof<A: BinaryAir>(
+    config: &Config,
+    air: &A,
+    vk: &VerifyingKey<Config>,
+    log_height: usize,
+    proof: &Proof,
+) -> Result<(), VerifyError> {
+    let public_values: [F; 0] = [];
+    let instances =
+        VerifierInstances::new(vec![VerifierInstance::new(air, vk, log_height, &public_values)]);
+    verify(config, instances, proof, 0, &mut challenger())
+}
+
+/// The bytes of `proof`, as the stage ships them.
+pub fn encode(proof: &Proof) -> Vec<u8> {
+    postcard::to_allocvec(proof).expect("a proof serializes")
+}
+
+/// A proof from the bytes [`encode`] produced.
+pub fn decode(bytes: &[u8]) -> Result<Proof, postcard::Error> {
+    postcard::from_bytes(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_binary_field::Gf2;
+    use p3_blake3_air::{Blake3BinaryAir, NUM_BLAKE3_BINARY_COLS};
+    use p3_matrix::dense::RowMajorMatrix;
+
+    use super::*;
+
+    /// Upstream's Blake3 compression AIR over bits, proved and verified under
+    /// the stage's schedule, with the proof going through its byte encoding.
+    #[test]
+    fn blake3_air_round_trip() {
+        let log_height = 10;
+        let air = Blake3BinaryAir::default();
+        let shape = TableShape::new(log_height, NUM_BLAKE3_BINARY_COLS);
+        let schedule = BinarySchedule::default();
+        let config = schedule.config(&air, shape).expect("schedule fits the AIR");
+        let (pk, vk) = keys(&config, &air).expect("keys");
+        let bits = security(&config, &air, &vk, log_height, schedule.security_bits)
+            .expect("the schedule reaches the target");
+        let words: RowMajorMatrix<u64> = air.generate_random_trace_packed::<Gf2>(1 << log_height);
+        let started = std::time::Instant::now();
+        let proof = prove(&config, &air, &pk, Table::<F>::from_packed_bits(words, log_height))
+            .expect("proof");
+        let prove_secs = started.elapsed().as_secs_f64();
+        let bytes = encode(&proof);
+        let proof = decode(&bytes).expect("round trip");
+        let started = std::time::Instant::now();
+        verify_proof(&config, &air, &vk, log_height, &proof).expect("verifies");
+        println!(
+            "blake3 2^{log_height} rows: {bits:.2} bits, {} proof bytes, prove {prove_secs:.1} s, verify {:.3} s",
+            bytes.len(),
+            started.elapsed().as_secs_f64()
+        );
+        assert!(bits >= schedule.security_bits as f64);
+    }
+}

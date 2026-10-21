@@ -1,0 +1,28 @@
+name: Binary proof engine
+on:
+  pull_request:
+    paths:
+      - 'crates/binary/**'
+      - 'crates/binary-recursion/**'
+      - 'crates/recursion/core/**'
+      - 'crates/recursion/compiler/**'
+      - 'Cargo.*'
+      - '.github/workflows/binary-engine.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/binary-engine-target
+      RAYON_NUM_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-17
+      - run: cargo test --locked --release -p zkm-binary-stark -p zkm-binary-recursion
+      - run: cargo test --locked --release -p zkm-recursion-core existing_instruction_discriminants_are_unchanged
+      - run: cargo clippy --locked -p zkm-binary-stark -p zkm-binary-recursion --tests -- -D warnings

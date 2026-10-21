@@ -28,6 +28,13 @@ pub enum Instruction<F> {
     /// `PrefixSumChecks` chip (compress-machine programs only): one row per
     /// bit, the Lagrange product and the Horner sum chained through memory.
     PrefixSumChecks(Box<PrefixSumChecksInstr<F>>),
+    /// One Blake3 compression over 16-bit limbs; only the binary machine
+    /// has a table for it, so it appears in programs the binary stage
+    /// proves and in no other.
+    Blake3Compress(Box<Blake3CompressInstr<F>>),
+    /// The two 16-bit limbs of an element; only the binary machine has a
+    /// table for it.
+    FeltLimbs(FeltLimbsInstr<F>),
 }
 
 /// The executor walks millions of these per recursion node and the program
@@ -186,6 +193,40 @@ pub fn poseidon2<F: PrimeCharacteristicRing>(
     }))
 }
 
+pub fn blake3_compress<F: PrimeCharacteristicRing>(
+    mults: [u32; BLAKE3_OUT_LIMBS],
+    output: [u32; BLAKE3_OUT_LIMBS],
+    chaining_value: [u32; BLAKE3_CV_LIMBS],
+    block: [u32; BLAKE3_BLOCK_LIMBS],
+    block_len: u32,
+    flags: u32,
+) -> Instruction<F> {
+    Instruction::Blake3Compress(Box::new(Blake3CompressInstr {
+        addrs: Blake3CompressIo {
+            chaining_value: chaining_value.map(F::from_u32).map(Address),
+            block: block.map(F::from_u32).map(Address),
+            output: output.map(F::from_u32).map(Address),
+        },
+        block_len: F::from_u32(block_len),
+        flags: F::from_u32(flags),
+        mults: mults.map(F::from_u32),
+    }))
+}
+
+pub fn felt_limbs<F: PrimeCharacteristicRing>(
+    mults: [u32; 2],
+    output: [u32; 2],
+    input: u32,
+) -> Instruction<F> {
+    Instruction::FeltLimbs(FeltLimbsInstr {
+        addrs: FeltLimbsIo {
+            input: Address(F::from_u32(input)),
+            output: output.map(F::from_u32).map(Address),
+        },
+        mults: mults.map(F::from_u32),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn select<F: PrimeCharacteristicRing>(
     mult1: u32,
@@ -235,6 +276,8 @@ impl<F: Copy> Instruction<F> {
             Instruction::ExtAlu(i) => f(i.addrs.out),
             Instruction::Mem(i) => f(i.addrs.inner),
             Instruction::Poseidon2(i) => i.addrs.output.iter().copied().for_each(f),
+            Instruction::Blake3Compress(i) => i.addrs.output.iter().copied().for_each(f),
+            Instruction::FeltLimbs(i) => i.addrs.output.iter().copied().for_each(f),
             Instruction::Select(i) => {
                 f(i.addrs.out1);
                 f(i.addrs.out2);
@@ -283,4 +326,49 @@ pub fn prefix_sum_checks<F: PrimeCharacteristicRing>(
         acc_mults: acc_mults.into_iter().map(F::from_u32).collect(),
         field_acc_mults: field_acc_mults.into_iter().map(F::from_u32).collect(),
     }))
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::*;
+
+    #[test]
+    fn existing_instruction_discriminants_are_unchanged() {
+        let encoded = |instruction: Instruction<p3_koala_bear::KoalaBear>| {
+            bincode::serialize(&instruction).unwrap()[..4].to_vec()
+        };
+        assert_eq!(encoded(mem(MemAccessKind::Write, 0, 0, 0)), 2u32.to_le_bytes());
+        assert_eq!(encoded(poseidon2([0; WIDTH], [0; WIDTH], [0; WIDTH])), 3u32.to_le_bytes());
+        assert_eq!(
+            encoded(Instruction::Hint(HintInstr { output_addrs_mults: vec![] })),
+            11u32.to_le_bytes()
+        );
+        assert_eq!(
+            encoded(Instruction::PrefixSumChecks(Box::new(PrefixSumChecksInstr {
+                addrs: PrefixSumChecksIo {
+                    zero: Address(p3_koala_bear::KoalaBear::ZERO),
+                    one: Address(p3_koala_bear::KoalaBear::ZERO),
+                    x1: vec![],
+                    x2: vec![],
+                    accs: vec![],
+                    field_accs: vec![]
+                },
+                acc_mults: vec![],
+                field_acc_mults: vec![],
+            }))),
+            12u32.to_le_bytes()
+        );
+        assert_eq!(
+            encoded(blake3_compress(
+                [0; BLAKE3_OUT_LIMBS],
+                [0; BLAKE3_OUT_LIMBS],
+                [0; BLAKE3_CV_LIMBS],
+                [0; BLAKE3_BLOCK_LIMBS],
+                0,
+                0
+            )),
+            13u32.to_le_bytes()
+        );
+        assert_eq!(encoded(felt_limbs([0; 2], [0; 2], 0)), 14u32.to_le_bytes());
+    }
 }

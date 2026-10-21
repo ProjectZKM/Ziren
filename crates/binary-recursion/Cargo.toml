@@ -1,0 +1,41 @@
+[package]
+name = "zkm-binary-recursion"
+description = "The narrow binary recursion: the binary stage's verifier, recorded from Plonky3's own, as a program over GF(2^128)."
+readme = "../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-field-current = { package = "p3-field", git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-dft = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-pcs = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-blake3 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-bus = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-commit = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-multilinear-util = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-multi-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-sumcheck = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-whir = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+num-bigint = { version = "0.5.1", default-features = false }
+postcard = { version = "1.0", default-features = false, features = ["alloc"] }
+rayon = "1.12"
+serde = { workspace = true }
+zkm-binary-stark = { workspace = true }
+zkm-derive = { workspace = true }
+zkm-recursion-core = { workspace = true }
+
+[dev-dependencies]
+p3-koala-bear = { workspace = true }
+zkm-pcs = { workspace = true }
+blake3 = { version = "1", features = ["std"] }

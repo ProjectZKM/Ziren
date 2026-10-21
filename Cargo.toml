@@ -9,6 +9,8 @@ categories = ["cryptography"]
 [workspace]
 members = [
     "crates/build",
+    "crates/binary",
+    "crates/binary-recursion",
     "crates/cli",
     "crates/core/executor",
     "crates/core/instruction-test-defs",
@@ -48,6 +50,7 @@ debug-assertions = true
 
 
 [workspace.dependencies]
+zkm-binary-stark = { path = "crates/binary" }
 rustc-hash = "2.1.0"
 # Pinned to a rev, not a branch. These crates supply the field, the challenger and
 # the Merkle tree -- the transcript -- so a branch pin lets `cargo update` change
