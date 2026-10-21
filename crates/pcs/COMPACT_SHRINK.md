@@ -1,4 +1,21 @@
-# Compact shrinker
+# Shrink strategies
+
+Both native and compact strategies consume the native compressed recursion proof
+(`ZKMReduceProof<CompressedSC>`). `ShrinkStrategy::Config` selects the output
+proof configuration; it does not change the child's verification relation.
+
+`NativeShrink` is available without enabling `compact-shrink`. It delegates to
+the existing Poseidon2 shrinker, including its frozen wrap-compatible shape and
+key-admission policy. `shrink()` remains a compatibility alias for this strategy.
+
+```rust,ignore
+let shrunk = prover.shrink_with::<NativeShrink>(compressed, opts)?;
+prover.verify_shrink(&shrunk, &application_vk)?;
+let wrapped = prover.wrap_bn254(shrunk, opts)?;
+// The resulting OuterSC proof feeds the existing Groth16/PLONK APIs.
+```
+
+## Compact shrinker
 
 `CompactShrink<Suite>` proves the compressed-proof verification computation over
 KoalaBear and its quartic extension. The suite chooses byte-hash commitments,
@@ -28,16 +45,24 @@ their union, including batching cardinality and the Fiat–Shamir compilation.
 Consumer-specific tuning needs a separately approved immutable profile; it
 cannot be selected by a submitted proof.
 
-The default `shrink` and its frozen wrap-compatible shape remain unchanged.
-`shrink_with` builds the same verifier computation without inheriting that
-Groth16-wrap shape policy. Its actual key geometry is part of independently
-approved setup. No key-map additions or membership bypasses are installed.
+`CompactShrink<Suite>` requires the optional `compact-shrink` feature. It builds
+the same verifier computation without inheriting the native Groth16-wrap shape
+policy. Its actual key geometry is part of independently approved setup. No
+key-map additions or membership bypasses are installed.
+
+The existing `wrap_bn254` accepts only native `ShrinkSC` proofs; this is enforced
+by its input type. Wrapping a compact output requires implementing its exact
+verifier in the next circuit and validating that circuit's shape, admitted keys
+and proving artifacts. This is not implemented by selecting a shrink strategy.
+A final BN254 Groth16/PLONK proof does not preserve an assumed post-quantum
+security guarantee of its input proof.
 
 ## Trusted verification and adapters
 
 `ShrinkVerifierData<Suite>::from_trusted_key` snapshots an independently approved
 setup key. Never construct the expected verifier data from a submitted proof.
-`verify_shrink_with` authenticates the key, application, recursion root, complete
+For strategies implementing `CompactShrinkStrategy`, `verify_shrink_with`
+authenticates the key, application, recursion root, complete
 successful execution and full public-values digest. The version-three key ID
 binds the suite ID, all suite domains, absorb boundary, resolved configuration,
 child transcript profile and canonical key geometry. Exported profiles and key

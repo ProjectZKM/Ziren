@@ -18,6 +18,8 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ runner.temp }}/compact-shrink-target
       PYTHONDONTWRITEBYTECODE: '1'
+      # Match the main CI fallback for the pinned gnark setup dependency.
+      GOPROXY: https://proxy.golang.org,https://goproxy.cn,direct
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
@@ -25,3 +27,5 @@ jobs:
           toolchain: nightly-2026-09-17
       - run: cargo test --locked -p zkm-pcs --features compact-shrink --lib shrink::
       - run: cargo test --locked -p zkm-pcs --features compact-shrink --lib compact_params
+      - run: cargo check --locked -p zkm-prover --lib
+      - run: cargo check --locked -p zkm-prover --features compact-shrink --lib
