@@ -3129,6 +3129,133 @@ mod test {
         );
     }
 
+    /// **Three-round contract** — `[preprocessed, global main, local main]`, the
+    /// layout of a shard whose global-scope chips commit in a round of their own.
+    /// Both main rounds are natural; the local round's offsets are rebased by the
+    /// SUM of the two preceding committed areas, and the verifier must be handed
+    /// both preceding roots in round order.
+    #[test]
+    fn test_jagged_basefold_three_round_layout() {
+        const STRIPE: usize = 1usize << DEFAULT_LOG_STACKING_HEIGHT;
+        const PREP_PAD_COLS: usize = 16;
+
+        let prep_traces = mk_named_shard("prep", &[(4, 16), (2, 8)], 0x3A0D_0001);
+        let global_traces = mk_named_shard("glob", &[(3, 32), (5, 8)], 0x3A0D_0002);
+        let local_traces = mk_named_shard("locl", &[(16, 1 << 17)], 0x3A0D_0003);
+        let z_row = mk_z_row(0x3A0D_0004);
+        let prep_views = as_chip_views(&prep_traces);
+        let global_views = as_chip_views(&global_traces);
+        let local_views = as_chip_views(&local_traces);
+
+        let commit = |views: &[ChipTraceView], pin| {
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(views, pin)
+        };
+        let prep = commit(
+            &prep_views,
+            Some(crate::jagged::AreaPin { area: STRIPE, pad_columns: PREP_PAD_COLS }),
+        );
+        let global = commit(&global_views, None);
+        let local = commit(&local_views, None);
+
+        let observe_all = |ch: &mut JaggedChallenger| {
+            ch.observe(prep.commit.original_commitment.clone());
+            ch.observe(global.commit.original_commitment.clone());
+            ch.observe(local.commit.original_commitment.clone());
+        };
+
+        let mut p_chal = build_challenger();
+        observe_all(&mut p_chal);
+        let prep_r_row = r_row_suffixes(&prep_views, &z_row);
+        let global_r_row = r_row_suffixes(&global_views, &z_row);
+        let local_r_row = r_row_suffixes(&local_views, &z_row);
+        let rounds = [
+            JaggedOpenRound {
+                chip_traces: &prep_views,
+                r_row_per_chip: &prep_r_row,
+                claims: column_claims(&prep_views, &z_row),
+                precomputed: &prep,
+            },
+            JaggedOpenRound {
+                chip_traces: &global_views,
+                r_row_per_chip: &global_r_row,
+                claims: column_claims(&global_views, &z_row),
+                precomputed: &global,
+            },
+            JaggedOpenRound {
+                chip_traces: &local_views,
+                r_row_per_chip: &local_r_row,
+                claims: column_claims(&local_views, &z_row),
+                precomputed: &local,
+            },
+        ];
+        let bundle = prove_jagged_rounds(&rounds, &z_row, &mut p_chal);
+
+        assert_eq!(
+            bundle.preceding_commits,
+            vec![
+                prep.commit.original_commitment.clone(),
+                global.commit.original_commitment.clone()
+            ],
+            "the preceding commits are the first two rounds, in round order"
+        );
+        assert_eq!(bundle.commit.original_commitment, local.commit.original_commitment);
+        assert_eq!(bundle.packing.round_counts.len(), 3);
+        assert_eq!(bundle.packing.padding_heights.len(), 3);
+        assert_eq!(bundle.packing.padding_heights[0].len(), PREP_PAD_COLS);
+
+        let prep_area = prep.prover_data.area;
+        let global_area = global.prover_data.area;
+        let off = &bundle.packing.offsets;
+        let n_prep_cols = 4 + 2 + PREP_PAD_COLS;
+        assert_eq!(off[n_prep_cols], prep_area, "the global round is rebased by the prep area");
+        let n_global_cols = 3 + 5 + bundle.packing.padding_heights[1].len();
+        assert_eq!(
+            off[n_prep_cols + n_global_cols],
+            prep_area + global_area,
+            "the local round is rebased by the sum of the two preceding areas"
+        );
+        assert_eq!(bundle.packing.total_values, prep_area + global_area + local.prover_data.area);
+
+        let widths: Vec<usize> = prep_traces
+            .iter()
+            .chain(global_traces.iter())
+            .chain(local_traces.iter())
+            .map(|(_, t)| t.width)
+            .collect();
+        let (chip_infos, r_row_v, z_row_v) =
+            build_jagged_verify_inputs(&bundle.packing, &widths, &z_row);
+        type Root = <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment;
+        let verify_with = |preceding: &[(Root, usize)]| {
+            let mut v_chal = build_challenger();
+            observe_all(&mut v_chal);
+            verify_jagged_no_observe(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                preceding,
+                prep_traces.len(),
+                &bundle,
+                &bundle.y_per_chip,
+                &mut v_chal,
+            )
+        };
+        let prep_root = prep.commit.original_commitment.clone();
+        let global_root = global.commit.original_commitment.clone();
+
+        assert!(
+            verify_with(&[(prep_root.clone(), prep_area), (global_root.clone(), global_area)]),
+            "an honest three-round bundle must verify"
+        );
+        assert!(
+            !verify_with(&[(global_root.clone(), prep_area), (prep_root.clone(), global_area)]),
+            "swapped preceding roots must be rejected"
+        );
+        assert!(
+            !verify_with(&[(prep_root.clone(), prep_area), (prep_root, global_area)]),
+            "a global root replaced by the prep root must be rejected"
+        );
+    }
+
     /// Move a round's geometry in ALL THREE records at once.
     ///
     /// The centralized validator rejects a round whose `commit`, `prover_data`

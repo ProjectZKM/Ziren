@@ -322,6 +322,8 @@ where
         row_counts,
         padding_column_counts,
         jagged_original_commitment: std::array::from_fn(|_| F::ZERO),
+        global_commitment: None,
+        global_original_commitment: None,
     }
 }
 

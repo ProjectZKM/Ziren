@@ -147,6 +147,10 @@ where
     /// the driver CONSUMES it (digest observed, precompute opened); `None` =>
     /// the commit is built inside the prove pass (identical value).
     pub commit_data: Option<RetainedJaggedCommit<SC>>,
+    /// The machine's global-round chip set ([`crate::StarkMachine::global_round`]):
+    /// the shard's chips named in it commit in a main round of their own,
+    /// ahead of the rest. `None` = a single main round.
+    pub global_round: Option<&'a std::collections::BTreeSet<String>>,
 }
 
 /// What `commit()` retains for the shard prove — the jagged hash-bind digest
@@ -170,6 +174,22 @@ where
     /// the prove read the same cells.  `None` on device provers (their
     /// traces are device-resident).
     pub main_store: Option<crate::traces::Traces<Val<SC>>>,
+    /// The global main round's commitment, when the shard commits one: it is
+    /// built over the shard's global-round chips alone, before the main round
+    /// above, which then holds every other chip.
+    pub global: Option<RetainedRound<SC>>,
+}
+
+/// One committed main round: the hash-bound digest the prologue observes and
+/// the precomputed commit the jagged open consumes.
+pub struct RetainedRound<SC>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+{
+    /// The hash-bound digest of the round.
+    pub commitment: [Val<SC>; 8],
+    /// The precomputed BaseFold commit of the round.
+    pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::BfMmcs>,
 }
 
 /// The polynomial-commitment component of a shard prover.
@@ -471,9 +491,10 @@ where
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                let (main_commitment, precomputed) =
-                    crate::shard_level::prover::commit_traces::<SC>(
+                let (global, main_commitment, precomputed) =
+                    crate::shard_level::prover::commit_main_rounds::<SC>(
                         &named_traces,
+                        self.machine().global_round(),
                         record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
                     );
                 Some(RetainedJaggedCommit {
@@ -481,6 +502,7 @@ where
                     precomputed,
                     device_dense_q: None,
                     main_store: Some(named_traces),
+                    global,
                 })
             } else {
                 None
@@ -520,6 +542,7 @@ where
             data.public_values.clone(),
             &basefold_challenger_snapshot,
             data.main_data,
+            self.machine().global_round(),
         );
 
         Ok(ShardProof::<SC> {
@@ -627,7 +650,8 @@ impl Error for CpuProverError {}
 /// precomputed commitment, opened as the first round of every shard proof,
 /// and the main round's area pin (the program's class). `commit_data` is the
 /// main-round commitment `commit` retained, together with the name-keyed
-/// traces it was built over.
+/// traces it was built over, and `global_round` the machine's global-round
+/// chip set.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
@@ -640,6 +664,7 @@ fn prove_shard_with_data_boxed<SC, A>(
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     commit_data: Option<RetainedJaggedCommit<SC>>,
+    global_round: Option<&std::collections::BTreeSet<String>>,
 ) -> Box<
     crate::shard_level::shard_proof::JaggedShardProof<
         Val<SC>,
@@ -715,6 +740,7 @@ where
             main_traces: main_traces_named,
             public_values,
             commit_data,
+            global_round,
         },
         &mut shard_challenger,
     );

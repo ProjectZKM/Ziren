@@ -371,6 +371,99 @@ pub mod tests {
         test_instructions(instructions);
     }
 
+    /// The fibonacci program on the shrink machine with `BaseAlu` and
+    /// `MemoryVar` committed in a global main round of their own: the split
+    /// proof verifies, and neither layout's verifier accepts the other's proof.
+    #[test]
+    pub fn fibonacci_with_global_round() {
+        use std::collections::BTreeSet;
+
+        let n = 10;
+        let instructions = once(instr::mem(MemAccessKind::Write, 1, 0, 0))
+            .chain(once(instr::mem(MemAccessKind::Write, 2, 1, 1)))
+            .chain((2..=n).map(|i| instr::base_alu(BaseAluOpcode::AddF, 2, i, i - 2, i - 1)))
+            .chain(once(instr::mem(MemAccessKind::Read, 1, n - 1, 34)))
+            .chain(once(instr::mem(MemAccessKind::Read, 2, n, 55)))
+            .collect::<Vec<_>>();
+        let mut program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
+        program.total_memory = program.computed_total_memory();
+        let program = Arc::new(program);
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
+            program.clone(),
+            SC::new().perm,
+        );
+        runtime.run().unwrap();
+
+        let global: BTreeSet<String> = ["BaseAlu", "MemoryVar"].map(String::from).into();
+        let split_machine =
+            || A::shrink_machine(SC::default()).with_global_round(Some(global.clone()));
+        let unsplit_machine = || A::shrink_machine(SC::default());
+
+        let machine = split_machine();
+        let (pk, vk) = machine.setup(&program);
+        let split_proof = run_test_machine(vec![runtime.record.clone()], machine, pk, vk.clone())
+            .unwrap_or_else(|e| panic!("the split proof must verify: {e:?}"));
+        assert!(split_proof
+            .shard_proofs
+            .iter()
+            .all(|p| p.jagged_shard_proof.global_commitment.is_some()));
+
+        let machine = unsplit_machine();
+        let (pk, unsplit_vk) = machine.setup(&program);
+        let unsplit_proof = run_test_machine(vec![runtime.record], machine, pk, unsplit_vk.clone())
+            .unwrap_or_else(|e| panic!("the unsplit proof must verify: {e:?}"));
+
+        let machine = unsplit_machine();
+        let mut challenger = machine.config().challenger();
+        assert!(
+            machine.verify(&vk, &split_proof, &mut challenger).is_err(),
+            "a single-main-round verifier must reject a split proof"
+        );
+        let machine = split_machine();
+        let mut challenger = machine.config().challenger();
+        assert!(
+            machine.verify(&unsplit_vk, &unsplit_proof, &mut challenger).is_err(),
+            "a split verifier must reject a single-main-round proof"
+        );
+
+        let tampered = |edit: &dyn Fn(&mut zkm_pcs::ShardProof<SC>)| {
+            let mut proof = split_proof.clone();
+            edit(&mut proof.shard_proofs[0]);
+            let machine = split_machine();
+            let mut challenger = machine.config().challenger();
+            machine.verify(&vk, &proof, &mut challenger)
+        };
+        assert!(
+            tampered(&|p| {
+                p.jagged_shard_proof.global_commitment.as_mut().unwrap()[0] += F::ONE;
+            })
+            .is_err(),
+            "a global commitment the opening does not re-derive must be rejected"
+        );
+        assert!(
+            tampered(&|p| {
+                p.jagged_shard_proof.global_original_commitment.as_mut().unwrap()[0] += F::ONE;
+            })
+            .is_err(),
+            "a raw global root other than the opening's must be rejected"
+        );
+        assert!(
+            tampered(&|p| {
+                let jp = &mut p.jagged_shard_proof;
+                let global = jp.global_commitment.unwrap();
+                jp.global_commitment = Some(jp.main_commitment);
+                jp.main_commitment = global;
+            })
+            .is_err(),
+            "swapped global and main commitments must be rejected"
+        );
+    }
+
     #[test]
     #[should_panic]
     pub fn div_nonzero_by_zero() {

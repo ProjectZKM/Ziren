@@ -150,6 +150,17 @@ pub struct JaggedShardProof<F, EF> {
     /// per-round hash-bind pins it.
     #[serde(default)]
     pub padding_row_heights: Vec<Vec<F>>,
+    /// The global main round's **HASH-BOUND** digest, when the shard commits
+    /// one: the transcript observes it right before [`Self::main_commitment`],
+    /// which then commits every chip outside that round.  `None` on a shard
+    /// with a single main round.
+    #[serde(default)]
+    pub global_commitment: Option<[F; 8]>,
+    /// The global main round's **RAW** BaseFold cap root, the role
+    /// [`Self::jagged_original_commitment`] plays for the main round.  `Some`
+    /// exactly when [`Self::global_commitment`] is.
+    #[serde(default)]
+    pub global_original_commitment: Option<[F; 8]>,
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
@@ -186,6 +197,8 @@ where
             preprocessed_original_commitment: [F::ZERO; 8],
             preprocessed_row_counts: Vec::new(),
             padding_row_heights: Vec::new(),
+            global_commitment: None,
+            global_original_commitment: None,
         }
     }
 }

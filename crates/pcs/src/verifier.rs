@@ -25,6 +25,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     ///   shard's chip subset or the key.
     /// * `pinned`: the machine's pins (`StarkMachine::recursion_pins`); `Some`
     ///   means the rounds are pinned.
+    /// * `global_round`: the machine's global-round chip set
+    ///   (`StarkMachine::global_round`); a shard naming any of its chips commits
+    ///   them in a main round of their own.
     #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
     pub fn verify_shard(
         _config: &SC,
@@ -35,6 +38,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         proof: &ShardProof<SC>,
         pinned: Option<crate::jagged::RecursionPins>,
         machine_has_pv_buses: bool,
+        global_round: Option<&std::collections::BTreeSet<String>>,
     ) -> Result<(), VerificationError<SC>>
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
@@ -77,6 +81,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 num_pv_elts,
                 pinned,
                 machine_has_pv_buses,
+                global_round,
             )
             .map_err(|e| VerificationError::JaggedShardVerifier(format!("{e}")))?;
         Ok(())

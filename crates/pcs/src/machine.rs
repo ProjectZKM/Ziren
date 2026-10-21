@@ -54,19 +54,56 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// node's row counts, and every node is proved at its own multiple-of-32
     /// rows.  `None` on core, shrink and wrap (natural own area).
     recursion_pins: Option<crate::jagged::RecursionPins>,
+
+    /// The chips committed in a main round of their own, ahead of the rest of
+    /// the shard's main traces: a shard naming any of them commits
+    /// `[preprocessed, global main, local main]`, every other shard
+    /// `[preprocessed, main]`. `None` on a machine that never splits.
+    global_round: Option<std::collections::BTreeSet<String>>,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`].
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, recursion_pins: None }
+        Self { config, chips, num_pv_elts, recursion_pins: None, global_round: None }
     }
 
     /// Marks this machine's shard proofs as committing under `pins` (the
     /// COMPRESS machine).  Consuming builder.
-    pub const fn with_recursion_pins(mut self, pins: Option<crate::jagged::RecursionPins>) -> Self {
+    ///
+    /// # Panics
+    /// When the machine also commits a global round: a pinned machine's
+    /// rounds are fixed at `[preprocessed, main]`.
+    pub fn with_recursion_pins(mut self, pins: Option<crate::jagged::RecursionPins>) -> Self {
+        assert!(
+            pins.is_none() || self.global_round.is_none(),
+            "a machine with a global round cannot be pinned"
+        );
         self.recursion_pins = pins;
         self
+    }
+
+    /// Commits the chips named in `global_round` in a main round of their own.
+    /// Consuming builder.
+    ///
+    /// # Panics
+    /// When the machine is pinned (see [`Self::with_recursion_pins`]).
+    pub fn with_global_round(
+        mut self,
+        global_round: Option<std::collections::BTreeSet<String>>,
+    ) -> Self {
+        assert!(
+            global_round.is_none() || self.recursion_pins.is_none(),
+            "a pinned machine cannot commit a global round"
+        );
+        self.global_round = global_round;
+        self
+    }
+
+    /// The chips this machine commits in the global main round, if it splits.
+    #[inline]
+    pub const fn global_round(&self) -> Option<&std::collections::BTreeSet<String>> {
+        self.global_round.as_ref()
     }
 
     /// The area pins this machine's proofs commit under (`None` = natural).
@@ -1108,6 +1145,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         shard_proof,
                         self.recursion_pins(),
                         has_pv_buses,
+                        self.global_round(),
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })
