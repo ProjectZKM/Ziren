@@ -85,6 +85,7 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 ///   `pc + 4` while its own `next_pc` is the exit signal 0.
 /// * `num_extra_cycles`: cycles this instruction adds to `clk`; 0 except for
 ///   syscalls.
+///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
 /// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
@@ -533,6 +534,7 @@ fn i_type_instruction<AB: AirBuilder>(
 /// vanish there.  Here the multiplicities are `is_real` directly (the same
 /// degree, since `imm_b` was a column), so a padding row needs no neutralising
 /// at all and the chips' `populate_dependency` calls disappear with it.
+///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
 /// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
@@ -540,6 +542,7 @@ fn i_type_instruction<AB: AirBuilder>(
 /// the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
+///
 /// `check_op_a_bytes` is `false` for the memory instructions and the branches,
 /// whose op_a value is bytes by induction: the branches and SW/SB/SH/SWL/SWR
 /// only read op_a (`value == prev`), SC writes the constant `[1, 0, 0, 0]`,
@@ -653,7 +656,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
             self.op_b_access.populate_register(event.b_record, blu);
         }
-
     }
 
     /// Populate the frame for an immediate-form ALU instruction.  Mirrors
@@ -865,6 +867,7 @@ fn r_type_instruction<AB: AirBuilder>(
 /// read together, and any rule added to one belongs in the other.  As with
 /// [`eval_i_type_frame`], the register-access multiplicities are `is_real`
 /// directly, so a padding row needs no neutralising.
+///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
 /// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
@@ -1155,6 +1158,7 @@ fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> Instruc
 /// does — the two must be read together, and any rule added to one belongs in
 /// the other.  Register-access multiplicities are `is_real` directly, so a
 /// padding row needs no neutralising.
+///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
 /// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
