@@ -134,7 +134,8 @@ where
 
 /// What a shard's global main round binds ahead of the global challenge: the
 /// round's commitment, and the names and heights of its chips in name order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(bound(serialize = "F: serde::Serialize", deserialize = "F: serde::Deserialize<'de>"))]
 pub struct GlobalRoundBinding<F> {
     /// The round's commitment `C_global`.
     pub commitment: [F; 8],

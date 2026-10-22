@@ -139,6 +139,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryProgramChip {
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_MEMORY_PROGRAM_MULT_COLS))
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        Some(next_power_of_two(
+            input.program.image.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MemoryProgramChip as MachineAir<F>>::name(self).as_str(),
+        ))
+    }
+
     fn included(&self, _: &Self::Record) -> bool {
         true
     }
