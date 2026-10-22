@@ -35,7 +35,7 @@ pub struct InstructionFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// (A per-shard `clk` runs to `2^26` = `CORE_SHARD_CLK_LIMIT`: the memory-argument ordering
     /// proof needs every timestamp it compares bounded by the same width it range-checks
@@ -88,9 +88,11 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 ///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
-/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
-/// of rows can close a cycle and every row lies on the one chain whose ends
-/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// `clk + 5 + extra`; the clock strictly grows along the chain and every
+/// row's clock is range-checked below `2^26` (`send_timestamp_range_checks`,
+/// which this argument depends on), so the sum of the steps cannot wrap the
+/// field, no subset of rows can close a cycle, and every row lies on the one
+/// chain whose ends the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
@@ -467,7 +469,7 @@ pub struct ITypeFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -537,9 +539,11 @@ fn i_type_instruction<AB: AirBuilder>(
 ///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
-/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
-/// of rows can close a cycle and every row lies on the one chain whose ends
-/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// `clk + 5 + extra`; the clock strictly grows along the chain and every
+/// row's clock is range-checked below `2^26` (`send_timestamp_range_checks`,
+/// which this argument depends on), so the sum of the steps cannot wrap the
+/// field, no subset of rows can close a cycle, and every row lies on the one
+/// chain whose ends the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 ///
@@ -551,7 +555,7 @@ fn i_type_instruction<AB: AirBuilder>(
 /// writer (this check where `check_op_a_bytes` is `true`, the chips' own
 /// operations otherwise); memory holds bytes because MemoryGlobalInit
 /// rebuilds initial words from bits, MemoryLocal checks every shard's initial
-/// and final values, MemoryBump checks a register's first touch per shard,
+/// values, MemoryBump checks a register's first touch per shard,
 /// stores copy register bytes, and precompile writes go through the checked
 /// `eval_memory_access`.  The ALU immediate chips pass `true`.
 #[allow(clippy::too_many_arguments)]
@@ -809,7 +813,7 @@ pub struct RTypeFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -870,9 +874,11 @@ fn r_type_instruction<AB: AirBuilder>(
 ///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
-/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
-/// of rows can close a cycle and every row lies on the one chain whose ends
-/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// `clk + 5 + extra`; the clock strictly grows along the chain and every
+/// row's clock is range-checked below `2^26` (`send_timestamp_range_checks`,
+/// which this argument depends on), so the sum of the steps cannot wrap the
+/// field, no subset of rows can close a cycle, and every row lies on the one
+/// chain whose ends the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
@@ -1107,7 +1113,7 @@ pub struct ShamtFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -1161,9 +1167,11 @@ fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> Instruc
 ///
 /// The shard column is not range-checked.  Every real row receives
 /// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
-/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
-/// of rows can close a cycle and every row lies on the one chain whose ends
-/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// `clk + 5 + extra`; the clock strictly grows along the chain and every
+/// row's clock is range-checked below `2^26` (`send_timestamp_range_checks`,
+/// which this argument depends on), so the sum of the steps cannot wrap the
+/// field, no subset of rows can close a cycle, and every row lies on the one
+/// chain whose ends the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
