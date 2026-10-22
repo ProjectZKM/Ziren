@@ -85,6 +85,13 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 ///   `pc + 4` while its own `next_pc` is the exit signal 0.
 /// * `num_extra_cycles`: cycles this instruction adds to `clk`; 0 except for
 ///   syscalls.
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
+/// of rows can close a cycle and every row lies on the one chain whose ends
+/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
@@ -109,13 +116,6 @@ pub fn eval_instruction_frame<AB>(
 
     builder.when(is_real.clone()).assert_eq(frame.instruction.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.when(frame.instruction.imm_b).assert_word_eq(frame.op_b_val(), frame.instruction.op_b);
@@ -212,13 +212,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -540,6 +533,13 @@ fn i_type_instruction<AB: AirBuilder>(
 /// vanish there.  Here the multiplicities are `is_real` directly (the same
 /// degree, since `imm_b` was a column), so a padding row needs no neutralising
 /// at all and the chips' `populate_dependency` calls disappear with it.
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
+/// of rows can close a cycle and every row lies on the one chain whose ends
+/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_i_type_frame<AB>(
     builder: &mut AB,
@@ -559,13 +559,6 @@ pub fn eval_i_type_frame<AB>(
     builder.send_program(pc.clone(), i_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -615,13 +608,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -752,13 +738,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -889,6 +868,13 @@ fn r_type_instruction<AB: AirBuilder>(
 /// read together, and any rule added to one belongs in the other.  As with
 /// [`eval_i_type_frame`], the register-access multiplicities are `is_real`
 /// directly, so a padding row needs no neutralising.
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
+/// of rows can close a cycle and every row lies on the one chain whose ends
+/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_r_type_frame<AB>(
     builder: &mut AB,
@@ -908,13 +894,6 @@ pub fn eval_r_type_frame<AB>(
     builder.send_program(pc.clone(), r_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -1055,13 +1034,6 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -1186,6 +1158,13 @@ fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> Instruc
 /// does — the two must be read together, and any rule added to one belongs in
 /// the other.  Register-access multiplicities are `is_real` directly, so a
 /// padding row needs no neutralising.
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`; the clock strictly grows along the chain, so no subset
+/// of rows can close a cycle and every row lies on the one chain whose ends
+/// the public-values AIR anchors to `execution_shard`.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_shamt_frame<AB>(
     builder: &mut AB,
@@ -1205,13 +1184,6 @@ pub fn eval_shamt_frame<AB>(
     builder.send_program(pc.clone(), shamt_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -1260,13 +1232,6 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
         let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
