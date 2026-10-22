@@ -156,6 +156,26 @@ pub fn split_global_round<F: Clone>(
     ))
 }
 
+/// The global round the shard of `main_traces` commits, as the global hash
+/// chain absorbs it: the round's commitment and its chips' heights. `None`
+/// when the shard names no chip of `global_round`.
+pub fn bind_global_round<SC>(
+    main_traces: &crate::traces::Traces<Val<SC>>,
+    global_round: Option<&std::collections::BTreeSet<String>>,
+) -> Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static,
+{
+    let (global, _) = split_global_round(main_traces, global_round)?;
+    let (commitment, _) = commit_traces::<SC>(&global, None);
+    let chips =
+        global.named_traces.iter().map(|(name, pm)| (name.clone(), raw_chip_height(pm))).collect();
+    Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips })
+}
+
 /// Commits the shard's main traces: the global round first when the shard has
 /// one (see [`split_global_round`]), then the main round over every other
 /// chip. Returns the global round, if any, and `(C_main, precompute)` of the
