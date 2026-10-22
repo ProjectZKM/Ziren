@@ -22,7 +22,6 @@ use zkm_pcs::{air::MachineAir, PicusInfo};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
-    memory::MemoryCols,
     utils::next_multiple_of_32,
     CoreChipError,
 };
