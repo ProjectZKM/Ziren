@@ -540,6 +540,17 @@ fn i_type_instruction<AB: AirBuilder>(
 /// the public-values AIR anchors to `execution_shard`.  The column therefore
 /// equals the public `execution_shard`, which the complete-proof check pins to
 /// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
+/// `check_op_a_bytes` is `false` for the memory instructions and the branches,
+/// whose op_a value is bytes by induction: the branches and SW/SB/SH/SWL/SWR
+/// only read op_a (`value == prev`), SC writes the constant `[1, 0, 0, 0]`,
+/// and LW/LL/LB/LH/LBU/LHU/LWL/LWR copy bytes of a memory word (and of op_a's
+/// previous value).  Every register write elsewhere is byte-checked by its
+/// writer (this check where `check_op_a_bytes` is `true`, the chips' own
+/// operations otherwise); memory holds bytes because MemoryGlobalInit
+/// rebuilds initial words from bits, MemoryLocal checks every shard's initial
+/// and final values, MemoryBump checks a register's first touch per shard,
+/// stores copy register bytes, and precompile writes go through the checked
+/// `eval_memory_access`.  The ALU immediate chips pass `true`.
 #[allow(clippy::too_many_arguments)]
 pub fn eval_i_type_frame<AB>(
     builder: &mut AB,
@@ -551,6 +562,7 @@ pub fn eval_i_type_frame<AB>(
     recv_next_pc: AB::Expr,
     num_extra_cycles: AB::Expr,
     is_real: AB::Expr,
+    check_op_a_bytes: bool,
 ) where
     AB: ZKMCoreAirBuilder,
 {
@@ -579,7 +591,9 @@ pub fn eval_i_type_frame<AB>(
         is_real.clone(),
     );
 
-    builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+    if check_op_a_bytes {
+        builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+    }
 
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
@@ -640,28 +654,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             self.op_b_access.populate_register(event.b_record, blu);
         }
 
-        let a_bytes = self
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[0] as u8,
-            c: a_bytes[1] as u8,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[2] as u8,
-            c: a_bytes[3] as u8,
-        });
     }
 
     /// Populate the frame for an immediate-form ALU instruction.  Mirrors
@@ -689,6 +681,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             program,
             shard,
             blu,
+            true,
         );
     }
 
@@ -715,6 +708,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             program,
             shard,
             blu,
+            false,
         );
     }
 
@@ -732,6 +726,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         program: &Program,
         shard: u32,
         blu: &mut impl ByteRecord,
+        check_op_a_bytes: bool,
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (clk & 0xffff) as u16;
@@ -769,28 +764,30 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             self.op_b_access.populate_register(b_record, blu);
         }
 
-        let a_bytes = self
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[0] as u8,
-            c: a_bytes[1] as u8,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[2] as u8,
-            c: a_bytes[3] as u8,
-        });
+        if check_op_a_bytes {
+            let a_bytes = self
+                .op_a_access
+                .access
+                .value
+                .0
+                .iter()
+                .map(|x| x.as_canonical_u32())
+                .collect::<Vec<_>>();
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[0] as u8,
+                c: a_bytes[1] as u8,
+            });
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[2] as u8,
+                c: a_bytes[3] as u8,
+            });
+        }
     }
 }
 
