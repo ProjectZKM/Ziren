@@ -11,7 +11,7 @@ theorem row_spec (w : W) (hw : constraints w) :
   rcases ZirenDet.bit_cases c16 with hz | hz <;> subst hz
   · simp only [sub_zero, one_mul, mul_one] at *
     exact Or.inr ⟨rfl, ZirenDet.LeadingOne.nonzero_spec x2 x6 x7 x8 x9 x56 x57 x58 x59 x60 x61 x62 x63 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x47 x48 x49 x50 x51 x39 x40 x41 x42 x43 x31 x32 x33 x34
-      c20 c99 c82 c83 c84 c85 c86 c87 c88 c89 c21 c22 c23 c24 c25 c26 c27 c28 c29 c30 c31 c32 c33 c34 c35 c36 c37 c38 c39 c43 c44 c45 c46 c47 c50 c51 c52 c53 c54 c56 c57 c58 c59 c60 c68 c67 c66 c65 c90 c91 c92 c93 ⟨c212, c213, c214, c215, c216, c217, c218, c219⟩ ⟨c200, c201, c202, c203, c204, c205, c206, c207⟩ ⟨c188, c189, c190, c191, c192, c193, c194, c195⟩ ⟨c176, c177, c178, c179, c180, c181, c182, c183⟩ ⟨c164, c165, c166, c167, c168, c169, c170, c171⟩ c94 c95 c96 c97 c220 c221 c222 c223 c224 c244 c245 c246 c247 c248 c236 c237 c238 c239 c240⟩
+      c20 c99 c82 c83 c84 c85 c86 c87 c88 c89 c21 c22 c23 c24 c25 c26 c27 c28 c29 c30 c31 c32 c33 c34 c35 c36 c37 c38 c39 c43 c44 c45 c46 c47 c50 c51 c52 c53 c54 c56 c57 c58 c59 c60 c68 c67 c66 c65 c90 c91 c92 c93 ⟨c211, c212, c213, c214, c215, c216, c217, c218⟩ ⟨c199, c200, c201, c202, c203, c204, c205, c206⟩ ⟨c187, c188, c189, c190, c191, c192, c193, c194⟩ ⟨c175, c176, c177, c178, c179, c180, c181, c182⟩ ⟨c163, c164, c165, c166, c167, c168, c169, c170⟩ c94 c95 c96 c97 c219 c220 c221 c222 c223 c243 c244 c245 c246 c247 c235 c236 c237 c238 c239⟩
   · simp only [one_mul] at *
     exact ZirenDet.LeadingOne.zero_spec x2 x6 x7 x8 x9 c17 c18 c19 c94 c95 c96 c97
 
