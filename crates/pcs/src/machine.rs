@@ -797,11 +797,21 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     where
         Val<SC>: 'a,
     {
+        let chain = self.global_chain(vk_challenger, rounds);
+        self.global_challenge_at(*chain.last().expect("the chain holds at least its start"))
+    }
+
+    /// The global challenge of a proof whose hash chain ends at `h_star`;
+    /// `None` for a machine without global lookups.
+    pub fn global_challenge_at(
+        &self,
+        h_star: [Val<SC>; 8],
+    ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
+    {
         self.has_global_lookups().then(|| {
-            let chain = self.global_chain(vk_challenger, rounds);
             crate::logup_gkr::GlobalChallenge::derive(
                 self.config.challenger(),
-                *chain.last().expect("the chain holds at least its start"),
+                h_star,
                 self.global_beta_seed_dim(),
             )
         })
