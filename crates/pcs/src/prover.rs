@@ -574,16 +574,7 @@ where
         if let Some(cluster_widths) = cluster_widths {
             pad_to_cluster(&mut traces, cluster_widths, |name| set.contains(name));
         }
-        if traces.named_traces.is_empty() {
-            return Ok(None);
-        }
-        let (commitment, _) = crate::shard_level::prover::commit_traces::<SC>(&traces, None);
-        let chips = traces
-            .named_traces
-            .iter()
-            .map(|(name, pm)| (name.clone(), crate::shard_level::prover::raw_chip_height(pm)))
-            .collect();
-        Ok(Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips }))
+        Ok(crate::shard_level::prover::bind_global_round::<SC>(&traces, Some(set)))
     }
 
     /// Prove the program for the given shard and given a commitment to the main data.

@@ -3263,21 +3263,14 @@ pub mod tests {
 
     /// A prover runs the program on an initial memory other than its image
     /// and proves against the image's verifying key: it sets up on the
-    /// altered image, puts the honest image's initial global sum into the
-    /// proving key so the transcript matches the honest key, and moves the
-    /// difference between the two initial sums into the Global chip's
-    /// declared global sum (`chip_cumulative_sums`) of one shard.  Nothing
-    /// constrains the declared sum (the shard prover has no permutation trace,
-    /// so `eval_permutation_constraints` returns before its last-row check),
-    /// so a verifier summing those would cancel the difference.  Returns the
+    /// altered image and replaces the proving key's preprocessed commitment
+    /// with the honest one, so the transcript matches the honest key while
+    /// the preprocessed tables it opens carry the altered image.  Returns the
     /// forged core proof and the honest image's verifying key.
     fn forge_core_proof_over_altered_image(
         prover: &ZKMProver<DefaultProverComponents>,
         opts: ZKMProverOpts,
     ) -> Result<(ZKMCoreProof, ZKMVerifyingKey)> {
-        use zkm_pcs::septic_curve::SepticCurveComplete;
-        use zkm_pcs::septic_digest::SepticDigest;
-
         let elf = test_artifacts::FIBONACCI_ELF;
         let (_, _, program, vk) = prover.setup(elf);
 
@@ -3292,49 +3285,19 @@ pub mod tests {
         altered.image.insert(addr, word ^ 1);
 
         let (altered_pk_d, altered_vk) = prover.core_prover.setup(&altered);
-        let honest_initial = vk.vk.initial_global_cumulative_sum;
-        let altered_initial = altered_vk.initial_global_cumulative_sum;
-        assert_ne!(honest_initial, altered_initial, "the altered word must move the initial sum");
+        assert_ne!(vk.vk.commit, altered_vk.commit, "the altered word must move the commitment");
         let mut pk = prover.core_prover.pk_to_host(&altered_pk_d);
-        pk.initial_global_cumulative_sum = honest_initial;
+        pk.commit = vk.vk.commit.clone();
         let pk_d = prover.core_prover.pk_to_device(&pk);
 
-        let mut core =
+        let core =
             prover.prove_core(&pk_d, altered, &fib_stdin(10), opts, ZKMContext::default())?;
-
-        let shift = |d: SepticDigest<KoalaBear>| {
-            SepticDigest(
-                (SepticCurveComplete::Affine(d.0)
-                    + SepticCurveComplete::Affine(altered_initial.0)
-                    + SepticCurveComplete::Affine(honest_initial.0.neg()))
-                .point(),
-            )
-        };
-        let shard = core
-            .proof
-            .0
-            .iter()
-            .position(|sp| {
-                sp.jagged_shard_proof.chip_cumulative_sums.values().any(|s| !s.global.is_zero())
-            })
-            .expect("a shard with global interactions");
-        for sums in core.proof.0[shard]
-            .jagged_shard_proof
-            .chip_cumulative_sums
-            .values_mut()
-            .filter(|s| !s.global.is_zero())
-        {
-            sums.global = shift(sums.global);
-        }
-        tracing::info!(
-            "altered image word {addr:#x}: {word:#x} -> {:#x}; shifted shard {shard}",
-            word ^ 1
-        );
+        tracing::info!("altered image word {addr:#x}: {word:#x} -> {:#x}", word ^ 1);
         Ok((core, vk))
     }
 
-    /// The leaf sums the shard public values, which the public-values AIR
-    /// binds to the Global chip's digest chain, so the tree over the proof of
+    /// The recursion verifier opens the preprocessed tables against the
+    /// verifying key's commitment, so the tree over the proof of
     /// [`forge_core_proof_over_altered_image`] cannot close.
     ///
     /// `cargo test -r -p zkm-prover compress_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
@@ -3369,8 +3332,8 @@ pub mod tests {
         Ok(())
     }
 
-    /// The host verifier sums the shard public values rather than the declared
-    /// per-chip sums, so the core machine's verifier rejects the proof of
+    /// The core machine's verifier opens the preprocessed tables against the
+    /// verifying key's commitment, so it rejects the proof of
     /// [`forge_core_proof_over_altered_image`] on its own, without recursion and
     /// without any check outside `StarkMachine::verify`.
     ///
@@ -3379,7 +3342,7 @@ pub mod tests {
     #[serial]
     #[ignore]
     fn core_verify_rejects_a_proof_over_a_different_initial_memory() -> Result<()> {
-        use zkm_pcs::{air::LookupScope, MachineProof, MachineVerificationError};
+        use zkm_pcs::MachineProof;
 
         setup_logger();
         let opts = ZKMProverOpts::default();
@@ -3392,20 +3355,15 @@ pub mod tests {
         let machine_result = machine.verify(&vk.vk, &machine_proof, &mut challenger);
         tracing::info!("StarkMachine::verify: {machine_result:?}");
         assert!(
-            matches!(
-                machine_result,
-                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
-            ),
-            "the core machine verifier must reject a proof over an altered initial memory; got {machine_result:?}"
+            machine_result.is_err(),
+            "the core machine verifier must reject a proof over an altered initial memory"
         );
 
         let prover_result = prover.verify(&core.proof, &vk);
+        tracing::info!("ZKMProver::verify: {prover_result:?}");
         assert!(
-            matches!(
-                prover_result,
-                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
-            ),
-            "ZKMProver::verify must reject a proof over an altered initial memory; got {prover_result:?}"
+            prover_result.is_err(),
+            "ZKMProver::verify must reject a proof over an altered initial memory"
         );
         Ok(())
     }

@@ -842,3 +842,379 @@ fn control_unshaped_memory_programs_verify() {
         assert!(res.is_ok(), "honest unshaped proof of {name} must verify");
     }
 }
+
+// GLOBAL LOOKUPS.
+//
+// The shards' cross-shard memory and syscall messages close on the global
+// bus under a challenge derived from the hash chain over every shard's
+// global round. A prover that deviates from the protocol is modelled by
+// `prove_tampered`: it traces the shards as `prove_with_context` does, edits
+// the raw traces before anything is committed, binds the edited global
+// rounds into the chain, and may prove a shard under a challenge other than
+// the chain's. Every deviation must be rejected by the honest verifier.
+
+type RawTraces = std::collections::BTreeMap<String, p3_matrix::dense::RowMajorMatrix<Val>>;
+type GlobalChallenge = zkm_pcs::logup_gkr::GlobalChallenge<Val, Challenge>;
+
+/// Proves `program` on `stdin` under `opts` with `prover`, whose machine
+/// decides which chips commit in the global round. `tamper` edits every
+/// shard's raw chip traces, in shard order, before they are committed;
+/// `challenge` picks, per shard, the challenge it is proven under from the one
+/// the shards' global rounds fix.
+fn prove_tampered(
+    prover: &CpuProver<SC, MipsAir<Val>>,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    tamper: impl FnOnce(&mut [RawTraces]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+) -> MachineProof<SC> {
+    use zkm_pcs::air::MachineAir;
+
+    let (pk, _) = prover.setup(program);
+    let records =
+        crate::utils::prove::shard_records::<SC, _>(prover, &pk, program, stdin, opts).unwrap();
+
+    let mut raw: Vec<RawTraces> = records
+        .iter()
+        .map(|record| {
+            prover
+                .machine()
+                .shard_chips(record)
+                .map(|chip| {
+                    let trace = chip
+                        .generate_trace(record, &mut zkm_core_executor::ExecutionRecord::default())
+                        .unwrap();
+                    (chip.name(), trace)
+                })
+                .collect()
+        })
+        .collect();
+    tamper(&mut raw);
+
+    let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
+        .max_log_row_count as u32;
+    let traces: Vec<zkm_pcs::Traces<Val>> = raw
+        .into_iter()
+        .map(|shard| zkm_pcs::Traces {
+            named_traces: shard
+                .into_iter()
+                .map(|(name, trace)| (name, zkm_pcs::into_padded(trace, cube, None)))
+                .collect(),
+        })
+        .collect();
+
+    let mut challenger = prover.machine().config().challenger();
+    zkm_pcs::MachineProvingKey::observe_into(&pk, &mut challenger);
+    let rounds = traces
+        .iter()
+        .map(|t| {
+            zkm_pcs::shard_level::prover::bind_global_round::<SC>(
+                t,
+                prover.machine().global_round(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let global = prover
+        .machine()
+        .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+        .expect("the core machine has global lookups");
+
+    let shard_proofs = records
+        .iter()
+        .zip(traces)
+        .enumerate()
+        .map(|(i, (record, traces))| {
+            let mut data = prover.commit(record, traces, None);
+            data.global_challenge = Some(challenge(i, &global));
+            prover.open(&pk, data, &mut challenger.clone()).unwrap()
+        })
+        .collect();
+    MachineProof { shard_proofs }
+}
+
+/// The honest machine and the verifying key of `program`.
+fn honest_vk(
+    program: &Program,
+) -> (StarkMachine<SC, MipsAir<Val>>, zkm_pcs::StarkVerifyingKey<SC>) {
+    let machine = MipsAir::machine(KoalaBearPoseidon2::new());
+    let (_pk, vk) = machine.setup(program);
+    (machine, vk)
+}
+
+fn honest_prover() -> CpuProver<SC, MipsAir<Val>> {
+    CpuProver::new(MipsAir::machine(KoalaBearPoseidon2::new()))
+}
+
+fn same_challenge(_: usize, global: &GlobalChallenge) -> GlobalChallenge {
+    global.clone()
+}
+
+/// Options that cut `fibonacci_program` into several shards.
+fn multi_shard_opts() -> ZKMCoreOpts {
+    ZKMCoreOpts { shard_size: 1 << 10, ..ZKMCoreOpts::default() }
+}
+
+/// Proves `program` with `tamper` and `challenge`, checks the proof has at
+/// least `min_shards` shards, and returns the honest verifier's verdict.
+#[allow(clippy::too_many_arguments)]
+fn verify_tampered(
+    label: &str,
+    program: Program,
+    stdin: ZKMStdin,
+    opts: ZKMCoreOpts,
+    min_shards: usize,
+    prover: CpuProver<SC, MipsAir<Val>>,
+    tamper: impl FnOnce(&mut [RawTraces]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+) -> Result<(), MachineVerificationError<SC>> {
+    let proof = prove_tampered(&prover, &program, &stdin, opts, tamper, challenge);
+    assert!(
+        proof.shard_proofs.len() >= min_shards,
+        "[{label}] needs {min_shards} shards, the proof has {}",
+        proof.shard_proofs.len()
+    );
+    let (machine, vk) = honest_vk(&program);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!(
+        "[global][{label}] shards={} verify = {}",
+        proof.shard_proofs.len(),
+        reject_tag(&res)
+    );
+    res
+}
+
+/// Mutable views of every row of `trace`.
+fn rows_mut(trace: &mut p3_matrix::dense::RowMajorMatrix<Val>) -> impl Iterator<Item = &mut [Val]> {
+    let width = trace.width;
+    trace.values.chunks_mut(width)
+}
+
+/// Control: the tampering prover with no tampering proves a multi-shard
+/// program that verifies, so a rejection below is the deviation's.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn control_untampered_multi_shard_verifies() {
+    setup_logger();
+    let res = verify_tampered(
+        "untampered",
+        fibonacci_program(),
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        honest_prover(),
+        |_| {},
+        same_challenge,
+    );
+    assert!(res.is_ok(), "the untampered proof must verify: {}", reject_tag(&res));
+}
+
+/// The first shard withholds the program image from the global bus: its
+/// MemoryProgram multiplicities are zeroed.
+#[test]
+#[ignore = "proves a real core proof; run with --ignored"]
+fn memory_program_withheld_in_first_shard_rejected() {
+    setup_logger();
+    let res = verify_tampered(
+        "image withheld",
+        fibonacci_program(),
+        fib_stdin(),
+        ZKMCoreOpts::default(),
+        1,
+        honest_prover(),
+        |shards| {
+            for row in rows_mut(shards[0].get_mut("MemoryProgram").unwrap()) {
+                let cols: &mut crate::memory::MemoryProgramMultCols<Val> =
+                    core::borrow::BorrowMut::borrow_mut(row);
+                cols.multiplicity = Val::ZERO;
+            }
+        },
+        same_challenge,
+    );
+    assert!(res.is_err(), "a first shard that withholds the image must be rejected");
+}
+
+/// A later shard sends the program image a second time: its MemoryProgram
+/// multiplicities are set on every image row.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn memory_program_resent_in_later_shard_rejected() {
+    setup_logger();
+    let program = fibonacci_program();
+    let image_len = program.image.len();
+    let res = verify_tampered(
+        "image resent",
+        program,
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        honest_prover(),
+        |shards| {
+            for row in rows_mut(shards[1].get_mut("MemoryProgram").unwrap()).take(image_len) {
+                let cols: &mut crate::memory::MemoryProgramMultCols<Val> =
+                    core::borrow::BorrowMut::borrow_mut(row);
+                cols.multiplicity = Val::ONE;
+            }
+        },
+        same_challenge,
+    );
+    assert!(res.is_err(), "a later shard that sends the image again must be rejected");
+}
+
+/// The first shard's proof drops the MemoryProgram table to height 0.
+#[test]
+#[ignore = "proves a real core proof; run with --ignored"]
+fn memory_program_height_zero_in_first_shard_rejected() {
+    setup_logger();
+    let (mut proof, machine, vk) = prove_raw_heights(fibonacci_program(), fib_stdin());
+    proof.shard_proofs[0].jagged_shard_proof.chip_heights.insert("MemoryProgram".to_string(), 0);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!("[global][image height 0] verify = {}", reject_tag(&res));
+    assert!(res.is_err(), "a first shard without the image table must be rejected");
+}
+
+/// A word of the program image differs from the verifying key's: the proof
+/// is made with the altered program's proving key, whose commitment is
+/// replaced by the honest one so the transcript matches the honest key.
+#[test]
+#[ignore = "proves a real core proof; run with --ignored"]
+fn altered_image_rejected_by_the_honest_vk() {
+    setup_logger();
+    let program = fibonacci_program();
+    let mut altered = program.clone();
+    let (&addr, &word) = altered.image.iter().next_back().unwrap();
+    altered.image.insert(addr, word ^ 1);
+
+    let (machine, vk) = honest_vk(&program);
+    let prover = honest_prover();
+    let (mut pk, _) = prover.setup(&altered);
+    pk.commit = vk.commit.clone();
+    let (proof, _, _) = prove_with_context::<SC, CpuProver<_, _>>(
+        &prover,
+        &pk,
+        altered,
+        &fib_stdin(),
+        ZKMCoreOpts::default(),
+        ZKMContext::default(),
+        None,
+    )
+    .unwrap();
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!("[global][altered image] verify = {}", reject_tag(&res));
+    assert!(res.is_err(), "a proof over an altered image must be rejected by the honest key");
+}
+
+/// One memory word's final value in a shard's local-memory table is off by
+/// one on the global bus.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_value_off_by_one_rejected() {
+    setup_logger();
+    let res = verify_tampered(
+        "value off by one",
+        fibonacci_program(),
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        honest_prover(),
+        |shards| {
+            let row = rows_mut(shards[0].get_mut("MemoryLocal").unwrap()).next().unwrap();
+            let entry: &mut crate::memory::SingleMemoryLocal<Val> =
+                core::borrow::BorrowMut::borrow_mut(
+                    &mut row[..core::mem::size_of::<crate::memory::SingleMemoryLocal<u8>>()],
+                );
+            entry.final_value[0] += Val::ONE;
+        },
+        same_challenge,
+    );
+    assert!(res.is_err(), "a global memory value off by one must be rejected");
+}
+
+/// Two shards exchange their first local-memory rows. The global bus still
+/// balances, since the multiset of global messages is unchanged; each
+/// shard's local bus does not.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_rows_swapped_across_shards_rejected() {
+    setup_logger();
+    let res = verify_tampered(
+        "rows swapped",
+        fibonacci_program(),
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        honest_prover(),
+        |shards| {
+            let (first, rest) = shards.split_at_mut(1);
+            let a = first[0].get_mut("MemoryLocal").unwrap();
+            let b = rest[0].get_mut("MemoryLocal").unwrap();
+            let width = a.width;
+            a.values[..width].swap_with_slice(&mut b.values[..width]);
+        },
+        same_challenge,
+    );
+    assert!(res.is_err(), "local-memory rows swapped across shards must be rejected");
+}
+
+/// The prover commits MemoryLocal, whose messages are on the global bus, in
+/// the local round, after the global challenge is fixed.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_chip_committed_in_the_local_round_rejected() {
+    setup_logger();
+    let machine = MipsAir::machine(KoalaBearPoseidon2::new());
+    let mut round = machine.global_round().cloned().unwrap();
+    assert!(round.remove("MemoryLocal"));
+    let prover = CpuProver::new(machine.with_global_round(Some(round)));
+    let res = verify_tampered(
+        "global chip in local round",
+        fibonacci_program(),
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        prover,
+        |_| {},
+        same_challenge,
+    );
+    assert!(res.is_err(), "a global chip committed in the local round must be rejected");
+}
+
+/// The last shard is proven under a challenge derived from a digest other
+/// than the chain's `h_star`.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn shard_proven_under_another_h_star_rejected() {
+    setup_logger();
+    let program = fibonacci_program();
+    let shards = shard_records_count(&program, &fib_stdin(), multi_shard_opts());
+    let machine = MipsAir::machine(KoalaBearPoseidon2::new());
+    let res = verify_tampered(
+        "mixed h_star",
+        program,
+        fib_stdin(),
+        multi_shard_opts(),
+        2,
+        honest_prover(),
+        |_| {},
+        |i, global| {
+            if i + 1 < shards {
+                return global.clone();
+            }
+            let mut h_star = global.h_star;
+            h_star[0] += Val::ONE;
+            zkm_pcs::logup_gkr::GlobalChallenge::derive(
+                machine.config().challenger(),
+                h_star,
+                machine.global_beta_seed_dim(),
+            )
+        },
+    );
+    assert!(res.is_err(), "a shard proven under another h_star must be rejected");
+}
+
+/// The number of shards `program` is cut into on `stdin` under `opts`.
+fn shard_records_count(program: &Program, stdin: &ZKMStdin, opts: ZKMCoreOpts) -> usize {
+    let prover = honest_prover();
+    let (pk, _) = prover.setup(program);
+    crate::utils::prove::shard_records::<SC, _>(&prover, &pk, program, stdin, opts).unwrap().len()
+}

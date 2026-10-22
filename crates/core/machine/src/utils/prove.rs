@@ -86,38 +86,10 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
-    let mut runtime = Executor::with_context(program.clone(), opts, context);
-    runtime.maximal_shapes = shape_config.map(|config| {
-        config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
-    });
-
-    runtime.write_vecs(&stdin.buffer);
-    for proof in stdin.proofs.iter() {
-        let (proof, vk) = proof.clone();
-        runtime.write_proof(proof, vk);
-    }
-
     let proving_start = Instant::now();
 
-    let checkpoint = tracing::debug_span!("checkpoint generator").in_scope(
-        || -> Result<_, ZKMCoreProverError> {
-            let initial_state = runtime.state.clone();
-            let chunk = runtime
-                .run_fast_capture_whole_program_chunk()
-                .map_err(ZKMCoreProverError::ExecutionError)?;
-            let global_clk = runtime.state.global_clk;
-            tracing::debug!(
-                target = "checkpoint_pin",
-                "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
-                chunk.clk_start,
-                chunk.clk_end,
-                chunk.mem_reads.len(),
-                global_clk,
-            );
-            Ok((0, initial_state, true, global_clk))
-        },
-    )?;
-    let public_values_stream = std::mem::take(&mut runtime.state.public_values_stream);
+    let (checkpoint, public_values_stream) =
+        execute_to_checkpoint(&program, stdin, opts, context, shape_config)?;
 
     let mut challenger = prover.machine().config().challenger();
     pk.observe_into(&mut challenger);
@@ -222,6 +194,85 @@ where
     Ok((proof, public_values_stream, cycles))
 }
 
+/// The state a pass starts tracing from: its index, the executor state, and
+/// whether it runs to the end of the program, with the program's cycle count.
+type Checkpoint = (usize, ExecutionState, bool, u64);
+
+/// Executes `program` on `stdin` once, returning the checkpoint every pass of
+/// [`prove_with_context`] traces from and the public values stream.
+fn execute_to_checkpoint<F: PrimeField32>(
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    context: ZKMContext,
+    shape_config: Option<&CoreShapeConfig<F>>,
+) -> Result<(Checkpoint, Vec<u8>), ZKMCoreProverError> {
+    let mut runtime = Executor::with_context(program.clone(), opts, context);
+    runtime.maximal_shapes = shape_config.map(|config| {
+        config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
+    });
+
+    runtime.write_vecs(&stdin.buffer);
+    for proof in stdin.proofs.iter() {
+        let (proof, vk) = proof.clone();
+        runtime.write_proof(proof, vk);
+    }
+
+    tracing::debug_span!("checkpoint generator").in_scope(|| {
+        let initial_state = runtime.state.clone();
+        let chunk = runtime
+            .run_fast_capture_whole_program_chunk()
+            .map_err(ZKMCoreProverError::ExecutionError)?;
+        let global_clk = runtime.state.global_clk;
+        tracing::debug!(
+            target = "checkpoint_pin",
+            "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
+            chunk.clk_start,
+            chunk.clk_end,
+            chunk.mem_reads.len(),
+            global_clk,
+        );
+        let public_values_stream = std::mem::take(&mut runtime.state.public_values_stream);
+        Ok(((0, initial_state, true, global_clk), public_values_stream))
+    })
+}
+
+/// The records of the shards [`prove_with_context`] proves for `program` on
+/// `stdin` without a shape, in shard order, as its passes trace them.
+#[cfg(test)]
+pub(crate) fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+    prover: &P,
+    pk: &P::DeviceProvingKey,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+) -> Result<Vec<ExecutionRecord>, ZKMCoreProverError>
+where
+    SC::Val: PrimeField32,
+    SC::Challenger: 'static + Clone + Send,
+    OpeningProof<SC>: Send,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
+    let (checkpoint, _) =
+        execute_to_checkpoint::<SC::Val>(program, stdin, opts, ZKMContext::default(), None)?;
+    let mut challenger = prover.machine().config().challenger();
+    pk.observe_into(&mut challenger);
+    let (records_tx, records_rx) = std::sync::mpsc::channel();
+    run_pass::<SC, P>(
+        prover,
+        pk,
+        program,
+        opts,
+        None,
+        &challenger,
+        checkpoint,
+        Pass::Bind,
+        Some(records_tx),
+    )?;
+    Ok(records_rx.into_iter().flatten().collect())
+}
+
 /// One pass of [`prove_with_context`] over the shards a checkpoint traces.
 #[derive(Clone, Copy)]
 enum Pass<'a, F, EF> {
@@ -253,7 +304,7 @@ fn run_pass<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     opts: ZKMCoreOpts,
     shape_config: Option<&CoreShapeConfig<SC::Val>>,
     challenger: &SC::Challenger,
-    checkpoint: (usize, ExecutionState, bool, u64),
+    checkpoint: Checkpoint,
     pass: Pass<'_, Val<SC>, SC::Challenge>,
     all_records_tx: Option<std::sync::mpsc::Sender<Vec<ExecutionRecord>>>,
 ) -> Result<(Vec<ShardOutput<SC>>, ExecutionReport), ZKMCoreProverError>
