@@ -166,12 +166,13 @@ pub fn verify_compress_basefold<C, SC, A>(
         array::from_fn(|_| builder.uninit());
     let mut _reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         array::from_fn(|_| builder.uninit());
-    let mut _global_cumulative_sums: Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>> =
-        Vec::new();
+    let mut _global_chain: [Felt<C::F>; DIGEST_SIZE] = array::from_fn(|_| builder.uninit());
     let mut _init_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     let mut _finalize_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     use p3_field::PrimeCharacteristicRing;
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
+    let mut _global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
+        array::from_fn(|_| builder.eval(C::F::ZERO));
 
     let _basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
         SC,
@@ -358,6 +359,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         let _jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -368,6 +370,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values,
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -436,6 +439,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                 machine.num_pv_elts(),
                 _eval_public_values_fn,
                 _jagged_evaluator_fn,
+                None,
+                &vec![false; _shard_chips.len()],
             );
         } else {
         let _jagged_shard_proof_variable = _jagged_shard_proof_variable
@@ -475,6 +480,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                 machine.num_pv_elts(),
                 _eval_public_values_fn,
                 _jagged_evaluator_fn,
+                None,
+                &vec![false; _shard_chips.len()],
             );
         }
 
@@ -512,6 +519,10 @@ pub fn verify_compress_basefold<C, SC, A>(
             {
                 *digest = first_digest;
             }
+
+            _compress_public_values.global_chain_start = _current_public_values.global_chain_start;
+            _global_chain = _current_public_values.global_chain_start;
+            _compress_public_values.global_h_star = _current_public_values.global_h_star;
 
             _compress_public_values.start_pc = _current_public_values.start_pc;
             _pc = _current_public_values.start_pc;
@@ -574,6 +585,19 @@ pub fn verify_compress_basefold<C, SC, A>(
 
         builder.assert_felt_eq(_pc, _current_public_values.start_pc);
         builder.assert_felt_eq(_shard, _current_public_values.start_shard);
+
+        for (chain, current) in
+            _global_chain.iter().zip_eq(_current_public_values.global_chain_start.iter())
+        {
+            builder.assert_felt_eq(*chain, *current);
+        }
+        for (h_star, current) in _compress_public_values
+            .global_h_star
+            .iter()
+            .zip_eq(_current_public_values.global_h_star.iter())
+        {
+            builder.assert_felt_eq(*h_star, *current);
+        }
 
         C::range_check_felt(
             builder,
@@ -706,10 +730,11 @@ pub fn verify_compress_basefold<C, SC, A>(
             *bit = *next_bit;
         }
 
-        _global_cumulative_sums.push(_current_public_values.global_cumulative_sum);
+        _global_chain = _current_public_values.global_chain_end;
+        for (sum, current) in _global_sum.iter_mut().zip_eq(_current_public_values.global_sum) {
+            *sum = builder.eval(*sum + current);
+        }
     }
-    use zkm_recursion_compiler::circuit::CircuitV2Builder;
-    let _global_cumulative_sum = builder.sum_digest_v2(_global_cumulative_sums);
 
     _compress_public_values.zkm_vk_digest = _zkm_vk_digest;
     _compress_public_values.next_pc = _pc;
@@ -720,7 +745,8 @@ pub fn verify_compress_basefold<C, SC, A>(
     _compress_public_values.end_reconstruct_deferred_digest = _reconstruct_deferred_digest;
     _compress_public_values.deferred_proofs_digest = _deferred_proofs_digest;
     _compress_public_values.committed_value_digest = _committed_value_digest;
-    _compress_public_values.global_cumulative_sum = _global_cumulative_sum;
+    _compress_public_values.global_chain_end = _global_chain;
+    _compress_public_values.global_sum = _global_sum;
     _compress_public_values.is_complete = is_complete;
     _compress_public_values.contains_execution_shard = _contains_execution_shard;
     _compress_public_values.exit_code = _exit_code;

@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use zkm_pcs::septic_curve::SepticCurve;
 use zkm_recursion_core::air::RecursionPublicValues;
 
 use super::{
@@ -279,13 +278,6 @@ pub enum DslIr<C: Config> {
     CircuitCommitCommittedValuesDigest(Var<C::N>),
     /// Commit the recursion verifying-key-allowlist root as a public input.
     CircuitCommitVkRoot(Var<C::N>),
-
-    /// Adds two elliptic curve points. (sum, point_1, point_2).
-    CircuitV2HintAddCurve(
-        SepticCurve<Felt<C::F>>,
-        SepticCurve<Felt<C::F>>,
-        SepticCurve<Felt<C::F>>,
-    ),
 
     // FRI specific instructions.
     /// Executes a FRI fold operation. 1st field is the size of the fri fold input array.  2nd

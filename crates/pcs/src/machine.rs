@@ -434,6 +434,30 @@ impl<SC: StarkGenericConfig> Debug for PartStarkVerifyingKey<SC> {
 }
 
 impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
+    /// Whether some chip of the machine has a global-scope lookup, whose
+    /// fraction uses the cross-shard [`crate::logup_gkr::GlobalChallenge`].
+    pub fn has_global_lookups(&self) -> bool {
+        self.chips
+            .iter()
+            .any(|chip| chip.sends().iter().chain(chip.receives().iter()).any(Lookup::is_global))
+    }
+
+    /// The β seed dimension of the global challenge: `log2` of the widest
+    /// global lookup's arity (its values plus the kind slot), rounded up
+    /// to a power of two. A property of the machine, so every shard
+    /// fingerprints a global message alike.
+    pub fn global_beta_seed_dim(&self) -> usize {
+        let max_arity = self
+            .chips
+            .iter()
+            .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
+            .filter(|lookup| lookup.is_global())
+            .map(|lookup| lookup.values.len() + 1)
+            .max()
+            .unwrap_or(1);
+        max_arity.next_power_of_two().trailing_zeros() as usize
+    }
+
     /// The pins a proof of a program with these per-chip ROW counts commits
     /// under on this machine: the smallest pin class both rounds fit
     /// (`RecursionPins::class_for_committed`), or `None` on a machine without
@@ -758,14 +782,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         crate::shard_level::verifier::chips_touch_public_value_buses(self.chips.iter())
     }
 
-    /// Whether some chip of the machine has a global-scope lookup, whose
-    /// fraction uses the cross-shard [`crate::logup_gkr::GlobalChallenge`].
-    pub fn has_global_lookups(&self) -> bool {
-        self.chips
-            .iter()
-            .any(|chip| chip.sends().iter().chain(chip.receives().iter()).any(Lookup::is_global))
-    }
-
     /// The cross-shard challenge of a proof whose shards commit the global
     /// rounds `rounds`, in shard order, under the verifying key
     /// `vk_challenger` has observed (the machine's challenger after the key);
@@ -782,17 +798,34 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         Val<SC>: 'a,
     {
         self.has_global_lookups().then(|| {
-            let h_star = rounds
-                .into_iter()
-                .fold(crate::logup_gkr::global_digest(vk_challenger.clone()), |h, round| {
-                    crate::logup_gkr::global_chain_step(self.config.challenger(), &h, round)
-                });
+            let chain = self.global_chain(vk_challenger, rounds);
             crate::logup_gkr::GlobalChallenge::derive(
                 self.config.challenger(),
-                h_star,
+                *chain.last().expect("the chain holds at least its start"),
                 self.global_beta_seed_dim(),
             )
         })
+    }
+
+    /// The global hash chain of a proof whose shards commit the global rounds
+    /// `rounds`, in shard order, under the verifying key `vk_challenger` has
+    /// observed: its start `h_0`, then its value after each shard. The last
+    /// entry is the `h_star` [`Self::global_challenge`] derives from.
+    pub fn global_chain<'a>(
+        &self,
+        vk_challenger: &SC::Challenger,
+        rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+    ) -> Vec<[Val<SC>; 8]>
+    where
+        Val<SC>: 'a,
+    {
+        let mut chain = vec![crate::logup_gkr::global_digest(vk_challenger.clone())];
+        for round in rounds {
+            let h = chain.last().expect("the chain holds at least its start");
+            let next = crate::logup_gkr::global_chain_step(self.config.challenger(), h, round);
+            chain.push(next);
+        }
+        chain
     }
 
     /// The global round `proof` commits, as the hash chain absorbs it: its
@@ -812,22 +845,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .map(|(name, &height)| (name.clone(), height))
             .collect();
         Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips })
-    }
-
-    /// The β seed dimension of the global challenge: `log2` of the widest
-    /// global lookup's arity (its values plus the kind slot), rounded up
-    /// to a power of two. A property of the machine, so every shard
-    /// fingerprints a global message alike.
-    pub fn global_beta_seed_dim(&self) -> usize {
-        let max_arity = self
-            .chips
-            .iter()
-            .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
-            .filter(|lookup| lookup.is_global())
-            .map(|lookup| lookup.values.len() + 1)
-            .max()
-            .unwrap_or(1);
-        max_arity.next_power_of_two().trailing_zeros() as usize
     }
 
     /// Checks that every chip with a global-scope lookup is committed in

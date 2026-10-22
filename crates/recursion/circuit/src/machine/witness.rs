@@ -229,12 +229,16 @@ mod basefold_witness {
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
+            let global_chain_start = self.global_chain_start.read(builder);
+            let global_h_star = self.global_h_star.read(builder);
             ZKMCoreBasefoldWitnessVariable {
                 vk,
                 shard_proof_tuples,
                 is_complete,
                 is_first_shard,
                 vk_root,
+                global_chain_start,
+                global_h_star,
             }
         }
 
@@ -244,6 +248,8 @@ mod basefold_witness {
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
+            self.global_chain_start.write(witness);
+            self.global_h_star.write(witness);
         }
     }
 
@@ -306,6 +312,8 @@ mod basefold_witness {
                 end_execution_shard: self.end_execution_shard.read(builder),
                 init_addr_bits: self.init_addr_bits.read(builder),
                 finalize_addr_bits: self.finalize_addr_bits.read(builder),
+                global_chain: self.global_chain.read(builder),
+                global_h_star: self.global_h_star.read(builder),
                 is_complete: InnerVal::from_bool(self.is_complete).read(builder),
             }
         }
@@ -322,6 +330,8 @@ mod basefold_witness {
             self.end_execution_shard.write(witness);
             self.init_addr_bits.write(witness);
             self.finalize_addr_bits.write(witness);
+            self.global_chain.write(witness);
+            self.global_h_star.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }

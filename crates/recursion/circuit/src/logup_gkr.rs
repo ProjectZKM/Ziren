@@ -315,6 +315,11 @@ pub struct LogupGkrShardChipMetadata {
 /// Trace-evaluation reconstruction from per-chip openings is
 /// deferred to the zerocheck stage; consumed via
 /// `proof.logup_evaluations`.
+///
+/// A global-scope lookup's fraction uses `global`'s `(α_g, β_g)`. The
+/// circuit output's columns of global lookups are summed apart: the local
+/// columns must balance against the public values, and the global columns'
+/// sum `S` is returned for the recursion tree to close across shards.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     builder: &mut Builder<C>,
@@ -326,7 +331,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     max_log_row_count: usize,
     challenger: &mut FC,
     eval_public_values_fn: EVPV,
-) where
+    global: Option<&crate::global_challenge::GlobalChallengeVariable<C>>,
+) -> SymbolicExt<C::F, C::EF>
+where
     C: CircuitConfig<F = SC::Val>,
     SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
@@ -364,19 +371,36 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     );
     let cumulative_sum: SymbolicExt<C::F, C::EF> = -local_interaction_digest;
 
+    let lookup_is_global: Vec<bool> = shard_chips
+        .iter()
+        .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
+        .map(|lookup| lookup.is_global())
+        .collect();
+    let columns = numerator.len() / 2;
+    assert!(
+        lookup_is_global.len() <= columns,
+        "circuit_output holds {columns} lookup columns, the chips have {}",
+        lookup_is_global.len()
+    );
+    assert!(
+        global.is_some() || !lookup_is_global.contains(&true),
+        "a shard with global lookups needs the global challenge"
+    );
+    let mut local_sum: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+    let mut global_sum: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+    for (k, (n, d)) in numerator.iter().zip(denominator.iter()).enumerate() {
+        let n_sym: SymbolicExt<C::F, C::EF> = (*n).into();
+        let d_sym: SymbolicExt<C::F, C::EF> = (*d).into();
+        if lookup_is_global.get(k % columns).copied().unwrap_or(false) {
+            global_sum += n_sym / d_sym;
+        } else {
+            local_sum += n_sym / d_sym;
+        }
+    }
+    builder.assert_ext_eq(local_sum, cumulative_sum);
+
     observe_ext_slice::<C, FC>(builder, challenger, numerator);
     observe_ext_slice::<C, FC>(builder, challenger, denominator);
-
-    let output_cumulative_sum: SymbolicExt<C::F, C::EF> = numerator
-        .iter()
-        .zip(denominator.iter())
-        .map(|(n, d)| {
-            let n_sym: SymbolicExt<C::F, C::EF> = (*n).into();
-            let d_sym: SymbolicExt<C::F, C::EF> = (*d).into();
-            n_sym / d_sym
-        })
-        .fold(SymbolicExt::ZERO, |acc, x| acc + x);
-    builder.assert_ext_eq(output_cumulative_sum, cumulative_sum);
 
     let initial_num_variables = chip_metadata.log_num_interactions + 1;
     let mut eval_point: Vec<Ext<C::F, C::EF>> =
@@ -526,16 +550,33 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
                 .map(|s| (s, true))
                 .chain(chip.receives().iter().map(|r| (r, false)))
             {
+                let (lookup_alpha, lookup_betas): (
+                    SymbolicExt<C::F, C::EF>,
+                    &[SymbolicExt<C::F, C::EF>],
+                ) = match (interaction.is_global(), global) {
+                    (true, Some(g)) => (g.alpha.into(), g.betas.as_slice()),
+                    (true, None) => unreachable!("checked above"),
+                    (false, _) => (alpha_sym, betas.as_slice()),
+                };
+                assert!(
+                    lookup_betas.len() > interaction.values.len(),
+                    "a lookup of {} values does not fit a β table of {}",
+                    interaction.values.len(),
+                    lookup_betas.len()
+                );
                 let (real_numerator, real_denominator) = interaction
                     .eval::<SymbolicExt<C::F, C::EF>, Ext<C::F, C::EF>>(
-                        prep, main, alpha_sym, &betas,
+                        prep,
+                        main,
+                        lookup_alpha,
+                        lookup_betas,
                     );
                 let (padding_numerator, padding_denominator) = interaction
                     .eval::<SymbolicExt<C::F, C::EF>, Ext<C::F, C::EF>>(
                         padding_prep.as_deref(),
                         &padding_main,
-                        alpha_sym,
-                        &betas,
+                        lookup_alpha,
+                        lookup_betas,
                     );
 
                 let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
@@ -578,6 +619,8 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             chip_evaluation.main_trace_evaluations_full.as_deref().unwrap_or(&[]),
         );
     }
+
+    global_sum
 }
 
 #[cfg(test)]

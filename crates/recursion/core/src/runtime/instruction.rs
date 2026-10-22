@@ -13,7 +13,6 @@ pub enum Instruction<F> {
     Poseidon2(Box<Poseidon2Instr<F>>),
     Select(SelectInstr<F>),
     HintBits(HintBitsInstr<F>),
-    HintAddCurve(Box<HintAddCurveInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     /// Constrained twin of `HintExt2Felts`: same operands, but the rows land
@@ -34,8 +33,7 @@ pub enum Instruction<F> {
 /// cache holds every distinct program at once, so the enum's WIDTH is a
 /// first-order cost twice over: it sets the memory traffic of the dispatch
 /// loop and it sets the cache's resident size.  A variant is boxed as soon as
-/// it would widen the enum for everyone else -- `HintAddCurve` carries six
-/// `Vec`s (144 bytes) and appears a handful of times in a program of millions.
+/// it would widen the enum for everyone else.
 const _: () = assert!(
     std::mem::size_of::<Instruction<u32>>() <= 40,
     "Instruction grew: box the widest variant rather than widening every instruction",
@@ -53,16 +51,6 @@ pub struct HintBitsInstr<F> {
 pub struct PrintInstr<F> {
     pub field_elt_type: FieldEltType,
     pub addr: Address<F>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HintAddCurveInstr<F> {
-    pub output_x_addrs_mults: Vec<(Address<F>, F)>,
-    pub output_y_addrs_mults: Vec<(Address<F>, F)>,
-    pub input1_x_addrs: Vec<Address<F>>,
-    pub input1_y_addrs: Vec<Address<F>>,
-    pub input2_x_addrs: Vec<Address<F>>,
-    pub input2_y_addrs: Vec<Address<F>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -240,11 +228,6 @@ impl<F: Copy> Instruction<F> {
                 f(i.addrs.out2);
             }
             Instruction::HintBits(i) => i.output_addrs_mults.iter().for_each(|(a, _)| f(*a)),
-            Instruction::HintAddCurve(i) => i
-                .output_x_addrs_mults
-                .iter()
-                .chain(i.output_y_addrs_mults.iter())
-                .for_each(|(a, _)| f(*a)),
             Instruction::Print(_) => {}
             Instruction::HintExt2Felts(i) | Instruction::Ext2Felts(i) => {
                 i.output_addrs_mults.iter().for_each(|(a, _)| f(*a))

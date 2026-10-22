@@ -5,10 +5,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 pub use outer::*;
 pub use stark::*;
-use zkm_pcs::{
-    septic_curve::SepticCurve, septic_digest::SepticDigest, septic_extension::SepticExtension,
-    InnerChallenge, InnerVal,
-};
+use zkm_pcs::{InnerChallenge, InnerVal};
 
 use crate::CircuitConfig;
 
@@ -123,22 +120,5 @@ impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Vec<T> {
         for x in self.iter() {
             x.write(witness);
         }
-    }
-}
-
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
-    for SepticDigest<InnerVal>
-{
-    type WitnessVariable = SepticDigest<Felt<C::F>>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let x = self.0.x.0.read(builder);
-        let y = self.0.y.0.read(builder);
-        SepticDigest(SepticCurve { x: SepticExtension(x), y: SepticExtension(y) })
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.0.x.0.write(witness);
-        self.0.y.0.write(witness);
     }
 }

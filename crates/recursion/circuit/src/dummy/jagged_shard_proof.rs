@@ -152,6 +152,7 @@ pub fn dummy_jagged_shard_proof<F, EF, A>(
     max_log_row_count: usize,
     pins: Option<zkm_pcs::jagged::RecursionPins>,
     profile: zkm_pcs::whir::jagged::WhirProfile,
+    global_round: Option<&std::collections::BTreeSet<String>>,
 ) -> JaggedShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -160,6 +161,10 @@ where
 {
     let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS];
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
+    let in_global_round = |chip: &Chip<F, A>| {
+        global_round.is_some_and(|set| set.contains(MachineAir::<F>::name(chip).as_str()))
+    };
+    let has_global_round = chips.iter().any(|chip| in_global_round(chip));
 
     let logup_gkr_proof = dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
 
@@ -214,15 +219,20 @@ where
         let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
-        let chip_dims: Vec<(usize, usize)> = name_sorted
-            .iter()
-            .map(|chip| {
-                let name = MachineAir::<F>::name(**chip);
-                let w = <_ as BaseAir<F>>::width(&chip.air);
-                let rows = heights.get(&name).copied().unwrap_or(0);
-                (w, rows)
-            })
-            .collect();
+        let round_dims = |global: bool| -> Vec<(usize, usize)> {
+            name_sorted
+                .iter()
+                .filter(|chip| in_global_round(chip) == global)
+                .map(|chip| {
+                    let name = MachineAir::<F>::name(**chip);
+                    let w = <_ as BaseAir<F>>::width(&chip.air);
+                    let rows = heights.get(&name).copied().unwrap_or(0);
+                    (w, rows)
+                })
+                .collect()
+        };
+        let global_dims = round_dims(true);
+        let chip_dims = round_dims(false);
         let prep_dims: Vec<(usize, usize)> = name_sorted
             .iter()
             .filter_map(|chip| {
@@ -237,6 +247,7 @@ where
             .collect();
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_basefold_bundle(
             &prep_dims,
+            &global_dims,
             &chip_dims,
             max_log_row_count,
             pins,
@@ -271,9 +282,10 @@ where
         zkm_pcs::jagged::unpinned_pad_columns(real, log_stack, cube)
     };
     let heights_by_name: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
-    let round_real = |preprocessed: bool| -> usize {
+    let round_real = |preprocessed: bool, global: Option<bool>| -> usize {
         chips
             .iter()
+            .filter(|c| global.is_none_or(|global| in_global_round(c) == global))
             .map(|c| {
                 let w = if preprocessed {
                     <A as MachineAir<F>>::preprocessed_width(&c.air)
@@ -288,9 +300,13 @@ where
     let mut padding_row_heights: Vec<Vec<F>> = Vec::new();
     if n_prep > 0 {
         padding_row_heights
-            .push(vec![F::ZERO; pad_columns(round_real(true), pins.map(|p| p.prep))]);
+            .push(vec![F::ZERO; pad_columns(round_real(true, None), pins.map(|p| p.prep))]);
     }
-    padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false), pins.map(|p| p.main))]);
+    if has_global_round {
+        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false, Some(true)), None)]);
+    }
+    padding_row_heights
+        .push(vec![F::ZERO; pad_columns(round_real(false, Some(false)), pins.map(|p| p.main))]);
 
     #[allow(clippy::needless_update)]
     JaggedShardProof {
@@ -308,8 +324,8 @@ where
         row_counts,
         padding_column_counts,
         jagged_original_commitment: std::array::from_fn(|_| F::ZERO),
-        global_commitment: None,
-        global_original_commitment: None,
+        global_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
+        global_original_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
     }
 }
 
@@ -346,6 +362,7 @@ where
 /// preprocessed round takes `pins.prep`, the main round `pins.main`.
 pub fn dummy_jagged_basefold_bundle(
     prep_dims: &[(usize, usize)],
+    global_dims: &[(usize, usize)],
     chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
     pins: Option<zkm_pcs::jagged::RecursionPins>,
@@ -367,8 +384,15 @@ pub fn dummy_jagged_basefold_bundle(
     type EF = InnerChallenge;
     const D: usize = 4;
 
-    let round_dims: Vec<&[(usize, usize)]> =
-        if prep_dims.is_empty() { vec![chip_dims] } else { vec![prep_dims, chip_dims] };
+    let mut round_dims: Vec<&[(usize, usize)]> = Vec::new();
+    if !prep_dims.is_empty() {
+        round_dims.push(prep_dims);
+    }
+    if !global_dims.is_empty() {
+        assert!(pins.is_none(), "a pinned machine commits no global round");
+        round_dims.push(global_dims);
+    }
+    round_dims.push(chip_dims);
 
     let pack_round = |dims: &[(usize, usize)]| {
         let traces: Vec<(String, RowMajorMatrix<F>)> = dims
@@ -394,6 +418,7 @@ pub fn dummy_jagged_basefold_bundle(
             Some(pins.prep)
         }
     };
+
     let areas: Vec<usize> = packings
         .iter()
         .enumerate()
@@ -803,6 +828,7 @@ mod tests {
         let max_log_row_count = 8usize;
 
         let dummy_bundle = dummy_jagged_basefold_bundle(
+            &[],
             &[],
             chip_dims,
             max_log_row_count,

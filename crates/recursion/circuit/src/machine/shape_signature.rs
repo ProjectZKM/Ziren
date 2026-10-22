@@ -40,6 +40,12 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     sp: &JaggedShardProof<InnerVal, InnerChallenge>,
     h: &mut H,
 ) {
+    sp.preprocessed_row_counts.len().hash(h);
+    sp.padding_row_heights.len().hash(h);
+    for round in sp.padding_row_heights.iter() {
+        round.len().hash(h);
+    }
+    sp.global_commitment.is_some().hash(h);
     sp.public_values.len().hash(h);
 
     let lgkr = &sp.logup_gkr_proof;

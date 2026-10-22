@@ -24,8 +24,6 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
-use zkm_pcs::septic_curve::SepticCurve;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
     shard_level::shard_proof::JaggedShardProof, InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
@@ -65,6 +63,11 @@ pub struct ZKMDeferredBasefoldWitnessValues<
     pub end_execution_shard: SC::Val,
     pub init_addr_bits: [SC::Val; 32],
     pub finalize_addr_bits: [SC::Val; 32],
+    /// The global hash chain's value where the deferred proofs sit in the
+    /// shard sequence; they pass it through unchanged.
+    pub global_chain: [SC::Val; DIGEST_SIZE],
+    /// The chain end the neighbouring shards' global challenge was derived from.
+    pub global_h_star: [SC::Val; DIGEST_SIZE],
     pub is_complete: bool,
 }
 
@@ -103,6 +106,8 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     pub end_execution_shard: Felt<C::F>,
     pub init_addr_bits: [Felt<C::F>; 32],
     pub finalize_addr_bits: [Felt<C::F>; 32],
+    pub global_chain: [Felt<C::F>; DIGEST_SIZE],
+    pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
     pub is_complete: Felt<C::F>,
 }
 
@@ -154,6 +159,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
         end_execution_shard,
         init_addr_bits,
         finalize_addr_bits,
+        global_chain,
+        global_h_star,
         is_complete,
     } = input;
 
@@ -361,6 +368,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -371,6 +379,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -443,6 +452,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 machine.num_pv_elts(),
                 eval_public_values_fn,
                 jagged_evaluator_fn,
+                None,
+                &vec![false; shard_chips.len()],
             );
         } else {
             let jagged_shard_proof_variable = jagged_shard_proof_variable
@@ -482,6 +493,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 machine.num_pv_elts(),
                 eval_public_values_fn,
                 jagged_evaluator_fn,
+                None,
+                &vec![false; shard_chips.len()],
             );
         }
 
@@ -526,10 +539,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
     builder.assert_felt_eq(is_complete, C::F::ZERO);
     deferred_public_values.is_complete = builder.eval(C::F::ZERO);
     deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
-    deferred_public_values.global_cumulative_sum =
-        SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
-            builder.eval(value)
-        }));
+    deferred_public_values.global_chain_start = global_chain;
+    deferred_public_values.global_chain_end = global_chain;
+    deferred_public_values.global_h_star = global_h_star;
+    deferred_public_values.global_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
     deferred_public_values.vk_root = vk_root;
     deferred_public_values.digest =
         recursion_public_values_digest::<C, SC>(builder, deferred_public_values);
@@ -584,6 +597,8 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             end_execution_shard: p3_koala_bear::KoalaBear::ZERO,
             init_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
             finalize_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
+            global_chain: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
+            global_h_star: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
         }
     }
 }

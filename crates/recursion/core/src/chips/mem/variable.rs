@@ -71,11 +71,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
                     output_addrs_mults,
                     input_addr: _,
                 }) => output_addrs_mults.iter().collect(),
-                Instruction::HintAddCurve(instr) => instr
-                    .output_x_addrs_mults
-                    .iter()
-                    .chain(instr.output_y_addrs_mults.iter())
-                    .collect(),
                 _ => vec![],
             })
             .collect::<Vec<_>>();

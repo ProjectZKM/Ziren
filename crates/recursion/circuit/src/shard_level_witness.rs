@@ -335,6 +335,9 @@ pub struct PreprocessedRoundWitness<C: CircuitConfig> {
     /// recursion round (whose committed area is PINNED far above its real
     /// cells) carries many where a core round carries one.
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
+    /// The global main round's raw root and hash-bound commitment, when the
+    /// shard commits one.
+    pub global: Option<([Felt<C::F>; 8], [Felt<C::F>; 8])>,
 }
 
 impl<C> Witnessable<C>
@@ -369,10 +372,18 @@ where
             .iter()
             .map(|round| round.iter().map(|f| f.read(builder)).collect())
             .collect();
+        let global =
+            self.global_original_commitment.zip(self.global_commitment).map(|(raw, commitment)| {
+                (
+                    core::array::from_fn(|i| raw[i].read(builder)),
+                    core::array::from_fn(|i| commitment[i].read(builder)),
+                )
+            });
         let preprocessed_round = PreprocessedRoundWitness::<C> {
             raw_commit: preprocessed_commit_arr,
             row_counts: preprocessed_row_counts,
             padding_heights: padding_row_heights,
+            global,
         };
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
@@ -465,6 +476,12 @@ where
         }
         for round in self.padding_row_heights.iter() {
             for f in round.iter() {
+                f.write(witness);
+            }
+        }
+        if let Some((raw, commitment)) = self.global_original_commitment.zip(self.global_commitment)
+        {
+            for f in raw.iter().chain(commitment.iter()) {
                 f.write(witness);
             }
         }

@@ -22,14 +22,15 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
 use zkm_pcs::air::MachineAir;
-use zkm_pcs::septic_curve::SepticCurve;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
     shard_level::shard_proof::JaggedShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
-use zkm_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
+use zkm_recursion_compiler::{
+    circuit::CircuitV2Builder,
+    ir::{Builder, Ext, Felt, SymbolicFelt},
+};
 use zkm_recursion_core::{
     air::{RecursionPublicValues, PV_DIGEST_NUM_WORDS, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
@@ -55,6 +56,11 @@ pub struct ZKMCoreBasefoldWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub is_complete: bool,
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
+    /// The global hash chain's value before this shard.
+    pub global_chain_start: [SC::Val; DIGEST_SIZE],
+    /// The chain end, over every shard of the execution, the shard's global
+    /// challenge is derived from.
+    pub global_h_star: [SC::Val; DIGEST_SIZE],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +96,8 @@ pub struct ZKMCoreBasefoldWitnessVariable<
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
+    pub global_chain_start: [Felt<C::F>; DIGEST_SIZE],
+    pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
 }
 
 /// Verify a list of basefold shard proofs, asserting the
@@ -132,6 +140,8 @@ pub fn verify_core_basefold<C, SC, A>(
         is_complete,
         is_first_shard,
         vk_root,
+        global_chain_start,
+        global_h_star,
     } = input;
     let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
         C,
@@ -162,6 +172,9 @@ pub fn verify_core_basefold<C, SC, A>(
 
     let mut cpu_shard_seen = false;
 
+    let global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS];
+    let global_chain_end: [Felt<C::F>; DIGEST_SIZE];
+
     assert_eq!(
         shard_proof_tuples.len(),
         1,
@@ -190,7 +203,23 @@ pub fn verify_core_basefold<C, SC, A>(
     let basefold_vk_ref = &basefold_vk;
     let basefold_shard_verifier_ref = &basefold_shard_verifier;
 
-    let verify_outputs: Vec<Vec<Felt<C::F>>> = shard_proof_tuples
+    let global_round = machine.global_round();
+    let has_global_lookups = machine.has_global_lookups();
+    let global = has_global_lookups.then(|| {
+        crate::global_challenge::GlobalChallengeVariable::derive(
+            builder,
+            machine.config(),
+            global_h_star,
+            machine.global_beta_seed_dim(),
+        )
+    });
+    let global_ref = global.as_ref();
+
+    let verify_outputs: Vec<(
+        Vec<Felt<C::F>>,
+        [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS],
+        [Felt<C::F>; DIGEST_SIZE],
+    )> = shard_proof_tuples
         .into_iter()
         .enumerate()
         .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (i, proof_tuple)| {
@@ -216,10 +245,28 @@ pub fn verify_core_basefold<C, SC, A>(
                 MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
-            let main_widths_pre: Vec<usize> = shard_chips_pre
+            let in_global_round: Vec<bool> = shard_chips_pre
                 .iter()
-                .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
+                .map(|c| global_round.is_some_and(|set| set.contains(c.name().as_str())))
                 .collect();
+            let has_global_round = in_global_round.contains(&true);
+            assert_eq!(
+                preprocessed_round.global.is_some(),
+                has_global_round,
+                "a shard commits a global round exactly when it has a global-round chip"
+            );
+            let round_widths = |global: bool| -> Vec<usize> {
+                shard_chips_pre
+                    .iter()
+                    .zip(in_global_round.iter())
+                    .filter(|(_, in_global)| **in_global == global)
+                    .map(|(c, _)| {
+                        p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c)
+                    })
+                    .collect()
+            };
+            let global_widths_pre = round_widths(true);
+            let main_widths_pre = round_widths(false);
             let prep_widths_pre: Vec<usize> = {
                 let mut dims: Vec<(String, usize)> = machine
                     .chips()
@@ -238,30 +285,49 @@ pub fn verify_core_basefold<C, SC, A>(
                 dims.sort_by(|a, b| a.0.cmp(&b.0));
                 dims.into_iter().map(|(_, w)| w).collect()
             };
-            let column_counts_by_round_pre: Vec<Vec<usize>> = if prep_widths_pre.is_empty() {
-                vec![main_widths_pre]
-            } else {
-                vec![prep_widths_pre.clone(), main_widths_pre]
-            };
+            let mut column_counts_by_round_pre: Vec<Vec<usize>> = Vec::new();
+            if !prep_widths_pre.is_empty() {
+                column_counts_by_round_pre.push(prep_widths_pre.clone());
+            }
+            if has_global_round {
+                column_counts_by_round_pre.push(global_widths_pre);
+            }
+            column_counts_by_round_pre.push(main_widths_pre);
 
+            let main_heights =
+                crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                );
+            assert_eq!(main_heights.len(), in_global_round.len());
+            let global_round_chips: Vec<(String, Felt<C::F>)> = chip_names
+                .iter()
+                .zip(main_heights.iter())
+                .zip(in_global_round.iter())
+                .filter(|(_, in_global)| **in_global)
+                .map(|((name, height), _)| (name.clone(), *height))
+                .collect();
             let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
                 let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
-                hs.extend(
-                    crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                        builder,
-                        &chip_names,
-                        &proof_opened_values,
-                    ),
-                );
+                for global in [true, false] {
+                    hs.extend(
+                        main_heights
+                            .iter()
+                            .zip(in_global_round.iter())
+                            .filter(|(_, in_global)| **in_global == global)
+                            .map(|(height, _)| *height),
+                    );
+                }
                 hs
             });
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
-            let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
-                if prep_widths_pre.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![(preprocessed_round.raw_commit, basefold_vk_ref.preprocessed_commit)]
-                };
+            let mut preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = Vec::new();
+            if !prep_widths_pre.is_empty() {
+                preceding_commitments
+                    .push((preprocessed_round.raw_commit, basefold_vk_ref.preprocessed_commit));
+            }
+            preceding_commitments.extend(preprocessed_round.global);
 
             use crate::shard_level_witness::LiftedEvalProof;
             let mut whir_evaluation_proof_var = None;
@@ -375,6 +441,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
                 crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
+                    preprocessed_round.global.map(|(_, commitment)| commitment),
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
@@ -385,6 +452,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
                 crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
+                    preprocessed_round.global.map(|(_, commitment)| commitment),
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
@@ -423,7 +491,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
 
-            if let Some(whir_pv) = &whir_shard_proof_variable {
+            let global_sum = if let Some(whir_pv) = &whir_shard_proof_variable {
                 let lsh = match &evaluation_proof {
                     LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
                     _ => unreachable!("whir proof variable implies a WhirBundle"),
@@ -458,7 +526,9 @@ pub fn verify_core_basefold<C, SC, A>(
                     machine.num_pv_elts(),
                     eval_public_values_fn,
                     jagged_evaluator_fn,
-                );
+                    global_ref,
+                    &in_global_round,
+                )
             } else {
             let jagged_shard_proof_variable =
                 jagged_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
@@ -496,19 +566,42 @@ pub fn verify_core_basefold<C, SC, A>(
                 machine.num_pv_elts(),
                 eval_public_values_fn,
                 jagged_evaluator_fn,
-            );
-            }
+                global_ref,
+                &in_global_round,
+            )
+            };
+            let global_sum: Ext<C::F, C::EF> = builder.eval(global_sum);
+            let global_sum = builder.ext2felt_v2(global_sum);
 
-            public_values_raw
+            let global_chain_end = if has_global_lookups {
+                let binding = preprocessed_round.global.map(|(_, commitment)| {
+                    crate::global_challenge::GlobalRoundBindingVariable {
+                        commitment,
+                        chips: &global_round_chips,
+                    }
+                });
+                crate::global_challenge::global_chain_step_variable(
+                    builder,
+                    machine.config(),
+                    global_chain_start,
+                    binding.as_ref(),
+                )
+            } else {
+                global_chain_start
+            };
+
+            (public_values_raw, global_sum, global_chain_end)
         });
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
-        let public_values_raw = verify_outputs
+        let (public_values_raw, shard_global_sum, shard_chain_end) = verify_outputs
             .into_iter()
             .next()
             .expect("single-shard normalize has exactly one verify output");
+        global_sum = shard_global_sum;
+        global_chain_end = shard_chain_end;
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
         let chip_names = &per_shard_chip_names[i];
@@ -564,6 +657,17 @@ pub fn verify_core_basefold<C, SC, A>(
             builder.assert_felt_ne((SymbolicFelt::ONE - is_first_shard) * initial_shard, C::F::ONE);
 
             builder.assert_felt_eq(is_first_shard * (start_pc - vk_legacy.pc_start), C::F::ZERO);
+
+            if has_global_lookups {
+                let chain_origin = crate::global_challenge::global_digest_variable(
+                    builder,
+                    machine.config(),
+                    &vk_legacy,
+                );
+                for (start, origin) in global_chain_start.iter().zip(chain_origin) {
+                    builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
+                }
+            }
 
             for bit in current_init_addr_bits.iter() {
                 builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
@@ -712,10 +816,6 @@ pub fn verify_core_basefold<C, SC, A>(
     }
 
     builder.cycle_tracker_v2_exit();
-    let global_cumulative_sum =
-        SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
-            builder.eval(value)
-        }));
 
     builder.assert_felt_eq(exit_code, C::F::ZERO);
 
@@ -740,7 +840,10 @@ pub fn verify_core_basefold<C, SC, A>(
     recursion_public_values.previous_finalize_addr_bits = initial_previous_finalize_addr_bits;
     recursion_public_values.last_finalize_addr_bits = current_finalize_addr_bits;
     recursion_public_values.zkm_vk_digest = vk_digest;
-    recursion_public_values.global_cumulative_sum = global_cumulative_sum;
+    recursion_public_values.global_chain_start = global_chain_start;
+    recursion_public_values.global_chain_end = global_chain_end;
+    recursion_public_values.global_h_star = global_h_star;
+    recursion_public_values.global_sum = global_sum;
     recursion_public_values.start_reconstruct_deferred_digest = start_deferred_digest;
     recursion_public_values.end_reconstruct_deferred_digest = end_deferred_digest;
     recursion_public_values.exit_code = exit_code;
@@ -848,6 +951,8 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             is_complete,
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+            global_chain_start: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+            global_h_star: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
         }
     }
 

@@ -203,6 +203,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         builder.cycle_tracker_v2_enter("row_count_le_cube".to_string());
         row_counts
             .iter()
+            .chain(padding_row_heights.iter())
             .flat_map(|round| round.iter().copied())
             .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, row_count| {
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);

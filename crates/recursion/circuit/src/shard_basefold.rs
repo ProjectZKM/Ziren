@@ -151,6 +151,9 @@ pub struct JaggedShardProofVariable<
     /// so this stays `[Felt;8]` and is observed felt-by-felt to match
     /// the host shard verifier's transcript.
     pub main_commitment: [Felt<C::F>; 8],
+    /// The global main round's commitment, observed between the public
+    /// values and the main commitment; `None` for a shard without one.
+    pub global_commitment: Option<[Felt<C::F>; 8]>,
     /// Per-chip log-degree bits (variable-width, max bound by
     /// `pcs_verifier.max_log_row_count + 1`).
     pub chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
@@ -316,6 +319,14 @@ impl<P> JaggedShardVerifier<P> {
     ///   * `jagged_evaluator_fn` — closure running the jagged-eval
     ///     sub-protocol.  Abstracted behind a closure so this
     ///     orchestrator doesn't depend on the jagged-eval module.
+    ///   * `global` — the cross-shard challenge of the shard's global
+    ///     lookups; its digest opens the transcript.  `None` for a machine
+    ///     without global lookups.
+    ///   * `in_global_round` — per shard chip, whether it is committed in the
+    ///     global main round, which is opened between the preprocessed round
+    ///     and the main round.
+    ///
+    /// Returns the sum of the shard's global lookup fractions.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     pub fn verify_shard<'a, C, SC, A, FC, HV, EVPV, JE>(
@@ -331,7 +342,10 @@ impl<P> JaggedShardVerifier<P> {
         num_pv_elts: usize,
         eval_public_values_fn: EVPV,
         jagged_evaluator_fn: JE,
-    ) where
+        global: Option<&crate::global_challenge::GlobalChallengeVariable<C>>,
+        in_global_round: &[bool],
+    ) -> SymbolicExt<C::F, C::EF>
+    where
         C: CircuitConfig<F = SC::Val>,
         C::F: TwoAdicField,
         SC: KoalaBearFriParametersVariable<C>,
@@ -357,15 +371,31 @@ impl<P> JaggedShardVerifier<P> {
         let _ = vk;
         let JaggedShardProofVariable {
             main_commitment,
+            global_commitment,
             chip_height_bits,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
         } = proof;
+        assert_eq!(in_global_round.len(), shard_chips.len());
+        let has_global_round = in_global_round.contains(&true);
+        assert_eq!(
+            global_commitment.is_some(),
+            has_global_round,
+            "a shard commits a global round exactly when it has a global-round chip"
+        );
+
+        for h in global.iter().flat_map(|g| g.h_star.iter()) {
+            challenger.observe(builder, *h);
+        }
 
         for value in public_values.iter() {
             challenger.observe(builder, *value);
+        }
+
+        for limb in global_commitment.iter().flatten() {
+            challenger.observe(builder, *limb);
         }
 
         for limb in main_commitment.iter() {
@@ -405,7 +435,7 @@ impl<P> JaggedShardVerifier<P> {
         let _ = num_pv_elts;
 
         builder.cycle_tracker_v2_enter("verify_logup_gkr".to_string());
-        verify_logup_gkr::<C, SC, A, FC, EVPV>(
+        let global_sum = verify_logup_gkr::<C, SC, A, FC, EVPV>(
             builder,
             chip_metadata,
             logup_gkr_proof,
@@ -415,6 +445,7 @@ impl<P> JaggedShardVerifier<P> {
             self.max_log_row_count,
             challenger,
             eval_public_values_fn,
+            global,
         );
 
         builder.cycle_tracker_v2_exit();
@@ -441,21 +472,32 @@ impl<P> JaggedShardVerifier<P> {
             .filter(|(_, c)| c.preprocessed_width() > 0)
             .map(|(i, _)| i)
             .collect();
-        let two_round = insertion_points.len() >= 2;
+        let has_prep_round = insertion_points.len() > 1 + usize::from(has_global_round);
         let mut evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
-        if two_round && !prep_positions.is_empty() {
+        if has_prep_round && !prep_positions.is_empty() {
             for &i in prep_positions.iter() {
                 evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
             }
         }
-        evaluation_claims.extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
+        for global_round in [true, false] {
+            evaluation_claims.extend(
+                opened_values
+                    .chips
+                    .iter()
+                    .zip(in_global_round.iter())
+                    .filter(|(_, in_global)| **in_global == global_round)
+                    .map(|(chip, _)| chip.main.local.clone()),
+            );
+        }
 
         {
             use p3_field::PrimeCharacteristicRing;
-            if HV::jagged_hash_bind_in_circuit()
-                && evaluation_proof.modified_commitments.len()
-                    == evaluation_proof.original_commitments.len()
-            {
+            if HV::jagged_hash_bind_in_circuit() {
+                assert_eq!(
+                    evaluation_proof.modified_commitments.len(),
+                    evaluation_proof.original_commitments.len(),
+                    "every opening round carries both its raw and its hash-bound commitment"
+                );
                 for (round_idx, (original, modified)) in evaluation_proof
                     .original_commitments
                     .iter()
@@ -507,6 +549,8 @@ impl<P> JaggedShardVerifier<P> {
             jagged_evaluator_fn,
         );
         builder.cycle_tracker_v2_exit();
+
+        global_sum
     }
 }
 
@@ -761,6 +805,7 @@ where
 
     JaggedShardProofVariable {
         main_commitment,
+        global_commitment: None,
         chip_height_bits,
         public_values,
         logup_gkr_proof,

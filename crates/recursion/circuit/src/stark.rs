@@ -98,6 +98,7 @@ where
         max_log_row_count,
         machine.pins_for_rows(&chip_heights_pairs),
         <KoalaBearPoseidon2Ring<P> as zkm_pcs::BasefoldRing>::WHIR_PROFILE,
+        machine.global_round(),
     );
 
     let chip_ordering = chip_heights_pairs
