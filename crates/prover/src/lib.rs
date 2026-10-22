@@ -127,7 +127,7 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
-/// Fixed height of the allowed-vk Merkle tree (capacity 2^14 = 16,384 vks).
+/// Fixed height of the allowed-vk Merkle tree (capacity 2^19 = 524,288 vks).
 ///
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
@@ -151,9 +151,10 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// keys production has been seen to produce, and it GROWS with traffic rather
 /// than being a fixed census. A height that cannot hold them is not "a smaller
 /// map" — it is a map that rejects real proofs, which is what 2^11 (2048) did.
-/// 2^14 also leaves room because the height is baked into every compose
-/// program, so raising it is itself a vk-changing event. Pay for the headroom
-/// once.
+/// The enumerated normalize classes (one per chip cluster and preprocessed,
+/// global and main round bucket) number about 393k, so the tree holds 2^19.
+/// The height is baked into every compose program, so raising it is itself a
+/// vk-changing event.
 ///
 /// `tests::enumeration_size_probe` asserts the enumerated tail fits; it cannot
 /// bound the collected half, which is why the headroom is deliberate.
@@ -1560,9 +1561,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
+    /// The global hash chain over `shard_proofs` under the core key `vk`:
+    /// its start, then its value after each shard, the last being the `h_star`
+    /// every shard's global challenge is derived from.
+    pub fn global_chain(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+    ) -> Vec<[KoalaBear; DIGEST_SIZE]> {
+        let machine = self.core_prover.machine();
+        let mut challenger = machine.config().challenger();
+        vk.observe_into(&mut challenger);
+        let rounds: Vec<_> =
+            shard_proofs.iter().map(|sp| machine.global_round_binding(sp)).collect();
+        machine.global_chain(&challenger, rounds.iter().map(Option::as_ref))
+    }
+
     /// Wrap each batch of `ShardProof`s into a
     /// `ZKMCoreBasefoldWitnessValues`, taking the `JaggedShardProof` each
-    /// one carries.
+    /// one carries, with the global hash chain's value before the shard and
+    /// its end over `shard_proofs`.
     pub fn get_recursion_core_inputs_basefold(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1570,6 +1588,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
         is_complete: bool,
     ) -> Vec<ZKMCoreBasefoldWitnessValues<CoreSC>> {
+        let chain = self.global_chain(vk, shard_proofs);
+        let global_h_star = *chain.last().expect("the chain holds at least its start");
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -1588,6 +1608,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 is_complete,
                 is_first_shard: batch_idx == 0,
                 vk_root: self.recursion_vk_root,
+                global_chain_start: chain[batch_idx],
+                global_h_star,
             });
         }
 
@@ -1595,11 +1617,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Constructs `ZKMDeferredBasefoldWitnessValues` from each batch, taking
-    /// the `JaggedShardProof` each input proof carries.
+    /// the `JaggedShardProof` each input proof carries. The deferred proofs
+    /// follow the last shard, so they pass through the global hash chain's
+    /// end `global_h_star`.
     pub fn get_recursion_deferred_inputs_basefold<'a>(
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
+        global_h_star: [KoalaBear; DIGEST_SIZE],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMDeferredBasefoldWitnessValues<CompressedSC>>, VkNotAllowed> {
@@ -1629,6 +1654,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 finalize_addr_bits: last_proof_pv.last_finalize_addr_bits,
                 committed_value_digest: last_proof_pv.committed_value_digest,
                 deferred_proofs_digest: last_proof_pv.deferred_proofs_digest,
+                global_chain: global_h_star,
+                global_h_star,
             });
             deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
         }
@@ -1662,9 +1689,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
+        let global_h_star = *self
+            .global_chain(&vk.vk, shard_proofs)
+            .last()
+            .expect("the chain holds at least its start");
         let bf_deferred = self.get_recursion_deferred_inputs_basefold(
             &vk.vk,
             last_proof_pv,
+            global_h_star,
             deferred_proofs,
             batch_size,
         )?;
@@ -3773,6 +3805,8 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
+                global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
+                global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
             };
             let vk_real_1 = prover
                 .compress_prover
@@ -4032,6 +4066,8 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
+                global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
+                global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
             };
             let prog_real = prover.recursion_program_basefold(&real_witness).0;
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();

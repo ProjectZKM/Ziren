@@ -96,10 +96,6 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
         Instruction::PrefixSumChecks(instr) => {
             incr(&mut counts.prefix_sum_checks_events, instr.addrs.x1.len())
         }
-        Instruction::HintAddCurve(instr) => incr(
-            &mut counts.mem_var_events,
-            instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
-        ),
         Instruction::CommitPublicValues(_) => incr(&mut counts.commit_pv_hash_events, 1),
         Instruction::Print(_) => 0,
     }

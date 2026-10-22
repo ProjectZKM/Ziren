@@ -1,10 +1,11 @@
-//! In-circuit jagged-pipeline shard verifier — the orchestrator
+//! In-circuit BaseFold-pipeline shard verifier — the orchestrator
 //! that ties together the per-phase verifiers (LogUp-GKR,
-//! zerocheck, jagged-PCS opening).
+//! zerocheck, jagged-PCS opening); the BaseFold counterpart of
+//! [`crate::stark::StarkVerifier::verify_shard`].
 //!
 //! # Architecture
 //!
-//! The jagged shard proof shape carries four soundness phases that
+//! The BaseFold proof shape carries four soundness phases that
 //! the verifier reproduces in order:
 //!
 //!   1. **Public-values + main-commit observe** — observe the
@@ -29,7 +30,7 @@
 //!      claimed evaluations of the main trace at the zerocheck-
 //!      reduced point are consistent with the committed digests.
 //!      Drives the [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier`]
-//!      which in turn drives the underlying WHIR opening
+//!      which in turn drives the underlying BaseFold opening
 //!      protocol.
 //!
 //! # Status
@@ -44,12 +45,12 @@
 //!     [`crate::zerocheck::ShardZerocheckVerifier::verify_zerocheck`]
 //!     for the transition-constraint zerocheck IOP — internally
 //!     dispatches `chip.eval` via
-//!     [`crate::constraint_folder::ShardConstraintFolder`].
+//!     [`crate::basefold_constraint_folder::ShardConstraintFolder`].
 //!   - Phase 4 constructs a
 //!     [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`]
 //!     over the shard verifier's stacked-PCS wrapper and calls
 //!     `verify_trusted_evaluations`, which drives both the jagged
-//!     sumcheck reduction and the WHIR opening underneath.
+//!     sumcheck reduction and the BaseFold FRI opening underneath.
 //!
 //! Call-site wiring into the `compress` / `deferred` / `wrap`
 //! recursion machines is the remaining cross-crate step.  Those
@@ -68,9 +69,10 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::{air::MachineAir, MachineChip};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
+use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::basefold_constraint_folder::ShardConstraintFolder;
+use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::challenger::FieldChallengerVariable;
-use crate::chip_opened_values::JaggedShardOpenedValuesVariable;
-use crate::constraint_folder::ShardConstraintFolder;
 use crate::jagged_circuit::{
     JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
 };
@@ -83,7 +85,7 @@ use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveSta
 use crate::zerocheck::ShardZerocheckVerifier;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
-/// Host-side jagged shard proof — the concrete type the prover
+/// Host-side BaseFold shard proof — the concrete type the prover
 /// produces and the recursion harness feeds into the verifier.
 ///
 /// Field layout mirrors [`JaggedShardProofVariable`] one-to-one
@@ -94,7 +96,7 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 ///
 /// The `opened_values` bundle rides alongside the proof rather
 /// than inside it — the shard verifier's `verify_shard` takes the
-/// proof and the opened-values separately because the WHIR
+/// proof and the opened-values separately because the BaseFold
 /// pipeline emits them through different transcript slots.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
@@ -113,7 +115,7 @@ pub struct JaggedShardProof<F, EF> {
     pub zerocheck_proof: crate::partial_sumcheck::PartialSumcheckProof<EF>,
 }
 
-/// In-circuit shard proof variable — the jagged-pipeline 5-field
+/// In-circuit shard proof variable — the BaseFold-pipeline 5-field
 /// shape (the counterpart of
 /// [`crate::stark::ShardProofVariable`]'s 5-field "commitment +
 /// opened_values + opening_proof + chip_ordering + public_values"
@@ -131,13 +133,27 @@ pub struct JaggedShardProof<F, EF> {
 ///   - `evaluation_proof` — input to phase 4
 ///
 /// Mirrors `ShardProofVariable` (crates/recursion/circuit/src/shard.rs).
-pub struct JaggedShardProofVariable<C: CircuitConfig, HV: crate::hash::FieldHasherVariable<C>, PP> {
+pub struct JaggedShardProofVariable<
+    C: CircuitConfig,
+    HV: crate::hash::FieldHasherVariable<C> = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+    PP = RecursiveBasefoldProof<
+        Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
+        Ext<
+            <C as zkm_recursion_compiler::ir::Config>::F,
+            <C as zkm_recursion_compiler::ir::Config>::EF,
+        >,
+        <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+    >,
+> {
     /// Commitment digest to the main trace.  The main trace is
     /// committed with the INNER KoalaBear MMCS on EVERY ring (only the
-    /// jagged WHIR round commitments go BN254 on the OUTER ring),
+    /// jagged BaseFold round commitments go BN254 on the OUTER ring),
     /// so this stays `[Felt;8]` and is observed felt-by-felt to match
     /// the host shard verifier's transcript.
     pub main_commitment: [Felt<C::F>; 8],
+    /// The global main round's commitment, observed between the public
+    /// values and the main commitment; `None` for a shard without one.
+    pub global_commitment: Option<[Felt<C::F>; 8]>,
     /// Per-chip log-degree bits (variable-width, max bound by
     /// `pcs_verifier.max_log_row_count + 1`).
     pub chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
@@ -147,14 +163,14 @@ pub struct JaggedShardProofVariable<C: CircuitConfig, HV: crate::hash::FieldHash
     pub logup_gkr_proof: LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     /// Zerocheck sumcheck reduction proof.
     pub zerocheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>>,
-    /// Jagged-PCS opening proof.  The inner WHIR proof's digests +
+    /// Jagged-PCS opening proof.  The inner BaseFold proof's digests +
     /// the per-round original commitments are `HV::DigestVariable`-typed
     /// (digests are witnessed/const-promoted to circuit
     /// variables, not raw host `FieldHasher::Digest`).
     pub evaluation_proof: JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>,
 }
 
-/// In-circuit verifying-key variable for the jagged pipeline.
+/// In-circuit verifying-key variable for the BaseFold pipeline.
 ///
 /// Carries the parts of the verifying key the verifier observes
 /// into its transcript prologue: the program counter start, the
@@ -186,7 +202,7 @@ impl<C: CircuitConfig> ShardVerifyingKeyVariable<C> {
 ///
 /// Generic over the underlying multilinear PCS verifier `P` (in
 /// production the
-/// [`crate::whir_circuit::RecursiveStackedWhirVerifier`]).  Holds
+/// [`crate::basefold_verifier::RecursiveBasefoldVerifier`]).  Holds
 /// the wrapping [`RecursiveStackedPcsVerifier`] and a
 /// `max_log_row_count` bound that gates per-chip height
 /// representations.
@@ -263,7 +279,7 @@ impl<P> JaggedShardVerifier<P> {
 }
 
 impl<P> JaggedShardVerifier<P> {
-    /// Verify a jagged-pipeline shard proof, end-to-end.
+    /// Verify a BaseFold-pipeline shard proof, end-to-end.
     ///
     /// The four-phase verification flow:
     ///   1. Transcript prologue — binds public values, main-trace
@@ -280,7 +296,7 @@ impl<P> JaggedShardVerifier<P> {
     /// Several caller-supplied inputs bridge data that lives
     /// outside the proof struct:
     ///
-    ///   * `shard_chips` — the machine's chip set (WHIR
+    ///   * `shard_chips` — the machine's chip set (BaseFold
     ///     pipeline does not embed the chip list in the proof; the
     ///     verifier introspects it from the machine reference).
     ///   * `chip_metadata` — interaction-count bits for the
@@ -288,7 +304,7 @@ impl<P> JaggedShardVerifier<P> {
     ///     receives; the caller computes this once per machine.
     ///   * `chip_degrees`, `cumulative_sums`, `global_cumulative_sums` —
     ///     per-chip degree points and cumulative-sum values.
-    ///     These live on the jagged-pipeline opening wire; until
+    ///     These live on the BaseFold-pipeline opening wire; until
     ///     a `JaggedChipOpenedValues` type bundles them, the
     ///     caller passes them as parallel slices aligned to
     ///     `shard_chips` order.
@@ -303,6 +319,14 @@ impl<P> JaggedShardVerifier<P> {
     ///   * `jagged_evaluator_fn` — closure running the jagged-eval
     ///     sub-protocol.  Abstracted behind a closure so this
     ///     orchestrator doesn't depend on the jagged-eval module.
+    ///   * `global` — the cross-shard challenge of the shard's global
+    ///     lookups; its digest opens the transcript.  `None` for a machine
+    ///     without global lookups.
+    ///   * `in_global_round` — per shard chip, whether it is committed in the
+    ///     global main round, which is opened between the preprocessed round
+    ///     and the main round.
+    ///
+    /// Returns the sum of the shard's global lookup fractions.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     pub fn verify_shard<'a, C, SC, A, FC, HV, EVPV, JE>(
@@ -318,7 +342,10 @@ impl<P> JaggedShardVerifier<P> {
         num_pv_elts: usize,
         eval_public_values_fn: EVPV,
         jagged_evaluator_fn: JE,
-    ) where
+        global: Option<&crate::global_challenge::GlobalChallengeVariable<C>>,
+        in_global_round: &[bool],
+    ) -> SymbolicExt<C::F, C::EF>
+    where
         C: CircuitConfig<F = SC::Val>,
         C::F: TwoAdicField,
         SC: KoalaBearFriParametersVariable<C>,
@@ -344,15 +371,31 @@ impl<P> JaggedShardVerifier<P> {
         let _ = vk;
         let JaggedShardProofVariable {
             main_commitment,
+            global_commitment,
             chip_height_bits,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
         } = proof;
+        assert_eq!(in_global_round.len(), shard_chips.len());
+        let has_global_round = in_global_round.contains(&true);
+        assert_eq!(
+            global_commitment.is_some(),
+            has_global_round,
+            "a shard commits a global round exactly when it has a global-round chip"
+        );
+
+        for h in global.iter().flat_map(|g| g.h_star.iter()) {
+            challenger.observe(builder, *h);
+        }
 
         for value in public_values.iter() {
             challenger.observe(builder, *value);
+        }
+
+        for limb in global_commitment.iter().flatten() {
+            challenger.observe(builder, *limb);
         }
 
         for limb in main_commitment.iter() {
@@ -392,7 +435,7 @@ impl<P> JaggedShardVerifier<P> {
         let _ = num_pv_elts;
 
         builder.cycle_tracker_v2_enter("verify_logup_gkr".to_string());
-        verify_logup_gkr::<C, SC, A, FC, EVPV>(
+        let global_sum = verify_logup_gkr::<C, SC, A, FC, EVPV>(
             builder,
             chip_metadata,
             logup_gkr_proof,
@@ -402,6 +445,7 @@ impl<P> JaggedShardVerifier<P> {
             self.max_log_row_count,
             challenger,
             eval_public_values_fn,
+            global,
         );
 
         builder.cycle_tracker_v2_exit();
@@ -425,26 +469,35 @@ impl<P> JaggedShardVerifier<P> {
         let prep_positions: Vec<usize> = shard_chips
             .iter()
             .enumerate()
-            .filter(|(_, c)| {
-                p3_air::BaseAir::<p3_koala_bear::KoalaBear>::preprocessed_width(**c) > 0
-            })
+            .filter(|(_, c)| c.preprocessed_width() > 0)
             .map(|(i, _)| i)
             .collect();
-        let two_round = insertion_points.len() >= 2;
+        let has_prep_round = insertion_points.len() > 1 + usize::from(has_global_round);
         let mut evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
-        if two_round && !prep_positions.is_empty() {
+        if has_prep_round && !prep_positions.is_empty() {
             for &i in prep_positions.iter() {
                 evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
             }
         }
-        evaluation_claims.extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
+        for global_round in [true, false] {
+            evaluation_claims.extend(
+                opened_values
+                    .chips
+                    .iter()
+                    .zip(in_global_round.iter())
+                    .filter(|(_, in_global)| **in_global == global_round)
+                    .map(|(chip, _)| chip.main.local.clone()),
+            );
+        }
 
         {
             use p3_field::PrimeCharacteristicRing;
-            if HV::jagged_hash_bind_in_circuit()
-                && evaluation_proof.modified_commitments.len()
-                    == evaluation_proof.original_commitments.len()
-            {
+            if HV::jagged_hash_bind_in_circuit() {
+                assert_eq!(
+                    evaluation_proof.modified_commitments.len(),
+                    evaluation_proof.original_commitments.len(),
+                    "every opening round carries both its raw and its hash-bound commitment"
+                );
                 for (round_idx, (original, modified)) in evaluation_proof
                     .original_commitments
                     .iter()
@@ -496,6 +549,268 @@ impl<P> JaggedShardVerifier<P> {
             jagged_evaluator_fn,
         );
         builder.cycle_tracker_v2_exit();
+
+        global_sum
+    }
+}
+
+/// Shape configuration for [`dummy_jagged_shard_proof_variable`].
+///
+/// Encapsulates the per-shard dimensions a dummy BaseFold proof
+/// needs: chip count, max-row count, public-value count, sumcheck
+/// round counts, etc.  Used by the recursion-circuit harness to
+/// build a structurally-correct placeholder proof for shape
+/// fixtures, witness-stream sizing, and circuit compilation tests.
+///
+/// The corresponding host-side BaseFold proof type would be the
+/// concrete-types analog of [`JaggedShardProofVariable`]; this
+/// helper produces an in-circuit dummy that the
+/// [`JaggedShardVerifier::verify_shard`] flow can be exercised
+/// against without a real prover run.
+///
+/// Sized for the BaseFold pipeline's 5-field proof shape
+/// (no permutation/quotient commits; instead an
+/// `evaluation_proof: JaggedPcsProofVariable`).
+#[derive(Clone, Debug)]
+pub struct BasefoldProofShape {
+    /// Per-chip (name, log-degree) pairs.
+    pub chips: Vec<(String, usize)>,
+    /// Max log-row-count across all shards (gates the height-bit
+    /// representation length).
+    pub max_log_row_count: usize,
+    /// Public-values element count.
+    pub num_public_values: usize,
+    /// LogUp-GKR round count (= log2 of total interaction count).
+    pub logup_gkr_rounds: usize,
+    /// Zerocheck sumcheck round count (= max chip log-degree).
+    pub zerocheck_rounds: usize,
+    /// Jagged sumcheck round count (= log2_ceil of total
+    /// column count, after zero-padding).
+    pub jagged_sumcheck_rounds: usize,
+    /// Stacked-PCS log stacking height.
+    pub log_stacking_height: usize,
+    /// BaseFold inner-PCS num_variables (typically
+    /// log_stacking_height).
+    pub basefold_num_variables: usize,
+}
+
+/// Build an in-circuit dummy [`JaggedShardProofVariable`] sized
+/// to `shape`.  All Ext/Felt cells are populated with builder
+/// constants of zero — the shape (lengths of each Vec, dimensions
+/// of each MLE) matches a real proof so the recursion compiler's
+/// witness-stream layout work can use this as a placeholder.
+///
+/// Used by:
+///
+///   - Recursion-circuit harness tests that compile the verifier
+///     against a stable proof-shape fixture.
+///   - The compress program's witness-shape sizing logic.
+///   - Future `build_compress_vks`-equivalent that needs a dummy
+///     BaseFold proof fixture per maximal shard shape.
+///
+/// # Soundness note
+///
+/// The all-zero payload is **structurally honest** — every
+/// assertion in the verifier reduces to `0 * anything == 0` or
+/// `0 + 0 == 0`, which trivially holds.  The dummy therefore
+/// passes the shape-fixture use case (witness-stream layout,
+/// circuit compilation, VK-map regeneration).
+///
+/// It is **not** an honest witness for a non-trivial claim:
+/// callers that want to exercise the verifier's rejection path
+/// against an adversarial proof must construct that proof
+/// explicitly (mutating at least one payload cell).  See the
+/// recursion-verifier tests that take a dummy, flip one coefficient,
+/// and assert the verify routine panics.
+pub fn dummy_jagged_shard_proof_variable<C>(
+    builder: &mut Builder<C>,
+    shape: &BasefoldProofShape,
+) -> JaggedShardProofVariable<C>
+where
+    C: CircuitConfig<F = p3_koala_bear::KoalaBear, Bit = Felt<p3_koala_bear::KoalaBear>>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    use crate::basefold_verifier::{
+        RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
+        RecursiveBasefoldRound,
+    };
+    use crate::jagged_circuit::{
+        JaggedDimensionMetadata, JaggedSumcheckEvalProof, RecursiveStackedPcsProof,
+    };
+    use crate::logup_proof::{
+        ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
+    };
+    use crate::partial_sumcheck::PartialSumcheckProof;
+    use crate::univariate::UnivariatePolynomial;
+
+    let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
+    let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
+    let zero_uni_poly =
+        |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
+            UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
+        };
+
+    let main_commitment: [Felt<C::F>; 8] = std::array::from_fn(|_| zero_felt(builder));
+
+    let chip_height_bits: Vec<(String, Vec<Felt<C::F>>)> = shape
+        .chips
+        .iter()
+        .map(|(name, _)| {
+            let bits = (0..shape.max_log_row_count + 1).map(|_| zero_felt(builder)).collect();
+            (name.clone(), bits)
+        })
+        .collect();
+
+    let public_values: Vec<Felt<C::F>> =
+        (0..shape.num_public_values).map(|_| zero_felt(builder)).collect();
+
+    let logup_gkr_proof = {
+        let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
+            main_trace_evaluations_full: None,
+            preprocessed_trace_evaluations_full: None,
+        };
+        let logup_evaluations = LogUpEvaluations::<Ext<C::F, C::EF>> {
+            point: (0..shape.logup_gkr_rounds).map(|_| zero_ext(builder)).collect(),
+            chip_openings: shape
+                .chips
+                .iter()
+                .map(|(name, _)| (name.clone(), dummy_chip_evaluation.clone()))
+                .collect(),
+        };
+        let circuit_output = LogUpGkrOutput::<Ext<C::F, C::EF>> {
+            numerator: (0..2).map(|_| zero_ext(builder)).collect(),
+            denominator: (0..2).map(|_| zero_ext(builder)).collect(),
+        };
+        let round_proofs: Vec<LogupGkrRoundProof<Ext<C::F, C::EF>>> = (0..shape.logup_gkr_rounds)
+            .map(|_| LogupGkrRoundProof::<Ext<C::F, C::EF>> {
+                numerator_0: zero_ext(builder),
+                numerator_1: zero_ext(builder),
+                denominator_0: zero_ext(builder),
+                denominator_1: zero_ext(builder),
+                sumcheck_proof: PartialSumcheckProof {
+                    univariate_polys: vec![zero_uni_poly(builder, 1)],
+                    claimed_sum: zero_ext(builder),
+                    point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+                },
+            })
+            .collect();
+        LogupGkrProof::<Felt<C::F>, Ext<C::F, C::EF>> {
+            circuit_output,
+            round_proofs,
+            logup_evaluations,
+            witness: zero_felt(builder),
+        }
+    };
+
+    let zerocheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
+        univariate_polys: (0..shape.zerocheck_rounds).map(|_| zero_uni_poly(builder, 2)).collect(),
+        claimed_sum: zero_ext(builder),
+        point_and_eval: (
+            (0..shape.zerocheck_rounds).map(|_| zero_ext(builder)).collect(),
+            zero_ext(builder),
+        ),
+    };
+
+    let evaluation_proof = {
+        let basefold_proof = RecursiveBasefoldProof::<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        > {
+            rounds: (0..shape.basefold_num_variables)
+                .map(|_| RecursiveBasefoldRound::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
+                    uni_poly: [zero_ext(builder), zero_ext(builder)],
+                    commitment: core::array::from_fn(|_| zero_felt(builder)),
+                    _phantom_f: core::marker::PhantomData,
+                })
+                .collect(),
+            final_poly: zero_ext(builder),
+            pow_witness: zero_felt(builder),
+            batch_grinding_witness: zero_felt(builder),
+            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
+                [Felt<C::F>; 8],
+            > {
+                leaf_values: vec![vec![zero_felt(builder)]],
+                merkle_path_bytes: vec![],
+                merkle_path_digests: vec![],
+                _phantom: core::marker::PhantomData,
+            }]],
+            query_phase_openings: (0..shape
+                .basefold_num_variables
+                .div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)))
+                .map(|_| {
+                    vec![
+                        RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
+                            position: 0,
+                            block: (0..(1usize
+                                << zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY))
+                                .map(|_| zero_ext(builder))
+                                .collect(),
+                            merkle_path_bytes: vec![],
+                            merkle_path_digests: vec![],
+                            _phantom: core::marker::PhantomData,
+                        },
+                    ]
+                })
+                .collect(),
+            batch_evaluations: vec![vec![zero_ext(builder)]],
+        };
+        let jagged_dim_metadata = {
+            let inner: Vec<Vec<Felt<C::F>>> = (0..2)
+                .map(|_| (0..shape.max_log_row_count + 1).map(|_| zero_felt(builder)).collect())
+                .collect();
+            JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums: inner }
+        };
+        let jagged_sumcheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
+            univariate_polys: (0..shape.jagged_sumcheck_rounds)
+                .map(|_| zero_uni_poly(builder, 2))
+                .collect(),
+            claimed_sum: zero_ext(builder),
+            point_and_eval: (
+                (0..shape.jagged_sumcheck_rounds).map(|_| zero_ext(builder)).collect(),
+                zero_ext(builder),
+            ),
+        };
+        let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
+            partial_sumcheck_proof: PartialSumcheckProof {
+                univariate_polys: vec![zero_uni_poly(builder, 1)],
+                claimed_sum: zero_ext(builder),
+                point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+            },
+        };
+        let stacked_pcs_proof = RecursiveStackedPcsProof::<
+            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
+            C::F,
+            C::EF,
+        > {
+            batch_evaluations: vec![(0..1).map(|_| zero_ext(builder)).collect()],
+            pcs_proof: basefold_proof,
+        };
+        crate::jagged_circuit::JaggedPcsProofVariable {
+            params: jagged_dim_metadata,
+            sumcheck_proof: jagged_sumcheck_proof,
+            jagged_eval_proof,
+            pcs_proof: stacked_pcs_proof,
+            column_counts: vec![vec![1]],
+            padding_row_heights: Vec::new(),
+            row_counts: vec![vec![zero_felt(builder)]],
+            original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
+            modified_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
+            expected_eval: zero_ext(builder),
+        }
+    };
+
+    JaggedShardProofVariable {
+        main_commitment,
+        global_commitment: None,
+        chip_height_bits,
+        public_values,
+        logup_gkr_proof,
+        zerocheck_proof,
+        evaluation_proof,
     }
 }
 
@@ -563,6 +878,7 @@ mod tests {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
         use crate::jagged_eval_primitives::{emit_branching_program_eval, emit_prefix_sum_check};
         let _evaluator: RecursiveJaggedEvalSumcheckConfig<
+            (),
             fn(
                 &mut Builder<C>,
                 &[SymbolicExt<C::F, C::EF>],
@@ -580,5 +896,29 @@ mod tests {
             emit_prefix_sum_check::<C>,
         );
         let _ = &_evaluator;
+    }
+
+    /// Construction smoke test: dummy_jagged_shard_proof_variable
+    /// builds a structurally-valid placeholder for the chosen shape
+    /// without panicking — verifies the Vec lengths cascade through
+    /// every nested proof type.
+    #[test]
+    fn dummy_jagged_shard_proof_constructs() {
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let shape = BasefoldProofShape {
+            chips: vec![("Cpu".to_string(), 16), ("Memory".to_string(), 14)],
+            max_log_row_count: 21,
+            num_public_values: 64,
+            logup_gkr_rounds: 6,
+            zerocheck_rounds: 21,
+            jagged_sumcheck_rounds: 5,
+            log_stacking_height: 21,
+            basefold_num_variables: 21,
+        };
+        let proof = dummy_jagged_shard_proof_variable::<C>(&mut builder, &shape);
+        assert_eq!(proof.public_values.len(), 64);
+        assert_eq!(proof.chip_height_bits.len(), 2);
+        assert_eq!(proof.zerocheck_proof.univariate_polys.len(), 21);
+        assert_eq!(proof.logup_gkr_proof.round_proofs.len(), 6);
     }
 }

@@ -197,10 +197,6 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::PrefixSumChecks(instr) => {
                 self.prefix_sum_checks_events += instr.addrs.x1.len()
             }
-            Instruction::HintAddCurve(instr) => {
-                self.mem_var_events += instr.output_x_addrs_mults.len();
-                self.mem_var_events += instr.output_y_addrs_mults.len();
-            }
             Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
         }

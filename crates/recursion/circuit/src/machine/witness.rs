@@ -203,25 +203,25 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Witnessable impls for the shard-level whir recursion stages: the
+// Witnessable impls for the shard-level basefold recursion stages: the
 // pattern above with `ShardProof<SC>::read` replaced by
 // `JaggedShardProof::read`, which produces a 5-tuple variable.
 // ---------------------------------------------------------------------------
 
-mod jagged_witness {
+mod basefold_witness {
     use super::*;
     use crate::machine::{
-        compress_jagged::{ZKMCompressWitnessValues, ZKMCompressWitnessVariable},
-        core_jagged::{ZKMCoreWitnessValues, ZKMCoreWitnessVariable},
-        deferred_jagged::{ZKMDeferredWitnessValues, ZKMDeferredWitnessVariable},
-        wrap::{ZKMWrapWitnessValues, ZKMWrapWitnessVariable},
+        compress_basefold::{ZKMCompressBasefoldWitnessValues, ZKMCompressBasefoldWitnessVariable},
+        core_basefold::{ZKMCoreBasefoldWitnessValues, ZKMCoreBasefoldWitnessVariable},
+        deferred_basefold::{ZKMDeferredBasefoldWitnessValues, ZKMDeferredBasefoldWitnessVariable},
+        wrap_basefold::{ZKMWrapBasefoldWitnessValues, ZKMWrapBasefoldWitnessVariable},
     };
 
-    impl<C> Witnessable<C> for ZKMCoreWitnessValues<KoalaBearPoseidon2>
+    impl<C> Witnessable<C> for ZKMCoreBasefoldWitnessValues<KoalaBearPoseidon2>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable = ZKMCoreWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMCoreBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
@@ -229,12 +229,16 @@ mod jagged_witness {
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
-            ZKMCoreWitnessVariable {
+            let global_chain_start = self.global_chain_start.read(builder);
+            let global_h_star = self.global_h_star.read(builder);
+            ZKMCoreBasefoldWitnessVariable {
                 vk,
                 shard_proof_tuples,
                 is_complete,
                 is_first_shard,
                 vk_root,
+                global_chain_start,
+                global_h_star,
             }
         }
 
@@ -244,10 +248,12 @@ mod jagged_witness {
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
+            self.global_chain_start.write(witness);
+            self.global_h_star.write(witness);
         }
     }
 
-    impl<C, SC> Witnessable<C> for ZKMCompressWitnessValues<SC>
+    impl<C, SC> Witnessable<C> for ZKMCompressBasefoldWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
         SC: zkm_pcs::StarkGenericConfig
@@ -258,7 +264,7 @@ mod jagged_witness {
         crate::machine::ZKMMerkleProofWitnessValues<SC>:
             Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
-        type WitnessVariable = ZKMCompressWitnessVariable<C, SC>;
+        type WitnessVariable = ZKMCompressBasefoldWitnessVariable<C, SC>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
@@ -266,7 +272,7 @@ mod jagged_witness {
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-            ZKMCompressWitnessVariable {
+            ZKMCompressBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_heights_per_input,
                 vk_merkle_data,
@@ -281,17 +287,17 @@ mod jagged_witness {
         }
     }
 
-    impl<C> Witnessable<C> for ZKMDeferredWitnessValues<KoalaBearPoseidon2Compress>
+    impl<C> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable = ZKMDeferredWitnessVariable<C, KoalaBearPoseidon2Compress>;
+        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2Compress>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
-            ZKMDeferredWitnessVariable {
+            ZKMDeferredBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_heights_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
@@ -306,6 +312,8 @@ mod jagged_witness {
                 end_execution_shard: self.end_execution_shard.read(builder),
                 init_addr_bits: self.init_addr_bits.read(builder),
                 finalize_addr_bits: self.finalize_addr_bits.read(builder),
+                global_chain: self.global_chain.read(builder),
+                global_h_star: self.global_h_star.read(builder),
                 is_complete: InnerVal::from_bool(self.is_complete).read(builder),
             }
         }
@@ -322,22 +330,24 @@ mod jagged_witness {
             self.end_execution_shard.write(witness);
             self.init_addr_bits.write(witness);
             self.finalize_addr_bits.write(witness);
+            self.global_chain.write(witness);
+            self.global_h_star.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }
 
-    impl<C, const P: u8> Witnessable<C> for ZKMWrapWitnessValues<KoalaBearPoseidon2Ring<P>>
+    impl<C, const P: u8> Witnessable<C> for ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2Ring<P>>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable = ZKMWrapWitnessVariable<C, KoalaBearPoseidon2Ring<P>>;
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<C, KoalaBearPoseidon2Ring<P>>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
-            ZKMWrapWitnessVariable {
+            ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_heights_per_input,
                 vk_merkle_data,
@@ -358,17 +368,19 @@ mod jagged_witness {
     // constraint + the public vkey_hash (no merkle).
     type OuterCfg = zkm_recursion_compiler::config::OuterConfig;
     impl Witnessable<OuterCfg>
-        for ZKMWrapWitnessValues<zkm_recursion_core::stark::KoalaBearPoseidon2Outer>
+        for ZKMWrapBasefoldWitnessValues<zkm_recursion_core::stark::KoalaBearPoseidon2Outer>
     {
-        type WitnessVariable =
-            ZKMWrapWitnessVariable<OuterCfg, zkm_recursion_core::stark::KoalaBearPoseidon2Outer>;
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<
+            OuterCfg,
+            zkm_recursion_core::stark::KoalaBearPoseidon2Outer,
+        >;
 
         fn read(&self, builder: &mut Builder<OuterCfg>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
-            ZKMWrapWitnessVariable {
+            ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_heights_per_input,
                 vk_merkle_data,

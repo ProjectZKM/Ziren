@@ -351,6 +351,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
         crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
             main_commit,
+            None,
             public_values_raw.clone(),
             &logup_gkr_proof,
             &zerocheck_proof,
@@ -361,6 +362,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
         crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
             main_commit,
+            None,
             public_values_raw.clone(),
             &logup_gkr_proof,
             &zerocheck_proof,
@@ -437,6 +439,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             machine.num_pv_elts(),
             eval_public_values_fn,
             jagged_evaluator_fn,
+            None,
+            &vec![false; shard_chips.len()],
         );
     } else {
         let jagged_shard_proof_variable = jagged_shard_proof_variable
@@ -498,6 +502,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             machine.num_pv_elts(),
             eval_public_values_fn,
             jagged_evaluator_fn,
+            None,
+            &vec![false; shard_chips.len()],
         );
     }
 

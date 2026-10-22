@@ -109,6 +109,8 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// # Inputs
 ///
 /// - `main_commitment`: 8 felts — the main-trace commitment digest
+/// - `global_commitment`: the global main round's commitment digest, when
+///   the shard commits one
 /// - `public_values`: per-shard public values
 /// - `logup_gkr_proof`: stark-side proof, converted internally
 /// - `zerocheck_proof`: stark-side proof, converted internally
@@ -117,6 +119,7 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 ///   coordinates, supplied by the caller.
 pub fn assemble_jagged_shard_proof_variable<C, HV, PP>(
     main_commitment: [Felt<C::F>; 8],
+    global_commitment: Option<[Felt<C::F>; 8]>,
     public_values: Vec<Felt<C::F>>,
     logup_gkr_proof: &st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     zerocheck_proof: &st::PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -129,6 +132,7 @@ where
 {
     JaggedShardProofVariable {
         main_commitment,
+        global_commitment,
         chip_height_bits,
         public_values,
         logup_gkr_proof: lift_logup_gkr_proof(logup_gkr_proof),
@@ -603,6 +607,7 @@ mod tests {
             _,
         >(
             main_commit,
+            None,
             public_values,
             &logup_gkr_proof,
             &zerocheck_proof,

@@ -111,15 +111,15 @@ pub struct GlobalChallenge<F, EF> {
 
 /// Separates the global challenge's derivation from every other use of a
 /// fresh challenger.
-const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
+pub const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
 
 /// Separates the global digest from every other use of the verifying key's
 /// transcript.
-const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
+pub const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
 
 /// Separates a step of the global hash chain from every other use of a fresh
 /// challenger.
-const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
+pub const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
 
 /// The start `h_0` of the global hash chain, sampled from `challenger`: the
 /// machine's challenger after it has observed the verifying key.
