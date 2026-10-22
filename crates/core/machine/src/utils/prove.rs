@@ -238,9 +238,9 @@ fn execute_to_checkpoint<F: PrimeField32>(
 }
 
 /// The records of the shards [`prove_with_context`] proves for `program` on
-/// `stdin` without a shape, in shard order, as its passes trace them.
-#[cfg(test)]
-pub(crate) fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+/// `stdin` without a shape, in shard order, as its passes trace them: with
+/// their dependencies generated, ready for a prover to commit.
+pub fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     pk: &P::DeviceProvingKey,
     program: &Program,

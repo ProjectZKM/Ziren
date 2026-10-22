@@ -195,6 +195,9 @@ where
     pub commitment: [Val<SC>; 8],
     /// The precomputed BaseFold commit of the round.
     pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::BfMmcs>,
+    /// GPU-only: the round's device dense, as in
+    /// [`RetainedJaggedCommit::device_dense_q`]; `None` on the CPU prover.
+    pub device_dense_q: Option<Box<dyn core::any::Any + Send + Sync>>,
 }
 
 /// The polynomial-commitment component of a shard prover.

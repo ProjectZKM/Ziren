@@ -1600,20 +1600,41 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                  got a batch of {} shards",
                 batch.len()
             );
-            let bf_proofs =
-                batch.iter().map(|sp| (*sp.jagged_shard_proof).clone()).collect::<Vec<_>>();
-            core_inputs.push(ZKMCoreBasefoldWitnessValues {
-                vk: vk.clone(),
-                shard_proofs: bf_proofs,
+            core_inputs.push(self.get_recursion_core_input_basefold(
+                vk,
+                &batch[0],
+                batch_idx == 0,
                 is_complete,
-                is_first_shard: batch_idx == 0,
-                vk_root: self.recursion_vk_root,
-                global_chain_start: chain[batch_idx],
+                chain[batch_idx],
                 global_h_star,
-            });
+            ));
         }
 
         core_inputs
+    }
+
+    /// The normalize input of one core shard proof, for a caller that holds
+    /// the proof's global hash chain: `global_chain_start` is the chain's value
+    /// before the shard ([`Self::global_chain`]'s entry at the shard's index)
+    /// and `global_h_star` its end.
+    pub fn get_recursion_core_input_basefold(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proof: &ShardProof<CoreSC>,
+        is_first_shard: bool,
+        is_complete: bool,
+        global_chain_start: [KoalaBear; DIGEST_SIZE],
+        global_h_star: [KoalaBear; DIGEST_SIZE],
+    ) -> ZKMCoreBasefoldWitnessValues<CoreSC> {
+        ZKMCoreBasefoldWitnessValues {
+            vk: vk.clone(),
+            shard_proofs: vec![(*shard_proof.jagged_shard_proof).clone()],
+            is_complete,
+            is_first_shard,
+            vk_root: self.recursion_vk_root,
+            global_chain_start,
+            global_h_star,
+        }
     }
 
     /// Constructs `ZKMDeferredBasefoldWitnessValues` from each batch, taking

@@ -210,6 +210,7 @@ where
                 Some(crate::prover::RetainedRound {
                     commitment: global_commitment,
                     precomputed: global_precomputed,
+                    device_dense_q: None,
                 }),
                 commitment,
                 precomputed,

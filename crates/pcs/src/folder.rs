@@ -166,7 +166,6 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     pub perm_challenges: &'a [Var],
     /// The local cumulative sum of the permutation.
     pub local_cumulative_sum: &'a Var,
-    /// The global cumulative sum of the permutation.
     /// The selector for the first row.
     pub is_first_row: Var,
     /// The selector for the last row.
