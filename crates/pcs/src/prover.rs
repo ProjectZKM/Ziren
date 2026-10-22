@@ -240,6 +240,73 @@ where
     type Error = CpuProverError;
 }
 
+/// The traces of `chips` for `record`, each wrapped at the shard cube.
+pub fn chip_traces<F, A>(
+    chips: &[&crate::Chip<F, A>],
+    record: &A::Record,
+) -> Result<crate::Traces<F>, A::Error>
+where
+    F: PrimeField32,
+    A: MachineAir<F>,
+{
+    let parent_span = tracing::debug_span!("generate traces for shard");
+    let traces = parent_span.in_scope(|| {
+        chips
+            .par_iter()
+            .map(|chip| {
+                let chip_name = chip.name();
+                let begin = Instant::now();
+                let trace = match chip.generate_trace(record, &mut A::Record::default()) {
+                    Ok(trace) => trace,
+                    Err(e) => {
+                        tracing::error!(
+                            parent: &parent_span,
+                            "failed to generate trace for chip {} in {:?}: {:?}",
+                            chip_name,
+                            begin.elapsed(),
+                            e
+                        );
+                        return Err(e);
+                    }
+                };
+                tracing::debug!(
+                    parent: &parent_span,
+                    "generated trace for chip {} in {:?}",
+                    chip_name,
+                    begin.elapsed()
+                );
+                Ok((chip_name, trace))
+            })
+            .collect::<Result<Vec<_>, A::Error>>()
+    })?;
+    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
+        .max_log_row_count as u32;
+    Ok(crate::Traces {
+        named_traces: traces
+            .into_iter()
+            .map(|(name, mat)| (name, into_padded(mat, cube, None)))
+            .collect(),
+    })
+}
+
+/// Adds every chip of `cluster_widths` that `traces` lacks, and that `keep`
+/// admits, as a height-0 trace at its width.
+pub fn pad_to_cluster<F: p3_field::Field>(
+    traces: &mut crate::Traces<F>,
+    cluster_widths: &std::collections::BTreeMap<String, usize>,
+    keep: impl Fn(&str) -> bool,
+) {
+    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
+        .max_log_row_count as u32;
+    for (name, width) in cluster_widths.iter().filter(|(name, _)| keep(name)) {
+        let w = (*width).max(1);
+        traces
+            .named_traces
+            .entry(name.clone())
+            .or_insert_with(|| into_padded(RowMajorMatrix::new(Vec::<F>::new(), w), cube, None));
+    }
+}
+
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     'static + Send + Sync
@@ -271,45 +338,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     #[allow(clippy::type_complexity)]
     fn generate_traces(&self, record: &A::Record) -> Result<crate::Traces<Val<SC>>, A::Error> {
         let shard_chips = self.machine().shard_chips(record).collect::<Vec<_>>();
-
-        let parent_span = tracing::debug_span!("generate traces for shard");
-        let traces = parent_span.in_scope(|| {
-            shard_chips
-                .par_iter()
-                .map(|chip| {
-                    let chip_name = chip.name();
-                    let begin = Instant::now();
-                    let trace = match chip.generate_trace(record, &mut A::Record::default()) {
-                        Ok(trace) => trace,
-                        Err(e) => {
-                            tracing::error!(
-                                parent: &parent_span,
-                                "failed to generate trace for chip {} in {:?}: {:?}",
-                                chip_name,
-                                begin.elapsed(),
-                                e
-                            );
-                            return Err(e);
-                        }
-                    };
-                    tracing::debug!(
-                        parent: &parent_span,
-                        "generated trace for chip {} in {:?}",
-                        chip_name,
-                        begin.elapsed()
-                    );
-                    Ok((chip_name, trace))
-                })
-                .collect::<Result<Vec<_>, A::Error>>()
-        })?;
-        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count as u32;
-        Ok(crate::Traces {
-            named_traces: traces
-                .into_iter()
-                .map(|(name, mat)| (name, into_padded(mat, cube, None)))
-                .collect(),
-        })
+        chip_traces(&shard_chips, record)
     }
 
     /// Commit to a shard's main traces.
@@ -329,6 +358,17 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
+
+    /// The global main round [`Self::commit`] commits for `record` under the
+    /// same `cluster_widths`, from the traces of the shard's global-round
+    /// chips alone; `None` for a shard without one. A proof's first pass
+    /// takes it for every shard to fix the global challenge before any shard
+    /// is proven.
+    fn global_round_binding(
+        &self,
+        record: &A::Record,
+        cluster_widths: Option<&std::collections::BTreeMap<String, usize>>,
+    ) -> Result<Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, A::Error>;
 
     /// The SHRINK-stage jagged shard proof for `record`, for a backend whose
     /// `open()` does not produce one.
@@ -477,15 +517,8 @@ where
         mut named_traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
-        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
-            for (name, width) in cluster_widths.iter() {
-                let w = (*width).max(1);
-                named_traces.entry(name.clone()).or_insert_with(|| {
-                    into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube, None)
-                });
-            }
+            pad_to_cluster(&mut named_traces, &cluster_widths, |_| true);
         }
 
         let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
@@ -522,6 +555,35 @@ where
             public_values: record.public_values(),
             global_challenge: None,
         }
+    }
+
+    fn global_round_binding(
+        &self,
+        record: &A::Record,
+        cluster_widths: Option<&std::collections::BTreeMap<String, usize>>,
+    ) -> Result<Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, A::Error> {
+        let Some(set) = self.machine().global_round() else {
+            return Ok(None);
+        };
+        let chips = self
+            .machine()
+            .shard_chips(record)
+            .filter(|chip| set.contains(chip.name().as_str()))
+            .collect::<Vec<_>>();
+        let mut traces = chip_traces(&chips, record)?;
+        if let Some(cluster_widths) = cluster_widths {
+            pad_to_cluster(&mut traces, cluster_widths, |name| set.contains(name));
+        }
+        if traces.named_traces.is_empty() {
+            return Ok(None);
+        }
+        let (commitment, _) = crate::shard_level::prover::commit_traces::<SC>(&traces, None);
+        let chips = traces
+            .named_traces
+            .iter()
+            .map(|(name, pm)| (name.clone(), crate::shard_level::prover::raw_chip_height(pm)))
+            .collect();
+        Ok(Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips }))
     }
 
     /// Prove the program for the given shard and given a commitment to the main data.
@@ -579,12 +641,18 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
-        let global = self.machine().global_challenge(challenger);
+        let rounds = records
+            .par_iter()
+            .map(|record| self.global_round_binding(record, None))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| CpuProverError)?;
+        let global = self.machine().global_challenge(challenger, rounds.iter().map(Option::as_ref));
 
         let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
             records
                 .into_par_iter()
-                .map(|record| {
+                .zip(rounds.into_par_iter())
+                .map(|(record, round)| {
                     let t0 = std::time::Instant::now();
                     let named_traces = self.generate_traces(&record).map_err(|e| {
                         tracing::error!("generate traces error: {:?}", e);
@@ -598,8 +666,13 @@ where
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
-                    let proof = self.open(pk, shard_data, &mut challenger.clone());
+                    let proof = self.open(pk, shard_data, &mut challenger.clone())?;
                     let open_ms = t2.elapsed().as_millis();
+                    assert_eq!(
+                        self.machine().global_round_binding(&proof),
+                        round,
+                        "the shard's global round differs between the two passes"
+                    );
 
                     tracing::info!(
                         ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",
@@ -607,7 +680,7 @@ where
                         trace_gen_ms + commit_ms + open_ms
                     );
 
-                    proof
+                    Ok(proof)
                 })
                 .collect::<Result<Vec<_>, _>>()
         })?;

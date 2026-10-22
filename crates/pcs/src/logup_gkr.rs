@@ -117,15 +117,60 @@ const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
 /// transcript.
 const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
 
-/// The digest `h_star` a [`GlobalChallenge`] is derived from, sampled from
-/// `challenger`: the machine's challenger after it has observed the verifying
-/// key.
+/// Separates a step of the global hash chain from every other use of a fresh
+/// challenger.
+const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
+
+/// The start `h_0` of the global hash chain, sampled from `challenger`: the
+/// machine's challenger after it has observed the verifying key.
 pub fn global_digest<F, C>(mut challenger: C) -> [F; 8]
 where
     F: p3_field::Field,
     C: p3_challenger::FieldChallenger<F>,
 {
     challenger.observe(F::from_u32(GLOBAL_DIGEST_DOMAIN));
+    core::array::from_fn(|_| challenger.sample())
+}
+
+/// What a shard's global main round binds ahead of the global challenge: the
+/// round's commitment, and the names and heights of its chips in name order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalRoundBinding<F> {
+    /// The round's commitment `C_global`.
+    pub commitment: [F; 8],
+    /// `(name, height)` of every chip the round commits.
+    pub chips: alloc::vec::Vec<(alloc::string::String, usize)>,
+}
+
+/// One step of the global hash chain: `h_prev` extended by a shard's global
+/// round, `None` for a shard without one. `challenger` must be a fresh
+/// challenger of the machine's configuration.
+pub fn global_chain_step<F, C>(
+    mut challenger: C,
+    h_prev: &[F; 8],
+    round: Option<&GlobalRoundBinding<F>>,
+) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_CHAIN_DOMAIN));
+    challenger.observe_slice(h_prev);
+    match round {
+        None => challenger.observe(F::ZERO),
+        Some(round) => {
+            challenger.observe(F::ONE);
+            challenger.observe_slice(&round.commitment);
+            challenger.observe(F::from_u64(round.chips.len() as u64));
+            for (name, height) in &round.chips {
+                challenger.observe(F::from_u64(*height as u64));
+                challenger.observe(F::from_u64(name.len() as u64));
+                for byte in name.bytes() {
+                    challenger.observe(F::from_u64(u64::from(byte)));
+                }
+            }
+        }
+    }
     core::array::from_fn(|_| challenger.sample())
 }
 
@@ -183,6 +228,43 @@ mod tests {
         ch.observe(JaggedVal::from_u32(0xA11CE));
         ch.observe(JaggedVal::from_u32(0xB0B));
         ch
+    }
+
+    /// A chain step binds the previous digest, whether the shard has a global
+    /// round, the round's commitment, and every chip's name and height.
+    #[test]
+    fn global_chain_step_binds_the_round() {
+        let fresh = || JaggedChallenger::new(zkm_primitives::poseidon2_init());
+        let h0 = [JaggedVal::from_u32(1); 8];
+        let round = GlobalRoundBinding {
+            commitment: [JaggedVal::from_u32(7); 8],
+            chips: alloc::vec![("MemoryLocal".into(), 32), ("SyscallCore".into(), 4)],
+        };
+        let base = global_chain_step(fresh(), &h0, Some(&round));
+        assert_eq!(global_chain_step(fresh(), &h0, Some(&round)), base);
+
+        let mut altered = alloc::vec![global_chain_step(fresh(), &h0, None)];
+        let mut h1 = h0;
+        h1[5] = JaggedVal::from_u32(2);
+        altered.push(global_chain_step(fresh(), &h1, Some(&round)));
+        let mut r = round.clone();
+        r.commitment[3] = JaggedVal::from_u32(8);
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips[0].1 = 33;
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips[1].0 = "SyscallPrecompile".into();
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips.pop();
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let r = GlobalRoundBinding { chips: alloc::vec::Vec::new(), ..round.clone() };
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+
+        for (i, h) in altered.iter().enumerate() {
+            assert_ne!(*h, base, "alteration {i} left the chain step unchanged");
+        }
     }
 
     /// The grinding witness is what makes the LogUp-GKR transcript cost work to

@@ -946,21 +946,52 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .any(|chip| chip.sends().iter().chain(chip.receives().iter()).any(Lookup::is_global))
     }
 
-    /// The cross-shard challenge of a proof under the verifying key
+    /// The cross-shard challenge of a proof whose shards commit the global
+    /// rounds `rounds`, in shard order, under the verifying key
     /// `vk_challenger` has observed (the machine's challenger after the key);
     /// `None` for a machine without global lookups.
-    pub fn global_challenge(
+    ///
+    /// Its digest `h_star` ends the hash chain that starts at the key's
+    /// digest and takes one [`crate::logup_gkr::global_chain_step`] per shard.
+    pub fn global_challenge<'a>(
         &self,
         vk_challenger: &SC::Challenger,
+        rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
     ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
+    where
+        Val<SC>: 'a,
     {
         self.has_global_lookups().then(|| {
+            let h_star = rounds
+                .into_iter()
+                .fold(crate::logup_gkr::global_digest(vk_challenger.clone()), |h, round| {
+                    crate::logup_gkr::global_chain_step(self.config.challenger(), &h, round)
+                });
             crate::logup_gkr::GlobalChallenge::derive(
                 self.config.challenger(),
-                crate::logup_gkr::global_digest(vk_challenger.clone()),
+                h_star,
                 self.global_beta_seed_dim(),
             )
         })
+    }
+
+    /// The global round `proof` commits, as the hash chain absorbs it: its
+    /// commitment and the heights of the shard's global-round chips. `None`
+    /// for a shard without one.
+    pub fn global_round_binding(
+        &self,
+        proof: &ShardProof<SC>,
+    ) -> Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>> {
+        let set = self.global_round()?;
+        let shard = &proof.jagged_shard_proof;
+        let commitment = shard.global_commitment?;
+        let chips = shard
+            .chip_heights
+            .iter()
+            .filter(|(name, _)| set.contains(name.as_str()))
+            .map(|(name, &height)| (name.clone(), height))
+            .collect();
+        Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips })
     }
 
     /// The β seed dimension of the global challenge: `log2` of the widest
@@ -1130,7 +1161,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// Verify that a proof is complete and valid given a verifying key and a claimed digest.
     ///
     /// A machine with global-scope lookups verifies under the challenge
-    /// [`Self::global_challenge`] derives; see [`Self::verify_with_global`].
+    /// [`Self::global_challenge`] derives from the global rounds of the
+    /// proof's shards, in proof order; see [`Self::verify_with_global`].
     #[allow(clippy::match_bool)]
     pub fn verify(
         &self,
@@ -1166,7 +1198,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let global = {
             let mut vk_challenger = challenger.clone();
             vk.observe_into(&mut vk_challenger);
-            self.global_challenge(&vk_challenger)
+            let rounds = proof
+                .shard_proofs
+                .iter()
+                .map(|shard| self.global_round_binding(shard))
+                .collect::<Vec<_>>();
+            self.global_challenge(&vk_challenger, rounds.iter().map(Option::as_ref))
         };
         self.verify_with_global(vk, proof, challenger, global.as_ref())
     }

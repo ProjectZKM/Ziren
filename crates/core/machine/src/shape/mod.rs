@@ -1358,11 +1358,13 @@ pub mod tests {
         let (pk, _) = prover.setup(&program);
 
         let main_traces = prover.generate_traces(&record).unwrap();
+        let round = prover.global_round_binding(&record, None).unwrap();
 
         let mut main_data = prover.commit(&record, main_traces, None);
 
         let mut challenger = prover.machine().config().challenger();
-        main_data.global_challenge = prover.machine().global_challenge(&challenger);
+        main_data.global_challenge =
+            prover.machine().global_challenge(&challenger, [round.as_ref()]);
 
         prover.open(&pk, main_data, &mut challenger).unwrap();
     }
