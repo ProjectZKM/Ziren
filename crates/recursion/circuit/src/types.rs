@@ -3,7 +3,6 @@ use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::Dimensions;
 
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
 
@@ -17,7 +16,6 @@ pub struct VerifyingKeyVariable<
 > {
     pub commitment: SC::DigestVariable,
     pub pc_start: Felt<C::F>,
-    pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
     /// The per-preprocessed-chip
@@ -46,14 +44,12 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>
     {
         challenger.observe(builder, self.commitment);
         challenger.observe(builder, self.pc_start);
-        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.y.0);
         let zero: Felt<_> = builder.eval(C::F::ZERO);
         challenger.observe(builder, zero);
     }
 
     /// Hash the verifying key into a single digest.
-    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum )
+    /// poseidon2( commit[0..8] || pc_start )
     ///
     /// Nothing about the chips
     /// is folded in: the preprocessed commitment is the HASH-BOUND digest
@@ -70,11 +66,9 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>
         C::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     {
-        let mut inputs: Vec<Felt<C::F>> = Vec::with_capacity(DIGEST_SIZE + 1 + 14);
+        let mut inputs: Vec<Felt<C::F>> = Vec::with_capacity(DIGEST_SIZE + 1);
         inputs.extend(self.commitment);
         inputs.push(self.pc_start);
-        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
-        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
 
         SC::hash(builder, &inputs)
     }

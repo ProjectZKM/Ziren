@@ -21,7 +21,6 @@ use std::marker::PhantomData;
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{Algebra, ExtensionField, Field};
 use zkm_pcs::folder::PairWindow;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 
 /// In-circuit chip-constraint folder for the BaseFold pipeline.
@@ -56,10 +55,6 @@ pub struct ShardConstraintFolder<'a, C: Config> {
     /// [`crate::zerocheck::compute_padded_row_adjustment`]'s
     /// dummy-row constraint evaluation).
     pub local_cumulative_sum: &'a Ext<C::F, C::EF>,
-    /// Global cumulative sum reference required by
-    /// [`zkm_pcs::air::MultiTableAirBuilder`].  Same placeholder
-    /// convention as `local_cumulative_sum`.
-    pub global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     /// Phantom for the circuit-config parameter.
     pub _marker: PhantomData<C>,
 }
@@ -194,14 +189,9 @@ where
     SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
     type LocalSum = Ext<C::F, C::EF>;
-    type GlobalSum = Felt<C::F>;
 
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
         self.local_cumulative_sum
-    }
-
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
     }
 }
 
@@ -230,17 +220,6 @@ mod tests {
         let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
         let local_sum = builder.constant(EF::ZERO);
-        let zero_felt: Felt<F> = builder.constant(F::ZERO);
-        use zkm_pcs::septic_curve::SepticCurve;
-        use zkm_pcs::septic_extension::SepticExtension;
-        let global_sum: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
-            x: SepticExtension::<Felt<F>>([
-                zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt,
-            ]),
-            y: SepticExtension::<Felt<F>>([
-                zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt,
-            ]),
-        });
 
         let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
@@ -249,7 +228,6 @@ mod tests {
             accumulator: SymbolicExt::ZERO,
             public_values: &public_values,
             local_cumulative_sum: &local_sum,
-            global_cumulative_sum: &global_sum,
             _marker: PhantomData,
         };
 

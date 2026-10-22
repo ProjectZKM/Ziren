@@ -3,7 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::septic_digest::SepticDigest;
 use crate::shard_level::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::ShardOpenedValues;
 
@@ -18,16 +17,6 @@ pub enum FoldOrientation {
     /// Low-order variable folded first; known broken at round 1+,
     /// retained only as a forensics opt-in.
     Lsb,
-}
-
-/// Per-chip cumulative-sum exposures emitted by the LogUp-GKR
-/// prover; lives as a sibling of `opened_values` to keep the `F`
-/// generic out of the LogUp-GKR proof types.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
-pub struct ChipCumulativeSums<F, EF> {
-    pub local: EF,
-    pub global: SepticDigest<F>,
 }
 
 /// Per-shard jagged-PCS opening. Exactly one variant is populated by
@@ -78,7 +67,7 @@ pub struct JaggedShardProof<F, EF> {
     /// Shard-level zerocheck `PartialSumcheckProof`.
     pub zerocheck_proof: PartialSumcheckProof<EF>,
     /// Per-chip opened values at the zerocheck-reduced point.
-    pub opened_values: ShardOpenedValues<F, EF>,
+    pub opened_values: ShardOpenedValues<EF>,
     /// Per-chip RAW `main_trace.height()` (`num_real_entries`, 0 allowed
     /// — NOT a log) keyed by chip name.  The verifier
     /// re-observes this exact felt in the transcript prologue and it is
@@ -88,10 +77,6 @@ pub struct JaggedShardProof<F, EF> {
     /// (treat as 0 placeholders).
     #[serde(default = "std::collections::BTreeMap::new")]
     pub chip_heights: std::collections::BTreeMap<String, usize>,
-    /// Per-chip (local, global) cumulative sums; empty on older
-    /// proof bytes.
-    #[serde(default = "std::collections::BTreeMap::new")]
-    pub chip_cumulative_sums: std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
     /// Jagged-PCS opening — tagged union over the three producer
     /// paths. See [`EvaluationProof`] for the variants.
     #[serde(default)]
@@ -188,7 +173,6 @@ where
             zerocheck_proof: PartialSumcheckProof::dummy(),
             opened_values: ShardOpenedValues { chips: Default::default() },
             chip_heights: std::collections::BTreeMap::new(),
-            chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: EvaluationProof::Empty,
             fold_orientation: FoldOrientation::Msb,
             row_counts: Vec::new(),
@@ -222,52 +206,6 @@ mod tests {
         assert_eq!(back.main_commitment.len(), proof.main_commitment.len());
         assert!(matches!(back.evaluation_proof, EvaluationProof::Empty));
         assert_eq!(back.opened_values.chips.len(), 0);
-    }
-
-    /// Height-agnostic groundwork BACKWARD-COMPAT: an
-    /// OLD-format proof serialized WITHOUT the new `row_counts` /
-    /// `padding_column_counts` fields must still deserialize into the
-    /// NEW struct, with those fields defaulting to empty (the
-    /// `#[serde(default)]` contract).  We model the old wire format
-    /// with a mirror struct carrying exactly the pre-change fields in
-    /// the same order (rmp-serde encodes structs positionally as a
-    /// compact array, so a SHORTER old array fills the new trailing
-    /// fields from their defaults).
-    #[derive(Serialize)]
-    #[serde(
-        bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>"
-    )]
-    struct OldBasefoldShardProof<F, EF> {
-        public_values: Vec<F>,
-        main_commitment: [F; 8],
-        logup_gkr_proof: LogupGkrProof<F, EF>,
-        zerocheck_proof: PartialSumcheckProof<EF>,
-        opened_values: ShardOpenedValues<F, EF>,
-        chip_log_heights: std::collections::BTreeMap<String, u8>,
-        chip_cumulative_sums: std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
-        evaluation_proof: EvaluationProof,
-        fold_orientation: FoldOrientation,
-    }
-
-    #[test]
-    fn jagged_shard_proof_old_format_deserializes() {
-        let old: OldBasefoldShardProof<F, EF> = OldBasefoldShardProof {
-            public_values: vec![F::ZERO; 7],
-            main_commitment: std::array::from_fn(|_| F::ZERO),
-            logup_gkr_proof: LogupGkrProof::dummy(),
-            zerocheck_proof: PartialSumcheckProof::dummy(),
-            opened_values: ShardOpenedValues { chips: Default::default() },
-            chip_log_heights: std::collections::BTreeMap::new(),
-            chip_cumulative_sums: std::collections::BTreeMap::new(),
-            evaluation_proof: EvaluationProof::Empty,
-            fold_orientation: FoldOrientation::Msb,
-        };
-        let old_bytes = rmp_serde::to_vec(&old).expect("old serializes");
-        let back: JaggedShardProof<F, EF> = rmp_serde::from_slice(&old_bytes)
-            .expect("old-format proof deserializes into new struct");
-        assert_eq!(back.public_values.len(), 7);
-        assert!(back.row_counts.is_empty(), "row_counts must default empty");
-        assert!(back.padding_column_counts.is_empty(), "padding_column_counts must default empty");
     }
 
     #[test]

@@ -2,11 +2,9 @@ use crate::event_vec::EventVec;
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use zkm_pcs::{
     air::{MachineAir, PublicValues},
-    septic_curve::SepticCurve,
-    septic_digest::SepticDigest,
     shape::Shape,
     MachineRecord, SplitOpts, ZKMCoreOpts,
 };
@@ -548,13 +546,8 @@ impl MachineRecord for ExecutionRecord {
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
         let mut pv = self.public_values;
-        pv.global_count = 0;
         pv.global_init_count = self.global_memory_initialize_events.len() as u32;
         pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
-        pv.global_cumulative_sum = SepticDigest(SepticCurve::convert(
-            SepticDigest::<p3_koala_bear::KoalaBear>::zero().0,
-            |x| x.as_canonical_u32(),
-        ));
         pv.to_vec()
     }
 }

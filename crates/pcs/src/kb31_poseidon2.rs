@@ -210,7 +210,6 @@ pub mod koala_bear_poseidon2 {
         crate::StarkVerifyingKey {
             commit: vk.commit,
             pc_start: vk.pc_start,
-            initial_global_cumulative_sum: vk.initial_global_cumulative_sum,
             chip_information: vk.chip_information,
             chip_ordering: vk.chip_ordering,
         }

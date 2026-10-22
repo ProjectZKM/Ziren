@@ -91,18 +91,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
-    /// per-input per-chip log heights (mirrors
-    /// `chip_cumulative_sums_per_input`).
+    /// per-input per-chip log heights.
     pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
@@ -154,7 +143,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
 {
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,
-        chip_cumulative_sums_per_input,
         chip_heights_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
@@ -390,18 +378,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 chip_height_bits,
             )
         });
-        let empty_cumsums_deferred = std::collections::BTreeMap::new();
-        let cumsums_for_input =
-            chip_cumulative_sums_per_input.get(_deferred_i).unwrap_or(&empty_cumsums_deferred);
-        let empty_heights_deferred = std::collections::BTreeMap::new();
-        let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-            builder,
-            proof_opened_values,
-            &chip_names,
-            &empty_heights_deferred,
-            cumsums_for_input,
-            max_log_row_count,
-        );
+        let opened_values = proof_opened_values;
         let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
         let jagged_evaluator_fn = super::compress_basefold::real_jagged_evaluator_fn::<
             C,

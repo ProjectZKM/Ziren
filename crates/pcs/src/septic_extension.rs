@@ -14,8 +14,6 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
-use crate::air::SepticExtensionAirBuilder;
-
 /// A septic extension with an irreducible polynomial `z^7 + 2z - 8`.
 ///
 /// The field can be constructed as `F_{p^7} = F_p[z]/(z^7 + 2z - 8)`.
@@ -707,16 +705,6 @@ impl<T> SepticBlock<T> {
     /// A function similar to `core:array::from_fn`.
     pub fn from_base_fn<G: FnMut(usize) -> T>(f: G) -> Self {
         Self(array::from_fn(f))
-    }
-}
-
-impl<T: Clone> SepticBlock<T> {
-    /// Takes a `SepticBlock` into a `SepticExtension` of expressions.
-    pub fn as_extension<AB: SepticExtensionAirBuilder<Var = T>>(
-        &self,
-    ) -> SepticExtension<AB::Expr> {
-        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::ZERO + x);
-        SepticExtension(arr)
     }
 }
 

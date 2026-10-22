@@ -106,7 +106,14 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         ("basefold.claims_before_batching_point", 1),
         // rev 1: the shard prologue absorbs public values, the main commitment, the
         //        chip count, then each chip's raw height and name.
-        ("shard.prologue_order", 1),
+        // rev 2: a shard with global lookups absorbs the global challenge's
+        //        digest first, and a shard with a global round absorbs that
+        //        round's commitment between the public values and the main
+        //        commitment.
+        ("shard.prologue_order", 2),
+        // rev 1: the verifying key absorbs its commitment, the start pc and a
+        //        zero; it no longer carries an initial global digest.
+        ("vk.observation", 1),
         // rev 1: a round's commitment is `compress([raw_root, hash(counts)])` over
         //        the ring's own hasher, so the digest states the geometry.
         ("jagged.geometry_hash_bind", 1),
@@ -317,7 +324,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "289ec12435dea7e2707a901a486c2af07d01ed832506f03b0736dcd35eb0586b",
+            "195ab86a4caed6de344a13fc0573a9db2a95a5ed5c5e8f8372d0c0057208251f",
             "the transcript profile changed -- see this test's documentation",
         );
     }

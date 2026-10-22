@@ -260,10 +260,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             }
         }
     }
-
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
-    }
 }
 
 impl<AB> Air<AB> for SyscallChip

@@ -6,10 +6,6 @@
 
 use std::collections::BTreeMap;
 
-use zkm_pcs::septic_curve::SepticCurve;
-use zkm_pcs::septic_digest::SepticDigest;
-use zkm_pcs::septic_extension::SepticExtension;
-use zkm_pcs::shard_level::shard_proof::ChipCumulativeSums;
 use zkm_pcs::shard_level::types as st;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
@@ -47,34 +43,6 @@ pub fn assert_recursion_stacking_height_fixed(
         "[{stage}] DE-CLAMP REGRESSION: bundle log_stacking_height \
          ({log_stacking_height}) != DEFAULT_LOG_STACKING_HEIGHT ({expected})",
     );
-}
-
-// Per-chip cumulative sums
-
-impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let local = self.local.read(builder);
-        let global_x = self.global.0.x.0.read(builder);
-        let global_y = self.global.0.y.0.read(builder);
-        ChipCumulativeSums {
-            local,
-            global: SepticDigest(SepticCurve {
-                x: SepticExtension(global_x),
-                y: SepticExtension(global_y),
-            }),
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.local.write(witness);
-        self.global.0.x.0.write(witness);
-        self.global.0.y.0.write(witness);
-    }
 }
 
 // Univariate + sumcheck types
@@ -383,7 +351,7 @@ where
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
         LiftedEvalProof<C>,
-        crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        crate::basefold_chip_opened_values::JaggedShardOpenedValues<Ext<C::F, C::EF>>,
         PreprocessedRoundWitness<C>,
     );
 
@@ -538,8 +506,8 @@ where
 /// is irrelevant to the felt-witness stream since `Ext` reads are
 /// length-prefixed by the `Vec<_>` Witnessable.
 fn basefold_opened_values_from_host(
-    opened: &zkm_pcs::ShardOpenedValues<InnerVal, InnerChallenge>,
-) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<InnerVal, InnerChallenge> {
+    opened: &zkm_pcs::ShardOpenedValues<InnerChallenge>,
+) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<InnerChallenge> {
     use p3_field::PrimeCharacteristicRing;
     let chips = opened
         .chips
@@ -553,7 +521,6 @@ fn basefold_opened_values_from_host(
             },
             degree: c.quotient.first().cloned().unwrap_or_else(|| vec![InnerChallenge::ZERO]),
             local_cumulative_sum: c.local_cumulative_sum,
-            global_cumulative_sum: c.global_cumulative_sum,
         })
         .collect();
     crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }

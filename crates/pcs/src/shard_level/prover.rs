@@ -292,7 +292,6 @@ where
     );
 
     let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
-    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!("prove shard with data", chips = n_chips).entered();
 
@@ -447,9 +446,6 @@ where
     let opened_values =
         build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
-    let chip_cumulative_sums =
-        build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
-
     assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
         global_commitment,
@@ -458,7 +454,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         orientation,
     )
@@ -875,14 +870,14 @@ pub fn build_opened_values<SC, A>(
     mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     chip_heights: &std::collections::BTreeMap<String, usize>,
     max_log_row_count: usize,
-) -> ShardOpenedValues<Val<SC>, Challenge<SC>>
+) -> ShardOpenedValues<Challenge<SC>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
     let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
     name_sorted.sort_by_key(|a| MachineAir::<Val<SC>>::name(**a));
-    let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> = name_sorted
+    let chip_opened: Vec<crate::types::ChipOpenedValues<Challenge<SC>>> = name_sorted
         .iter()
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
@@ -909,61 +904,12 @@ where
                 main: crate::types::AirOpenedValues { local: main_local, next: Vec::new() },
                 permutation: crate::types::AirOpenedValues { local: Vec::new(), next: Vec::new() },
                 quotient: vec![degree_bits],
-                global_cumulative_sum: crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
                 local_cumulative_sum: Challenge::<SC>::ZERO,
                 log_degree,
             }
         })
         .collect();
     ShardOpenedValues { chips: chip_opened }
-}
-
-/// Per-chip (local, global) cumulative sums.  `local` is ZERO
-/// (the basefold path doesn't materialize the permutation trace); `global`
-/// reads the RAW per-chip cells at their raw heights (device chips use the
-/// early-captured provider TAIL, `chip_cum_tails`).
-pub fn build_chip_cumulative_sums<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    chip_cum_tails: &[Option<Vec<Val<SC>>>],
-) -> std::collections::BTreeMap<
-    String,
-    crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
->
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    assert_eq!(
-        chips.len(),
-        shared_trace_mles.len(),
-        "build_chip_cumulative_sums: chips/shared_trace_mles must be parallel",
-    );
-    assert_eq!(
-        chips.len(),
-        chip_cum_tails.len(),
-        "build_chip_cumulative_sums: chips/chip_cum_tails must be parallel",
-    );
-    chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .zip(chip_cum_tails.iter())
-        .map(|((chip, pm), tail)| {
-            let name = MachineAir::<Val<SC>>::name(*chip);
-            let global = if let Some(tail14) = tail {
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_tail(
-                    *chip, tail14,
-                )
-            } else {
-                let vals: &[Val<SC>] = pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
-                    *chip, vals,
-                )
-            };
-            let local = Challenge::<SC>::ZERO;
-            (name, crate::shard_level::shard_proof::ChipCumulativeSums { local, global })
-        })
-        .collect()
 }
 
 /// The final `JaggedShardProof` construction.  Derives
@@ -976,12 +922,8 @@ pub fn assemble_jagged_shard_proof<SC>(
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
-    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
-    chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
@@ -996,7 +938,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         orientation,
     )
@@ -1013,12 +954,8 @@ pub fn assemble_jagged_shard_proof_with_global<SC>(
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
-    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
-    chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
@@ -1103,7 +1040,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: orientation,
         row_counts,

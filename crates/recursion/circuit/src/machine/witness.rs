@@ -109,7 +109,6 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let commitment = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
-        let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
         let chip_information = self
             .chip_information
             .iter()
@@ -134,7 +133,6 @@ where
         VerifyingKeyVariable {
             commitment,
             pc_start,
-            initial_global_cumulative_sum,
             chip_information,
             chip_ordering,
             prep_name_width_hash_inputs,
@@ -144,7 +142,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.commit.write(witness);
         self.pc_start.write(witness);
-        self.initial_global_cumulative_sum.write(witness);
         for (name, _ser_domain, dims) in self.chip_information.iter() {
             zkm_primitives::prep_chip_name_digest(name).write(witness);
             InnerVal::from_usize(dims.0).write(witness);
@@ -229,23 +226,12 @@ mod basefold_witness {
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
             let shard_proof_tuples = self.shard_proofs.read(builder);
-            let chip_cumulative_sums_per_shard: Vec<_> = self
-                .shard_proofs
-                .iter()
-                .map(|sp| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
             ZKMCoreBasefoldWitnessVariable {
                 vk,
                 shard_proof_tuples,
-                chip_cumulative_sums_per_shard,
                 is_complete,
                 is_first_shard,
                 vk_root,
@@ -255,11 +241,6 @@ mod basefold_witness {
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
             self.shard_proofs.write(witness);
-            for sp in self.shard_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
@@ -281,23 +262,12 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             ZKMCompressBasefoldWitnessVariable {
                 vks_and_proofs,
-                chip_cumulative_sums_per_input,
                 chip_heights_per_input,
                 vk_merkle_data,
                 is_complete,
@@ -306,11 +276,6 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
@@ -324,21 +289,10 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             ZKMDeferredBasefoldWitnessVariable {
                 vks_and_proofs,
-                chip_cumulative_sums_per_input,
                 chip_heights_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
                 start_reconstruct_deferred_digest: self
@@ -358,11 +312,6 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
             self.start_reconstruct_deferred_digest.write(witness);
             self.zkm_vk_digest.write(witness);
@@ -385,22 +334,11 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
-                chip_cumulative_sums_per_input,
                 chip_heights_per_input,
                 vk_merkle_data,
             }
@@ -408,11 +346,6 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
         }
     }
@@ -434,22 +367,11 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<OuterCfg>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
-                chip_cumulative_sums_per_input,
                 chip_heights_per_input,
                 vk_merkle_data,
             }
@@ -457,11 +379,6 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<OuterCfg>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
         }
     }

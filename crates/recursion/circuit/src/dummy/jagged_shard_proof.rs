@@ -17,10 +17,9 @@ use p3_air::BaseAir;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
 use zkm_pcs::{
-    air::{LookupScope, MachineAir},
-    septic_digest::SepticDigest,
+    air::MachineAir,
     shard_level::{
-        shard_proof::{ChipCumulativeSums, FoldOrientation, JaggedShardProof},
+        shard_proof::{FoldOrientation, JaggedShardProof},
         types::{
             ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
             PartialSumcheckProof, UnivariatePolynomial,
@@ -129,8 +128,7 @@ where
 ///   `machine.chips()`).
 /// * `chip_heights_pairs` — per chip, (name, rows): exact row counts as the
 ///   prover pads them (`next_multiple_of_32_rows` of the shape's rows), not
-///   log2 heights. They fill `chip_heights` and `chip_cumulative_sums`, one
-///   entry per chip.
+///   log2 heights. They fill `chip_heights`, one entry per chip.
 /// * `max_log_row_count` — m, the cube: it sets the number of LogUp-GKR
 ///   rounds and of zerocheck polynomials.
 /// * `pins` — the child's area pins (`StarkMachine::recursion_pins`):
@@ -147,7 +145,6 @@ where
 /// | `zerocheck_proof`      | `dummy_partial_sumcheck_proof(max_log_row_count, 4)` |
 /// | `opened_values`        | one zero entry per chip, shaped as the prover's |
 /// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
-/// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
 /// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
 pub fn dummy_jagged_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
@@ -173,7 +170,7 @@ where
         let heights_map: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
-        let chips_ov: Vec<ChipOpenedValues<F, EF>> = name_sorted
+        let chips_ov: Vec<ChipOpenedValues<EF>> = name_sorted
             .iter()
             .map(|chip| {
                 let prep_w = MachineAir::<F>::preprocessed_width(**chip);
@@ -202,7 +199,6 @@ where
                     main: AirOpenedValues { local: vec![EF::ZERO; main_w], next: Vec::new() },
                     permutation: AirOpenedValues { local: Vec::new(), next: Vec::new() },
                     quotient: vec![degree_bits],
-                    global_cumulative_sum: SepticDigest::<F>::zero(),
                     local_cumulative_sum: EF::ZERO,
                     log_degree: log_h,
                 }
@@ -213,15 +209,6 @@ where
 
     let chip_heights: BTreeMap<String, usize> =
         chip_heights_pairs.iter().map(|(name, rows)| (name.clone(), *rows)).collect();
-
-    let chip_cumulative_sums: BTreeMap<String, ChipCumulativeSums<F, EF>> = chips
-        .iter()
-        .map(|chip| {
-            let name = MachineAir::<F>::name(*chip);
-            let _scope_documented = chip.commit_scope() == LookupScope::Local;
-            (name, ChipCumulativeSums { local: EF::ZERO, global: SepticDigest::<F>::zero() })
-        })
-        .collect();
 
     let evaluation_proof = {
         let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
@@ -316,7 +303,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: FoldOrientation::Msb,
         row_counts,

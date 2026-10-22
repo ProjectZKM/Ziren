@@ -22,9 +22,6 @@ use crate::{
     count_permutation_constraints,
     lookup::{debug_lookups_with_all_chips, Lookup, LookupKind},
     record::MachineRecord,
-    septic_curve::SepticCurve,
-    septic_digest::SepticDigest,
-    septic_extension::SepticExtension,
     DebugConstraintBuilder, ShardProof, VerifierConstraintFolder,
 };
 
@@ -134,8 +131,6 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub commit: Com<SC>,
     /// The start pc of the program.
     pub pc_start: Val<SC>,
-    /// The starting global digest of the program, after incorporating the initial memory.
-    pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The preprocessed traces, row-major.  These are the AIR-side form:
     /// serialized with the key and handed to the constraint folder / debug
     /// paths.
@@ -188,7 +183,6 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
         Self {
             commit: self.commit.clone(),
             pc_start: self.pc_start,
-            initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             traces: self.traces.clone(),
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
@@ -207,7 +201,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     pub fn from_parts(
         commit: Com<SC>,
         pc_start: Val<SC>,
-        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
         traces: Vec<RowMajorMatrix<Val<SC>>>,
         chip_ordering: HashMap<String, usize>,
         constraints_map: HashMap<String, usize>,
@@ -215,7 +208,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         Self {
             commit,
             pc_start,
-            initial_global_cumulative_sum,
             traces,
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
@@ -250,20 +242,12 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     pub fn from_parts_with_preprocessed_data(
         commit: Com<SC>,
         pc_start: Val<SC>,
-        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
         traces: Vec<RowMajorMatrix<Val<SC>>>,
         chip_ordering: HashMap<String, usize>,
         constraints_map: HashMap<String, usize>,
         preprocessed_data: std::sync::Arc<SC::PrepPrecomputed>,
     ) -> Self {
-        let key = Self::from_parts(
-            commit,
-            pc_start,
-            initial_global_cumulative_sum,
-            traces,
-            chip_ordering,
-            constraints_map,
-        );
+        let key = Self::from_parts(commit, pc_start, traces, chip_ordering, constraints_map);
         let _ = key.preprocessed_data.set(preprocessed_data);
         key
     }
@@ -364,8 +348,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         challenger.observe(Val::<SC>::ZERO);
     }
 }
@@ -410,8 +392,6 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     pub commit: Com<SC>,
     /// The start pc of the program.
     pub pc_start: Val<SC>,
-    /// The starting global digest of the program, after incorporating the initial memory.
-    pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The chip information.
     pub chip_information: Vec<(String, SerializableDomain<Val<SC>>, (usize, usize))>,
     /// The chip ordering.
@@ -433,8 +413,6 @@ impl<SC: StarkGenericConfig> StarkVerifyingKey<SC> {
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         challenger.observe(Val::<SC>::ZERO);
     }
 
@@ -562,9 +540,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             permutation_challenges.push(challenger.sample_algebra_element());
         }
 
-        let mut global_cumulative_sums = Vec::new();
-        global_cumulative_sums.push(pk.initial_global_cumulative_sum);
-
         for shard in records.iter() {
             let chips = self.shard_chips(shard).collect::<Vec<_>>();
 
@@ -590,32 +565,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                             main_trace,
                             &permutation_challenges,
                         );
-                        let global_sum = if chip.commit_scope() == LookupScope::Local {
-                            SepticDigest::<Val<SC>>::zero()
-                        } else {
-                            let main_trace_size = main_trace.height() * main_trace.width();
-                            let last_row =
-                                &main_trace.values[main_trace_size - 14..main_trace_size];
-                            SepticDigest(SepticCurve {
-                                x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| {
-                                    last_row[i]
-                                }),
-                                y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| {
-                                    last_row[i + 7]
-                                }),
-                            })
-                        };
-                        (trace, (global_sum, local_sum))
+                        (trace, local_sum)
                     })
                     .unzip_into_vecs(&mut permutation_traces, &mut chip_cumulative_sums);
             });
 
-            let global_cumulative_sum =
-                chip_cumulative_sums.iter().map(|sums| sums.0).sum::<SepticDigest<Val<SC>>>();
-            global_cumulative_sums.push(global_cumulative_sum);
-
-            let local_cumulative_sum =
-                chip_cumulative_sums.iter().map(|sums| sums.1).sum::<SC::Challenge>();
+            let local_cumulative_sum = chip_cumulative_sums.iter().copied().sum::<SC::Challenge>();
 
             if !local_cumulative_sum.is_zero() {
                 tracing::warn!("Local cumulative sum is not zero");
@@ -659,8 +614,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                         &permutation_traces[i],
                         &permutation_challenges,
                         &shard.public_values(),
-                        &chip_cumulative_sums[i].1,
-                        &chip_cumulative_sums[i].0,
+                        &chip_cumulative_sums[i],
                     );
                 }
             });
@@ -668,27 +622,16 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
         tracing::info!("Constraints verified successfully");
 
-        let global_cumulative_sum: SepticDigest<Val<SC>> =
-            global_cumulative_sums.iter().copied().sum();
-
-        if !global_cumulative_sum.is_zero() {
-            tracing::warn!("Global cumulative sum is not zero");
-            tracing::debug_span!("debug global lookups").in_scope(|| {
-                debug_lookups_with_all_chips::<SC, A>(
-                    self,
-                    pk,
-                    &records,
-                    LookupKind::all_kinds(),
-                    LookupScope::Global,
-                )
-            });
-            tracing::warn!(
-                "Global cumulative sum: {:?}, should be: {:?}",
-                global_cumulative_sum,
-                SepticDigest::<Val<SC>>::zero(),
-            );
-            panic!("Global cumulative sum is not zero");
-        }
+        let global_balanced = tracing::debug_span!("debug global lookups").in_scope(|| {
+            debug_lookups_with_all_chips::<SC, A>(
+                self,
+                pk,
+                &records,
+                LookupKind::all_kinds(),
+                LookupScope::Global,
+            )
+        });
+        assert!(global_balanced, "the global lookups do not balance across the shards");
     }
 }
 
@@ -740,7 +683,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             &chip.sends,
                             &chip.receives,
                             chip.logup_batch_size(),
-                            chip.air.commit_scope(),
                         );
 
                         (
@@ -787,13 +729,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
         let pc_start = program.pc_start();
-        let initial_global_cumulative_sum = program.initial_global_cumulative_sum();
 
         (
             StarkProvingKey {
                 commit: commit.clone(),
                 pc_start,
-                initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
                 preprocessed_data: {
@@ -806,127 +746,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
-            StarkVerifyingKey {
-                commit,
-                pc_start,
-                initial_global_cumulative_sum,
-                chip_information,
-                chip_ordering,
-            },
-        )
-    }
-
-    /// The setup preprocessing phase. Same as `setup` but initial global cumulative sum is
-    /// precomputed.
-    pub fn setup_core(
-        &self,
-        program: &A::Program,
-        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
-    ) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
-        let parent_span = tracing::debug_span!("generate preprocessed traces");
-        let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
-            parent_span.in_scope(|| {
-                self.chips()
-                    .par_iter()
-                    .map(|chip| {
-                        let chip_name = chip.name();
-                        let begin = Instant::now();
-                        let prep_trace = chip.generate_preprocessed_trace(program);
-                        tracing::debug!(
-                            parent: &parent_span,
-                            "generated preprocessed trace for chip {} in {:?}",
-                            chip_name,
-                            begin.elapsed()
-                        );
-                        let expected_width =
-                            prep_trace.as_ref().map_or(0, p3_matrix::Matrix::width);
-                        assert_eq!(
-                            expected_width,
-                            chip.preprocessed_width(),
-                            "Incorrect number of preprocessed columns for chip {chip_name}"
-                        );
-
-                        let num_main_constraints = get_symbolic_constraints(
-                            &chip.air,
-                            AirLayout {
-                                preprocessed_width: chip.preprocessed_width(),
-                                main_width: chip.width(),
-                                num_public_values: PROOF_MAX_NUM_PVS,
-                                ..Default::default()
-                            },
-                        )
-                        .len();
-
-                        let num_permutation_constraints = count_permutation_constraints(
-                            &chip.sends,
-                            &chip.receives,
-                            chip.logup_batch_size(),
-                            chip.air.commit_scope(),
-                        );
-
-                        (
-                            prep_trace.map(move |t| (chip.name(), t)),
-                            (chip_name, num_main_constraints + num_permutation_constraints),
-                        )
-                    })
-                    .unzip()
-            });
-
-        let mut named_preprocessed_traces =
-            named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
-
-        named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let chip_information: Vec<_> = named_preprocessed_traces
-            .iter()
-            .map(|(name, trace)| {
-                let ser_domain = SerializableDomain::new(
-                    Val::<SC>::ONE,
-                    crate::shard_level::ceil_log2(trace.height()),
-                );
-                (name.to_owned(), ser_domain, (trace.width(), trace.height()))
-            })
-            .collect();
-
-        let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
-            .iter()
-            .map(|(name, trace)| (name.to_string(), trace.clone()))
-            .collect();
-        let commit = SC::prep_commit(&named, self.prep_area_pin());
-
-        let chip_ordering = named_preprocessed_traces
-            .iter()
-            .enumerate()
-            .map(|(i, (name, _))| (name.to_owned(), i))
-            .collect::<HashMap<_, _>>();
-
-        let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
-
-        let traces =
-            named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
-
-        let pc_start = program.pc_start();
-
-        (
-            StarkProvingKey {
-                commit: commit.clone(),
-                pc_start,
-                initial_global_cumulative_sum,
-                traces,
-                preprocessed_mles: std::sync::OnceLock::new(),
-                preprocessed_data: std::sync::OnceLock::new(),
-                prep_pin: self.prep_area_pin(),
-                main_pin: self.main_area_pin(),
-                chip_ordering: chip_ordering.clone(),
-                constraints_map,
-            },
-            StarkVerifyingKey {
-                commit,
-                pc_start,
-                initial_global_cumulative_sum,
-                chip_information,
-                chip_ordering,
-            },
+            StarkVerifyingKey { commit, pc_start, chip_information, chip_ordering },
         )
     }
 

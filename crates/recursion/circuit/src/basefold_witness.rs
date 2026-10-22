@@ -27,7 +27,6 @@
 
 use std::collections::BTreeMap;
 
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use crate::basefold_chip_opened_values::{
@@ -224,33 +223,18 @@ where
     }
 }
 
-impl<C> Witnessable<C> for JaggedChipOpenedValues<InnerVal, InnerChallenge>
+impl<C> Witnessable<C> for JaggedChipOpenedValues<InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = JaggedChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = JaggedChipOpenedValues<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        use zkm_pcs::septic_curve::SepticCurve;
-        use zkm_pcs::septic_extension::SepticExtension;
         let preprocessed = self.preprocessed.read(builder);
         let main = self.main.read(builder);
         let degree = self.degree.read(builder);
         let local_cumulative_sum = self.local_cumulative_sum.read(builder);
-        let x_felts: [Felt<C::F>; 7] =
-            core::array::from_fn(|i| self.global_cumulative_sum.0.x.0[i].read(builder));
-        let y_felts: [Felt<C::F>; 7] =
-            core::array::from_fn(|i| self.global_cumulative_sum.0.y.0[i].read(builder));
-        JaggedChipOpenedValues {
-            preprocessed,
-            main,
-            degree,
-            local_cumulative_sum,
-            global_cumulative_sum: SepticDigest(SepticCurve {
-                x: SepticExtension(x_felts),
-                y: SepticExtension(y_felts),
-            }),
-        }
+        JaggedChipOpenedValues { preprocessed, main, degree, local_cumulative_sum }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -258,20 +242,14 @@ where
         self.main.write(witness);
         self.degree.write(witness);
         self.local_cumulative_sum.write(witness);
-        for f in self.global_cumulative_sum.0.x.0.iter() {
-            f.write(witness);
-        }
-        for f in self.global_cumulative_sum.0.y.0.iter() {
-            f.write(witness);
-        }
     }
 }
 
-impl<C> Witnessable<C> for JaggedShardOpenedValues<InnerVal, InnerChallenge>
+impl<C> Witnessable<C> for JaggedShardOpenedValues<InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = JaggedShardOpenedValues<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         JaggedShardOpenedValues { chips: self.chips.read(builder) }

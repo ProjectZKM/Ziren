@@ -22,15 +22,14 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
 use zkm_pcs::air::MachineAir;
+use zkm_pcs::septic_curve::SepticCurve;
+use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
     shard_level::shard_proof::JaggedShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
-use zkm_recursion_compiler::{
-    circuit::CircuitV2Builder,
-    ir::{Builder, Felt, SymbolicFelt},
-};
+use zkm_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
 use zkm_recursion_core::{
     air::{RecursionPublicValues, PV_DIGEST_NUM_WORDS, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
@@ -88,16 +87,6 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         crate::shard_level_witness::PreprocessedRoundWitness<C>,
     )>,
-    /// per-shard per-chip cumulative sums.
-    pub chip_cumulative_sums_per_shard: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
@@ -140,7 +129,6 @@ pub fn verify_core_basefold<C, SC, A>(
     let ZKMCoreBasefoldWitnessVariable {
         vk: vk_legacy,
         shard_proof_tuples,
-        chip_cumulative_sums_per_shard,
         is_complete,
         is_first_shard,
         vk_root,
@@ -172,7 +160,6 @@ pub fn verify_core_basefold<C, SC, A>(
     let mut deferred_proofs_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
         array::from_fn(|_| builder.uninit());
 
-    let mut global_cumulative_sums = Vec::new();
     let mut cpu_shard_seen = false;
 
     assert_eq!(
@@ -202,7 +189,6 @@ pub fn verify_core_basefold<C, SC, A>(
 
     let basefold_vk_ref = &basefold_vk;
     let basefold_shard_verifier_ref = &basefold_shard_verifier;
-    let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
 
     let verify_outputs: Vec<Vec<Felt<C::F>>> = shard_proof_tuples
         .into_iter()
@@ -406,19 +392,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     chip_height_bits,
                 )
             });
-            let empty_cumsums = std::collections::BTreeMap::new();
-            let cumsums_for_shard = cumsums_per_shard_ref
-                .get(i)
-                .unwrap_or(&empty_cumsums);
-            let opened_values =
-                crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-                    builder,
-                    proof_opened_values,
-                    &chip_names,
-                    chip_heights_for_shard,
-                    cumsums_for_shard,
-                    max_log_row_count,
-                );
+            let opened_values = proof_opened_values;
             let eval_public_values_fn =
                 |folder: &mut crate::public_values_folder::RecursivePublicValuesConstraintFolder<C>| {
                     zkm_pcs::air::eval_public_values(folder);
@@ -591,11 +565,6 @@ pub fn verify_core_basefold<C, SC, A>(
 
             builder.assert_felt_eq(is_first_shard * (start_pc - vk_legacy.pc_start), C::F::ZERO);
 
-            global_cumulative_sums.push(builder.select_global_cumulative_sum(
-                is_first_shard,
-                vk_legacy.initial_global_cumulative_sum,
-            ));
-
             for bit in current_init_addr_bits.iter() {
                 builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
             }
@@ -740,12 +709,13 @@ pub fn verify_core_basefold<C, SC, A>(
         }
 
         C::range_check_felt(builder, public_values.shard, MAX_LOG_NUMBER_OF_SHARDS);
-
-        global_cumulative_sums.push(public_values.global_cumulative_sum);
     }
 
     builder.cycle_tracker_v2_exit();
-    let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
+    let global_cumulative_sum =
+        SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
+            builder.eval(value)
+        }));
 
     builder.assert_felt_eq(exit_code, C::F::ZERO);
 
@@ -791,7 +761,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     /// Construct a dummy witness for a given recursion shape.
     /// Drives the multi-chip basefold dummy helper for each shard
     /// in `shape.proof_shapes`, producing a witness whose
-    /// `chip_cumulative_sums` cardinality matches a real proof
+    /// `chip_heights` cardinality matches a real proof
     /// shard-by-shard.
     ///
     /// Sole dummy constructor for the basefold recursion pipeline.
@@ -869,9 +839,6 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         let vk = StarkVerifyingKey {
             commit: crate::fri::dummy_commit(),
             pc_start: p3_koala_bear::KoalaBear::ZERO,
-            initial_global_cumulative_sum: zkm_pcs::septic_digest::SepticDigest::<
-                p3_koala_bear::KoalaBear,
-            >::zero(),
             chip_information,
             chip_ordering,
         };

@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign};
 
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use zkm_pcs::{
-    air::{LookupScope, MachineAir, PicusInfo},
+    air::{MachineAir, PicusInfo},
     shape::OrderedShape,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };

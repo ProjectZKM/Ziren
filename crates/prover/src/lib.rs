@@ -3803,7 +3803,6 @@ pub mod tests {
                 v.push(("public_values".into(), bf.public_values.len().to_string()));
                 v.push(("opened_values.chips".into(), bf.opened_values.chips.len().to_string()));
                 v.push(("chip_heights".into(), format!("{:?}", bf.chip_heights)));
-                v.push(("chip_cumulative_sums".into(), bf.chip_cumulative_sums.len().to_string()));
                 v.push((
                     "row_counts".into(),
                     format!("{:?}", bf.row_counts.iter().map(|r| r.len()).collect::<Vec<_>>()),

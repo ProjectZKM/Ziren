@@ -20,7 +20,6 @@ use std::marker::PhantomData;
 use p3_air::{Air, BaseAir};
 use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_pcs::folder::PairWindow;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
@@ -95,7 +94,7 @@ pub fn eq_eval<C: CircuitConfig>(
 /// mismatches early.
 pub fn verify_opening_shape<C, SC, A>(
     chip: &MachineChip<SC, A>,
-    opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+    opening: &ChipOpenedValues<Ext<C::F, C::EF>>,
 ) -> Result<(), OpeningShapeError>
 where
     C: CircuitConfig<F = SC::Val>,
@@ -170,8 +169,8 @@ where
     /// values), returning the constraint accumulator as a single Ext
     /// value.
     ///
-    /// `local_cumulative_sum` and `global_cumulative_sum` thread
-    /// through to the `MultiTableAirBuilder` impl on the folder so
+    /// `local_cumulative_sum` threads through to the
+    /// `MultiTableAirBuilder` impl on the folder so
     /// chips that read them via that trait see consistent values
     /// (in the BaseFold pipeline these come from the LogUp-GKR
     /// sumcheck output, not a per-chip permutation column).
@@ -192,7 +191,7 @@ where
             opening.main.local.iter().map(|e| (*e).into()).collect();
         let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
         let main = PairWindow { local: &main_row, next: &main_row };
-        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
+        let zero_lcs = Self::zero_local_cumulative_sum(builder);
         let mut folder = ShardConstraintFolder::<C> {
             preprocessed,
             main,
@@ -200,28 +199,16 @@ where
             accumulator: SymbolicExt::ZERO,
             public_values,
             local_cumulative_sum: &zero_lcs,
-            global_cumulative_sum: &zero_gcs,
             _marker: PhantomData,
         };
         chip.eval(&mut folder);
         builder.eval(folder.accumulator)
     }
 
-    /// Zero `(local_cumulative_sum, global_cumulative_sum)` for the
-    /// zerocheck constraint folder, matching the host
-    /// (`eval_air_constraints_at_row`).
-    fn zero_cumulative_sums(
-        builder: &mut Builder<C>,
-    ) -> (Ext<C::F, C::EF>, SepticDigest<Felt<C::F>>) {
-        use zkm_pcs::septic_curve::SepticCurve;
-        use zkm_pcs::septic_extension::SepticExtension;
-        let zero_lcs: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-        let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
-        let zero_gcs: SepticDigest<Felt<C::F>> = SepticDigest(SepticCurve {
-            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
-            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
-        });
-        (zero_lcs, zero_gcs)
+    /// Zero `local_cumulative_sum` for the zerocheck constraint folder,
+    /// matching the host (`eval_air_constraints_at_row`).
+    fn zero_local_cumulative_sum(builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
+        builder.constant(C::EF::ZERO)
     }
 
     /// Variant of [`Self::compute_padded_row_adjustment`]
@@ -240,7 +227,7 @@ where
         let preproc_width = chip.preprocessed_width();
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
-        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
+        let zero_lcs = Self::zero_local_cumulative_sum(builder);
         let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
@@ -248,72 +235,6 @@ where
             accumulator: SymbolicExt::ZERO,
             public_values,
             local_cumulative_sum: &zero_lcs,
-            global_cumulative_sum: &zero_gcs,
-            _marker: PhantomData,
-        };
-        chip.eval(&mut folder);
-        builder.eval(folder.accumulator)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn eval_constraints<'a>(
-        builder: &mut Builder<C>,
-        chip: &MachineChip<SC, A>,
-        opening: &'a ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-        alpha: Ext<C::F, C::EF>,
-        public_values: &'a [Felt<C::F>],
-        local_cumulative_sum: &'a Ext<C::F, C::EF>,
-        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
-    ) -> Ext<C::F, C::EF> {
-        let preprocessed_row: Vec<SymbolicExt<C::F, C::EF>> =
-            opening.preprocessed.local.iter().map(|e| (*e).into()).collect();
-        let main_row: Vec<SymbolicExt<C::F, C::EF>> =
-            opening.main.local.iter().map(|e| (*e).into()).collect();
-        let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
-        let main = PairWindow { local: &main_row, next: &main_row };
-        let mut folder = ShardConstraintFolder::<C> {
-            preprocessed,
-            main,
-            alpha,
-            accumulator: SymbolicExt::ZERO,
-            public_values,
-            local_cumulative_sum,
-            global_cumulative_sum,
-            _marker: PhantomData,
-        };
-        chip.eval(&mut folder);
-        builder.eval(folder.accumulator)
-    }
-
-    /// Compute the "padded row adjustment" — the constraint-folder
-    /// accumulator that a chip's eval would produce if invoked on a
-    /// dummy all-zero row.  Used by the zerocheck verifier to subtract
-    /// the constraint contribution from out-of-range padded rows.
-    ///
-    /// The padded-row mask returned by [`full_geq`] gates this value
-    /// to fire only outside the chip's real-data window; inside the
-    /// real window the mask is zero and this adjustment cancels.
-    #[allow(clippy::too_many_arguments)]
-    pub fn compute_padded_row_adjustment<'a>(
-        builder: &mut Builder<C>,
-        chip: &MachineChip<SC, A>,
-        alpha: Ext<C::F, C::EF>,
-        public_values: &'a [Felt<C::F>],
-        local_cumulative_sum: &'a Ext<C::F, C::EF>,
-        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
-    ) -> Ext<C::F, C::EF> {
-        let main_width = chip.width();
-        let preproc_width = chip.preprocessed_width();
-        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
-        let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
-        let mut folder = ShardConstraintFolder::<C> {
-            preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
-            main: PairWindow { local: &main_row, next: &main_row },
-            alpha,
-            accumulator: SymbolicExt::ZERO,
-            public_values,
-            local_cumulative_sum,
-            global_cumulative_sum,
             _marker: PhantomData,
         };
         chip.eval(&mut folder);
@@ -344,9 +265,6 @@ where
     ///     [`full_geq`] to compute the padded-row mask.
     ///   * `cumulative_sums` — per-chip local cumulative-sum value
     ///     from the LogUp-GKR sumcheck output.
-    ///   * `global_cumulative_sums` — per-chip global
-    ///     cumulative-sum digest references; same source as
-    ///     `cumulative_sums`.
     ///   * `gkr_evaluations` — output of [`verify_logup_gkr`]:
     ///     the GKR-emitted evaluation point + per-chip column
     ///     evaluations the zerocheck reduction targets.
@@ -752,8 +670,6 @@ mod padded_row_tests {
     use super::*;
     use zkm_pcs::folder::PairWindow;
     use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
-    use zkm_pcs::septic_curve::SepticCurve;
-    use zkm_pcs::septic_extension::SepticExtension;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_core::machine::RecursionAir;
 
@@ -768,7 +684,6 @@ mod padded_row_tests {
         alpha: Ext<F, EF>,
         pv: &[Felt<F>],
         lcs: &Ext<F, EF>,
-        gcs: &SepticDigest<Felt<F>>,
         runtime_row: bool,
     ) -> usize
     where
@@ -794,7 +709,6 @@ mod padded_row_tests {
             accumulator: SymbolicExt::ZERO,
             public_values: pv,
             local_cumulative_sum: lcs,
-            global_cumulative_sum: gcs,
             _marker: std::marker::PhantomData,
         };
         chip.eval(&mut folder);
@@ -820,24 +734,19 @@ mod padded_row_tests {
         let lcs: Ext<F, EF> = builder.constant(EF::default());
         let pv: Vec<Felt<F>> =
             (0..zkm_pcs::PROOF_MAX_NUM_PVS).map(|_| builder.constant(F::default())).collect();
-        let zero_felt: Felt<F> = builder.constant(F::default());
-        let gcs: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
-            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
-            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
-        });
 
         let recursion = RecursionAir::<F, 3>::compress_machine(KoalaBearPoseidon2::default());
         let (mut rec_runtime, mut rec_const) = (0usize, 0usize);
         for chip in recursion.chips().iter() {
-            rec_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
-            rec_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+            rec_runtime += count(&mut builder, chip, alpha, &pv, &lcs, true);
+            rec_const += count(&mut builder, chip, alpha, &pv, &lcs, false);
         }
 
         let core = zkm_core_machine::mips::MipsAir::<F>::machine(KoalaBearPoseidon2::default());
         let (mut core_runtime, mut core_const) = (0usize, 0usize);
         for chip in core.chips().iter() {
-            core_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
-            core_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+            core_runtime += count(&mut builder, chip, alpha, &pv, &lcs, true);
+            core_const += count(&mut builder, chip, alpha, &pv, &lcs, false);
         }
 
         assert!(

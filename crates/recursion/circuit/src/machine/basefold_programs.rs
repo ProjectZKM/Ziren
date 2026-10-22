@@ -417,7 +417,7 @@ mod tests {
     }
 
     /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
-    /// witness whose per-shard `chip_cumulative_sums` cardinality
+    /// witness whose per-shard `chip_heights` cardinality
     /// matches a real shard's chip count — the shape-stability
     /// invariant for `program_from_shape` basefold dispatch.
     #[test]
@@ -437,7 +437,6 @@ mod tests {
         let witness =
             super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
         assert_eq!(witness.shard_proofs.len(), 1);
-        assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
         assert_eq!(witness.shard_proofs[0].chip_heights.len(), 2);
         assert!(!witness.is_complete);
     }

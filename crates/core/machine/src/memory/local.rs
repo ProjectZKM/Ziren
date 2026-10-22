@@ -213,10 +213,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
             shard.get_local_mem_events().nth(0).is_some()
         }
     }
-
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
-    }
 }
 
 impl<AB> Air<AB> for MemoryLocalChip

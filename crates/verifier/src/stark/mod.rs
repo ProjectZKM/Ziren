@@ -168,11 +168,9 @@ impl<const P: u8> HashableKey
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         let commit_elems: Vec<KoalaBear> =
             self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
-        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(commit_elems.len() + 1 + 14);
+        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(commit_elems.len() + 1);
         inputs.extend(commit_elems);
         inputs.push(self.pc_start);
-        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
-        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
 
         poseidon2_hash(inputs)
     }

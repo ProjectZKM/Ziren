@@ -4,7 +4,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{AirBuilder, ExtensionBuilder, WindowAccess};
+use p3_air::{ExtensionBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::{ExtensionField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -200,7 +200,6 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     sends: &[Lookup<F>],
     receives: &[Lookup<F>],
     batch_size: usize,
-    commit_scope: LookupScope,
     builder: &mut AB,
 ) where
     F: Field,
@@ -307,18 +306,6 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         builder.when_transition().assert_eq_ext(phi_next - phi_local.clone(), sum_next);
         builder.when_last_row().assert_eq_ext(*perm_local.last().unwrap(), *local_cumulative_sum);
     }
-
-    let global_cumulative_sum = builder.global_cumulative_sum();
-    if commit_scope == LookupScope::Global {
-        for i in 0..7 {
-            builder
-                .when_last_row()
-                .assert_eq(main_local[main_local.len() - 14 + i], global_cumulative_sum.0.x.0[i]);
-            builder
-                .when_last_row()
-                .assert_eq(main_local[main_local.len() - 7 + i], global_cumulative_sum.0.y.0[i]);
-        }
-    }
 }
 
 /// Counts the number of permutation constraints for the given chip.
@@ -326,12 +313,10 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 /// IMPORTANT: This function must be manually updated if any changes are made to
 /// `eval_permutation_constraints`. The current count includes:
 /// - For local lookups: `local_permutation_trace_width(sends.len() + receives.len(), batch_size)` + 3 local cumulative sum constraints.
-/// - For global scope: 14 additional constraints for the global cumulative sum.
 pub fn count_permutation_constraints<F: Field>(
     sends: &[Lookup<F>],
     receives: &[Lookup<F>],
     batch_size: usize,
-    commit_scope: LookupScope,
 ) -> usize {
     let mut count = 0;
 
@@ -347,10 +332,6 @@ pub fn count_permutation_constraints<F: Field>(
         count += local_permutation_width - 1;
 
         count += 3;
-    }
-
-    if commit_scope == LookupScope::Global {
-        count += 14;
     }
 
     count

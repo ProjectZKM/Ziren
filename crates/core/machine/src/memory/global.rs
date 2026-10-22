@@ -173,10 +173,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             }
         }
     }
-
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
-    }
 }
 
 #[derive(PicusAnnotations, AlignedBorrow, Clone, Copy)]

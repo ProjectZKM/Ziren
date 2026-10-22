@@ -23,7 +23,7 @@ use super::types::PartialSumcheckProof;
 use crate::air::MachineAir;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
 use p3_challenger::FieldChallenger;
-use p3_field::{BasedVectorSpace, Field, PrimeField};
+use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
 /// Squeeze the two batching challenges [`prove_shard_zerocheck`] consumes, in
@@ -225,76 +225,6 @@ where
         trace_at_z.insert(name, component_poly_evals[k].clone());
     }
     (sumcheck_proof, trace_at_z)
-}
-
-/// Derive a chip's global cumulative sum from the last 14 elements of
-/// its main trace (x = elements 0..7, y = elements 7..14). Zero when
-/// the chip commits to the local scope or has too few rows.
-pub fn chip_global_cumulative_sum<F, A>(
-    chip: &crate::Chip<F, A>,
-    main_trace: &RowMajorMatrix<F>,
-) -> crate::septic_digest::SepticDigest<F>
-where
-    F: PrimeField,
-    A: MachineAir<F>,
-{
-    chip_global_cumulative_sum_from_values(chip, &main_trace.values)
-}
-
-/// Row-major-`values` variant of [`chip_global_cumulative_sum`]: reads
-/// only the last 14 cells of a chip's main-trace `values` (the fn never
-/// uses the width).  Lets the caller source the cells from the shared
-/// `Arc<Mle>` view ([`crate::multilinear::PaddedMle::real_trace_ref`]'s
-/// `values`) with no owned `RowMajorMatrix` — byte-identical to the
-/// `RowMajorMatrix` form.
-pub fn chip_global_cumulative_sum_from_values<F, A>(
-    chip: &crate::Chip<F, A>,
-    values: &[F],
-) -> crate::septic_digest::SepticDigest<F>
-where
-    F: PrimeField,
-    A: MachineAir<F>,
-{
-    if chip.commit_scope() == crate::air::LookupScope::Local {
-        return crate::septic_digest::SepticDigest::<F>::zero();
-    }
-    let sz = values.len();
-    if sz < 14 {
-        return crate::septic_digest::SepticDigest::<F>::zero();
-    }
-    let last_row = &values[sz - 14..sz];
-    let x =
-        crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| last_row[j]);
-    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| {
-        last_row[j + 7]
-    });
-    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
-}
-
-/// Commit-traces D2H removal: tail-only variant of
-/// [`chip_global_cumulative_sum`].  `tail14` MUST be the last 14
-/// row-major values of the chip's main trace (x = 0..7, y = 7..14),
-/// e.g. from `DeviceTraceProvider::chip_main_tail` — a ~56-byte D2H
-/// gather instead of the full-trace materialize.  Identical output to
-/// the full-trace fn for the same chip/trace (the provider returns
-/// `None` when `h*w < 14`, mirroring the `sz < 14` zero branch).
-pub fn chip_global_cumulative_sum_from_tail<F, A>(
-    chip: &crate::Chip<F, A>,
-    tail14: &[F],
-) -> crate::septic_digest::SepticDigest<F>
-where
-    F: PrimeField,
-    A: MachineAir<F>,
-{
-    if chip.commit_scope() == crate::air::LookupScope::Local || tail14.len() != 14 {
-        return crate::septic_digest::SepticDigest::<F>::zero();
-    }
-    let x =
-        crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| tail14[j]);
-    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| {
-        tail14[j + 7]
-    });
-    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
 }
 
 /// Max log_degree across a shard's main traces; equals the

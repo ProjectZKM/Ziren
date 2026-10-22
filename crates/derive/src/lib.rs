@@ -187,13 +187,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            let commit_scope_arms = variants.iter().map(|(variant_name, field)| {
-                let field_ty = &field.ty;
-                quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::commit_scope(x)
-                }
-            });
-
             let picus_info_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
@@ -267,12 +260,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                     fn included(&self, shard: &Self::Record) -> bool {
                         match self {
                             #(#included_arms,)*
-                        }
-                    }
-
-                    fn commit_scope(&self) -> LookupScope {
-                        match self {
-                            #(#commit_scope_arms,)*
                         }
                     }
 

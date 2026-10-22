@@ -54,11 +54,10 @@ fn breakdown<SC: zkm_pcs::StarkGenericConfig>(
     let j = &proof.jagged_shard_proof;
     println!("{name}: vk {} B, public values {} B", sz(vk), sz(&j.public_values));
     println!(
-        "    logup-gkr {} B, zerocheck {} B, opened values {} B, cumulative sums {} B",
+        "    logup-gkr {} B, zerocheck {} B, opened values {} B",
         sz(&j.logup_gkr_proof),
         sz(&j.zerocheck_proof),
-        sz(&j.opened_values),
-        sz(&j.chip_cumulative_sums)
+        sz(&j.opened_values)
     );
     let heights: Vec<String> = j.chip_heights.iter().map(|(c, h)| format!("{c}={h}")).collect();
     println!("    chip heights: {}", heights.join(" "));

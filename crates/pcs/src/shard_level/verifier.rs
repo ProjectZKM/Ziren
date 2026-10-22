@@ -513,7 +513,7 @@ fn verify_jagged_pcs_host<SC, A>(
     shared_eval_point: &[Challenge<SC>],
     evaluation_proof: &super::shard_proof::EvaluationProof,
     _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
-    opened_values: &crate::ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: &crate::ShardOpenedValues<Challenge<SC>>,
     observed_main_commitment: &[Val<SC>; 8],
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
     global_indices: &[usize],
@@ -1268,7 +1268,7 @@ fn verify_zerocheck_host<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: &ShardOpenedValues<Challenge<SC>>,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
@@ -1408,7 +1408,7 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     alpha: Challenge<SC>,
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
-    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: &ShardOpenedValues<Challenge<SC>>,
 ) -> Challenge<SC>
 where
     SC: StarkGenericConfig,
@@ -1671,7 +1671,7 @@ where
 fn verify_logup_gkr_host<SC, A>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
     chips: &[&Chip<Val<SC>, A>],
-    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: &ShardOpenedValues<Challenge<SC>>,
     max_log_row_count: usize,
     beta_seed_dim: usize,
     fold_orientation: FoldOrientation,

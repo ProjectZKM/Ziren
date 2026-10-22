@@ -4,7 +4,6 @@ use p3_air::Air;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2Ring, shape::OrderedShape, Chip, InnerChallenge,
@@ -136,7 +135,6 @@ where
     let vk = StarkVerifyingKey {
         commit: dummy_commit(),
         pc_start: KoalaBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
         chip_information,
         chip_ordering,
     };
@@ -184,7 +182,7 @@ pub mod tests {
     use crate::witness::*;
 
     /// Verifies `dummy_basefold_vk_and_shard_proof` produces a
-    /// proof whose `chip_cumulative_sums` map cardinality matches
+    /// proof whose `chip_heights` map cardinality matches
     /// the input shape's chip count — the shape-stability invariant
     /// the recursion-program builder depends on.
     #[test]
@@ -200,12 +198,6 @@ pub mod tests {
             vk.chip_ordering.len(),
             shape.inner.len(),
             "vk chip_ordering must match shape chip count",
-        );
-        assert_eq!(
-            proof.chip_cumulative_sums.len(),
-            shape.inner.len(),
-            "chip_cumulative_sums must have one entry per chip in the shape \
-             — this is the shape-stability invariant for program_from_shape",
         );
         assert_eq!(
             proof.chip_heights.len(),

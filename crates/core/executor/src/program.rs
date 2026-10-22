@@ -14,7 +14,6 @@ use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelIterator;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::{MachineAir, MachineProgram};
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::shape::Shape;
 
 use crate::{Instruction, MipsAirId, Register};
@@ -390,10 +389,6 @@ pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
 impl<F: PrimeField32> MachineProgram<F> for Program {
     fn pc_start(&self) -> F {
         F::from_u32(self.pc_start)
-    }
-
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        SepticDigest::zero()
     }
 }
 

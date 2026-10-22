@@ -48,9 +48,6 @@ use rayon::prelude::*;
 
 use crate::air::MachineAir;
 use crate::folder::PairWindow;
-use crate::septic_curve::SepticCurve;
-use crate::septic_digest::SepticDigest;
-use crate::septic_extension::SepticExtension;
 use crate::shard_level::basefold_constraint_folder::ShardConstraintFolder;
 use crate::shard_level::sumcheck_poly::{
     ComponentPoly, SumcheckPoly, SumcheckPolyBase, SumcheckPolyFirstRound,
@@ -707,10 +704,6 @@ where
     A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, K, EF>>,
 {
     let local_sum = EF::ZERO;
-    let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
-        x: SepticExtension::<F>([F::ZERO; 7]),
-        y: SepticExtension::<F>([F::ZERO; 7]),
-    });
     let mut folder = ShardConstraintFolder::<F, K, EF> {
         preprocessed: PairWindow { local: prep_row, next: prep_row },
         main: PairWindow { local: main_row, next: main_row },
@@ -718,7 +711,6 @@ where
         accumulator: EF::ZERO,
         public_values,
         local_cumulative_sum: &local_sum,
-        global_cumulative_sum: &global_sum,
         _marker: PhantomData,
     };
     chip.eval(&mut folder);
@@ -1150,7 +1142,6 @@ mod tests {
     use crate::chip::Chip;
     use crate::lookup::LookupKind;
     use crate::record::MachineRecord;
-    use crate::septic_digest::SepticDigest;
     use p3_air::{Air, BaseAir, WindowAccess};
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -1171,9 +1162,6 @@ mod tests {
     impl MachineProgram<InnerVal> for MockProgram {
         fn pc_start(&self) -> InnerVal {
             InnerVal::ZERO
-        }
-        fn initial_global_cumulative_sum(&self) -> SepticDigest<InnerVal> {
-            SepticDigest::<InnerVal>::zero()
         }
     }
     #[derive(Clone)]

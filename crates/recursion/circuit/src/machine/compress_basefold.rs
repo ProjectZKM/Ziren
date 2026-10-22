@@ -91,18 +91,6 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums (witnessed
-    /// from each input's `JaggedShardProof.chip_cumulative_sums`).
-    /// Same length and order as `vks_and_proofs`.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
     /// per-input per-chip log heights (sourced from each input's
     /// `JaggedShardProof.chip_heights`).  Same length and order
     /// as `vks_and_proofs`.  Threaded into
@@ -151,7 +139,6 @@ pub fn verify_compress_basefold<C, SC, A>(
     use std::borrow::BorrowMut;
     let ZKMCompressBasefoldWitnessVariable {
         vks_and_proofs,
-        chip_cumulative_sums_per_input,
         chip_heights_per_input,
         vk_merkle_data,
         is_complete,
@@ -402,20 +389,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
         );
 
-        let empty_cumsums_compress = std::collections::BTreeMap::new();
-        let cumsums_for_input = chip_cumulative_sums_per_input
-            .get(_i)
-            .unwrap_or(&empty_cumsums_compress);
-        let empty_log_heights_compress = std::collections::BTreeMap::new();
-        let _opened_values =
-            crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-                builder,
-                proof_opened_values,
-                &chip_names,
-                &empty_log_heights_compress,
-                cumsums_for_input,
-                max_log_row_count,
-            );
+        let _opened_values = proof_opened_values;
 
         let mut _challenger = machine.config().challenger_variable(builder);
 

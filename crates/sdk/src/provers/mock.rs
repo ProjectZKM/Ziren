@@ -11,7 +11,6 @@ use crate::{
 use anyhow::Result;
 use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
@@ -81,7 +80,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                     pc_start: KoalaBear::ZERO,
                     chip_information: vec![],
                     chip_ordering: HashMap::new(),
-                    initial_global_cumulative_sum: SepticDigest::zero(),
                 };
 
                 let proof = ZKMProof::Compressed(Box::new(ZKMReduceProof {

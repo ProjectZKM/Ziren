@@ -8,10 +8,7 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 use super::{lookup::AirLookup, BinomialExtension};
-use crate::{
-    lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension,
-    ProverConstraintFolder, StarkGenericConfig, Word,
-};
+use crate::{lookup::LookupKind, ProverConstraintFolder, StarkGenericConfig, Word};
 
 /// The default increment for the program counter.  Is used for all instructions except
 /// for branches and jumps.
@@ -498,20 +495,6 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
     }
 }
 
-/// A builder that can operate on septic extension elements.
-pub trait SepticExtensionAirBuilder: BaseAirBuilder {
-    /// Asserts that the two field extensions are equal.
-    fn assert_septic_ext_eq<I: Into<Self::Expr>>(
-        &mut self,
-        left: SepticExtension<I>,
-        right: SepticExtension<I>,
-    ) {
-        for (left, right) in left.0.into_iter().zip(right.0) {
-            self.assert_eq(left, right);
-        }
-    }
-}
-
 /// A builder that can operate on extension elements.
 pub trait ExtensionAirBuilder: BaseAirBuilder {
     /// Asserts that the two field extensions are equal.
@@ -555,22 +538,13 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
     /// The type of the local cumulative sum.
     type LocalSum: Into<Self::ExprEF> + Copy;
 
-    /// The type of the global cumulative sum;
-    type GlobalSum: Into<Self::Expr> + Copy;
-
     /// Returns the local cumulative sum of the permutation.
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum;
-
-    /// Returns the global cumulative sum of the permutation.
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum>;
 }
 
 /// A trait that contains the common helper methods for building `Ziren recursion` and Ziren machine
 /// AIRs.
-pub trait MachineAirBuilder:
-    BaseAirBuilder + ExtensionAirBuilder + SepticExtensionAirBuilder
-{
-}
+pub trait MachineAirBuilder: BaseAirBuilder + ExtensionAirBuilder {}
 
 /// A trait which contains all helper methods for building Ziren machine AIRs.
 pub trait ZKMAirBuilder: MachineAirBuilder + ByteAirBuilder + InstructionAirBuilder {}
@@ -594,7 +568,6 @@ impl<AB: BaseAirBuilder> ByteAirBuilder for AB {}
 impl<AB: BaseAirBuilder> InstructionAirBuilder for AB {}
 
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
-impl<AB: BaseAirBuilder> SepticExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> MachineAirBuilder for AB {}
 impl<AB: BaseAirBuilder> ZKMAirBuilder for AB {}
 

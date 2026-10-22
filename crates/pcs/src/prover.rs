@@ -1,4 +1,3 @@
-use crate::septic_digest::SepticDigest;
 use core::fmt::Display;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, time::Instant};
@@ -427,9 +426,6 @@ pub trait MachineProvingKey<SC: StarkGenericConfig>: Send + Sync {
     /// The start pc.
     fn pc_start(&self) -> Val<SC>;
 
-    /// The initial global cumulative sum.
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>>;
-
     /// Observe itself in the challenger.
     fn observe_into(&self, challenger: &mut Challenger<SC>);
 }
@@ -694,17 +690,10 @@ where
         self.pc_start
     }
 
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
-        self.initial_global_cumulative_sum
-    }
-
     fn observe_into(&self, challenger: &mut Challenger<SC>) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
-        let zero = Val::<SC>::ZERO;
-        challenger.observe(zero);
+        challenger.observe(Val::<SC>::ZERO);
     }
 }
 

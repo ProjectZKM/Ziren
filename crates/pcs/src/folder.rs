@@ -7,7 +7,7 @@ use p3_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess};
 use p3_field::{Algebra, ExtensionField, Field};
 
 use super::{Challenge, PackedChallenge, PackedVal, StarkGenericConfig, Val};
-use crate::{air::MultiTableAirBuilder, septic_digest::SepticDigest};
+use crate::air::MultiTableAirBuilder;
 
 /// A two-row window backed by slices.
 #[derive(Clone, Copy)]
@@ -38,8 +38,6 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub perm_challenges: &'a [PackedChallenge<SC>],
     /// The local cumulative sum for the permutation.
     pub local_cumulative_sum: &'a PackedChallenge<SC>,
-    /// The global cumulative sum for the permutation.
-    pub global_cumulative_sum: &'a SepticDigest<Val<SC>>,
     /// The selector for the first row.
     pub is_first_row: PackedVal<SC>,
     /// The selector for the last row.
@@ -140,14 +138,9 @@ impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for ProverConstraintFolde
 
 impl<'a, SC: StarkGenericConfig> MultiTableAirBuilder<'a> for ProverConstraintFolder<'a, SC> {
     type LocalSum = PackedChallenge<SC>;
-    type GlobalSum = Val<SC>;
 
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
         self.local_cumulative_sum
-    }
-
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
     }
 }
 
@@ -174,7 +167,6 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     /// The local cumulative sum of the permutation.
     pub local_cumulative_sum: &'a Var,
     /// The global cumulative sum of the permutation.
-    pub global_cumulative_sum: &'a SepticDigest<PubVar>,
     /// The selector for the first row.
     pub is_first_row: Var,
     /// The selector for the last row.
@@ -386,14 +378,9 @@ where
     PubVar: Into<Expr> + Copy,
 {
     type LocalSum = Var;
-    type GlobalSum = PubVar;
 
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
         self.local_cumulative_sum
-    }
-
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
     }
 }
 

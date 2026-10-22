@@ -81,11 +81,6 @@ pub fn hash_shard_proof_structure<H: Hasher>(
         chip.main.local.len().hash(h);
         chip.quotient.first().map(|q| q.len()).unwrap_or(0).hash(h);
     }
-
-    sp.chip_cumulative_sums.len().hash(h);
-    for name in sp.chip_cumulative_sums.keys() {
-        name.hash(h);
-    }
 }
 
 /// The same structural dimensions [`hash_shard_proof_structure`] hashes, as
@@ -108,7 +103,6 @@ pub fn describe_shard_proof_structure(
         ("zc_univariate_polys".into(), sp.zerocheck_proof.univariate_polys.len()),
         ("zc_point".into(), sp.zerocheck_proof.point_and_eval.0.len()),
         ("opened_chips".into(), sp.opened_values.chips.len()),
-        ("chip_cumulative_sums".into(), sp.chip_cumulative_sums.len()),
     ];
     {
         let mut h = std::collections::hash_map::DefaultHasher::new();

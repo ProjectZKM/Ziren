@@ -16,15 +16,14 @@
 //!
 //! This module hosts the BaseFold-shape opening type that bundles
 //! exactly those fields per chip, instead of parallel slices
-//! (`chip_degrees`, `cumulative_sums`, `global_cumulative_sums`).
+//! (`chip_degrees`, `cumulative_sums`).
 //!
 //! Uses Ziren's recursion-compiler `Felt`/`Ext` types (the
 //! in-circuit variant); the corresponding host-side variant lives
 //! on the prover side.
 
 use serde::{Deserialize, Serialize};
-use zkm_pcs::septic_digest::SepticDigest;
-use zkm_recursion_compiler::ir::{Ext, Felt};
+use zkm_recursion_compiler::ir::Ext;
 
 /// Single-row variant of [`zkm_pcs::AirOpenedValues`] for the
 /// BaseFold pipeline.
@@ -45,9 +44,9 @@ pub struct JaggedAirOpenedValues<T> {
 /// The in-circuit verifier's counterpart of [`zkm_pcs::ChipOpenedValues`],
 /// which serves the 4-batch FRI verifier path.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
-#[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-pub struct JaggedChipOpenedValues<F, EF> {
+#[serde(bound(serialize = "EF: Serialize"))]
+#[serde(bound(deserialize = "EF: Deserialize<'de>"))]
+pub struct JaggedChipOpenedValues<EF> {
     /// Preprocessed-trace evaluations at the sumcheck point.
     pub preprocessed: JaggedAirOpenedValues<EF>,
     /// Main-trace evaluations at the sumcheck point.
@@ -60,19 +59,16 @@ pub struct JaggedChipOpenedValues<F, EF> {
     /// output, taken directly from the GKR layer's reduced eval (no
     /// permutation column).
     pub local_cumulative_sum: EF,
-    /// Per-chip global cumulative sum digest.  Same source as
-    /// `local_cumulative_sum`.
-    pub global_cumulative_sum: SepticDigest<F>,
 }
 
 /// Per-shard opening bundle: one [`JaggedChipOpenedValues`] per
 /// chip, in the same order as the shard's chip list.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
-#[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-pub struct JaggedShardOpenedValues<F, EF> {
+#[serde(bound(serialize = "EF: Serialize"))]
+#[serde(bound(deserialize = "EF: Deserialize<'de>"))]
+pub struct JaggedShardOpenedValues<EF> {
     /// Per-chip openings.
-    pub chips: Vec<JaggedChipOpenedValues<F, EF>>,
+    pub chips: Vec<JaggedChipOpenedValues<EF>>,
 }
 
 /// In-circuit variant — the field types are the recursion-
@@ -80,7 +76,6 @@ pub struct JaggedShardOpenedValues<F, EF> {
 /// values, so the orchestrator can borrow into them without
 /// witnessing.
 pub type JaggedChipOpenedValuesVariable<C> = JaggedChipOpenedValues<
-    Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
     Ext<
         <C as zkm_recursion_compiler::ir::Config>::F,
         <C as zkm_recursion_compiler::ir::Config>::EF,
@@ -89,7 +84,6 @@ pub type JaggedChipOpenedValuesVariable<C> = JaggedChipOpenedValues<
 
 /// In-circuit per-shard opening bundle.
 pub type JaggedShardOpenedValuesVariable<C> = JaggedShardOpenedValues<
-    Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
     Ext<
         <C as zkm_recursion_compiler::ir::Config>::F,
         <C as zkm_recursion_compiler::ir::Config>::EF,
@@ -102,26 +96,19 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
-    type F = KoalaBear;
     type EF = KoalaBear;
 
     /// Construction smoke test: the bundle constructs cleanly with
     /// host-side base/extension types.
     #[test]
     fn opening_bundle_constructs() {
-        use zkm_pcs::septic_curve::SepticCurve;
-        use zkm_pcs::septic_extension::SepticExtension;
-        let chip_opening: JaggedChipOpenedValues<F, EF> = JaggedChipOpenedValues {
+        let chip_opening: JaggedChipOpenedValues<EF> = JaggedChipOpenedValues {
             preprocessed: JaggedAirOpenedValues { local: vec![EF::ZERO; 2] },
             main: JaggedAirOpenedValues { local: vec![EF::ZERO; 4] },
             degree: vec![EF::ZERO; 5],
             local_cumulative_sum: EF::ZERO,
-            global_cumulative_sum: SepticDigest(SepticCurve {
-                x: SepticExtension::<F>([F::ZERO; 7]),
-                y: SepticExtension::<F>([F::ZERO; 7]),
-            }),
         };
-        let shard: JaggedShardOpenedValues<F, EF> =
+        let shard: JaggedShardOpenedValues<EF> =
             JaggedShardOpenedValues { chips: vec![chip_opening] };
         assert_eq!(shard.chips.len(), 1);
         assert_eq!(shard.chips[0].main.local.len(), 4);

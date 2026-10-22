@@ -248,10 +248,6 @@ where
         self.air.included(shard)
     }
 
-    fn commit_scope(&self) -> crate::air::LookupScope {
-        self.air.commit_scope()
-    }
-
     fn picus_info(&self) -> PicusInfo {
         self.air.picus_info()
     }
@@ -275,13 +271,7 @@ where
     fn eval(&self, builder: &mut AB) {
         self.air.eval(builder);
         let batch_size = self.logup_batch_size();
-        eval_permutation_constraints(
-            &self.sends,
-            &self.receives,
-            batch_size,
-            self.air.commit_scope(),
-            builder,
-        );
+        eval_permutation_constraints(&self.sends, &self.receives, batch_size, builder);
     }
 }
 

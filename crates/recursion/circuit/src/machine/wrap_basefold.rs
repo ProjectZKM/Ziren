@@ -68,18 +68,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
-    /// per-input per-chip log heights (mirrors
-    /// `chip_cumulative_sums_per_input`).
+    /// per-input per-chip log heights.
     pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — in-circuit cousin of
     /// [`ZKMWrapBasefoldWitnessValues::vk_merkle_data`].
@@ -114,12 +103,8 @@ pub fn verify_wrap_basefold<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
-    let ZKMWrapBasefoldWitnessVariable {
-        vks_and_proofs,
-        chip_cumulative_sums_per_input,
-        chip_heights_per_input,
-        vk_merkle_data,
-    } = input;
+    let ZKMWrapBasefoldWitnessVariable { vks_and_proofs, chip_heights_per_input, vk_merkle_data } =
+        input;
 
     let vk_root = vk_merkle_data.root;
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
@@ -130,7 +115,6 @@ pub fn verify_wrap_basefold<C, SC, A>(
         builder,
         vk_legacy,
         proof_tuple,
-        chip_cumulative_sums_per_input,
         chip_heights_per_input,
         machine,
         max_log_row_count,
@@ -162,15 +146,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         crate::shard_level_witness::PreprocessedRoundWitness<C>,
     ),
-    chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
     chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
@@ -393,16 +368,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             chip_height_bits,
         )
     });
-    let empty_cumsums_wrap = std::collections::BTreeMap::new();
-    let cumsums_for_input = chip_cumulative_sums_per_input.first().unwrap_or(&empty_cumsums_wrap);
-    let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-        builder,
-        proof_opened_values,
-        &chip_names,
-        chip_heights_for_input,
-        cumsums_for_input,
-        max_log_row_count,
-    );
+    let opened_values = proof_opened_values;
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
     let wrap_real_num_cols: usize = {
         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
