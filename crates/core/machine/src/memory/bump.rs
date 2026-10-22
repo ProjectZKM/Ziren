@@ -14,7 +14,7 @@ use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::events::{ByteLookupEvent, ByteRecord, MemoryBumpEvent, MemoryReadRecord};
 use zkm_core_executor::{ByteOpcode, ExecutionRecord, Program, NUM_REGISTERS};
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{MachineAir, ZKMAirBuilder};
 
 use crate::{
     air::{MemoryAirBuilder, TIMESTAMP_HIGH_LIMB_BITS, TIMESTAMP_HIGH_LIMB_MASK},
@@ -181,10 +181,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
 
     fn included(&self, shard: &Self::Record) -> bool {
         !shard.bump_memory_events.is_empty()
-    }
-
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
     }
 }
 

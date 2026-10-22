@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir, MachineProgram};
 use crate::koala_bear_poseidon2::KoalaBearPoseidon2;
 use crate::logup_gkr::GlobalChallenge;
-use crate::septic_digest::SepticDigest;
 use crate::{
     Chip, CpuProver, LookupKind, MachineProof, MachineProver, MachineRecord, StarkGenericConfig,
     StarkMachine, StarkVerifyingKey, Val,
@@ -46,9 +45,6 @@ struct BusProgram;
 impl MachineProgram<F> for BusProgram {
     fn pc_start(&self) -> F {
         F::ZERO
-    }
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        SepticDigest::<F>::zero()
     }
 }
 

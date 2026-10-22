@@ -13,7 +13,6 @@ use super::{MachineChip, StarkGenericConfig, Val};
 use crate::{
     air::{MachineAir, MultiTableAirBuilder},
     folder::PairWindow,
-    septic_digest::SepticDigest,
 };
 
 /// Checks that the constraints of the given AIR are satisfied, including the permutation trace.
@@ -28,7 +27,6 @@ pub fn debug_constraints<SC, A>(
     perm_challenges: &[SC::Challenge],
     public_values: &[Val<SC>],
     local_cumulative_sum: &SC::Challenge,
-    global_cumulative_sum: &SepticDigest<Val<SC>>,
 ) where
     SC: StarkGenericConfig,
     Val<SC>: PrimeField32,
@@ -72,7 +70,6 @@ pub fn debug_constraints<SC, A>(
             perm: PairWindow { local: perm_local, next: perm_next },
             perm_challenges,
             local_cumulative_sum,
-            global_cumulative_sum,
             is_first_row: Val::<SC>::ZERO,
             is_last_row: Val::<SC>::ZERO,
             is_transition: Val::<SC>::ONE,
@@ -111,14 +108,12 @@ where
     A: for<'a> Air<DebugConstraintBuilder<'a, F, EF>>,
 {
     let local_cumulative_sum = EF::ZERO;
-    let global_cumulative_sum = SepticDigest::<F>::zero();
     let mut builder = DebugConstraintBuilder {
         preprocessed: PairWindow { local: &[], next: &[] },
         main: PairWindow { local, next },
         perm: PairWindow { local: &[], next: &[] },
         perm_challenges: &[],
         local_cumulative_sum: &local_cumulative_sum,
-        global_cumulative_sum: &global_cumulative_sum,
         is_first_row: F::ONE,
         is_last_row: F::ONE,
         is_transition: F::ZERO,
@@ -141,7 +136,6 @@ pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) main: PairWindow<'a, F>,
     pub(crate) perm: PairWindow<'a, EF>,
     pub(crate) local_cumulative_sum: &'a EF,
-    pub(crate) global_cumulative_sum: &'a SepticDigest<F>,
     pub(crate) perm_challenges: &'a [EF],
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
@@ -272,13 +266,8 @@ where
     EF: ExtensionField<F>,
 {
     type LocalSum = EF;
-    type GlobalSum = F;
 
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
         self.local_cumulative_sum
-    }
-
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
     }
 }

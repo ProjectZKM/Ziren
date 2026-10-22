@@ -1,34 +1,17 @@
 //! Host primitives shared by the zerocheck stage.
 //!
-//! Two pieces live here:
-//!
-//! * [`eq_mle_table`] — the dense evaluation table of the equality
-//!   multilinear extension `eq(r, -)` over `{0,1}^m`.  Index bit `i` of a
-//!   table slot selects `r[i]`, i.e. the table is LSB-first in `r`; every
-//!   caller that folds a table pair-wise (`table[2i]`, `table[2i+1]`) folds
-//!   variable `r[0]` first and must supply its point in that same order.
-//!   `Σ_b eq(r, b) = 1` for every `r`.
-//!
-//! * [`eval_constraints_on_hypercube_with_cumsums`] — the batched AIR
-//!   constraint polynomial evaluated at every row of the Boolean hypercube,
-//!   which is the `C(-)` table the zerocheck claim `Σ_b eq(r, b)·C(b) = 0`
-//!   is taken over.
+//! [`eq_mle_table`] is the dense evaluation table of the equality
+//! multilinear extension `eq(r, -)` over `{0,1}^m`.  Index bit `i` of a
+//! table slot selects `r[i]`, i.e. the table is LSB-first in `r`; every
+//! caller that folds a table pair-wise (`table[2i]`, `table[2i+1]`) folds
+//! variable `r[0]` first and must supply its point in that same order.
+//! `Σ_b eq(r, b) = 1` for every `r`.
 //!
 //! The zerocheck prover/verifier themselves live in [`crate::shard_level`].
 
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 
-use p3_air::Air;
-use p3_field::{Field, PrimeCharacteristicRing};
-use p3_matrix::dense::RowMajorMatrix;
-use p3_matrix::Matrix;
-
-use crate::air::MachineAir;
-use crate::chip::Chip;
-use crate::folder::{PairWindow, VerifierConstraintFolder};
-use crate::septic_digest::SepticDigest;
-use crate::{Challenge, StarkGenericConfig, Val};
+use p3_field::Field;
 
 /// Dense evaluation table of the equality MLE over `r ∈ EF^m`:
 ///
@@ -90,106 +73,11 @@ fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r
     table
 }
 
-/// Evaluate the batched AIR constraint polynomial at every row of the
-/// Boolean hypercube with real per-chip `local_cumulative_sum` +
-/// `global_cumulative_sum`.  The recursion verifier's
-/// `build_opened_values_from_chip_openings_with_cumsums` must pass
-/// MATCHING values (from `JaggedShardProof.chip_cumulative_sums`) or
-/// the zerocheck sumcheck balance will not close.
-#[allow(clippy::too_many_arguments)]
-pub fn eval_constraints_on_hypercube_with_cumsums<SC, A>(
-    chip: &Chip<Val<SC>, A>,
-    num_vars: usize,
-    main: &RowMajorMatrix<Val<SC>>,
-    preprocessed: &RowMajorMatrix<Val<SC>>,
-    public_values: &[Val<SC>],
-    alpha: Challenge<SC>,
-    local_cumulative_sum: Challenge<SC>,
-    global_cumulative_sum: SepticDigest<Val<SC>>,
-) -> Vec<Challenge<SC>>
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-{
-    let n = 1usize << num_vars;
-    assert_eq!(main.height(), n, "main trace height must equal 2^num_vars");
-    let main_width = main.width();
-    let preproc_width = preprocessed.width();
-    if preproc_width > 0 {
-        assert_eq!(preprocessed.height(), n, "preprocessed trace height must equal 2^num_vars");
-    }
-
-    let main_ext: Vec<Challenge<SC>> =
-        main.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
-    let preproc_ext: Vec<Challenge<SC>> =
-        preprocessed.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
-
-    let wrap_main: Vec<Challenge<SC>> = {
-        let mut v = Vec::with_capacity(main_ext.len());
-        v.extend_from_slice(&main_ext[main_width..]);
-        v.extend_from_slice(&main_ext[..main_width]);
-        v
-    };
-    let wrap_preproc: Vec<Challenge<SC>> = if preproc_width == 0 {
-        Vec::new()
-    } else {
-        let mut v = Vec::with_capacity(preproc_ext.len());
-        v.extend_from_slice(&preproc_ext[preproc_width..]);
-        v.extend_from_slice(&preproc_ext[..preproc_width]);
-        v
-    };
-
-    let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();
-    let zero_challenge: Challenge<SC> = local_cumulative_sum;
-    let global_sum: SepticDigest<Val<SC>> = global_cumulative_sum;
-
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let main_local = &main_ext[i * main_width..(i + 1) * main_width];
-        let main_next = &wrap_main[i * main_width..(i + 1) * main_width];
-        let main_view = PairWindow { local: main_local, next: main_next };
-
-        let preproc_window = if preproc_width == 0 {
-            PairWindow { local: &[], next: &[] }
-        } else {
-            let local = &preproc_ext[i * preproc_width..(i + 1) * preproc_width];
-            let next = &wrap_preproc[i * preproc_width..(i + 1) * preproc_width];
-            PairWindow { local, next }
-        };
-
-        let empty_view = PairWindow { local: &empty_perm_ext[..], next: &empty_perm_ext[..] };
-
-        let is_first = if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
-        let is_last = if i == n - 1 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
-        let is_transition = if i == n - 1 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
-
-        let mut folder = VerifierConstraintFolder::<SC> {
-            preprocessed: preproc_window,
-            main: main_view,
-            perm: empty_view,
-            perm_challenges: &[],
-            local_cumulative_sum: &zero_challenge,
-            global_cumulative_sum: &global_sum,
-            is_first_row: is_first,
-            is_last_row: is_last,
-            is_transition,
-            alpha,
-            accumulator: Challenge::<SC>::ZERO,
-            public_values,
-            _marker: PhantomData,
-        };
-
-        chip.eval(&mut folder);
-        out.push(folder.accumulator);
-    }
-
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;

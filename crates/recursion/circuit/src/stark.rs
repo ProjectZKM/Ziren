@@ -4,7 +4,6 @@ use p3_air::Air;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2Ring, shape::OrderedShape, Chip, InnerChallenge,
@@ -12,7 +11,7 @@ use zkm_pcs::{
 
 use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 
-/// Make a dummy jagged-pipeline shard proof for a given proof shape.
+/// Make a dummy basefold-pipeline shard proof for a given proof shape.
 ///
 /// Drives the host-side `prove_shard_with_data` with zero-filled
 /// traces for every chip in `shape`. The resulting proof is
@@ -28,13 +27,13 @@ use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 /// witness-stream `read()` count is shape-stable across dummy and
 /// real proofs.
 ///
-/// Unblocks `program_from_shape` whir
+/// Unblocks `program_from_shape` basefold
 /// dispatch and downstream `dummy()` constructors for
-/// `ZKMCoreWitnessValues` etc.
+/// `ZKMCoreBasefoldWitnessValues` etc.
 /// A dummy (vk, shard proof) for a CORE child at `shape`, whose values are
 /// LOG2 heights (the core cluster shapes: every core trace in a cluster is
 /// padded to a power of two).
-pub fn dummy_vk_and_shard_proof<const P: u8, A>(
+pub fn dummy_basefold_vk_and_shard_proof<const P: u8, A>(
     machine: &StarkMachine<KoalaBearPoseidon2Ring<P>, A>,
     shape: &OrderedShape,
 ) -> (
@@ -47,14 +46,14 @@ where
 {
     let rows: Vec<(String, usize)> =
         shape.inner.iter().map(|(name, log_h)| (name.clone(), 1usize << *log_h)).collect();
-    dummy_vk_and_shard_proof_rows(machine, &rows)
+    dummy_basefold_vk_and_shard_proof_rows(machine, &rows)
 }
 
 /// A dummy (vk, shard proof) for a child whose chips sit at exactly `rows`
 /// (name, row count) — the RECURSION children, whose one shape pins every
 /// chip to a multiple-of-32 row count (`next_multiple_of_32_rows`), not a
 /// power of two.  `ZKMCompressShape::proof_shapes` carries ROWS.
-pub fn dummy_vk_and_shard_proof_rows<const P: u8, A>(
+pub fn dummy_basefold_vk_and_shard_proof_rows<const P: u8, A>(
     machine: &StarkMachine<KoalaBearPoseidon2Ring<P>, A>,
     rows: &[(String, usize)],
 ) -> (
@@ -111,7 +110,7 @@ where
             .iter()
             .filter_map(|(name, rows)| {
                 let chip = chips.iter().find(|c| c.name() == name.as_str())?;
-                let pw = p3_air::BaseAir::<KoalaBear>::preprocessed_width(*chip);
+                let pw = MachineAir::<KoalaBear>::preprocessed_width(*chip);
                 if pw > 0 {
                     Some((name.clone(), pw, *rows))
                 } else {
@@ -136,7 +135,6 @@ where
     let vk = StarkVerifyingKey {
         commit: dummy_commit(),
         pc_start: KoalaBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
         chip_information,
         chip_ordering,
     };
@@ -183,29 +181,23 @@ pub mod tests {
     use super::*;
     use crate::witness::*;
 
-    /// Verifies `dummy_vk_and_shard_proof` produces a
-    /// proof whose `chip_cumulative_sums` map cardinality matches
+    /// Verifies `dummy_basefold_vk_and_shard_proof` produces a
+    /// proof whose `chip_heights` map cardinality matches
     /// the input shape's chip count — the shape-stability invariant
     /// the recursion-program builder depends on.
     #[test]
-    fn dummy_vk_and_shard_proof_shape_stable() {
+    fn dummy_basefold_vk_and_shard_proof_shape_stable() {
         let machine = MipsAir::<KoalaBear>::machine(KoalaBearPoseidon2::default());
         let shape = OrderedShape::from_log2_heights(&[
             ("AddSub".to_string(), 3),
             ("Bitwise".to_string(), 3),
         ]);
         let (vk, proof) =
-            super::dummy_vk_and_shard_proof::<_, MipsAir<KoalaBear>>(&machine, &shape);
+            super::dummy_basefold_vk_and_shard_proof::<_, MipsAir<KoalaBear>>(&machine, &shape);
         assert_eq!(
             vk.chip_ordering.len(),
             shape.inner.len(),
             "vk chip_ordering must match shape chip count",
-        );
-        assert_eq!(
-            proof.chip_cumulative_sums.len(),
-            shape.inner.len(),
-            "chip_cumulative_sums must have one entry per chip in the shape \
-             — this is the shape-stability invariant for program_from_shape",
         );
         assert_eq!(
             proof.chip_heights.len(),

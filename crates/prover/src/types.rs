@@ -78,12 +78,10 @@ where
         std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(DIGEST_SIZE + 1 + 14);
+        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(DIGEST_SIZE + 1);
         let cap: &[[KoalaBear; DIGEST_SIZE]] = self.commit.borrow();
         inputs.extend(&cap[0]);
         inputs.push(self.pc_start);
-        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
-        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
 
         poseidon2_hash(inputs)
     }

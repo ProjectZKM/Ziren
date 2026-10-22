@@ -90,7 +90,6 @@ fn main() {
             "  last_init/fin bits : {:?} / {:?}",
             pv.last_init_addr_bits, pv.last_finalize_addr_bits
         );
-        println!("  global_cumulative  : {:?}", pv.global_cumulative_sum);
     }
 
     verdict("file", &vk);

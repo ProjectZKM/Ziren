@@ -37,7 +37,7 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
 {
-    use crate::{InnerChallenge, InnerVal, WhirRing};
+    use crate::{WhirRing, InnerChallenge, InnerVal};
     use core::any::TypeId;
 
     assert!(
@@ -76,7 +76,7 @@ where
             })
         };
         let raw_root_inner: [InnerVal; 8] =
-            crate::jagged_pcs::whir_commit_digest(&precomputed.commit);
+            crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
         let digest_inner: [InnerVal; 8] = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
@@ -164,7 +164,7 @@ pub fn bind_global_round<SC>(
     global_round: Option<&std::collections::BTreeSet<String>>,
 ) -> Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>
 where
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
@@ -241,13 +241,18 @@ pub fn prove_shard_with_data<SC, A>(
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::WhirRing,
-    A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
+    A: MachineAir<Val<SC>> + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger: 'static
-        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + CanObserve<crate::WhirRingCommitment<SC>>,
+    SC::Challenger:
+        'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<
+                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
 {
     let ShardData {
         chips,
@@ -287,7 +292,6 @@ where
     );
 
     let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
-    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!("prove shard with data", chips = n_chips).entered();
 
@@ -442,9 +446,6 @@ where
     let opened_values =
         build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
-    let chip_cumulative_sums =
-        build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
-
     assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
         global_commitment,
@@ -453,7 +454,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         orientation,
     )
@@ -689,7 +689,7 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
         chips.len(),
         name_sorted.iter().map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
             let evals: &[Challenge<SC>] =
                 trace_at_z.get(&name).map(|v| v.as_slice()).unwrap_or(&[]);
             let split = prep_width.min(evals.len());
@@ -740,7 +740,7 @@ where
                 if let Some(m) = remat {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                    let mle = std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(m));
+                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
                     return crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h);
                 }
                 return pm.clone();
@@ -870,18 +870,18 @@ pub fn build_opened_values<SC, A>(
     mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     chip_heights: &std::collections::BTreeMap<String, usize>,
     max_log_row_count: usize,
-) -> ShardOpenedValues<Val<SC>, Challenge<SC>>
+) -> ShardOpenedValues<Challenge<SC>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
     let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
     name_sorted.sort_by_key(|a| MachineAir::<Val<SC>>::name(**a));
-    let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> = name_sorted
+    let chip_opened: Vec<crate::types::ChipOpenedValues<Challenge<SC>>> = name_sorted
         .iter()
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
             let mut prep_local: Vec<Challenge<SC>> = trace_at_z.remove(&name).unwrap_or_default();
             let split = prep_width.min(prep_local.len());
             let main_local = prep_local.split_off(split);
@@ -904,7 +904,6 @@ where
                 main: crate::types::AirOpenedValues { local: main_local, next: Vec::new() },
                 permutation: crate::types::AirOpenedValues { local: Vec::new(), next: Vec::new() },
                 quotient: vec![degree_bits],
-                global_cumulative_sum: crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
                 local_cumulative_sum: Challenge::<SC>::ZERO,
                 log_degree,
             }
@@ -913,57 +912,9 @@ where
     ShardOpenedValues { chips: chip_opened }
 }
 
-/// Per-chip (local, global) cumulative sums.  `local` is ZERO
-/// (the whir path doesn't materialize the permutation trace); `global`
-/// reads the RAW per-chip cells at their raw heights (device chips use the
-/// early-captured provider TAIL, `chip_cum_tails`).
-pub fn build_chip_cumulative_sums<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    chip_cum_tails: &[Option<Vec<Val<SC>>>],
-) -> std::collections::BTreeMap<
-    String,
-    crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
->
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    assert_eq!(
-        chips.len(),
-        shared_trace_mles.len(),
-        "build_chip_cumulative_sums: chips/shared_trace_mles must be parallel",
-    );
-    assert_eq!(
-        chips.len(),
-        chip_cum_tails.len(),
-        "build_chip_cumulative_sums: chips/chip_cum_tails must be parallel",
-    );
-    chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .zip(chip_cum_tails.iter())
-        .map(|((chip, pm), tail)| {
-            let name = MachineAir::<Val<SC>>::name(*chip);
-            let global = if let Some(tail14) = tail {
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_tail(
-                    *chip, tail14,
-                )
-            } else {
-                let vals: &[Val<SC>] = pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
-                    *chip, vals,
-                )
-            };
-            let local = Challenge::<SC>::ZERO;
-            (name, crate::shard_level::shard_proof::ChipCumulativeSums { local, global })
-        })
-        .collect()
-}
-
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
-/// WHIR root (`jagged_original_commitment`) from `evaluation_proof`, then
+/// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
@@ -971,12 +922,8 @@ pub fn assemble_jagged_shard_proof<SC>(
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
-    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
-    chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
@@ -991,7 +938,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         orientation,
     )
@@ -1008,12 +954,8 @@ pub fn assemble_jagged_shard_proof_with_global<SC>(
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
-    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
-    chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
@@ -1036,7 +978,7 @@ where
 
     let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
-            let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
+            let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
         }
         _ => main_commitment,
@@ -1049,7 +991,7 @@ where
                     && bundle.packing.round_counts.len() >= 2 + n_main_preceding =>
             {
                 let raw_inner =
-                    crate::jagged_pcs::whir_commit_digest_felts(&bundle.preceding_commits[0]);
+                    crate::jagged_pcs::basefold_commit_digest_felts(&bundle.preceding_commits[0]);
                 let raw = unsafe {
                     core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
                 };
@@ -1098,7 +1040,6 @@ where
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: orientation,
         row_counts,
@@ -1163,10 +1104,15 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger: 'static
-        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
+    SC::Challenger:
+        'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
 {
     prove_trusted_evaluations_with_global::<SC, A>(
         chips,

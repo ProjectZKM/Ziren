@@ -21,7 +21,7 @@
 //!
 //!   * MLE fold: adjacent pairs `(2i, 2i+1)` → `i`, last odd row
 //!     paired with the `ZERO` padding constant (LSB-first, identical to
-//!     `crate::whir::mle::Mle`).  The
+//!     `crate::basefold::Mle`).  The
 //!     "last variable" fixed each round is the least-significant bit of
 //!     the row index; `zeta`'s last coordinate.
 //!   * `partial_lagrange`: big-endian, `point[0]` is the MSB.
@@ -48,10 +48,7 @@ use rayon::prelude::*;
 
 use crate::air::MachineAir;
 use crate::folder::PairWindow;
-use crate::septic_curve::SepticCurve;
-use crate::septic_digest::SepticDigest;
-use crate::septic_extension::SepticExtension;
-use crate::shard_level::constraint_folder::ShardConstraintFolder;
+use crate::shard_level::basefold_constraint_folder::ShardConstraintFolder;
 use crate::shard_level::sumcheck_poly::{
     ComponentPoly, SumcheckPoly, SumcheckPolyBase, SumcheckPolyFirstRound,
 };
@@ -723,10 +720,6 @@ where
     A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, K, EF>>,
 {
     let local_sum = EF::ZERO;
-    let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
-        x: SepticExtension::<F>([F::ZERO; 7]),
-        y: SepticExtension::<F>([F::ZERO; 7]),
-    });
     let mut folder = ShardConstraintFolder::<F, K, EF> {
         preprocessed: PairWindow { local: prep_row, next: prep_row },
         main: PairWindow { local: main_row, next: main_row },
@@ -734,7 +727,6 @@ where
         accumulator: EF::ZERO,
         public_values,
         local_cumulative_sum: &local_sum,
-        global_cumulative_sum: &global_sum,
         _marker: PhantomData,
     };
     chip.eval(&mut folder);
@@ -809,6 +801,7 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
         return Vec::new();
     }
     let mut out = vec![EF::ZERO; num_real.div_ceil(2) * ncols];
+    use p3_maybe_rayon::prelude::*;
     out.par_chunks_mut(ncols).enumerate().for_each(|(i, out_row)| {
         let r0 = 2 * i;
         let r1 = 2 * i + 1;
@@ -1163,9 +1156,29 @@ mod tests {
     use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir};
     use crate::chip::Chip;
     use crate::lookup::LookupKind;
-    use crate::shard_level::test_machine::{MockProgram, MockRecord};
+    use crate::record::MachineRecord;
     use p3_air::{Air, BaseAir, WindowAccess};
     use p3_matrix::dense::RowMajorMatrix;
+
+    #[derive(Clone, Default)]
+    struct MockRecord;
+    impl MachineRecord for MockRecord {
+        type Config = ();
+        fn stats(&self) -> hashbrown::HashMap<String, usize> {
+            hashbrown::HashMap::new()
+        }
+        fn append(&mut self, _other: &mut Self) {}
+        fn public_values<FF: p3_field::PrimeCharacteristicRing>(&self) -> Vec<FF> {
+            Vec::new()
+        }
+    }
+    #[derive(Clone, Default)]
+    struct MockProgram;
+    impl MachineProgram<InnerVal> for MockProgram {
+        fn pc_start(&self) -> InnerVal {
+            InnerVal::ZERO
+        }
+    }
     #[derive(Clone)]
     struct MockAir {
         ncols: usize,

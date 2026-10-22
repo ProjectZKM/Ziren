@@ -168,10 +168,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             MemoryChipType::Finalize => !shard.global_memory_finalize_events.is_empty(),
         }
     }
-
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
-    }
 }
 
 #[derive(PicusAnnotations, AlignedBorrow, Clone, Copy)]
