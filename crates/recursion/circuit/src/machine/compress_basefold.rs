@@ -523,6 +523,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             _compress_public_values.global_chain_start = _current_public_values.global_chain_start;
             _global_chain = _current_public_values.global_chain_start;
             _compress_public_values.global_h_star = _current_public_values.global_h_star;
+            _compress_public_values.global_pow_witness = _current_public_values.global_pow_witness;
 
             _compress_public_values.start_pc = _current_public_values.start_pc;
             _pc = _current_public_values.start_pc;
@@ -598,6 +599,10 @@ pub fn verify_compress_basefold<C, SC, A>(
         {
             builder.assert_felt_eq(*h_star, *current);
         }
+        builder.assert_felt_eq(
+            _compress_public_values.global_pow_witness,
+            _current_public_values.global_pow_witness,
+        );
 
         C::range_check_felt(
             builder,

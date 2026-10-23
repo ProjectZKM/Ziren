@@ -1202,11 +1202,13 @@ fn shard_proven_under_another_h_star_rejected() {
             }
             let mut h_star = global.h_star;
             h_star[0] += Val::ONE;
-            zkm_pcs::logup_gkr::GlobalChallenge::derive(
+            let mut forged = zkm_pcs::logup_gkr::GlobalChallenge::grind(
                 machine.config().challenger(),
                 h_star,
                 machine.global_beta_seed_dim(),
-            )
+            );
+            forged.pow_witness = global.pow_witness;
+            forged
         },
     );
     assert!(res.is_err(), "a shard proven under another h_star must be rejected");

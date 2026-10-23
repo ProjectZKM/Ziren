@@ -146,6 +146,11 @@ pub struct JaggedShardProof<F, EF> {
     /// exactly when [`Self::global_commitment`] is.
     #[serde(default)]
     pub global_original_commitment: Option<[F; 8]>,
+    /// The proof-of-work witness of the global challenge the shard's global
+    /// lookups are proved under; the same in every shard of a proof. `None`
+    /// on a machine without global lookups.
+    #[serde(default)]
+    pub global_pow_witness: Option<F>,
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
@@ -183,6 +188,7 @@ where
             padding_row_heights: Vec::new(),
             global_commitment: None,
             global_original_commitment: None,
+            global_pow_witness: None,
         }
     }
 }

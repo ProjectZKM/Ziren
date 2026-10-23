@@ -326,6 +326,7 @@ where
         jagged_original_commitment: std::array::from_fn(|_| F::ZERO),
         global_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
         global_original_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
+        global_pow_witness: None,
     }
 }
 

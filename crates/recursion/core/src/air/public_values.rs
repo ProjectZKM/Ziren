@@ -122,6 +122,9 @@ pub struct RecursionPublicValues<T> {
     /// chain over every shard of the execution.
     pub global_h_star: [T; DIGEST_SIZE],
 
+    /// The proof-of-work witness of the global challenge of the covered shards.
+    pub global_pow_witness: T,
+
     /// The sum of the covered shards' global lookup fractions, as the basis coefficients of an
     /// extension-field element.
     pub global_sum: [T; GLOBAL_SUM_NUM_ELTS],

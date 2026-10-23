@@ -1616,7 +1616,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// The normalize input of one core shard proof, for a caller that holds
     /// the proof's global hash chain: `global_chain_start` is the chain's value
     /// before the shard ([`Self::global_chain`]'s entry at the shard's index)
-    /// and `global_h_star` its end.
+    /// and `global_h_star` its end. The global challenge's proof-of-work
+    /// witness is the one the shard proof carries.
     pub fn get_recursion_core_input_basefold(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1634,18 +1635,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_root: self.recursion_vk_root,
             global_chain_start,
             global_h_star,
+            global_pow_witness: shard_proof
+                .jagged_shard_proof
+                .global_pow_witness
+                .unwrap_or(KoalaBear::ZERO),
         }
     }
 
     /// Constructs `ZKMDeferredBasefoldWitnessValues` from each batch, taking
     /// the `JaggedShardProof` each input proof carries. The deferred proofs
     /// follow the last shard, so they pass through the global hash chain's
-    /// end `global_h_star`.
+    /// end `global_h_star` and the global challenge's proof-of-work witness
+    /// `global_pow_witness`.
     pub fn get_recursion_deferred_inputs_basefold<'a>(
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
         global_h_star: [KoalaBear; DIGEST_SIZE],
+        global_pow_witness: KoalaBear,
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMDeferredBasefoldWitnessValues<CompressedSC>>, VkNotAllowed> {
@@ -1677,6 +1684,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 deferred_proofs_digest: last_proof_pv.deferred_proofs_digest,
                 global_chain: global_h_star,
                 global_h_star,
+                global_pow_witness,
             });
             deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
         }
@@ -1714,10 +1722,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .global_chain(&vk.vk, shard_proofs)
             .last()
             .expect("the chain holds at least its start");
+        let global_pow_witness = shard_proofs
+            .last()
+            .and_then(|sp| sp.jagged_shard_proof.global_pow_witness)
+            .unwrap_or(KoalaBear::ZERO);
         let bf_deferred = self.get_recursion_deferred_inputs_basefold(
             &vk.vk,
             last_proof_pv,
             global_h_star,
+            global_pow_witness,
             deferred_proofs,
             batch_size,
         )?;
@@ -3828,6 +3841,7 @@ pub mod tests {
                 vk_root: prover.recursion_vk_root,
                 global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
                 global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
+                global_pow_witness: KoalaBear::ZERO,
             };
             let vk_real_1 = prover
                 .compress_prover
@@ -4089,6 +4103,7 @@ pub mod tests {
                 vk_root: prover.recursion_vk_root,
                 global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
                 global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
+                global_pow_witness: KoalaBear::ZERO,
             };
             let prog_real = prover.recursion_program_basefold(&real_witness).0;
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();

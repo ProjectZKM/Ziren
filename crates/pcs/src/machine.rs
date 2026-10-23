@@ -784,8 +784,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
     /// The cross-shard challenge of a proof whose shards commit the global
     /// rounds `rounds`, in shard order, under the verifying key
-    /// `vk_challenger` has observed (the machine's challenger after the key);
-    /// `None` for a machine without global lookups.
+    /// `vk_challenger` has observed (the machine's challenger after the key),
+    /// with its proof of work ground; `None` for a machine without global
+    /// lookups.
     ///
     /// Its digest `h_star` ends the hash chain that starts at the key's
     /// digest and takes one [`crate::logup_gkr::global_chain_step`] per shard.
@@ -801,20 +802,61 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         self.global_challenge_at(*chain.last().expect("the chain holds at least its start"))
     }
 
-    /// The global challenge of a proof whose hash chain ends at `h_star`;
-    /// `None` for a machine without global lookups.
+    /// The global challenge of a proof whose hash chain ends at `h_star`, with
+    /// its proof of work ground; `None` for a machine without global lookups.
     pub fn global_challenge_at(
         &self,
         h_star: [Val<SC>; 8],
     ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
     {
         self.has_global_lookups().then(|| {
-            crate::logup_gkr::GlobalChallenge::derive(
+            crate::logup_gkr::GlobalChallenge::grind(
                 self.config.challenger(),
                 h_star,
                 self.global_beta_seed_dim(),
             )
         })
+    }
+
+    /// The global challenge a verifier accepts for a proof whose shards commit
+    /// the global rounds `rounds` under the verifying key `vk_challenger` has
+    /// observed, and whose shards carry the proof-of-work witnesses
+    /// `pow_witnesses`: every shard must carry the same witness, and it must
+    /// pass the proof of work. `Ok(None)` for a machine without global lookups.
+    #[allow(clippy::type_complexity)]
+    pub fn verify_global_challenge<'a>(
+        &self,
+        vk_challenger: &SC::Challenger,
+        rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        pow_witnesses: impl IntoIterator<Item = Option<Val<SC>>>,
+    ) -> Result<
+        Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>,
+        String,
+    >
+    where
+        Val<SC>: 'a,
+    {
+        if !self.has_global_lookups() {
+            return Ok(None);
+        }
+        let mut witness = None;
+        for w in pow_witnesses {
+            let w = w.ok_or("a shard carries no global proof-of-work witness")?;
+            if *witness.get_or_insert(w) != w {
+                return Err("the shards carry different global proof-of-work witnesses".into());
+            }
+        }
+        let witness = witness.ok_or("a proof without shards")?;
+        let chain = self.global_chain(vk_challenger, rounds);
+        let h_star = *chain.last().expect("the chain holds at least its start");
+        crate::logup_gkr::GlobalChallenge::derive(
+            self.config.challenger(),
+            h_star,
+            witness,
+            self.global_beta_seed_dim(),
+        )
+        .map(Some)
+        .ok_or_else(|| "the global proof-of-work witness fails".into())
     }
 
     /// The global hash chain of a proof whose shards commit the global rounds
@@ -1008,8 +1050,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// Verify that a proof is complete and valid given a verifying key and a claimed digest.
     ///
     /// A machine with global-scope lookups verifies under the challenge
-    /// [`Self::global_challenge`] derives from the global rounds of the
-    /// proof's shards, in proof order; see [`Self::verify_with_global`].
+    /// [`Self::verify_global_challenge`] accepts for the global rounds and
+    /// proof-of-work witness of the proof's shards, in proof order; see
+    /// [`Self::verify_with_global`].
     #[allow(clippy::match_bool)]
     pub fn verify(
         &self,
@@ -1050,7 +1093,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 .iter()
                 .map(|shard| self.global_round_binding(shard))
                 .collect::<Vec<_>>();
-            self.global_challenge(&vk_challenger, rounds.iter().map(Option::as_ref))
+            self.verify_global_challenge(
+                &vk_challenger,
+                rounds.iter().map(Option::as_ref),
+                proof.shard_proofs.iter().map(|shard| shard.jagged_shard_proof.global_pow_witness),
+            )
+            .map_err(MachineVerificationError::InvalidGlobalChallenge)?
         };
         self.verify_with_global(vk, proof, challenger, global.as_ref())
     }
