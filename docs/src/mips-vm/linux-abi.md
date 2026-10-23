@@ -50,9 +50,8 @@ The guest never touches real kernel code. The zkVM emulates a minimal Linux kern
                     |                           |
                     v                           v
                 +--------------------------------------+
-                |            GlobalChip                |
-                |  Verify send/receive multiplicities  |
-                |  Ensure result consistency           |
+                |   global lookups, balanced across    |
+                |   shards under the global challenge  |
                 +--------------------------------------+
 ```
 
@@ -257,7 +256,7 @@ Global #2 (SyscallResult kind):
   [shard, clk, syscall_id, result_lo, result_hi, 0, 0]
 ```
 
-The `GlobalChip` verifies that send/receive multiplicities match for both messages. This ensures:
+Both messages are global lookups, balanced across shards under the execution's global challenge (see [Memory Consistency Checking](../design/memory-checking.md#global-challenge)). This ensures:
 - **Argument integrity**: The Core and Precompile shards process the same 32-bit arguments (half-word packed to prevent `reduce()` collisions modulo the KoalaBear prime).
 - **Result consistency**: Both shards agree on the syscall return value.
 

@@ -12,7 +12,7 @@ Ziren is a zkVM for the MIPS32r2 instruction set. It proves that a guest program
 
 - **Memory across shards**
 
-  Within a shard, memory is checked with timestamped read/write tuples on the memory bus. Across shards, every value a shard leaves for a later one is sent as a point on an elliptic curve over the degree-7 extension of KoalaBear, and the sum of all shards' points must be the identity. See [Memory Consistency Checking](./memory-checking.md) and [Continuation](./continuation.md).
+  Within a shard, memory is checked with timestamped read/write tuples on the memory bus. Across shards, every value a shard leaves for a later one is a global lookup: each shard proves its global lookups under one challenge drawn from a hash chain over every shard's committed global rows, and the shards' sums must add to zero. See [Memory Consistency Checking](./memory-checking.md) and [Continuation](./continuation.md).
 
 - **Recursion and the SNARK**
 
