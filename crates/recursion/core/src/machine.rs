@@ -368,7 +368,7 @@ pub mod tests {
     }
 
     /// The fibonacci program on the shrink machine with `BaseAlu` and
-    /// `MemoryVar` committed in a global main round of their own: the split
+    /// `MemoryVar` committed in a global round of their own: the split
     /// proof verifies, and neither layout's verifier accepts the other's proof.
     #[test]
     pub fn fibonacci_with_global_round() {

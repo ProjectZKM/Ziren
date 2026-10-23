@@ -151,7 +151,7 @@ pub struct JaggedShardProofVariable<
     /// so this stays `[Felt;8]` and is observed felt-by-felt to match
     /// the host shard verifier's transcript.
     pub main_commitment: [Felt<C::F>; 8],
-    /// The global main round's commitment, observed between the public
+    /// The global round's commitment, observed between the public
     /// values and the main commitment; `None` for a shard without one.
     pub global_commitment: Option<[Felt<C::F>; 8]>,
     /// Per-chip log-degree bits (variable-width, max bound by
@@ -319,7 +319,7 @@ impl<P> JaggedShardVerifier<P> {
     ///     lookups; its digest opens the transcript.  `None` for a machine
     ///     without global lookups.
     ///   * `in_global_round` — per shard chip, whether it is committed in the
-    ///     global main round, which is opened between the preprocessed round
+    ///     global round, which is opened between the preprocessed round
     ///     and the main round.
     ///
     /// Returns the sum of the shard's global lookup fractions.

@@ -109,7 +109,7 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// # Inputs
 ///
 /// - `main_commitment`: 8 felts — the main-trace commitment digest
-/// - `global_commitment`: the global main round's commitment digest, when
+/// - `global_commitment`: the global round's commitment digest, when
 ///   the shard commits one
 /// - `public_values`: per-shard public values
 /// - `logup_gkr_proof`: stark-side proof, converted internally

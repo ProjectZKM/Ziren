@@ -230,7 +230,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // hash-bind, `main_commitment` is the MODIFIED digest
         // `compress([raw_root, hash(counts)])` (observed in the FS prologue),
         // so the raw root is witnessed SEPARATELY here (from
-        // `JaggedShardProof::jagged_original_commitment`).  On the
+        // `JaggedShardProof::main_original_commitment`).  On the
         // hash-bind-off path the host writes `main_commitment` into that field
         // too, so this still equals main_commitment.
         commit_root: [Felt<C::F>; 8],
@@ -332,7 +332,7 @@ pub struct ShardRoundsWitness<C: CircuitConfig> {
     /// recursion round (whose committed area is PINNED far above its real
     /// cells) carries many where a core round carries one.
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
-    /// The global main round's raw root and hash-bound commitment, when the
+    /// The global round's raw root and hash-bound commitment, when the
     /// shard commits one.
     pub global: Option<RoundCommitments<C::F>>,
 }
@@ -365,8 +365,8 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.main_commitment[i].read(builder));
-        let jagged_original_commitment_arr: [Felt<C::F>; 8] =
-            core::array::from_fn(|i| self.jagged_original_commitment[i].read(builder));
+        let main_original_commitment_arr: [Felt<C::F>; 8] =
+            core::array::from_fn(|i| self.main_original_commitment[i].read(builder));
         let preprocessed_commit_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.preprocessed_original_commitment[i].read(builder));
         let preprocessed_row_counts: Vec<Felt<C::F>> =
@@ -423,7 +423,7 @@ where
                         sumcheck,
                         jagged_eval,
                         expected_eval,
-                        commit_root: jagged_original_commitment_arr,
+                        commit_root: main_original_commitment_arr,
                         modified_commitment: main_commitment_arr,
                     }
                 }
@@ -447,7 +447,7 @@ where
                         sumcheck,
                         jagged_eval,
                         expected_eval,
-                        commit_root: jagged_original_commitment_arr,
+                        commit_root: main_original_commitment_arr,
                         modified_commitment: main_commitment_arr,
                     }
                 }
@@ -469,7 +469,7 @@ where
         for f in self.main_commitment.iter() {
             f.write(witness);
         }
-        for f in self.jagged_original_commitment.iter() {
+        for f in self.main_original_commitment.iter() {
             f.write(witness);
         }
         for f in self.preprocessed_original_commitment.iter() {

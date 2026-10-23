@@ -52,9 +52,9 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// rows.  `None` on core, shrink and wrap (natural own area).
     recursion_pins: Option<crate::jagged::RecursionPins>,
 
-    /// The chips committed in a main round of their own, ahead of the rest of
-    /// the shard's main traces: a shard naming any of them commits
-    /// `[preprocessed, global main, local main]`, every other shard
+    /// The chips committed in the global round, ahead of the main round that
+    /// commits the rest of the shard's main traces: a shard naming any of them
+    /// commits `[preprocessed, global, main]`, every other shard
     /// `[preprocessed, main]`. `None` on a machine that never splits.
     global_round: Option<std::collections::BTreeSet<String>>,
 }
@@ -97,7 +97,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         self
     }
 
-    /// The chips this machine commits in the global main round, if it splits.
+    /// The chips this machine commits in the global round, if it splits.
     #[inline]
     pub const fn global_round(&self) -> Option<&std::collections::BTreeSet<String>> {
         self.global_round.as_ref()

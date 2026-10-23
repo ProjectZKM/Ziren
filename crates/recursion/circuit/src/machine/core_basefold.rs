@@ -248,7 +248,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
-            let layout = zkm_pcs::shard_level::round_layout::MainRoundLayout::for_chips(
+            let layout = zkm_pcs::shard_level::round_layout::TraceRoundLayout::for_chips(
                 &shard_chips_pre,
                 global_round,
             );
@@ -265,7 +265,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     .collect()
             };
             let global_widths_pre = round_widths(layout.global_indices());
-            let main_widths_pre = round_widths(layout.local_indices());
+            let main_widths_pre = round_widths(layout.main_indices());
             let prep_widths_pre: Vec<usize> = {
                 let mut dims: Vec<(String, usize)> = machine
                     .chips()

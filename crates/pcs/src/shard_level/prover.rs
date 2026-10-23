@@ -112,7 +112,7 @@ where
     (main_commitment, precomputed_generic)
 }
 
-/// The shard's chips committed in the global main round, as indices into the
+/// The shard's chips committed in the global round, as indices into the
 /// name-ordered `chips`: those named in the machine's `global_round`. Empty
 /// when the machine does not split or the shard names none of them, and then
 /// the shard commits a single main round.
@@ -123,7 +123,7 @@ pub fn global_round_indices<F, A: MachineAir<F>>(
 where
     F: p3_field::Field,
 {
-    super::round_layout::MainRoundLayout::for_chips(chips, global_round).global_indices().to_vec()
+    super::round_layout::TraceRoundLayout::for_chips(chips, global_round).global_indices().to_vec()
 }
 
 /// Splits a shard's name-keyed main traces into the global round's and the
@@ -174,7 +174,7 @@ where
 /// main round. `pin` applies to the main round; a machine that splits is never
 /// pinned.
 #[allow(clippy::type_complexity)]
-pub fn commit_main_rounds<SC>(
+pub fn commit_trace_rounds<SC>(
     main_traces: &crate::traces::Traces<Val<SC>>,
     global_round: Option<&std::collections::BTreeSet<String>>,
     pin: Option<crate::jagged::AreaPin>,
@@ -221,7 +221,7 @@ where
 ///   sample   α, β
 ///   zerocheck at the cube {0,1}^m, λ drawn inside, reducing to z*
 ///   observe  n, (prep_i(z*), main_i(z*))_{i<n}                  name order
-///   jagged open of the preprocessed and main rounds at z*
+///   jagged open of the preprocessed and trace rounds at z*
 /// ```
 ///
 /// with `h_i` the raw row count of chip `i` and `m = max_log_row_count`.
@@ -292,7 +292,7 @@ where
         let _span = tracing::info_span!("commit traces").entered();
         match commit_data {
             Some(retained) => (retained.global, retained.main_commitment, retained.precomputed),
-            None => commit_main_rounds::<SC>(&main_traces, global_round, main_pin),
+            None => commit_trace_rounds::<SC>(&main_traces, global_round, main_pin),
         }
     };
     let global_indices = global_round_indices(chips, global_round);
@@ -518,7 +518,7 @@ pub fn observe_transcript_prologue<SC, A>(
 }
 
 /// [`observe_transcript_prologue`] for a shard that may use the cross-shard
-/// challenge and commit a global main round: the challenge's digest `h_star`
+/// challenge and commit a global round: the challenge's digest `h_star`
 /// opens the transcript, and the global round's digest `C_global` is observed
 /// between the public values and `C_main`, so the order is `[h_star] →
 /// public_values → [C_global] → C_main → num_chips → per-chip {height_felt,
@@ -909,7 +909,7 @@ where
 
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
-/// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
+/// BaseFold root (`main_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
@@ -938,7 +938,7 @@ where
     )
 }
 
-/// [`assemble_jagged_shard_proof`] for a shard that may commit a global main
+/// [`assemble_jagged_shard_proof`] for a shard that may commit a global
 /// round. `global_commitment` is that round's hash-bound digest; its raw root
 /// is the bundle's last preceding commitment, the one right before the main
 /// round's.
@@ -971,7 +971,7 @@ where
         _ => (Vec::new(), Vec::new()),
     };
 
-    let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
+    let main_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
             let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
@@ -1040,7 +1040,7 @@ where
         fold_orientation: orientation,
         row_counts,
         padding_column_counts,
-        jagged_original_commitment,
+        main_original_commitment,
         preprocessed_original_commitment,
         preprocessed_row_counts,
     }
@@ -1125,10 +1125,10 @@ where
     )
 }
 
-/// [`prove_trusted_evaluations`] for a shard that may commit a global main
+/// [`prove_trusted_evaluations`] for a shard that may commit a global
 /// round. `global` names that round's chips, as indices into the name-ordered
 /// `chips`, together with its precomputed commit; the rounds are then opened
-/// in the order `[preprocessed, global main, main]`, each main round over its
+/// in the order `[preprocessed, global, main]`, each trace round over its
 /// own chips in name order, and `precomputed_commit` is the main round over
 /// every chip not in `global`.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1267,27 +1267,27 @@ where
         .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
         .collect();
 
-    struct MainRound<MT: p3_commit::Mmcs<InnerVal>> {
+    struct TraceRound<MT: p3_commit::Mmcs<InnerVal>> {
         chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView>,
         r_row_per_chip: Vec<Vec<InnerChallenge>>,
         claims: Vec<Vec<InnerChallenge>>,
         precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<MT>,
     }
-    let main_rounds: Vec<MainRound<<SC as BasefoldRing>::BfMmcs>> = match global {
-        None => vec![MainRound {
+    let trace_rounds: Vec<TraceRound<<SC as BasefoldRing>::BfMmcs>> = match global {
+        None => vec![TraceRound {
             chip_traces,
             r_row_per_chip,
             claims: pre_y_inner,
             precomputed: precomputed_commit,
         }],
         Some((global_indices, global_precomputed)) => {
-            let layout = super::round_layout::MainRoundLayout::from_global_indices(
+            let layout = super::round_layout::TraceRoundLayout::from_global_indices(
                 chips.len(),
                 &global_indices,
             );
             let mut claims: Vec<Option<Vec<InnerChallenge>>> =
                 pre_y_inner.into_iter().map(Some).collect();
-            let mut round = |indices: &[usize], precomputed| MainRound {
+            let mut round = |indices: &[usize], precomputed| TraceRound {
                 chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
                 r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
                 claims: indices
@@ -1297,11 +1297,11 @@ where
                 precomputed,
             };
             let global_round = round(layout.global_indices(), global_precomputed);
-            let main_round = round(layout.local_indices(), precomputed_commit);
+            let main_round = round(layout.main_indices(), precomputed_commit);
             vec![global_round, main_round]
         }
     };
-    for round in main_rounds.iter() {
+    for round in trace_rounds.iter() {
         debug_assert!(
             round.chip_traces.iter().map(|(name, _)| name).eq(round
                 .precomputed
@@ -1314,7 +1314,7 @@ where
     }
 
     let mut rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, _>> =
-        Vec::with_capacity(1 + main_rounds.len());
+        Vec::with_capacity(1 + trace_rounds.len());
     if !prep_chip_traces.is_empty() {
         rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
             chip_traces: &prep_chip_traces,
@@ -1323,7 +1323,7 @@ where
             precomputed: preprocessed_commit,
         });
     }
-    for round in main_rounds.iter() {
+    for round in trace_rounds.iter() {
         rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
             chip_traces: &round.chip_traces,
             r_row_per_chip: &round.r_row_per_chip,

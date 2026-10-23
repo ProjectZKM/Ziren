@@ -145,7 +145,7 @@ where
     core::array::from_fn(|_| challenger.sample())
 }
 
-/// What a shard's global main round binds ahead of the global challenge: the
+/// What a shard's global round binds ahead of the global challenge: the
 /// round's commitment, and the names and heights of its chips in name order.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(bound(serialize = "F: serde::Serialize", deserialize = "F: serde::Deserialize<'de>"))]

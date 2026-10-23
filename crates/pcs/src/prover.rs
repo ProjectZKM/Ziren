@@ -179,7 +179,7 @@ where
     /// the prove read the same cells.  `None` on device provers (their
     /// traces are device-resident).
     pub main_store: Option<crate::traces::Traces<Val<SC>>>,
-    /// The global main round's commitment, when the shard commits one: it is
+    /// The global round's commitment, when the shard commits one: it is
     /// built over the shard's global-round chips alone, before the main round
     /// above, which then holds every other chip.
     pub global: Option<RetainedRound<SC>>,
@@ -361,7 +361,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
 
-    /// The global main round [`Self::commit`] commits for `record` under the
+    /// The global round [`Self::commit`] commits for `record` under the
     /// same `cluster_widths`, from the traces of the shard's global-round
     /// chips alone; `None` for a shard without one. A proof's first pass
     /// takes it for every shard to fix the global challenge before any shard
@@ -530,7 +530,7 @@ where
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
                 let (global, main_commitment, precomputed) =
-                    crate::shard_level::prover::commit_main_rounds::<SC>(
+                    crate::shard_level::prover::commit_trace_rounds::<SC>(
                         &named_traces,
                         self.machine().global_round(),
                         record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),

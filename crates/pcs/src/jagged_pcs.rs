@@ -3129,9 +3129,9 @@ mod test {
         );
     }
 
-    /// **Three-round contract** — `[preprocessed, global main, local main]`, the
+    /// **Three-round contract** — `[preprocessed, global, main]`, the
     /// layout of a shard whose global-scope chips commit in a round of their own.
-    /// Both main rounds are natural; the local round's offsets are rebased by the
+    /// Both trace rounds are natural; the main round's offsets are rebased by the
     /// SUM of the two preceding committed areas, and the verifier must be handed
     /// both preceding roots in round order.
     #[test]
@@ -3212,7 +3212,7 @@ mod test {
         assert_eq!(
             off[n_prep_cols + n_global_cols],
             prep_area + global_area,
-            "the local round is rebased by the sum of the two preceding areas"
+            "the main round is rebased by the sum of the two preceding areas"
         );
         assert_eq!(bundle.packing.total_values, prep_area + global_area + local.prover_data.area);
 

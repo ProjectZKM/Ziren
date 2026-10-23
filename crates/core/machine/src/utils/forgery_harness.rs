@@ -1157,17 +1157,17 @@ fn global_memory_rows_swapped_across_shards_rejected() {
 }
 
 /// The prover commits MemoryLocal, whose messages are on the global bus, in
-/// the local round, after the global challenge is fixed.
+/// the main round, after the global challenge is fixed.
 #[test]
 #[ignore = "proves a real multi-shard core proof; run with --ignored"]
-fn global_chip_committed_in_the_local_round_rejected() {
+fn global_chip_committed_in_the_main_round_rejected() {
     setup_logger();
     let machine = MipsAir::machine(KoalaBearPoseidon2::new());
     let mut round = machine.global_round().cloned().unwrap();
     assert!(round.remove("MemoryLocal"));
     let prover = CpuProver::new(machine.with_global_round(Some(round)));
     let res = verify_tampered(
-        "global chip in local round",
+        "global chip in main round",
         fibonacci_program(),
         fib_stdin(),
         multi_shard_opts(),
@@ -1176,7 +1176,7 @@ fn global_chip_committed_in_the_local_round_rejected() {
         |_| {},
         same_challenge,
     );
-    assert!(res.is_err(), "a global chip committed in the local round must be rejected");
+    assert!(res.is_err(), "a global chip committed in the main round must be rejected");
 }
 
 /// The last shard is proven under a challenge derived from a digest other

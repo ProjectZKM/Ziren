@@ -245,13 +245,13 @@ impl JaggedShardVerifier {
             }
         }
 
-        let layout = super::round_layout::MainRoundLayout::for_chips(chips, global_round);
+        let layout = super::round_layout::TraceRoundLayout::for_chips(chips, global_round);
         let has_global = layout.has_global();
         if proof.global_commitment.is_some() != has_global
             || proof.global_original_commitment.is_some() != has_global
         {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                "the shard's chips {} a global main round, but the proof carries {} commitment \
+                "the shard's chips {} a global round, but the proof carries {} commitment \
                  for one",
                 if has_global { "commit" } else { "do not commit" },
                 if proof.global_commitment.is_some() { "a" } else { "no" },
@@ -442,7 +442,7 @@ impl JaggedShardVerifier {
 
                 if area >= (1usize << crate::jagged::MAX_ROUND_LOG_AREA) {
                     return Err(JaggedShardVerifyError::JaggedPcs(
-                        "jagged hash-bind: the main rounds' area is out of bounds \
+                        "jagged hash-bind: the trace rounds' area is out of bounds \
                          (0 < area < 2^30) (AreaOutOfBounds)"
                             .into(),
                     ));
@@ -494,7 +494,7 @@ impl JaggedShardVerifier {
 /// * `observed_chip_heights` — the h_i the prologue observed, before any
 ///   challenge of this phase: the canonical main-round row counts, against
 ///   which the jagged geometry is checked.
-/// * `layout` — the global and local main-round chip indices, in opening order.
+/// * `layout` — the global- and main-round chip indices, in opening order.
 /// * `claimed_prep_pad_columns` — `Some(n)` on a pinned machine, where the
 ///   number of preprocessed padding columns names the proof's pin class;
 ///   `None` for natural rounds.
@@ -514,7 +514,7 @@ fn verify_jagged_pcs_host<SC, A>(
     opened_values: &crate::ShardOpenedValues<Challenge<SC>>,
     observed_main_commitment: &[Val<SC>; 8],
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
-    layout: &super::round_layout::MainRoundLayout,
+    layout: &super::round_layout::TraceRoundLayout,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
 ) -> Result<(), JaggedShardVerifyError>
@@ -887,7 +887,7 @@ where
     if combined_packing.round_counts.len() != expected_rounds {
         return Err(JaggedShardVerifyError::JaggedPcs(format!(
             "inner bundle describes {} round(s); the machine commits {expected_rounds} \
-             ({} preprocessed chip(s), {} global main round, plus the main round)",
+             ({} preprocessed chip(s), {} global round, plus the main round)",
             combined_packing.round_counts.len(),
             n_prep,
             if has_global { "a" } else { "no" },
@@ -901,7 +901,7 @@ where
     }
     if has_global && pin_class.is_some() {
         return Err(JaggedShardVerifyError::JaggedPcs(
-            "a pinned shard cannot commit a global main round".into(),
+            "a pinned shard cannot commit a global round".into(),
         ));
     }
     let observed_height = |c: &Chip<Val<SC>, A>| {
@@ -935,7 +935,7 @@ where
         .expect("the round count was just required to be at least one");
     crate::jagged_pcs::check_round_geometry(
         main_round,
-        &expected_for(layout.local_indices()),
+        &expected_for(layout.main_indices()),
         "inner main round",
     )
     .map_err(JaggedShardVerifyError::JaggedPcs)?;
@@ -964,7 +964,7 @@ where
         push_padding(&mut chip_infos, global_cells, global_natural.saturating_sub(global_cells));
     }
     let n_global_end = chip_infos.len();
-    for &i in layout.local_indices() {
+    for &i in layout.main_indices() {
         let chip = chips[i];
         let column_count = column_count_at(chip_infos.len(), chip);
         chip_infos.push(JaggedChipInfo {
@@ -994,7 +994,7 @@ where
                     return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "{} round: {} is {} rows in the packing but {} as pinned by the \
                          verifying key or the observed heights",
-                        if i < n_prep_infos { "preprocessed" } else { "global main" },
+                        if i < n_prep_infos { "preprocessed" } else { "global" },
                         info.name,
                         h,
                         info.row_count,
@@ -1027,7 +1027,7 @@ where
         }
         if col_idx != total_cols {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                "packing column accounting mismatch: [preprocessed | global main | main] \
+                "packing column accounting mismatch: [preprocessed | global | main] \
                  covers {col_idx} columns but the packing carries {total_cols}",
             )));
         }
