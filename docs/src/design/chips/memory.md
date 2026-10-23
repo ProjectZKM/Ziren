@@ -55,7 +55,7 @@ These chips cover the lifetime of an address across the whole execution:
 - `MemoryGlobalInit` has a row for each address the program touches that is not in the program image. It sends `(0, 0, addr, value)` on the `Global` bus with its initial value.
 - `MemoryGlobalFinal` has a row for each touched address. It receives the last `(shard, clk, addr, value)` from the `Global` bus.
 
-Initial values of the program image do not have rows. They are folded into the verifying key as `initial_global_cumulative_sum`, which the leaf of the first shard adds to the global sum.
+Initial values of the program image are rows of the preprocessed `MemoryProgram` table, part of the verifying key. Every shard includes the table, and only the first shard sends its rows as global lookups.
 
 Each address may be initialized and finalized once. Both chips enforce it the same way:
 

@@ -24,7 +24,7 @@ Each column of a chip trace with \\( 2^n \\) rows is read as the multilinear ext
 
 ## Transcript prologue
 
-The verifier observes the verifying key (the preprocessed commitment, the start `pc`, the initial global digest and the chip layout). For each shard it then observes the public values, the main commitment, and the number, heights and names of the chips present. Binding the heights before any challenge prevents the prover from choosing trace dimensions after seeing randomness.
+The verifier observes the verifying key (the preprocessed commitment, the start `pc` and the chip layout). For each shard it then observes the end of the global hash chain the shard's global lookups are proved under, the public values, the global commitment of a shard that has one, the main commitment, and the number, heights and names of the chips present. Binding the heights before any challenge prevents the prover from choosing trace dimensions after seeing randomness.
 
 ## Lookup argument
 
@@ -82,8 +82,8 @@ The target is 106 rather than 100 because a shard transcript has about two dozen
 The verifier, `verify_shard` in `crates/pcs/src/shard_level/verifier.rs`:
 
 1. replays the prologue;
-2. checks the LogUp-GKR proof, using the public values for the endpoints of the `State`, `GlobalAccumulation` and global-memory control buses;
+2. checks the LogUp-GKR proof, using the public values for the endpoints of the `State` and global-memory control buses, and the global challenge for the shard's global lookups;
 3. checks the zerocheck sumcheck and recomputes every chip's batched constraint at \\( z^* \\) from the claimed column values;
 4. checks the jagged reduction and the WHIR proof against the preprocessed root in the verifying key and the shard's main commitment.
 
-Checks between shards (the `pc` chain, shard numbers, memory address ranges, the global digest) are not part of the shard argument. The recursion enforces them (see [Recursive STARK](./prover-architecture/recursive-stark.md)).
+Checks between shards (the `pc` chain, shard numbers, memory address ranges, the global hash chain and the global sums) are not part of the shard argument. The recursion enforces them (see [Recursive STARK](./prover-architecture/recursive-stark.md)).

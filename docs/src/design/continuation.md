@@ -23,15 +23,14 @@ A shard's proof exposes its interface as public values:
 | `previous_init_addr_bits`, `last_init_addr_bits`, `previous_finalize_addr_bits`, `last_finalize_addr_bits` | the range of addresses whose global initialization and finalization the shard covers |
 | `committed_value_digest`, `deferred_proofs_digest` | the guest's public output digest and deferred-proof digest, once committed |
 | `exit_code` | the exit code on halt |
-| `global_cumulative_sum` | the sum of the shard's cross-shard messages on the septic curve |
 
-No register file or memory image is passed between shards. Registers are memory addresses 0 to 35. The last value of each address a shard touches leaves the shard as a message on the global bus, and the next shard that touches the address takes it from there (see [Memory Consistency Checking](./memory-checking.md)).
+No register file or memory image is passed between shards. Registers are memory addresses 0 to 35. The last value of each address a shard touches leaves the shard as a global lookup, and the next shard that touches the address takes it from there (see [Memory Consistency Checking](./memory-checking.md)). A shard proof also outputs the sum of its global lookup fractions under the global challenge, and its leaf publishes that sum with the shard's step of the global hash chain.
 
 ## Key constraints
 
 - **Shard validity.** Each shard proof verifies against the program's verifying key.
-- **Initial state.** The first shard starts at `pc_start` from the verifying key, and its global digest is added to the key's digest of the initial memory image.
+- **Initial state.** The first shard starts at `pc_start` from the verifying key, its global hash chain starts at the value derived from the verifying key, and it sends the initial memory image from the key's preprocessed `MemoryProgram` table.
 - **Transitions.** Each shard's `start_pc` equals the previous shard's `next_pc`. Shard boundaries are sequential (`start_next_pc = start_pc + 4`, `next_next_pc = next_pc + 4`), so no pending branch target crosses them. Shard numbers increase by one, and the initialized and finalized address ranges of consecutive shards join.
-- **Completion.** The last shard ends with `next_pc = 0` and exit code 0. The sum of all shards' global digests and the initial digest is the neutral digest, so every memory value handed from one shard to another was consumed exactly once.
+- **Completion.** The last shard ends with `next_pc = 0` and exit code 0. The global hash chain ends at the value the global challenge was derived from, and the shards' global sums add to zero, so every memory value handed from one shard to another was consumed exactly once.
 
 The normalize programs check the conditions on single shards, the compose programs check the transitions, and the root checks completion (see [STARK Aggregation](./prover-architecture/stark-aggregation.md)).

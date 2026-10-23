@@ -10,7 +10,7 @@ Each core shard proof is verified by a *normalize* program, one shard per progra
 - checks the conditions that depend on the shard alone;
 - outputs the shard's public values in the recursion format (`RecursionPublicValues`), which covers a shard *range* `[start_shard, next_shard)`.
 
-The first shard must start at the verifying key's `pc_start` and contributes the key's initial global digest. An execution shard must have sequential boundaries (`start_next_pc = start_pc + 4`, `next_next_pc = next_pc + 4`) and exit code 0.
+Each leaf extends the global hash chain by its shard's global round and outputs the shard's global sum (see [Memory Consistency Checking](../memory-checking.md#global-challenge)). The first shard must start at the verifying key's `pc_start`, and its chain at the value derived from the verifying key. An execution shard must have sequential boundaries (`start_next_pc = start_pc + 4`, `next_next_pc = next_pc + 4`) and exit code 0.
 
 Deferred proofs are verified by a separate *deferred* program in batches. A deferred batch covers a range placed after the last execution shard (see [Proof Composition](./proof-composition.md)).
 
@@ -22,9 +22,10 @@ A *compose* program verifies up to three (`REDUCE_BATCH_SIZE`) recursion proofs 
 - shard and execution-shard numbers continue;
 - the initialized and finalized address ranges join;
 - the deferred-proof digest chain continues;
-- the committed-value and deferred-proof digests agree.
+- the committed-value and deferred-proof digests agree;
+- the global hash chain continues, and the inputs agree on the chain end the global challenge was derived from.
 
-It also adds the inputs' global digests. Each input's verifying key must be in the enumerated set of recursion keys: the program checks a Merkle proof of the key's hash against `vk_root`, a tree of height 14. The check is compiled into the program when `VERIFY_VK` is true, the default.
+It also adds the inputs' global sums. Each input's verifying key must be in the enumerated set of recursion keys: the program checks a Merkle proof of the key's hash against `vk_root`, a tree of height 19. The check is compiled into the program when `VERIFY_VK` is true, the default.
 
 ## Scheduling
 
@@ -39,6 +40,6 @@ The compose that covers the whole execution runs with `is_complete` set and chec
 - the execution starts at shard 1 and contains an execution shard;
 - it ends with `next_pc = 0`;
 - the reconstructed deferred digest starts at zero and ends at the digest the guest committed;
-- the sum of all global digests is the neutral digest, so every cross-shard memory and syscall message was consumed.
+- the global hash chain ends at the value the global challenge was derived from, and the global sums add to zero, so every cross-shard memory and syscall message was consumed.
 
 The output is a `ZKMReduceProof`, the *compressed* proof, which the SDK can verify directly or pass on to the SNARK stages.

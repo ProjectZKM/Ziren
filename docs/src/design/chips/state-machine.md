@@ -24,7 +24,7 @@ The chip set is the `MipsAir` enum in `crates/core/machine/src/mips/mod.rs`. The
 
 - **Global**
 
-  The `Global` chip turns every message that crosses a shard boundary (memory hand-offs, syscalls sent to a precompile shard) into a point on a septic elliptic curve and accumulates the points into the shard's digest.
+  Every message that crosses a shard boundary (memory hand-offs, syscalls sent to a precompile shard) is a global lookup, proved under the execution's global challenge (see [Memory Consistency Checking](../memory-checking.md#global-challenge)).
 
 - **Lookup tables**
 
@@ -49,9 +49,7 @@ Two program counters travel on the bus because MIPS has a branch delay slot: `ne
 | `Memory` | timestamped `(shard, clk, addr, value)` accesses |
 | `Byte`, `Range` | byte-operation and range-check lookups |
 | `Syscall`, `SyscallResult` | syscall arguments and results between the syscall chips |
-| `Global` | messages that cross shards, consumed by the `Global` chip |
-| `GlobalAccumulation` | the running sum of the `Global` chip's points |
 | `MemoryGlobalInitControl`, `MemoryGlobalFinalizeControl` | the ordered chain of initialized and finalized addresses |
 | `PrecompileChain` | the per-row state of multi-row precompiles |
 
-The `State`, `GlobalAccumulation` and the two global-memory control buses are closed by endpoints the shard's public values supply; every other bus balances within the shard's traces.
+The `State` and the two global-memory control buses are closed by endpoints the shard's public values supply. `Memory`, `Syscall` and `SyscallResult` messages that cross shards are global lookups, which balance only over the whole execution (see [Memory Consistency Checking](../memory-checking.md#global-challenge)); every other lookup balances within the shard's traces.

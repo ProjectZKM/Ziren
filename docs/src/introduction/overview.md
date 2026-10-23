@@ -28,7 +28,7 @@ This documentation describes Ziren V2.0.
 
 - **Per-opcode chips.** Instructions are proved by narrow per-family chips rather than one wide table, so a common instruction pays only for its own columns. An addition or bitwise operation costs 33 to 37 committed cells per row, of which 29 to 32 are the shared instruction frame.
 
-- **Cross-shard memory consistency by multiset hashing.** Accesses to memory that crosses shard boundaries are accumulated as points on an elliptic curve over a degree-7 extension of KoalaBear (see [Memory Consistency Checking](../design/memory-checking.md)), rather than by Merkle hashing.
+- **Cross-shard memory consistency by a global challenge.** Memory values handed from one shard to another are global lookups, balanced over the whole execution by one LogUp challenge drawn from a hash chain over every shard's committed global rows (see [Memory Consistency Checking](../design/memory-checking.md)), rather than by Merkle hashing.
 
 - **KoalaBear field.** Arithmetic is over the prime \\(2^{31} - 2^{24} + 1\\), with a degree-4 extension for challenges.
 
