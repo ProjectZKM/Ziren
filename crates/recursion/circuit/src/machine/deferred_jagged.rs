@@ -78,7 +78,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     /// Per input: the child vk and its shard-proof pieces; the last tuple
-    /// entry is the preprocessed opening round's witnessed inputs.
+    /// entry holds the shard's opening-round witnesses.
     pub vks_and_proofs: Vec<(
         VerifyingKeyVariable<C, SC>,
         (
@@ -93,11 +93,9 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
-    /// per-input per-chip log heights.
-    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
@@ -151,7 +149,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
 {
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,
-        chip_heights_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
         zkm_vk_digest,
@@ -198,7 +195,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             zerocheck_proof,
             evaluation_proof,
             proof_opened_values,
-            preprocessed_round,
+            rounds_witness,
         ) = proof_tuple;
 
         let chip_names: Vec<String> =
@@ -249,7 +246,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         };
 
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
-            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
             hs.extend(
                 crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                     builder,
@@ -267,7 +264,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             if prep_widths.is_empty() {
                 Vec::new()
             } else {
-                vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
+                vec![(rounds_witness.preprocessed_raw_commit, basefold_vk_pre.preprocessed_commit)]
             };
 
         use crate::shard_level_witness::LiftedEvalProof;
@@ -299,7 +296,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                         *commit_root,
                         *modified_commitment,
                         &preceding_commitments,
-                        &preprocessed_round.padding_heights,
+                        &rounds_witness.padding_heights,
                         max_log_row_count,
                         &column_counts_by_round,
                         None,
@@ -325,7 +322,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 *commit_root,
                 *modified_commitment,
                 &preceding_commitments,
-                &preprocessed_round.padding_heights,
+                &rounds_witness.padding_heights,
                 max_log_row_count,
                 &column_counts_by_round,
                 None,
@@ -351,10 +348,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 unreachable!("deferred path never carries an OUTER (gnark) bundle")
             }
         };
-        let empty_heights_deferred = std::collections::BTreeMap::<String, usize>::new();
-        let chip_heights_for_input =
-            chip_heights_per_input.get(_deferred_i).unwrap_or(&empty_heights_deferred);
-        let _ = chip_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
@@ -399,7 +392,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         >(builder, {
             let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
             let witness_pads: usize =
-                preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+                rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
             match pack_info {
                 Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                     total_cols,

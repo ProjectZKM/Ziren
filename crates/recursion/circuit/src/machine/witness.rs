@@ -271,16 +271,9 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-            ZKMCompressBasefoldWitnessVariable {
-                vks_and_proofs,
-                chip_heights_per_input,
-                vk_merkle_data,
-                is_complete,
-            }
+            ZKMCompressBasefoldWitnessVariable { vks_and_proofs, vk_merkle_data, is_complete }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -298,11 +291,8 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             ZKMDeferredBasefoldWitnessVariable {
                 vks_and_proofs,
-                chip_heights_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
                 start_reconstruct_deferred_digest: self
                     .start_reconstruct_deferred_digest

@@ -123,15 +123,7 @@ pub fn global_round_indices<F, A: MachineAir<F>>(
 where
     F: p3_field::Field,
 {
-    let Some(set) = global_round else {
-        return Vec::new();
-    };
-    chips
-        .iter()
-        .enumerate()
-        .filter(|(_, chip)| set.contains(chip.name().as_str()))
-        .map(|(i, _)| i)
-        .collect()
+    super::round_layout::MainRoundLayout::for_chips(chips, global_round).global_indices().to_vec()
 }
 
 /// Splits a shard's name-keyed main traces into the global round's and the
@@ -1289,26 +1281,23 @@ where
             precomputed: precomputed_commit,
         }],
         Some((global_indices, global_precomputed)) => {
-            let mut in_global = vec![false; chips.len()];
-            for &i in global_indices.iter() {
-                in_global[i] = true;
-            }
+            let layout = super::round_layout::MainRoundLayout::from_global_indices(
+                chips.len(),
+                &global_indices,
+            );
             let mut claims: Vec<Option<Vec<InnerChallenge>>> =
                 pre_y_inner.into_iter().map(Some).collect();
-            let mut round = |members: &dyn Fn(usize) -> bool, precomputed| {
-                let indices: Vec<usize> = (0..chips.len()).filter(|&i| members(i)).collect();
-                MainRound {
-                    chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
-                    r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
-                    claims: indices
-                        .iter()
-                        .map(|&i| claims[i].take().expect("each chip is opened in one round"))
-                        .collect(),
-                    precomputed,
-                }
+            let mut round = |indices: &[usize], precomputed| MainRound {
+                chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
+                r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
+                claims: indices
+                    .iter()
+                    .map(|&i| claims[i].take().expect("each chip is opened in one round"))
+                    .collect(),
+                precomputed,
             };
-            let global_round = round(&|i| in_global[i], global_precomputed);
-            let main_round = round(&|i| !in_global[i], precomputed_commit);
+            let global_round = round(layout.global_indices(), global_precomputed);
+            let main_round = round(layout.local_indices(), precomputed_commit);
             vec![global_round, main_round]
         }
     };

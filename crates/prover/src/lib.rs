@@ -168,15 +168,9 @@ pub use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 /// the keys the map is missing.  Merge the result into
 /// `crates/prover/vk_map.bin` with the `merge_vk_maps` bin.
 ///
-/// WHY the map was ever short (Sep 2026): the normalize key is a function of
-/// `(chip set, prep blocks, main blocks, prep pad columns, main pad columns)`,
-/// but `generate` keyed only on the first three and emitted ONE representative
-/// per class.  `shape_at_class` packs its fillers up to the class ceiling, so
-/// that representative always landed on the FEWEST pad columns; a real shard
-/// that only just crossed into the class commits more of them, which is a
-/// different program and so a different vk.  MEASURED by
-/// `tests::normalize_vk_padding_column_probe`: one chip set, `main_blocks=8`,
-/// 1 pad column vs 2 -> the vks differ.  The pad counts are in the key now.
+/// Normalize keys depend on the chip set and the geometry of every committed
+/// round, including padding columns. `tests::normalize_vk_round_geometry_probe`
+/// compares those quantities under the current machine layout.
 ///
 /// Collection should therefore be a DIAGNOSTIC, not a dependency: a key that
 /// shows up here and is not in an enumerated map is a coverage bug in
@@ -4215,290 +4209,64 @@ pub mod tests {
         );
     }
 
-    /// PROBE: which AGGREGATE does the normalize vk key on?
-    ///
-    /// `normalize_vk_height_sensitivity` shows the vk survives moving one
-    /// chip's height but not bumping them all, so it is not the per-chip vector.
-    /// The enumeration dedups on `log_dense` — the power of two ENCLOSING the
-    /// committed length — while the prover's BaseFold geometry keys on the
-    /// committed length itself: `dense_len` in whole stacking blocks, and
-    /// `num_stripes = dense_len >> log_stacking`.  Two shapes can share a
-    /// `log_dense` and still differ in block count.  This builds pairs that
-    /// isolate the two candidates.
+    /// Reports how per-chip heights affect each committed round and the normalize VK.
+    /// Shapes in the same class must build identical programs; changes across
+    /// classes are reported without assuming one combined main-round area.
     #[test]
     #[serial]
     #[ignore]
-    fn normalize_vk_aggregate_key_probe() {
-        use zkm_pcs::air::MachineAir;
+    fn normalize_vk_round_geometry_probe() {
+        use crate::shapes::ZKMProofShape;
+        use zkm_core_machine::shape::CoreShapeConfig;
         use zkm_pcs::shape::OrderedShape;
+
         setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
+        // This diagnostic compares freshly built keys and needs no allowlist.
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
         let machine = prover.core_prover.machine();
-        let widths: std::collections::BTreeMap<String, usize> = machine
-            .chips()
-            .iter()
-            .map(|c| {
-                (
-                    <_ as MachineAir<KoalaBear>>::name(c),
-                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                )
-            })
+        let base: Vec<(String, usize)> = CoreShapeConfig::<KoalaBear>::default()
+            .maximal_core_shapes(18)
+            .into_iter()
+            .next()
+            .expect("the core machine has a representative shape")
+            .into_iter()
+            .map(|(chip, log_rows)| (chip.to_string(), log_rows))
             .collect();
-        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let stats = |hs: &[(&str, usize)]| -> (usize, usize, usize, usize) {
-            let total: usize =
-                hs.iter().map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h)).sum();
-            let dense = zkm_pcs::jagged::committed_dense_len(total, log_stack);
-            let blocks = dense >> log_stack;
-            let log_dense =
-                if dense == 0 { 0 } else { dense.next_power_of_two().trailing_zeros() as usize };
-            (total, dense, blocks, log_dense)
-        };
-        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program_basefold(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-        let report =
-            |tag: &str, hs: &[(&str, usize)]| -> ([u32; 8], (usize, usize, usize, usize)) {
-                let st = stats(hs);
-                let vk = vk_of(hs);
-                tracing::info!(
-                    "[AGGKEY] {tag}: total={} dense_len={} blocks={} log_dense={} vk={vk:?}",
-                    st.0,
-                    st.1,
-                    st.2,
-                    st.3,
-                );
-                (vk, st)
+        let mut variants = vec![("base".to_string(), base.clone())];
+        for name in ["MemoryLocal", "Mul", "Program", "MemoryProgram"] {
+            let mut heights = base.clone();
+            let (_, height) = heights
+                .iter_mut()
+                .find(|(chip, _)| chip == name)
+                .expect("the representative contains the diagnostic chip");
+            *height = height.saturating_sub(1).max(1);
+            variants.push((format!("halve {name}"), heights));
+        }
+
+        let mut programs_by_class = BTreeMap::new();
+        for (label, heights) in variants {
+            let rows: Vec<_> =
+                heights.iter().map(|(name, log_rows)| (name.clone(), 1usize << log_rows)).collect();
+            let class = ZKMProofShape::normalize_class(machine, &rows);
+            let shape = ZKMRecursionShape {
+                proof_shapes: vec![OrderedShape::from_log2_heights(&heights)],
+                is_complete: false,
             };
-
-        let base: &[(&str, usize)] = &[
-            ("AddSub", 13),
-            ("Bitwise", 12),
-            ("Branch", 11),
-            ("Byte", 16),
-            ("CloClz", 10),
-            ("Cpu", 14),
-            ("DivRem", 10),
-            ("Global", 9),
-            ("Jump", 10),
-            ("Lt", 12),
-            ("LoadNarrow", 10),
-            ("LoadWord", 10),
-            ("StoreNarrow", 10),
-            ("StoreWord", 10),
-            ("MemoryUnaligned", 10),
-            ("MemoryLocal", 10),
-            ("MiscInstrs", 1),
-            ("MovCond", 10),
-            ("Mul", 10),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 9),
-            ("ShiftRight", 9),
-            ("SyscallCore", 10),
-            ("SyscallInstrs", 10),
-        ];
-        let (vk_base, st_base) = report("base       ", base);
-
-        let same_blocks: Vec<(&str, usize)> = base
-            .iter()
-            .map(|(n, h)| match *n {
-                "Global" => (*n, 12),
-                "Mul" => (*n, 11),
-                _ => (*n, *h),
-            })
-            .collect();
-        let (vk_sb, st_sb) = report("same-blocks", &same_blocks);
-
-        let same_logdense: Vec<(&str, usize)> =
-            base.iter().map(|(n, h)| if *n == "Cpu" { (*n, 15) } else { (*n, *h) }).collect();
-        let (vk_sl, st_sl) = report("more-blocks", &same_logdense);
-
-        tracing::info!(
-            "[AGGKEY] (a) blocks {}=={} -> vk_eq={}",
-            st_base.2,
-            st_sb.2,
-            vk_base == vk_sb,
-        );
-        tracing::info!(
-            "[AGGKEY] (b) log_dense {}=={} but blocks {} vs {} -> vk_eq={}",
-            st_base.3,
-            st_sl.3,
-            st_base.2,
-            st_sl.2,
-            vk_base == vk_sl,
-        );
-        let prep_moved: Vec<(&str, usize)> =
-            base.iter().map(|(n, h)| if *n == "Program" { (*n, 17) } else { (*n, *h) }).collect();
-        let (vk_pm, st_pm) = report("prep-moved ", &prep_moved);
-        tracing::info!(
-            "[AGGKEY] (c) Program 19->17: blocks {} vs {} -> vk_eq={}",
-            st_base.2,
-            st_pm.2,
-            vk_base == vk_pm,
-        );
-
-        tracing::info!(
-            "[AGGKEY] CONCLUSION: the vk keys on the committed BLOCK COUNT, not log_dense: {}",
-            (vk_base == vk_sb && st_base.2 == st_sb.2)
-                && !(vk_base == vk_sl && st_base.2 != st_sl.2),
-        );
-    }
-
-    /// PROBE: is the STACKING-PAD COLUMN COUNT part of the normalize vk key?
-    ///
-    /// `normalize_vk_aggregate_key_probe` establishes that the key is a
-    /// function of the committed BLOCK COUNTS and not of the per-chip heights.
-    /// `ZKMProofShape::generate` takes that one step further and emits ONE
-    /// representative per `(chip set, prep blocks, main blocks)` — which is
-    /// only sound if nothing ELSE about the commitment reaches the program.
-    ///
-    /// It does.  A round's committed area is its real cells rounded out to
-    /// whole stacking blocks, and `committed_dense_len` rounds past four
-    /// blocks on to a multiple of EIGHT — so the gap between the real cells
-    /// and the committed area runs up to `8 << log_stacking`, and the dummy
-    /// (and the prover) close it with `ceil(gap / 2^max_log_row_count)`
-    /// explicit padding COLUMNS.  Those columns are in the concatenated
-    /// column space the verifier walks, so their COUNT is a program length.
-    ///
-    /// Two shapes can therefore share a class and still commit a different
-    /// number of padding columns.  The enumeration's representative packs its
-    /// fillers greedily up to the class ceiling, so it always lands on the
-    /// FEWEST pads; a real shard that only just crossed into the class lands
-    /// on more.  If the vks differ, the enumerated map is missing those
-    /// shapes by construction — which is what `ZIREN_VK_COLLECT` has been
-    /// papering over.
-    ///
-    /// `cargo test -r -p zkm-prover normalize_vk_padding_column_probe -- --ignored --nocapture`
-    #[test]
-    #[serial]
-    #[ignore]
-    fn normalize_vk_padding_column_probe() {
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::shape::OrderedShape;
-        setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-        let widths: std::collections::BTreeMap<String, usize> = machine
-            .chips()
-            .iter()
-            .map(|c| {
-                (
-                    <_ as MachineAir<KoalaBear>>::name(c),
-                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                )
-            })
-            .collect();
-        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let cube = 1usize << ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
-
-        let geometry = |hs: &[(&str, usize)]| -> (usize, usize, usize) {
-            let tv: usize =
-                hs.iter().map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h)).sum();
-            let area = zkm_pcs::jagged::committed_dense_len(tv, log_stack);
-            let gap = area - tv;
-            let pad_cols = gap.div_ceil(cube).max(1);
-            (tv, area >> log_stack, pad_cols)
-        };
-        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            let witness = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let program = prover.build_normalize_program_basefold_uncached(&witness);
+            let bytes = bincode::serialize(&*program).expect("serialize normalize program");
+            let vk = prover.compress_prover.setup(&program).1.hash_koalabear();
+            tracing::info!(
+                "{label}: prep_blocks={} global_blocks={} main_blocks={} padding_columns={:?} vk={vk:?}",
+                class.1, class.2, class.3, witness.shard_proofs[0].padding_column_counts,
             );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program_basefold(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-
-        let with_filler = |filler_h: usize| -> Vec<(&'static str, usize)> {
-            vec![
-                ("AddSub", 13),
-                ("Bitwise", 12),
-                ("Branch", 11),
-                ("Byte", 16),
-                ("Cpu", 14),
-                ("Global", 9),
-                ("Lt", 12),
-                ("MemoryLocal", filler_h),
-                ("Program", 19),
-                ("Range", 10),
-                ("SyscallCore", 10),
-            ]
-        };
-
-        let mut by_class: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
-        for h in 1..=21 {
-            let hs = with_filler(h);
-            let (tv, blocks, pads) = geometry(&hs);
-            by_class.entry(blocks).or_default().push((h, tv, pads));
+            if let Some(previous) = programs_by_class.insert(class, bytes.clone()) {
+                assert!(
+                    previous == bytes,
+                    "{label}: equal round geometry must produce the same normalize program"
+                );
+            }
         }
-        for (blocks, rows) in &by_class {
-            let pads: BTreeSet<usize> = rows.iter().map(|(_, _, p)| *p).collect();
-            tracing::info!(
-                "[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
-                rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
-                pads
-            );
-        }
-
-        let Some((blocks, a, b)) = by_class.iter().find_map(|(blocks, rows)| {
-            let lo = rows.iter().min_by_key(|(_, _, p)| *p)?;
-            let hi = rows.iter().max_by_key(|(_, _, p)| *p)?;
-            (lo.2 != hi.2).then_some((*blocks, *lo, *hi))
-        }) else {
-            tracing::info!(
-                "[PADCOL] INCONCLUSIVE: no class in the sweep spans two pad-column counts"
-            );
-            return;
-        };
-
-        tracing::info!(
-            "[PADCOL] class main_blocks={blocks}: A filler=2^{} cells={} pads={} | B filler=2^{} cells={} pads={}",
-            a.0, a.1, a.2, b.0, b.1, b.2,
-        );
-        let vk_a = vk_of(&with_filler(a.0));
-        let vk_b = vk_of(&with_filler(b.0));
-        tracing::info!("[PADCOL] vk_A={vk_a:?}");
-        tracing::info!("[PADCOL] vk_B={vk_b:?}");
-        tracing::info!(
-            "[PADCOL] NECESSARY: same (chip set, blocks), pad cols {} vs {} -> vk_eq={}.  \
-             vk_eq=false means the pad-column count belongs in the enumeration key.",
-            a.2,
-            b.2,
-            vk_a == vk_b,
-        );
-
-        let Some((blocks, c, d)) = by_class.iter().find_map(|(blocks, rows)| {
-            let first = rows.first()?;
-            let other = rows.iter().find(|r| r.0 != first.0 && r.2 == first.2)?;
-            Some((*blocks, *first, *other))
-        }) else {
-            tracing::info!(
-                "[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count"
-            );
-            return;
-        };
-        tracing::info!(
-            "[PADCOL] class main_blocks={blocks} pads={}: C filler=2^{} cells={} | D filler=2^{} cells={}",
-            c.2, c.0, c.1, d.0, d.1,
-        );
-        let vk_c = vk_of(&with_filler(c.0));
-        let vk_d = vk_of(&with_filler(d.0));
-        tracing::info!(
-            "[PADCOL] SUFFICIENT: same (chip set, blocks, pad cols), cells {} vs {} -> vk_eq={}.  \
-             vk_eq=true means one representative per class is faithful.",
-            c.1,
-            d.1,
-            vk_c == vk_d,
-        );
     }
 
     /// PROBE: how large is the shape space `fix_shape` can actually snap a core
@@ -4569,7 +4337,7 @@ pub mod tests {
             "CloClz",
             "Cpu",
             "DivRem",
-            "Global",
+            "MemoryProgram",
             "Jump",
             "Lt",
             "MemoryGlobalFinalize",
@@ -4716,421 +4484,6 @@ pub mod tests {
         tracing::info!(
             "[CSENS] CONCLUSION: a UNIFORM compose child see eq= above — reproduce the natural compose vk"
         );
-    }
-
-    /// Normalize VK height-sensitivity: does the NORMALIZE vk depend on the
-    /// EXACT per-chip canonical heights, or only the (chip-SET[, log_dense])?
-    /// No proving — builds dummy normalize programs from hardcoded shapes and
-    /// compares VKs.  Decides whether the enum can use a coarse cluster-cap
-    /// representative (O(N)) or must reproduce the per-chip clamped heights.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn normalize_vk_height_sensitivity() {
-        use zkm_pcs::shape::OrderedShape;
-        setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-        let vk_of = |inner: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &inner.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program_basefold(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-        let realcanon: &[(&str, usize)] = &[
-            ("AddSub", 13),
-            ("Bitwise", 12),
-            ("Branch", 11),
-            ("Byte", 16),
-            ("CloClz", 10),
-            ("Cpu", 14),
-            ("DivRem", 10),
-            ("Global", 9),
-            ("Jump", 10),
-            ("Lt", 12),
-            ("LoadNarrow", 10),
-            ("LoadWord", 10),
-            ("StoreNarrow", 10),
-            ("StoreWord", 10),
-            ("MemoryUnaligned", 10),
-            ("MemoryLocal", 10),
-            ("MiscInstrs", 1),
-            ("MovCond", 10),
-            ("Mul", 10),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 9),
-            ("ShiftRight", 9),
-            ("SyscallCore", 10),
-            ("SyscallInstrs", 10),
-        ];
-        let misc10: Vec<(&str, usize)> = realcanon
-            .iter()
-            .map(|(n, h)| if *n == "MiscInstrs" { (*n, 10) } else { (*n, *h) })
-            .collect();
-        let allcap: Vec<(&str, usize)> = realcanon
-            .iter()
-            .map(|(n, h)| match *n {
-                "Byte" | "Program" => (*n, *h),
-                _ => (*n, 14),
-            })
-            .collect();
-        let v_real = vk_of(realcanon);
-        let v_misc10 = vk_of(&misc10);
-        let v_allcap = vk_of(&allcap);
-        tracing::info!("[HSENS] realcanon   vk={v_real:?}");
-        tracing::info!("[HSENS] misc1->10   vk={v_misc10:?} eq_real={}", v_misc10 == v_real);
-        tracing::info!("[HSENS] all-core=14 vk={v_allcap:?} eq_real={}", v_allcap == v_real);
-        tracing::info!(
-            "[HSENS] CONCLUSION: normalize vk is {} to per-chip heights",
-            if v_misc10 == v_real && v_allcap == v_real {
-                "INSENSITIVE (chip-SET only)"
-            } else {
-                "SENSITIVE (per-chip heights load-bearing)"
-            }
-        );
-    }
-
-    /// VK-root construction validation: the normalize program is
-    /// (chip_set, log_dense)-determined, so ANY valid memory-cluster shape at
-    /// log_dense=27 must produce fib's vk.  Find a CONSTRUCTIBLE one (area
-    /// concentrated in a byte-lookup-free chip so the VK-setup
-    /// `Σ byte_lookups·2^log_degree ≤ |F|` holds) that hits each log_dense
-    /// band — the recipe generate() will use.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn vkroot_site5_construct() {
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::shape::OrderedShape;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-
-        let fib_vk = [
-            1995641422u32,
-            1126409227,
-            1338345684,
-            1611704093,
-            650337242,
-            439362553,
-            2125947076,
-            2022707873,
-        ];
-        let cluster: Vec<&str> = vec![
-            "AddSub",
-            "Bitwise",
-            "Branch",
-            "Byte",
-            "CloClz",
-            "Cpu",
-            "DivRem",
-            "Global",
-            "Jump",
-            "Lt",
-            "MemoryGlobalFinalize",
-            "MemoryGlobalInit",
-            "LoadNarrow",
-            "LoadWord",
-            "StoreNarrow",
-            "StoreWord",
-            "MemoryUnaligned",
-            "MemoryLocal",
-            "MiscInstrs",
-            "MovCond",
-            "Mul",
-            "Program",
-            "ShiftLeft",
-            "ShiftRight",
-            "SyscallCore",
-            "SyscallInstrs",
-        ];
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-
-        for c in machine.chips().iter() {
-            let cname = <_ as MachineAir<KoalaBear>>::name(c);
-            if cluster.contains(&cname.as_str()) {
-                tracing::info!(
-                    "[SITE5] {cname}: num_sent_byte_lookups={}",
-                    c.num_sent_byte_lookups()
-                );
-            }
-        }
-
-        let build = |hs: &[(&str, usize)]| -> ([u32; 8], usize) {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
-            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let ld = match &dummy.shard_proofs[0].evaluation_proof {
-                EvaluationProof::Bundle(bd) => bd.packing.log_dense_size,
-                _ => 0,
-            };
-            let prog = prover.recursion_program_basefold(&dummy).0;
-            let vk = prover
-                .compress_prover
-                .setup(&prog)
-                .1
-                .hash_koalabear()
-                .map(|x| x.as_canonical_u32());
-            (vk, ld)
-        };
-
-        let fillers = [
-            "Program",
-            "Jump",
-            "SyscallInstrs",
-            "MemoryGlobalInit",
-            "MemoryGlobalFinalize",
-            "MemoryLocal",
-            "MovCond",
-        ];
-        for fh in [4usize, 8, 12, 15, 16, 17, 18, 20] {
-            let mut hs: Vec<(&str, usize)> = cluster.iter().map(|n| (*n, 1usize)).collect();
-            for e in hs.iter_mut() {
-                if e.0 == "Byte" {
-                    e.1 = 16;
-                }
-                if fillers.contains(&e.0) {
-                    e.1 = fh;
-                }
-            }
-            let (vk, ld) = build(&hs);
-            tracing::info!("[SITE5] fillers@{fh}: log_dense={ld} vk_eq_fib={}", vk == fib_vk);
-        }
-    }
-
-    /// The normalize program vk depends only on
-    /// `(chip_set, next_pow2(total_values))`, not on the per-chip height
-    /// distribution (no core run).  Uses fib's shape and the vk captured from
-    /// `test_vk_equality_normalize_fib`; if alternate same-band distributions
-    /// reproduce `vk_real`, then `generate()` need only emit one shape per
-    /// `(cluster, log_dense band)`.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn vkroot_normalize_vk_equivalence_class() {
-        use zkm_pcs::shape::OrderedShape;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-
-        let fib: Vec<(&str, usize)> = vec![
-            ("AddSub", 16),
-            ("Bitwise", 13),
-            ("Branch", 13),
-            ("Byte", 16),
-            ("CloClz", 5),
-            ("Cpu", 17),
-            ("DivRem", 11),
-            ("Global", 18),
-            ("Jump", 11),
-            ("Lt", 15),
-            ("MemoryGlobalFinalize", 17),
-            ("MemoryGlobalInit", 17),
-            ("LoadNarrow", 15),
-            ("LoadWord", 15),
-            ("StoreNarrow", 15),
-            ("StoreWord", 15),
-            ("MemoryUnaligned", 15),
-            ("MemoryLocal", 11),
-            ("MiscInstrs", 11),
-            ("MovCond", 12),
-            ("Mul", 13),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 13),
-            ("ShiftRight", 11),
-            ("SyscallCore", 11),
-            ("SyscallInstrs", 11),
-        ];
-        let vk_real: [u32; 8] = [
-            1115632139, 1688068798, 1650214975, 1858294344, 1237422514, 2047442675, 305119098,
-            273862066,
-        ];
-
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-
-        let build = |hs: &[(&str, usize)]| -> (
-            [u32; 8],
-            usize,
-            usize,
-            std::sync::Arc<zkm_recursion_core::RecursionProgram<KoalaBear>>,
-        ) {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
-            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let (tv, ld) = match &dummy.shard_proofs[0].evaluation_proof {
-                EvaluationProof::Bundle(bd) => (bd.packing.total_values, bd.packing.log_dense_size),
-                _ => (0, 0),
-            };
-            let prog = prover.recursion_program_basefold(&dummy).0;
-            let vk = prover
-                .compress_prover
-                .setup(&prog)
-                .1
-                .hash_koalabear()
-                .map(|x| x.as_canonical_u32());
-            (vk, tv, ld, prog)
-        };
-
-        let mut alts: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
-        alts.push(("fib_itself", fib.clone()));
-        {
-            let mut a = fib.clone();
-            for e in a.iter_mut() {
-                if e.0 == "Program" {
-                    e.1 = 18;
-                }
-            }
-            alts.push(("program_19to18", a));
-        }
-        {
-            let mut a = fib.clone();
-            for e in a.iter_mut() {
-                match e.0 {
-                    "Global" => e.1 = 16,
-                    "MemoryGlobalFinalize" => e.1 = 16,
-                    "MemoryGlobalInit" => e.1 = 16,
-                    "Cpu" => e.1 = 18,
-                    "Mul" => e.1 = 18,
-                    "DivRem" => e.1 = 18,
-                    _ => {}
-                }
-            }
-            alts.push(("redistribute", a));
-        }
-
-        let mut fib_prog = None;
-        let mut fib_vk: Option<[u32; 8]> = None;
-        for (tag, hs) in &alts {
-            let (vk, tv, ld, prog) = build(hs);
-            tracing::info!(
-                "[EQUIV] {tag}: total_values={tv} log_dense={ld} vk_eq_real={} vk_eq_fib={} vk={vk:?}",
-                vk == vk_real,
-                fib_vk.map(|f| f == vk).unwrap_or(true),
-            );
-            if *tag == "fib_itself" {
-                fib_prog = Some(prog);
-                fib_vk = Some(vk);
-                continue;
-            }
-            assert_eq!(
-                Some(vk),
-                fib_vk,
-                "normalize VK for same chip-set differs across heights \
-                 (tag={tag}): VK is still program-length-dependent — a baked \
-                 height anchor was reintroduced",
-            );
-            if Some(vk) != fib_vk {
-                let fp = fib_prog.as_ref().unwrap();
-                let rb = bincode::serialize(&**fp).unwrap();
-                let db = bincode::serialize(&*prog).unwrap();
-                let first_diff = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
-                let ri: Vec<_> = fp.iter_instructions().collect();
-                let di: Vec<_> = prog.iter_instructions().collect();
-                tracing::info!(
-                    "[EQUIV-DIFF] {tag} vs fib: prog_bytes fib={} alt={} first_byte_diff={:?} | instrs fib={} alt={} (delta={}) total_mem fib={} alt={}",
-                    rb.len(), db.len(), first_diff, ri.len(), di.len(),
-                    ri.len() as i64 - di.len() as i64, fp.total_memory, prog.total_memory,
-                );
-                let n = ri.len().min(di.len());
-                let mut shown = 0;
-                let mut first_idx = None;
-                for k in 0..n {
-                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
-                        if first_idx.is_none() {
-                            first_idx = Some(k);
-                        }
-                        tracing::info!(
-                            "[EQUIV-DIFF] {tag} diff@{k}: fib={:?} | alt={:?}",
-                            ri[k],
-                            di[k]
-                        );
-                        shown += 1;
-                        if shown >= 8 {
-                            break;
-                        }
-                    }
-                }
-                let rtr = &fp.traces;
-                if let Some(fd) = first_idx {
-                    let mut shown_rdr = 0;
-                    for k in fd..ri.len() {
-                        let s = format!("{:?}", ri[k]);
-                        if !(s.contains("kind: Write")
-                            && format!("{:?}", di.get(k)) != format!("{:?}", Some(&ri[k])))
-                        {
-                            continue;
-                        }
-                        if let Some(addr) = s
-                            .split("inner: Address(")
-                            .nth(1)
-                            .and_then(|t| t.split(')').next())
-                            .and_then(|t| t.parse::<usize>().ok())
-                        {
-                            let needle = format!("Address({addr})");
-                            for j in (k + 1)..ri.len() {
-                                let rs = format!("{:?}", ri[j]);
-                                if rs.contains(&needle) && !rs.contains("kind: Write") {
-                                    let frame = rtr
-                                        .get(j)
-                                        .and_then(|t| t.as_ref())
-                                        .map(|bt| {
-                                            let mut b = bt.clone();
-                                            b.resolve();
-                                            let fs = format!("{:?}", b);
-                                            fs.lines()
-                                                .find(|l| {
-                                                    l.contains("recursion/circuit/src")
-                                                        || l.contains("stark/src")
-                                                })
-                                                .unwrap_or("(no circuit frame)")
-                                                .trim()
-                                                .to_string()
-                                        })
-                                        .unwrap_or_else(|| "(reader no trace)".to_string());
-                                    tracing::info!("[EQUIV-RDR] {tag} const@{addr} (write instr{k}) read by instr{j}: {frame} | {:?}", ri[j]);
-                                    let lo = j.saturating_sub(60);
-                                    let hi = (j + 60).min(ri.len());
-                                    for w in lo..hi {
-                                        if let Some(Some(bt)) = rtr.get(w) {
-                                            let mut b = bt.clone();
-                                            b.resolve();
-                                            let fs = format!("{:?}", b);
-                                            if let Some(line) = fs.lines().find(|l| {
-                                                (l.contains("recursion/circuit/src")
-                                                    || l.contains("stark/src"))
-                                                    && !l.contains("shard_proof_variable_lift")
-                                            }) {
-                                                tracing::info!("[EQUIV-NEAR] {tag} @{j} nearest-traced@{w}: {}", line.trim());
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            shown_rdr += 1;
-                            if shown_rdr >= 6 {
-                                break;
-                            }
-                        }
-                    }
-                }
-                tracing::info!(
-                    "[EQUIV-DIFF] {tag}: traces.len()={} (0 = ZKM_DEBUG unset)",
-                    rtr.len()
-                );
-            }
-        }
     }
 
     // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient

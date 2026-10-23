@@ -93,7 +93,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
         crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-        crate::shard_level_witness::PreprocessedRoundWitness<C>,
+        crate::shard_level_witness::ShardRoundsWitness<C>,
     )>,
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
@@ -121,7 +121,6 @@ pub fn verify_core_basefold<C, SC, A>(
     input: ZKMCoreBasefoldWitnessVariable<C, SC>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
-    chip_heights_per_shard: &[std::collections::BTreeMap<String, usize>],
 ) where
     SC: KoalaBearFriParametersVariable<
         C,
@@ -226,8 +225,7 @@ pub fn verify_core_basefold<C, SC, A>(
         [Felt<C::F>; DIGEST_SIZE],
     )> = shard_proof_tuples
         .into_iter()
-        .enumerate()
-        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (i, proof_tuple)| {
+        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, proof_tuple| {
             let (
                 main_commit,
                 public_values_raw,
@@ -235,7 +233,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 zerocheck_proof,
                 evaluation_proof,
                 proof_opened_values,
-                preprocessed_round,
+                rounds_witness,
             ) = proof_tuple;
             builder.cycle_tracker_v2_enter("leaf_lift".to_string());
             let chip_names: Vec<String> =
@@ -250,28 +248,24 @@ pub fn verify_core_basefold<C, SC, A>(
                 MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
-            let in_global_round: Vec<bool> = shard_chips_pre
-                .iter()
-                .map(|c| global_round.is_some_and(|set| set.contains(c.name().as_str())))
-                .collect();
-            let has_global_round = in_global_round.contains(&true);
+            let layout = zkm_pcs::shard_level::round_layout::MainRoundLayout::for_chips(
+                &shard_chips_pre,
+                global_round,
+            );
+            let has_global_round = layout.has_global();
             assert_eq!(
-                preprocessed_round.global.is_some(),
+                rounds_witness.global.is_some(),
                 has_global_round,
                 "a shard commits a global round exactly when it has a global-round chip"
             );
-            let round_widths = |global: bool| -> Vec<usize> {
-                shard_chips_pre
+            let round_widths = |indices: &[usize]| -> Vec<usize> {
+                indices
                     .iter()
-                    .zip(in_global_round.iter())
-                    .filter(|(_, in_global)| **in_global == global)
-                    .map(|(c, _)| {
-                        p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c)
-                    })
+                    .map(|&i| p3_air::BaseAir::<InnerVal>::width(shard_chips_pre[i]))
                     .collect()
             };
-            let global_widths_pre = round_widths(true);
-            let main_widths_pre = round_widths(false);
+            let global_widths_pre = round_widths(layout.global_indices());
+            let main_widths_pre = round_widths(layout.local_indices());
             let prep_widths_pre: Vec<usize> = {
                 let mut dims: Vec<(String, usize)> = machine
                     .chips()
@@ -305,34 +299,28 @@ pub fn verify_core_basefold<C, SC, A>(
                     &chip_names,
                     &proof_opened_values,
                 );
-            assert_eq!(main_heights.len(), in_global_round.len());
-            let global_round_chips: Vec<(String, Felt<C::F>)> = chip_names
+            assert_eq!(main_heights.len(), layout.membership().len());
+            let global_round_chips: Vec<(String, Felt<C::F>)> = layout
+                .global_indices()
                 .iter()
-                .zip(main_heights.iter())
-                .zip(in_global_round.iter())
-                .filter(|(_, in_global)| **in_global)
-                .map(|((name, height), _)| (name.clone(), *height))
+                .map(|&i| (chip_names[i].clone(), main_heights[i]))
                 .collect();
             let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
-                let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
-                for global in [true, false] {
-                    hs.extend(
-                        main_heights
-                            .iter()
-                            .zip(in_global_round.iter())
-                            .filter(|(_, in_global)| **in_global == global)
-                            .map(|(height, _)| *height),
-                    );
+                let mut heights = rounds_witness.preprocessed_row_counts.clone();
+                for indices in layout.rounds() {
+                    heights.extend(indices.iter().map(|&i| main_heights[i]));
                 }
-                hs
+                heights
             });
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
             let mut preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = Vec::new();
             if !prep_widths_pre.is_empty() {
                 preceding_commitments
-                    .push((preprocessed_round.raw_commit, basefold_vk_ref.preprocessed_commit));
+                    .push((rounds_witness.preprocessed_raw_commit, basefold_vk_ref.preprocessed_commit));
             }
-            preceding_commitments.extend(preprocessed_round.global);
+            preceding_commitments.extend(
+                rounds_witness.global.map(|round| (round.raw, round.hash_bound)),
+            );
 
             use crate::shard_level_witness::LiftedEvalProof;
             let mut whir_evaluation_proof_var = None;
@@ -355,7 +343,7 @@ pub fn verify_core_basefold<C, SC, A>(
                             *commit_root,
                             *modified_commitment,
                             &preceding_commitments,
-                            &preprocessed_round.padding_heights,
+                            &rounds_witness.padding_heights,
                             max_log_row_count,
                             &column_counts_by_round_pre,
                             None,
@@ -378,7 +366,7 @@ pub fn verify_core_basefold<C, SC, A>(
                         *commit_root,
                         *modified_commitment,
                         &preceding_commitments,
-                        &preprocessed_round.padding_heights,
+                        &rounds_witness.padding_heights,
                         max_log_row_count,
                         &column_counts_by_round_pre,
                         None,
@@ -405,11 +393,6 @@ pub fn verify_core_basefold<C, SC, A>(
                     unreachable!("core path never carries an OUTER (gnark) bundle")
                 }
             };
-            let empty_heights_core = std::collections::BTreeMap::<String, usize>::new();
-            let chip_heights_for_shard = chip_heights_per_shard
-                .get(i)
-                .unwrap_or(&empty_heights_core);
-            let _ = chip_heights_for_shard;
             let chip_height_bits =
                 crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                     builder,
@@ -446,7 +429,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
                 crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
-                    preprocessed_round.global.map(|(_, commitment)| commitment),
+                    rounds_witness.global.map(|round| round.hash_bound),
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
@@ -457,7 +440,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
                 crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
-                    preprocessed_round.global.map(|(_, commitment)| commitment),
+                    rounds_witness.global.map(|round| round.hash_bound),
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
@@ -476,7 +459,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     {
                         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
                         let witness_pads: usize =
-                            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+                            rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
                         match pack_info {
                             Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                                 total_cols, widths, packing_pads, Some(witness_pads), "core",
@@ -532,7 +515,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     eval_public_values_fn,
                     jagged_evaluator_fn,
                     global_ref,
-                    &in_global_round,
+                    layout.membership(),
                 )
             } else {
             let jagged_shard_proof_variable =
@@ -572,16 +555,16 @@ pub fn verify_core_basefold<C, SC, A>(
                 eval_public_values_fn,
                 jagged_evaluator_fn,
                 global_ref,
-                &in_global_round,
+                layout.membership(),
             )
             };
             let global_sum: Ext<C::F, C::EF> = builder.eval(global_sum);
             let global_sum = builder.ext2felt_v2(global_sum);
 
             let global_chain_end = if has_global_lookups {
-                let binding = preprocessed_round.global.map(|(_, commitment)| {
+                let binding = rounds_witness.global.map(|round| {
                     crate::global_challenge::GlobalRoundBindingVariable {
-                        commitment,
+                        commitment: round.hash_bound,
                         chips: &global_round_chips,
                     }
                 });

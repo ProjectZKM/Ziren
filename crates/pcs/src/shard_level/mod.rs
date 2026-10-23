@@ -9,6 +9,7 @@
 pub mod constraint_folder;
 pub mod logup_gkr_prover;
 pub mod prover;
+pub mod round_layout;
 pub mod row_gkr;
 pub mod shard_proof;
 pub mod sumcheck_poly;
