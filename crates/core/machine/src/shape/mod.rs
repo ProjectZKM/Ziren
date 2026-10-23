@@ -102,7 +102,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// `fix_shape` + [`canonicalize_shape_to_cluster`] would produce under
     /// `FIX_CORE_SHAPES=true`, but WITHOUT mutating the record or padding any
     /// trace.  Mirrors every `fix_shape` branch (packed-small / plain-core)
-    /// plus the preprocessed (Byte/Program) shape and the stacked-cluster
+    /// plus the preprocessed (Byte/Program/MemoryProgram) shape and the stacked-cluster
     /// canonicalization, returning the per-chip cluster band-cap `log_height`
     /// map (incl. the missing canonical-cluster chips at log-height 1).
     ///
@@ -110,7 +110,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// only searches `partial_core_shapes` over the present CORE chips, so it
     /// (a) selects a DIFFERENT cluster than `fix_shape`'s packed-small branch
     /// for a CPU+memory shard, and (b) never covers the non-core chips
-    /// (Byte/Program/MemoryGlobal*/Global) nor the missing event-driven chips.
+    /// (Byte/Program/MemoryProgram/MemoryGlobal*) nor the missing event-driven chips.
     /// The jagged COMMIT must pad to THIS shape (chip-SET + heights) so the
     /// raw-height normalize VK equals the fixed-shape canonical cluster VK in the
     /// production vk_map.

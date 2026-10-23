@@ -873,7 +873,7 @@ fn prove_tampered(
 
     let (pk, _) = prover.setup(program);
     let records =
-        crate::utils::prove::shard_records::<SC, _>(prover, &pk, program, stdin, opts).unwrap();
+        crate::utils::prove::shard_records::<SC, _>(prover, program, stdin, opts).unwrap();
 
     let mut raw: Vec<RawTraces> = records
         .iter()
@@ -1217,6 +1217,5 @@ fn shard_proven_under_another_h_star_rejected() {
 /// The number of shards `program` is cut into on `stdin` under `opts`.
 fn shard_records_count(program: &Program, stdin: &ZKMStdin, opts: ZKMCoreOpts) -> usize {
     let prover = honest_prover();
-    let (pk, _) = prover.setup(program);
-    crate::utils::prove::shard_records::<SC, _>(&prover, &pk, program, stdin, opts).unwrap().len()
+    crate::utils::prove::shard_records::<SC, _>(&prover, program, stdin, opts).unwrap().len()
 }

@@ -88,16 +88,9 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
-    /// per-input per-chip log heights (sourced from each input's
-    /// `JaggedShardProof.chip_heights`).  Same length and order
-    /// as `vks_and_proofs`.  Threaded into
-    /// `chip_height_bits_from_heights` at the lift site so the
-    /// recursion verifier observes the real Horner-recomposed felt
-    /// rather than the zero placeholder.
-    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — the in-circuit cousin of
     /// [`ZKMCompressBasefoldWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -137,12 +130,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     use std::borrow::BorrowMut;
-    let ZKMCompressBasefoldWitnessVariable {
-        vks_and_proofs,
-        chip_heights_per_input,
-        vk_merkle_data,
-        is_complete,
-    } = input;
+    let ZKMCompressBasefoldWitnessVariable { vks_and_proofs, vk_merkle_data, is_complete } = input;
 
     let vk_root = vk_merkle_data.root;
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
@@ -189,7 +177,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             zerocheck_proof,
             evaluation_proof,
             proof_opened_values,
-            preprocessed_round,
+            rounds_witness,
         ) = proof_tuple;
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
@@ -234,7 +222,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         };
 
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
-            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
             hs.extend(
                 crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                     builder,
@@ -254,7 +242,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             if prep_widths_pre.is_empty() {
                 Vec::new()
             } else {
-                vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
+                vec![(rounds_witness.preprocessed_raw_commit, basefold_vk_pre.preprocessed_commit)]
             };
 
         use crate::shard_level_witness::LiftedEvalProof;
@@ -273,7 +261,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                         *commit_root,
                         *modified_commitment,
                         &preceding_commitments,
-                        &preprocessed_round.padding_heights,
+                        &rounds_witness.padding_heights,
                         max_log_row_count,
                         &column_counts_by_round_pre,
                         None,
@@ -292,7 +280,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                         *commit_root,
                         *modified_commitment,
                     &preceding_commitments,
-                    &preprocessed_round.padding_heights,
+                    &rounds_witness.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
@@ -316,11 +304,6 @@ pub fn verify_compress_basefold<C, SC, A>(
             }
         };
 
-        let empty_log_heights_compress = std::collections::BTreeMap::<String, usize>::new();
-        let chip_heights_for_input = chip_heights_per_input
-            .get(_i)
-            .unwrap_or(&empty_log_heights_compress);
-        let _ = chip_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
@@ -389,7 +372,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         let _jagged_evaluator_fn = real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
             builder,
             _column_counts_by_round.iter().flatten().sum::<usize>()
-                + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                + rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
         );
 
         let _opened_values = proof_opened_values;

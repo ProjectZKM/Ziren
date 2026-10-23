@@ -317,19 +317,16 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // variable-reconstruction step downstream can match the variant
 // directly (Bundle → bundle lift; Bytes → bytes lift; Empty →
 // placeholder).
-/// The preprocessed opening round's witnessed inputs.
-///
-/// Its chips and their WIDTHS come from the machine, so the only things a
-/// height-agnostic circuit cannot reconstruct are the RAW BaseFold root (the
-/// key holds the hash-bound digest) and the heights.  All three are read at a
-/// fixed stream position, and the per-round hash-bind pins them.
-pub struct PreprocessedRoundWitness<C: CircuitConfig> {
-    /// The round's RAW BaseFold cap root, which the BaseFold open binds
+/// Commitments and heights witnessed for a shard's opening rounds.
+/// Chip names and widths come from the machine; these values bind the
+/// preprocessed and optional global rounds and every round's padding.
+pub struct ShardRoundsWitness<C: CircuitConfig> {
+    /// The preprocessed round's RAW BaseFold cap root, which the BaseFold open binds
     /// against.  `compress([this, hash(counts)])` must equal the key's
     /// preprocessed commitment.
-    pub raw_commit: [Felt<C::F>; 8],
+    pub preprocessed_raw_commit: [Felt<C::F>; 8],
     /// One height per preprocessed chip, in the machine's chip-name order.
-    pub row_counts: Vec<Felt<C::F>>,
+    pub preprocessed_row_counts: Vec<Felt<C::F>>,
     /// Each opening round's stacking-padding column heights, in round order.
     /// A round's gap is split into columns no taller than the row cube, so a
     /// recursion round (whose committed area is PINNED far above its real
@@ -337,7 +334,14 @@ pub struct PreprocessedRoundWitness<C: CircuitConfig> {
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
     /// The global main round's raw root and hash-bound commitment, when the
     /// shard commits one.
-    pub global: Option<([Felt<C::F>; 8], [Felt<C::F>; 8])>,
+    pub global: Option<RoundCommitments<C::F>>,
+}
+
+/// The two commitments to one round, in witness-stream order.
+#[derive(Clone, Copy)]
+pub struct RoundCommitments<F> {
+    pub raw: [Felt<F>; 8],
+    pub hash_bound: [Felt<F>; 8],
 }
 
 impl<C> Witnessable<C>
@@ -355,7 +359,7 @@ where
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
         LiftedEvalProof<C>,
         crate::basefold_chip_opened_values::JaggedShardOpenedValues<Ext<C::F, C::EF>>,
-        PreprocessedRoundWitness<C>,
+        ShardRoundsWitness<C>,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -374,14 +378,14 @@ where
             .collect();
         let global =
             self.global_original_commitment.zip(self.global_commitment).map(|(raw, commitment)| {
-                (
-                    core::array::from_fn(|i| raw[i].read(builder)),
-                    core::array::from_fn(|i| commitment[i].read(builder)),
-                )
+                RoundCommitments {
+                    raw: core::array::from_fn(|i| raw[i].read(builder)),
+                    hash_bound: core::array::from_fn(|i| commitment[i].read(builder)),
+                }
             });
-        let preprocessed_round = PreprocessedRoundWitness::<C> {
-            raw_commit: preprocessed_commit_arr,
-            row_counts: preprocessed_row_counts,
+        let rounds_witness = ShardRoundsWitness::<C> {
+            preprocessed_raw_commit: preprocessed_commit_arr,
+            preprocessed_row_counts,
             padding_heights: padding_row_heights,
             global,
         };
@@ -457,7 +461,7 @@ where
             zerocheck_proof,
             evaluation_proof,
             opened_values,
-            preprocessed_round,
+            rounds_witness,
         )
     }
 

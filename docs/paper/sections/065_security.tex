@@ -8,7 +8,7 @@ This section collects the security argument. It states the relation the block pr
 
 The shard argument proves one shard; the statement of Section~\ref{sec:statement} is about an execution. Between the two sits the arithmetised relation the recursion tree is knowledge sound for, with each condition assigned to the component that enforces it:
 \begin{align*}
-  \mathcal R_{\mathrm{arith}} = \Big\{ (\mathsf{vk}, h) :\ \exists\, g^\star, w, (\mathsf{T}_i, \mathsf{pv}_i)_{i<N}\ 
+  \mathcal R_{\mathrm{arith}} = \Big\{ (\mathsf{vk}, h) :\ \exists\, g^\star, w, (\mathsf{T}_i, \mathsf{pv}_i)_{i<N}\
   & \forall i:\ \mathsf{T}_i \text{ is a valid shard for } \mathsf{pv}_i,\ \mathsf{vk}
     && \text{(shard argument)} \\
   & \phantom{\forall i:\ }\text{and } \mathsf{chal}(g^\star, w),\ h_i = h \\

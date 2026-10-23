@@ -959,17 +959,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
         let mut census_rows: Vec<(String, u128)> = Vec::new();
         let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
-        let first_consumer = chips.iter().position(|c| c.name() == "Global").unwrap_or(chips.len());
         for record in records.iter_mut() {
-            let (par_chips, seq_chips) = if serial {
-                (&chips[..0], &chips[..])
-            } else {
-                (&chips[..first_consumer], &chips[first_consumer..])
-            };
-            if !par_chips.is_empty() {
+            if !serial {
                 use rayon::prelude::*;
                 let t_par = std::time::Instant::now();
-                let included: Vec<&_> = par_chips
+                let included: Vec<&_> = chips
                     .iter()
                     .filter(|c| {
                         !crate::device_byte_lookups::chip_byte_lookups_on_device(&c.name())
@@ -1006,29 +1000,30 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     census_rows
                         .push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
                 }
-            }
-            for chip in seq_chips.iter() {
-                if crate::device_byte_lookups::chip_byte_lookups_on_device(&chip.name()) {
-                    continue;
-                }
-                if !chip.included(record) {
-                    continue;
-                }
-                let span = tracing::debug_span!("chip dependencies", chip = chip.name());
-                let _enter = span.enter();
-                let t_chip = std::time::Instant::now();
-                let mut output = A::Record::default();
-                if let Err(e) = chip.generate_dependencies(record, &mut output) {
-                    tracing::error!(
-                        "Error generating dependencies for chip {}: {:?}",
-                        chip.name(),
-                        e
-                    );
-                    return Err(e);
-                }
-                record.append(&mut output);
-                if census {
-                    census_rows.push((chip.name(), t_chip.elapsed().as_micros()));
+            } else {
+                for chip in chips.iter() {
+                    if crate::device_byte_lookups::chip_byte_lookups_on_device(&chip.name()) {
+                        continue;
+                    }
+                    if !chip.included(record) {
+                        continue;
+                    }
+                    let span = tracing::debug_span!("chip dependencies", chip = chip.name());
+                    let _enter = span.enter();
+                    let t_chip = std::time::Instant::now();
+                    let mut output = A::Record::default();
+                    if let Err(e) = chip.generate_dependencies(record, &mut output) {
+                        tracing::error!(
+                            "Error generating dependencies for chip {}: {:?}",
+                            chip.name(),
+                            e
+                        );
+                        return Err(e);
+                    }
+                    record.append(&mut output);
+                    if census {
+                        census_rows.push((chip.name(), t_chip.elapsed().as_micros()));
+                    }
                 }
             }
             if census {

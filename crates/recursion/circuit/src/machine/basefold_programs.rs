@@ -50,14 +50,11 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);
-    let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
-        input.shard_proofs.iter().map(|sp| sp.chip_heights.clone()).collect();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
         max_log_row_count,
-        &chip_heights_per_shard,
     );
     let operations = builder.into_operations();
     builder_span.exit();

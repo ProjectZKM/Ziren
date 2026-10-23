@@ -94,26 +94,27 @@ where
     let mut challenger = prover.machine().config().challenger();
     pk.observe_into(&mut challenger);
 
-    let (bound, _) = tracing::debug_span!("bind global rounds").in_scope(|| {
-        run_pass::<SC, P>(
+    let bind_round =
+        |record: ExecutionRecord,
+         (),
+         cluster_widths: Option<std::collections::BTreeMap<String, usize>>| {
+            prover.global_round_binding(&record, cluster_widths.as_ref()).map_err(|e| {
+                tracing::error!("Trace generation error: {:?}", e);
+                ZKMCoreProverError::TracesGenerationError
+            })
+        };
+    let (rounds, _) = tracing::debug_span!("bind global rounds").in_scope(|| {
+        run_pass::<SC, P, _, _>(
             prover,
-            pk,
             &program,
             opts,
             shape_config,
-            &challenger,
             checkpoint.clone(),
-            Pass::Bind,
+            &|_| Ok(()),
+            &bind_round,
             None,
         )
     })?;
-    let rounds = bound
-        .into_iter()
-        .map(|output| match output {
-            ShardOutput::Bound(round) => round,
-            ShardOutput::Proven(_) => unreachable!("the bind pass proves no shard"),
-        })
-        .collect::<Vec<_>>();
     let global = prover.machine().global_challenge(&challenger, rounds.iter().map(Option::as_ref));
 
     #[cfg(feature = "debug")]
@@ -123,26 +124,36 @@ where
     #[cfg(not(feature = "debug"))]
     let all_records_tx = None;
 
-    let (proven, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
-        run_pass::<SC, P>(
+    let prepare_traces = |record: &ExecutionRecord| {
+        prover.generate_traces(record).map_err(|e| {
+            tracing::error!("Trace generation error: {:?}", e);
+            ZKMCoreProverError::TracesGenerationError
+        })
+    };
+    let prove_shard = |record, traces, cluster_widths| {
+        Ok(prove_bound_shard::<SC, P>(
             prover,
             pk,
+            &challenger,
+            global.as_ref(),
+            &rounds,
+            record,
+            traces,
+            cluster_widths,
+        ))
+    };
+    let (shard_proofs, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
+        run_pass::<SC, P, _, _>(
+            prover,
             &program,
             opts,
             shape_config,
-            &challenger,
             checkpoint,
-            Pass::Prove { global: global.as_ref(), rounds: &rounds },
+            &prepare_traces,
+            &prove_shard,
             all_records_tx,
         )
     })?;
-    let shard_proofs = proven
-        .into_iter()
-        .map(|output| match output {
-            ShardOutput::Proven(proof) => proof,
-            ShardOutput::Bound(_) => unreachable!("the prove pass proves every shard"),
-        })
-        .collect::<Vec<_>>();
 
     tracing::info!(
         "execution report (totals): total_cycles={}, total_syscall_cycles={}, touched_memory_addresses={}",
@@ -242,7 +253,6 @@ fn execute_to_checkpoint<F: PrimeField32>(
 /// their dependencies generated, ready for a prover to commit.
 pub fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
-    pk: &P::DeviceProvingKey,
     program: &Program,
     stdin: &ZKMStdin,
     opts: ZKMCoreOpts,
@@ -256,58 +266,106 @@ where
 {
     let (checkpoint, _) =
         execute_to_checkpoint::<SC::Val>(program, stdin, opts, ZKMContext::default(), None)?;
-    let mut challenger = prover.machine().config().challenger();
-    pk.observe_into(&mut challenger);
     let (records_tx, records_rx) = std::sync::mpsc::channel();
-    run_pass::<SC, P>(
+    run_pass::<SC, P, _, _>(
         prover,
-        pk,
         program,
         opts,
         None,
-        &challenger,
         checkpoint,
-        Pass::Bind,
+        &|_| Ok(()),
+        &|_, (), _| Ok(()),
         Some(records_tx),
     )?;
     Ok(records_rx.into_iter().flatten().collect())
 }
 
-/// One pass of [`prove_with_context`] over the shards a checkpoint traces.
-#[derive(Clone, Copy)]
-enum Pass<'a, F, EF> {
-    /// Commits each shard's global round alone.
-    Bind,
-    /// Proves each shard under `global`, and checks that it commits the
-    /// global round `rounds` holds for it.
-    Prove {
-        global: Option<&'a zkm_pcs::logup_gkr::GlobalChallenge<F, EF>>,
-        rounds: &'a [Option<zkm_pcs::logup_gkr::GlobalRoundBinding<F>>],
-    },
-}
-
-/// What a [`Pass`] yields for one shard.
-enum ShardOutput<SC: StarkGenericConfig> {
-    Bound(Option<zkm_pcs::logup_gkr::GlobalRoundBinding<Val<SC>>>),
-    Proven(zkm_pcs::ShardProof<SC>),
-}
-
-/// Traces the shards of `checkpoint` and runs `pass` over each, in shard
-/// order. Both passes cut, defer and shape the records alike, so a shard
-/// commits the same global round in each.
+/// Proves one shard and checks it against the global round fixed by the bind pass.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
-fn run_pass<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+fn prove_bound_shard<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     pk: &P::DeviceProvingKey,
+    challenger: &SC::Challenger,
+    global: Option<&zkm_pcs::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>>,
+    rounds: &[Option<zkm_pcs::logup_gkr::GlobalRoundBinding<Val<SC>>>],
+    record: ExecutionRecord,
+    main_traces: zkm_pcs::Traces<Val<SC>>,
+    cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+) -> zkm_pcs::ShardProof<SC>
+where
+    SC::Val: PrimeField32,
+{
+    let t_commit = std::time::Instant::now();
+    let mut main_data = prover.commit(&record, main_traces, cluster_widths);
+    main_data.global_challenge = global.cloned();
+    let commit_ms = t_commit.elapsed().as_millis();
+
+    let opening_span = tracing::debug_span!("opening").entered();
+    let t_open = std::time::Instant::now();
+    let proof = prover.open(pk, main_data, &mut challenger.clone()).unwrap();
+    let open_ms = t_open.elapsed().as_millis();
+    opening_span.exit();
+
+    tracing::info!(
+        "PCS timing: commit={}ms open={}ms total={}ms",
+        commit_ms,
+        open_ms,
+        commit_ms + open_ms
+    );
+
+    let shard = record.public_values.shard as usize;
+    let bound =
+        shard.checked_sub(1).and_then(|i| rounds.get(i)).expect("the bind pass covers every shard");
+    assert_eq!(
+        &prover.machine().global_round_binding(&proof),
+        bound,
+        "shard {shard}: the global round differs between the \
+         two passes"
+    );
+
+    #[cfg(debug_assertions)]
+    {
+        if let Some(ref shape) = record.shape {
+            assert_eq!(
+                proof.shape(),
+                shape
+                    .clone()
+                    .into_iter()
+                    .filter(|(k, _)| { k != &zkm_core_executor::MipsAirId::Cpu })
+                    .map(|(k, v)| (k.to_string(), v as usize))
+                    .collect(),
+            );
+        }
+    }
+
+    rayon::spawn(move || {
+        drop(record);
+    });
+
+    proof
+}
+
+/// Replays, cuts and shapes records identically for both passes.
+/// `prepare` runs in the trace workers; `process` consumes the prepared value
+/// in the prover worker. Their shared type prevents a prove pass from receiving
+/// a shard without traces. Results preserve shard order across both stages.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn run_pass<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>, T: Send, R: Send>(
+    prover: &P,
     program: &Program,
     opts: ZKMCoreOpts,
     shape_config: Option<&CoreShapeConfig<SC::Val>>,
-    challenger: &SC::Challenger,
     checkpoint: Checkpoint,
-    pass: Pass<'_, Val<SC>, SC::Challenge>,
+    prepare: &(impl Fn(&ExecutionRecord) -> Result<T, ZKMCoreProverError> + Sync),
+    process: &(impl Fn(
+        ExecutionRecord,
+        T,
+        Option<std::collections::BTreeMap<String, usize>>,
+    ) -> Result<R, ZKMCoreProverError>
+          + Sync),
     all_records_tx: Option<std::sync::mpsc::Sender<Vec<ExecutionRecord>>>,
-) -> Result<(Vec<ShardOutput<SC>>, ExecutionReport), ZKMCoreProverError>
+) -> Result<(Vec<R>, ExecutionReport), ZKMCoreProverError>
 where
     SC::Val: PrimeField32,
     SC::Challenger: 'static + Clone + Send,
@@ -321,11 +379,9 @@ where
 
         let record_gen_sync = Arc::new(TurnBasedSync::new());
         let trace_gen_sync = Arc::new(TurnBasedSync::new());
-        let (records_and_traces_tx, records_and_traces_rx) =
-            sync_channel::<(Vec<ExecutionRecord>, Vec<Option<zkm_pcs::Traces<Val<SC>>>>)>(
-                opts.records_and_traces_channel_capacity,
-            );
-        let records_and_traces_tx = Arc::new(Mutex::new(records_and_traces_tx));
+        let (prepared_records_tx, prepared_records_rx) =
+            sync_channel::<Vec<(ExecutionRecord, T)>>(opts.records_and_traces_channel_capacity);
+        let prepared_records_tx = Arc::new(Mutex::new(prepared_records_tx));
 
         let report_aggregate = Arc::new(Mutex::new(ExecutionReport::default()));
         let (checkpoints_tx, checkpoints_rx) =
@@ -339,7 +395,7 @@ where
         for _ in 0..opts.trace_gen_workers {
             let record_gen_sync = Arc::clone(&record_gen_sync);
             let trace_gen_sync = Arc::clone(&trace_gen_sync);
-            let records_and_traces_tx = Arc::clone(&records_and_traces_tx);
+            let prepared_records_tx = Arc::clone(&prepared_records_tx);
             let checkpoints_rx = Arc::clone(&checkpoints_rx);
 
             let report_aggregate = Arc::clone(&report_aggregate);
@@ -529,46 +585,16 @@ where
                                 tx.send(records.clone()).unwrap();
                             }
 
-                            let main_traces_results: Vec<Result<_, _>> = match pass {
-                                Pass::Bind => records.iter().map(|_| Ok(None)).collect(),
-                                Pass::Prove { .. } => tracing::debug_span!(
-                                    "generate main traces",
-                                    index
-                                )
-                                .in_scope(|| {
-                                    records
-                                        .par_iter()
-                                        .map(|record| prover.generate_traces(record).map(Some))
-                                        .collect()
-                                }),
-                            };
-                            let (successes, errors): (Vec<_>, Vec<_>) =
-                                main_traces_results.into_iter().partition(Result::is_ok);
-                            let main_traces = successes.into_iter().map(Result::unwrap).collect();
-                            if !errors.is_empty() {
-                                tracing::error!("Failed to generate {} traces", errors.len());
-                                for error in errors {
-                                    if let Err(e) = error {
-                                        tracing::error!("Trace generation error: {:?}", e);
-                                        return Err(ZKMCoreProverError::TracesGenerationError);
-                                    }
-                                }
-                            }
+                            let prepared = tracing::debug_span!("prepare shards", index).in_scope(|| {
+                                records.par_iter().map(prepare).collect::<Result<Vec<_>, _>>()
+                            })?;
 
                             trace_gen_sync.wait_for_turn(index);
 
-                            let chunked_records = chunk_vec(records, opts.shard_batch_size);
-                            let chunked_main_traces = chunk_vec(main_traces, opts.shard_batch_size);
-                            chunked_records
-                                .into_iter()
-                                .zip(chunked_main_traces)
-                                .for_each(|(records, main_traces)| {
-                                    records_and_traces_tx
-                                        .lock()
-                                        .unwrap()
-                                        .send((records, main_traces))
-                                        .unwrap();
-                                });
+                            let prepared_records = records.into_iter().zip(prepared).collect();
+                            for batch in chunk_vec(prepared_records, opts.shard_batch_size) {
+                                prepared_records_tx.lock().unwrap().send(batch).unwrap();
+                            }
 
                             trace_gen_sync.advance_turn();
                             Ok(())
@@ -590,7 +616,7 @@ where
             });
             record_and_trace_gen_handles.push(handle);
         }
-        drop(records_and_traces_tx);
+        drop(prepared_records_tx);
         drop(all_records_tx);
 
         let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
@@ -607,109 +633,29 @@ where
             let _span = prover_span.enter();
             let mut outputs = Vec::new();
             tracing::debug_span!("shard prover").in_scope(|| {
-                for (records, traces) in records_and_traces_rx.into_iter() {
+                for batch in prepared_records_rx.into_iter() {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
-                        outputs.par_extend(
-                            records.into_par_iter().zip(traces.into_par_iter()).map(
-                                |(record, main_traces)| {
-                                    let _span = span.enter();
+                        outputs.par_extend(batch.into_par_iter().map(|(record, prepared)| {
+                            let _span = span.enter();
 
-                                    let cluster_widths: Option<
-                                        std::collections::BTreeMap<String, usize>,
-                                    > = cluster_shape_config
-                                        .find_canonical_cluster_shape(&record)
-                                        .map(|shape| {
-                                            shape
-                                                .iter()
-                                                .filter_map(|(air, _log_h)| {
-                                                    let name = air.to_string();
-                                                    let width =
-                                                        cluster_chip_widths.get(&name).copied()?;
-                                                    Some((name, width))
-                                                })
-                                                .collect()
-                                        });
+                            let cluster_widths: Option<std::collections::BTreeMap<String, usize>> =
+                                cluster_shape_config.find_canonical_cluster_shape(&record).map(
+                                    |shape| {
+                                        shape
+                                            .iter()
+                                            .filter_map(|(air, _log_h)| {
+                                                let name = air.to_string();
+                                                let width =
+                                                    cluster_chip_widths.get(&name).copied()?;
+                                                Some((name, width))
+                                            })
+                                            .collect()
+                                    },
+                                );
 
-                                    let (global, rounds) = match pass {
-                                        Pass::Bind => {
-                                            let round = prover
-                                                .global_round_binding(
-                                                    &record,
-                                                    cluster_widths.as_ref(),
-                                                )
-                                                .map_err(|e| {
-                                                    tracing::error!(
-                                                        "Trace generation error: {:?}",
-                                                        e
-                                                    );
-                                                    ZKMCoreProverError::TracesGenerationError
-                                                })?;
-                                            return Ok(ShardOutput::Bound(round));
-                                        }
-                                        Pass::Prove { global, rounds } => (global, rounds),
-                                    };
-                                    let main_traces =
-                                        main_traces.expect("the prove pass traces every shard");
-
-                                    let t_commit = std::time::Instant::now();
-                                    let mut main_data =
-                                        prover.commit(&record, main_traces, cluster_widths);
-                                    main_data.global_challenge = global.cloned();
-                                    let commit_ms = t_commit.elapsed().as_millis();
-
-                                    let opening_span = tracing::debug_span!("opening").entered();
-                                    let t_open = std::time::Instant::now();
-                                    let proof = prover
-                                        .open(pk, main_data, &mut challenger.clone())
-                                        .unwrap();
-                                    let open_ms = t_open.elapsed().as_millis();
-                                    opening_span.exit();
-
-                                    tracing::info!(
-                                        "PCS timing: commit={}ms open={}ms total={}ms",
-                                        commit_ms,
-                                        open_ms,
-                                        commit_ms + open_ms
-                                    );
-
-                                    let shard = record.public_values.shard as usize;
-                                    let bound = shard
-                                        .checked_sub(1)
-                                        .and_then(|i| rounds.get(i))
-                                        .expect("the bind pass covers every shard");
-                                    assert_eq!(
-                                        &prover.machine().global_round_binding(&proof),
-                                        bound,
-                                        "shard {shard}: the global round differs between the \
-                                         two passes"
-                                    );
-
-                                    #[cfg(debug_assertions)]
-                                    {
-                                        if let Some(ref shape) = record.shape {
-                                            assert_eq!(
-                                                proof.shape(),
-                                                shape
-                                                    .clone()
-                                                    .into_iter()
-                                                    .filter(|(k, _)| {
-                                                        k != &zkm_core_executor::MipsAirId::Cpu
-                                                    })
-                                                    .map(|(k, v)| (k.to_string(), v as usize))
-                                                    .collect(),
-                                            );
-                                        }
-                                    }
-
-                                    rayon::spawn(move || {
-                                        drop(record);
-                                    });
-
-                                    Ok(ShardOutput::Proven(proof))
-                                },
-                            ),
-                        );
+                            process(record, prepared, cluster_widths)
+                        }));
                     });
                 }
             });

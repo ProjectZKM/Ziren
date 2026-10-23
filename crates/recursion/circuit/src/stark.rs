@@ -22,10 +22,8 @@ use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 /// `program_from_shape`-style consumers that only care about the
 /// program SHAPE (number of witness reads), not soundness.
 ///
-/// Returned `chip_cumulative_sums` has one entry per chip in
-/// `shape.inner` — matching real proofs, so the recursion program's
-/// witness-stream `read()` count is shape-stable across dummy and
-/// real proofs.
+/// The dummy carries the same chip openings and round layout as a real
+/// proof of the supplied shape, keeping witness reads shape-stable.
 ///
 /// Unblocks `program_from_shape` basefold
 /// dispatch and downstream `dummy()` constructors for

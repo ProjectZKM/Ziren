@@ -65,7 +65,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
     /// per-input per-chip log heights.
@@ -144,7 +144,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
         crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-        crate::shard_level_witness::PreprocessedRoundWitness<C>,
+        crate::shard_level_witness::ShardRoundsWitness<C>,
     ),
     chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
@@ -169,7 +169,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         zerocheck_proof,
         evaluation_proof,
         proof_opened_values,
-        preprocessed_round,
+        rounds_witness,
     ) = proof_tuple;
 
     let chip_names: Vec<String> =
@@ -211,11 +211,11 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = if prep_widths.is_empty() {
         Vec::new()
     } else {
-        vec![(preprocessed_round.raw_commit, basefold_vk.preprocessed_commit)]
+        vec![(rounds_witness.preprocessed_raw_commit, basefold_vk.preprocessed_commit)]
     };
 
     let chip_height_felts_pre: Vec<Felt<C::F>> = {
-        let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+        let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
         hs.extend(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
             builder,
             &chip_names,
@@ -249,7 +249,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                     *commit_root,
                     *modified_commitment,
                     &preceding_commitments,
-                    &preprocessed_round.padding_heights,
+                    &rounds_witness.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
@@ -310,7 +310,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             *commit_root,
             *modified_commitment,
             &preceding_commitments,
-            &preprocessed_round.padding_heights,
+            &rounds_witness.padding_heights,
             max_log_row_count,
             &column_counts_by_round,
             None,
@@ -375,7 +375,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let wrap_real_num_cols: usize = {
         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
         let witness_pads: usize =
-            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+            rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
         match outer_pack_info {
             Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                 total_cols,

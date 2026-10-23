@@ -245,8 +245,8 @@ impl JaggedShardVerifier {
             }
         }
 
-        let global_indices = crate::shard_level::prover::global_round_indices(chips, global_round);
-        let has_global = !global_indices.is_empty();
+        let layout = super::round_layout::MainRoundLayout::for_chips(chips, global_round);
+        let has_global = layout.has_global();
         if proof.global_commitment.is_some() != has_global
             || proof.global_original_commitment.is_some() != has_global
         {
@@ -460,7 +460,7 @@ impl JaggedShardVerifier {
             &proof.opened_values,
             &proof.main_commitment,
             &proof.chip_heights,
-            &global_indices,
+            &layout,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
         )?;
@@ -494,9 +494,7 @@ impl JaggedShardVerifier {
 /// * `observed_chip_heights` — the h_i the prologue observed, before any
 ///   challenge of this phase: the canonical main-round row counts, against
 ///   which the jagged geometry is checked.
-/// * `global_indices` — the chips (indices into `chips`) the shard commits in
-///   the global main round, ahead of the main round; empty for a single main
-///   round.
+/// * `layout` — the global and local main-round chip indices, in opening order.
 /// * `claimed_prep_pad_columns` — `Some(n)` on a pinned machine, where the
 ///   number of preprocessed padding columns names the proof's pin class;
 ///   `None` for natural rounds.
@@ -516,7 +514,7 @@ fn verify_jagged_pcs_host<SC, A>(
     opened_values: &crate::ShardOpenedValues<Challenge<SC>>,
     observed_main_commitment: &[Val<SC>; 8],
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
-    global_indices: &[usize],
+    layout: &super::round_layout::MainRoundLayout,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
 ) -> Result<(), JaggedShardVerifyError>
@@ -552,7 +550,7 @@ where
             build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
-        if !global_indices.is_empty() {
+        if layout.has_global() {
             return Err(JaggedShardVerifyError::JaggedPcs(
                 "outer ring: a shard commits a single main round".into(),
             ));
@@ -884,7 +882,7 @@ where
 
     use p3_air::BaseAir;
 
-    let has_global = !global_indices.is_empty();
+    let has_global = layout.has_global();
     let expected_rounds = usize::from(n_prep > 0) + usize::from(has_global) + 1;
     if combined_packing.round_counts.len() != expected_rounds {
         return Err(JaggedShardVerifyError::JaggedPcs(format!(
@@ -906,22 +904,17 @@ where
             "a pinned shard cannot commit a global main round".into(),
         ));
     }
-    let mut in_global = alloc::vec![false; chips.len()];
-    for &i in global_indices {
-        in_global[i] = true;
-    }
     let observed_height = |c: &Chip<Val<SC>, A>| {
         observed_chip_heights.get(MachineAir::<Val<SC>>::name(c).as_str()).copied().unwrap_or(0)
     };
-    let expected_for = |global: bool| -> Vec<(String, usize, usize)> {
-        chips
+    let expected_for = |indices: &[usize]| -> Vec<(String, usize, usize)> {
+        indices
             .iter()
-            .enumerate()
-            .filter(|(i, _)| in_global[*i] == global)
-            .map(|(_, c)| {
+            .map(|&i| {
+                let c = chips[i];
                 (
-                    MachineAir::<Val<SC>>::name(*c),
-                    <_ as BaseAir<Val<SC>>>::width(*c),
+                    MachineAir::<Val<SC>>::name(c),
+                    <_ as BaseAir<Val<SC>>>::width(c),
                     observed_height(c),
                 )
             })
@@ -931,7 +924,7 @@ where
     if has_global {
         crate::jagged_pcs::check_round_geometry(
             &combined_packing.round_counts[first_main_round],
-            &expected_for(true),
+            &expected_for(layout.global_indices()),
             "inner global round",
         )
         .map_err(JaggedShardVerifyError::JaggedPcs)?;
@@ -940,8 +933,12 @@ where
         .round_counts
         .last()
         .expect("the round count was just required to be at least one");
-    crate::jagged_pcs::check_round_geometry(main_round, &expected_for(false), "inner main round")
-        .map_err(JaggedShardVerifyError::JaggedPcs)?;
+    crate::jagged_pcs::check_round_geometry(
+        main_round,
+        &expected_for(layout.local_indices()),
+        "inner main round",
+    )
+    .map_err(JaggedShardVerifyError::JaggedPcs)?;
 
     let column_count_at = |k: usize, chip: &Chip<Val<SC>, A>| {
         combined_packing
@@ -952,7 +949,7 @@ where
     };
     if has_global {
         let mut global_cells = 0usize;
-        for &i in global_indices {
+        for &i in layout.global_indices() {
             let chip = chips[i];
             let h = observed_height(chip);
             let column_count = column_count_at(chip_infos.len(), chip);
@@ -967,10 +964,8 @@ where
         push_padding(&mut chip_infos, global_cells, global_natural.saturating_sub(global_cells));
     }
     let n_global_end = chip_infos.len();
-    for (i, chip) in chips.iter().enumerate() {
-        if in_global[i] {
-            continue;
-        }
+    for &i in layout.local_indices() {
+        let chip = chips[i];
         let column_count = column_count_at(chip_infos.len(), chip);
         chip_infos.push(JaggedChipInfo {
             name: chip.name().to_string(),
