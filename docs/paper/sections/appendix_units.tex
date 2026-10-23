@@ -33,7 +33,7 @@ The R-type frame raises 20 interactions per row: one program fetch; a receive of
 
 \subsection{The chips}
 
-Table~\ref{tab:chips} lists all 62 chips with their widths in the analysed configuration. \texttt{Global} differs most from the measured configuration: it has 65 columns here, against 100 in the measured baseline and 58 after the change of \S\ref{sec:perf-changes}, because the analysed configuration keeps seven chord-witness columns that change removed.
+Table~\ref{tab:chips} lists all 62 chips with their widths in the analysed configuration with the elliptic-curve multiset hash; the global challenge (\S\ref{sec:air-global}) removes \texttt{Global} and adds the preprocessed \texttt{MemoryProgram} table, one main column. \texttt{Global} differs most from the measured configuration: it has 65 columns here, against 100 in the measured baseline and 58 after the change of \S\ref{sec:perf-changes}, because the analysed configuration keeps seven chord-witness columns that change removed.
 
 \begin{table}[t]
 \centering

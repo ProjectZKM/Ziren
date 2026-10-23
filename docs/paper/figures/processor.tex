@@ -36,11 +36,11 @@
 
   % tables and memory chips
   \node[rom] (prog) at (1.2,2.5)  {\texttt{Program} ROM\\(preprocessed, in vk)};
-  \node[rom, text width=3.4cm] (pv)   at (5.6,2.5)  {Public values\\entry/exit state, digests};
+  \node[rom, text width=3.4cm] (pv)   at (5.6,2.5)  {Public values\\entry/exit state, global sum};
   \node[mem] (bump) at (0.6,-2.9)  {\texttt{MemoryBump}\\register anchors};
   \node[rom] (byte) at (4.0,-2.9)  {\texttt{Byte} / \texttt{Range} tables\\(preprocessed)};
   \node[mem] (loc)  at (7.6,-2.9)  {\texttt{MemoryLocal}\\shard first/last touch};
-  \node[mem] (glob) at (11.0,-2.9) {\texttt{Global}\\septic digest};
+  \node[rom] (glob) at (11.0,-2.9) {\texttt{MemoryProgram}\\image (preprocessed, in vk)};
   \node[mem] (init) at (14.6,-2.9) {\texttt{MemoryGlobal}\\\texttt{Init}/\texttt{Finalize}};
 
   \draw[tap] (prog.south) -- (1.2,1.35);
@@ -48,7 +48,6 @@
   \draw[tap] (bump.north) -- (0.6,-1.0);
   \draw[tap] (byte.north) -- (4.0,-1.35);
   \draw[tap] (loc.north) -- (7.6,-1.0);
-  \draw[tap] (loc.east) -- (glob.west);
   \draw[tap] (glob.north) -- (11.0,-1.7);
   \draw[tap] (init.north) -- (14.6,-1.7);
 \end{tikzpicture}

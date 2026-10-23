@@ -1,5 +1,5 @@
 % The memory argument for ONE address: a chain that is shard-local on the
-% memory bus and closed across shards only by the septic digest.  Solid edges
+% memory bus and closed across shards only by the global interactions.  Solid edges
 % are memory-bus tuples, dashed edges are global interactions.  The two shards
 % are stacked rather than placed side by side, so that the canvas stays close
 % to 2:1 and the tuple labels survive scaling to \textwidth.
@@ -69,7 +69,7 @@
 \draw[gl] (gi) -- (li);
 \draw[gl] (lf2) -- (gf);
 \node[note, text width=4.0cm] at (-4.6,-1.35)
-  {hint data; the image's digest comes from $\mathsf{vk}$};
+  {hint data; the image is \texttt{MemoryProgram} in $\mathsf{vk}$};
 \node[note, text width=4.2cm] at (12.7,-5.55)
   {addresses strictly increasing; the cursors are public values};
 
@@ -80,6 +80,6 @@
    along the chain\\
    \textcolor{zirenslate!85}{\rule[0.22em]{0.45em}{1.1pt}\hspace{0.18em}%
    \rule[0.22em]{0.45em}{1.1pt}}\ \
-   global interaction: summed into the digest $D$, cancels only over the whole
-   execution};
+   global interaction: summed under the global challenge, cancels only over
+   the whole execution};
 \end{tikzpicture}
