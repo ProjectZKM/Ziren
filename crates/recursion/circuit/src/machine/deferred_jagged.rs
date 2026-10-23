@@ -68,6 +68,8 @@ pub struct ZKMDeferredBasefoldWitnessValues<
     pub global_chain: [SC::Val; DIGEST_SIZE],
     /// The chain end the neighbouring shards' global challenge was derived from.
     pub global_h_star: [SC::Val; DIGEST_SIZE],
+    /// The global challenge's proof-of-work witness, carried through.
+    pub global_pow_witness: SC::Val,
     pub is_complete: bool,
 }
 
@@ -108,6 +110,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     pub finalize_addr_bits: [Felt<C::F>; 32],
     pub global_chain: [Felt<C::F>; DIGEST_SIZE],
     pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
+    pub global_pow_witness: Felt<C::F>,
     pub is_complete: Felt<C::F>,
 }
 
@@ -161,6 +164,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         finalize_addr_bits,
         global_chain,
         global_h_star,
+        global_pow_witness,
         is_complete,
     } = input;
 
@@ -542,6 +546,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
     deferred_public_values.global_chain_start = global_chain;
     deferred_public_values.global_chain_end = global_chain;
     deferred_public_values.global_h_star = global_h_star;
+    deferred_public_values.global_pow_witness = global_pow_witness;
     deferred_public_values.global_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
     deferred_public_values.vk_root = vk_root;
     deferred_public_values.digest =
@@ -599,6 +604,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             finalize_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
             global_chain: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
             global_h_star: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
+            global_pow_witness: p3_koala_bear::KoalaBear::ZERO,
         }
     }
 }

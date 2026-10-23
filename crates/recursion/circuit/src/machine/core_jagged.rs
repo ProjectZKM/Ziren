@@ -61,6 +61,8 @@ pub struct ZKMCoreBasefoldWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     /// The chain end, over every shard of the execution, the shard's global
     /// challenge is derived from.
     pub global_h_star: [SC::Val; DIGEST_SIZE],
+    /// The global challenge's proof-of-work witness.
+    pub global_pow_witness: SC::Val,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -98,6 +100,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
     pub global_chain_start: [Felt<C::F>; DIGEST_SIZE],
     pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
+    pub global_pow_witness: Felt<C::F>,
 }
 
 /// Verify a list of basefold shard proofs, asserting the
@@ -142,6 +145,7 @@ pub fn verify_core_basefold<C, SC, A>(
         vk_root,
         global_chain_start,
         global_h_star,
+        global_pow_witness,
     } = input;
     let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
         C,
@@ -210,6 +214,7 @@ pub fn verify_core_basefold<C, SC, A>(
             builder,
             machine.config(),
             global_h_star,
+            global_pow_witness,
             machine.global_beta_seed_dim(),
         )
     });
@@ -843,6 +848,7 @@ pub fn verify_core_basefold<C, SC, A>(
     recursion_public_values.global_chain_start = global_chain_start;
     recursion_public_values.global_chain_end = global_chain_end;
     recursion_public_values.global_h_star = global_h_star;
+    recursion_public_values.global_pow_witness = global_pow_witness;
     recursion_public_values.global_sum = global_sum;
     recursion_public_values.start_reconstruct_deferred_digest = start_deferred_digest;
     recursion_public_values.end_reconstruct_deferred_digest = end_deferred_digest;
@@ -953,6 +959,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
             global_chain_start: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
             global_h_star: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+            global_pow_witness: p3_koala_bear::KoalaBear::ZERO,
         }
     }
 

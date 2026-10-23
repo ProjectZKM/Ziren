@@ -447,7 +447,7 @@ where
     let opened_values =
         build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
-    assemble_jagged_shard_proof_with_global::<SC>(
+    let mut proof = assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
         global_commitment,
         main_commitment,
@@ -457,7 +457,9 @@ where
         chip_heights,
         evaluation_proof,
         orientation,
-    )
+    );
+    proof.global_pow_witness = global_challenge.map(|g| g.pow_witness);
+    proof
 }
 
 // Shared NON-DEVICE shard-driver orchestration helpers, `pub` so the
@@ -1035,6 +1037,7 @@ where
         public_values,
         global_commitment,
         global_original_commitment,
+        global_pow_witness: None,
         main_commitment,
         padding_row_heights,
         logup_gkr_proof,

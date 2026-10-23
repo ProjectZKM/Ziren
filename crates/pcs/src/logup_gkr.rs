@@ -30,6 +30,16 @@ pub fn gkr_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_LOGUP_GRINDING_BITS", 22)
 }
 
+/// Proof-of-work grinding difficulty (in bits) of the cross-shard global
+/// challenge: the prover grinds for a witness that, absorbed after `h_star`,
+/// makes the challenger emit this many leading zero bits before `(α_g, β_g)`
+/// is sampled. The challenge is drawn once per execution and fingerprints every
+/// global lookup of every shard, so its error grows with the execution's global
+/// lookups rather than one shard's.
+pub fn global_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_GLOBAL_GRINDING_BITS", 22)
+}
+
 use p3_challenger::GrindingChallenger;
 
 /// `F == JaggedVal` at every instantiation, checked rather than assumed.
@@ -107,6 +117,9 @@ pub struct GlobalChallenge<F, EF> {
     /// `β_g`: `betas[0]` weights the lookup kind, `betas[k + 1]` the
     /// message's `k`-th value.
     pub betas: alloc::vec::Vec<EF>,
+    /// The proof-of-work witness absorbed after `h_star`
+    /// ([`global_grinding_bits`]).
+    pub pow_witness: F,
 }
 
 /// Separates the global challenge's derivation from every other use of a
@@ -177,17 +190,53 @@ where
 
 impl<F, EF> GlobalChallenge<F, EF>
 where
-    F: p3_field::Field,
+    F: p3_field::Field + 'static,
     EF: p3_field::ExtensionField<F> + Send + Sync,
 {
-    /// Derives the challenge from `h_star` on `challenger`, which must be a
-    /// fresh challenger of the machine's configuration.
-    pub fn derive<C>(mut challenger: C, h_star: [F; 8], beta_seed_dim: usize) -> Self
+    /// Prover side: absorbs the domain and `h_star` on `challenger`, which
+    /// must be a fresh challenger of the machine's configuration, grinds the
+    /// proof-of-work witness and samples the challenge.
+    pub fn grind<C>(mut challenger: C, h_star: [F; 8], beta_seed_dim: usize) -> Self
     where
-        C: p3_challenger::FieldChallenger<F>,
+        C: p3_challenger::FieldChallenger<F>
+            + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + 'static,
     {
+        Self::absorb(&mut challenger, &h_star);
+        let pow_witness: F = gkr_grind(&mut challenger, global_grinding_bits());
+        Self::sample(challenger, h_star, beta_seed_dim, pow_witness)
+    }
+
+    /// Verifier side: the challenge of `h_star` and `pow_witness`, or `None`
+    /// when the witness fails the proof of work. `challenger` must be a fresh
+    /// challenger of the machine's configuration.
+    pub fn derive<C>(
+        mut challenger: C,
+        h_star: [F; 8],
+        pow_witness: F,
+        beta_seed_dim: usize,
+    ) -> Option<Self>
+    where
+        C: p3_challenger::FieldChallenger<F>
+            + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + 'static,
+    {
+        Self::absorb(&mut challenger, &h_star);
+        gkr_check_witness(&mut challenger, global_grinding_bits(), pow_witness)
+            .then(|| Self::sample(challenger, h_star, beta_seed_dim, pow_witness))
+    }
+
+    fn absorb<C: p3_challenger::FieldChallenger<F>>(challenger: &mut C, h_star: &[F; 8]) {
         challenger.observe(F::from_u32(GLOBAL_CHALLENGE_DOMAIN));
-        challenger.observe_slice(&h_star);
+        challenger.observe_slice(h_star);
+    }
+
+    fn sample<C: p3_challenger::FieldChallenger<F>>(
+        mut challenger: C,
+        h_star: [F; 8],
+        beta_seed_dim: usize,
+        pow_witness: F,
+    ) -> Self {
         let alpha: EF = challenger.sample_algebra_element::<EF>();
         let seed: alloc::vec::Vec<EF> =
             (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<EF>()).collect();
@@ -196,7 +245,7 @@ where
         } else {
             crate::zerocheck_prover::eq_mle_table::<EF>(&seed)
         };
-        Self { h_star, alpha, betas }
+        Self { h_star, alpha, betas, pow_witness }
     }
 
     /// The `(α, β)` pair a lookup of `scope` uses: this challenge for

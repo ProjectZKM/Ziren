@@ -17,21 +17,25 @@ use crate::{
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
-/// A shard's global challenge: the chain end `h_star` it is derived from,
-/// `α_g`, and the `β_g` table (the eq table of the β seed).
+/// A shard's global challenge: the chain end `h_star` it is derived from, the
+/// proof-of-work witness, `α_g`, and the `β_g` table (the eq table of the β
+/// seed).
 pub struct GlobalChallengeVariable<C: CircuitConfig<F = KoalaBear>> {
     pub h_star: [Felt<C::F>; DIGEST_SIZE],
+    pub pow_witness: Felt<C::F>,
     pub alpha: Ext<C::F, C::EF>,
     pub betas: Vec<SymbolicExt<C::F, C::EF>>,
 }
 
 impl<C: CircuitConfig<F = KoalaBear>> GlobalChallengeVariable<C> {
-    /// `GlobalChallenge::derive`: absorbs the domain and `h_star`, then samples
-    /// `α_g` and `beta_seed_dim` seed elements.
+    /// `GlobalChallenge::derive`: absorbs the domain and `h_star`, checks the
+    /// proof-of-work witness, then samples `α_g` and `beta_seed_dim` seed
+    /// elements.
     pub fn derive<SC>(
         builder: &mut Builder<C>,
         config: &SC,
         h_star: [Felt<C::F>; DIGEST_SIZE],
+        pow_witness: Felt<C::F>,
         beta_seed_dim: usize,
     ) -> Self
     where
@@ -44,11 +48,12 @@ impl<C: CircuitConfig<F = KoalaBear>> GlobalChallengeVariable<C> {
         for h in h_star {
             challenger.observe(builder, h);
         }
+        challenger.check_witness(builder, zkm_pcs::logup_gkr::global_grinding_bits(), pow_witness);
         let alpha = challenger.sample_ext(builder);
         let seed: Vec<SymbolicExt<C::F, C::EF>> =
             (0..beta_seed_dim).map(|_| challenger.sample_ext(builder).into()).collect();
         let betas = partial_lagrange_symbolic::<C>(&seed);
-        Self { h_star, alpha, betas }
+        Self { h_star, pow_witness, alpha, betas }
     }
 }
 
@@ -115,4 +120,76 @@ where
         }
     }
     core::array::from_fn(|_| challenger.sample(builder))
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{
+        koala_bear_poseidon2::KoalaBearPoseidon2,
+        logup_gkr::{global_grinding_bits, GlobalChallenge},
+        InnerChallenge, InnerVal, StarkGenericConfig,
+    };
+    use zkm_recursion_compiler::{
+        config::InnerConfig,
+        ir::{Builder, Ext, ExtConst, Felt},
+    };
+
+    use super::GlobalChallengeVariable;
+    use crate::utils::tests::run_test_recursion;
+
+    const BETA_SEED_DIM: usize = 2;
+
+    fn host_challenge() -> GlobalChallenge<InnerVal, InnerChallenge> {
+        let h_star = core::array::from_fn(|i| InnerVal::from_u32(11 * i as u32 + 3));
+        GlobalChallenge::grind(KoalaBearPoseidon2::default().challenger(), h_star, BETA_SEED_DIM)
+    }
+
+    /// Derives the challenge in-circuit from `host.h_star` and `witness`, and,
+    /// when `compare`, asserts it equals the host's.
+    fn derive_in_circuit(
+        host: &GlobalChallenge<InnerVal, InnerChallenge>,
+        witness: InnerVal,
+        compare: bool,
+    ) {
+        let config = KoalaBearPoseidon2::default();
+        let mut builder = Builder::<InnerConfig>::default();
+        let h_star: [Felt<InnerVal>; 8] = host.h_star.map(|h| builder.eval(h));
+        let witness: Felt<InnerVal> = builder.eval(witness);
+        let global = GlobalChallengeVariable::<InnerConfig>::derive(
+            &mut builder,
+            &config,
+            h_star,
+            witness,
+            BETA_SEED_DIM,
+        );
+        if compare {
+            let alpha: Ext<InnerVal, InnerChallenge> = builder.eval(host.alpha.cons());
+            builder.assert_ext_eq(global.alpha, alpha);
+            for (beta, expected) in global.betas.iter().zip(&host.betas) {
+                let expected: Ext<InnerVal, InnerChallenge> = builder.eval(expected.cons());
+                builder.assert_ext_eq(beta.clone(), expected);
+            }
+        }
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    #[test]
+    fn the_circuit_derives_the_host_challenge() {
+        let host = host_challenge();
+        derive_in_circuit(&host, host.pow_witness, true);
+    }
+
+    #[test]
+    #[should_panic]
+    fn the_circuit_rejects_a_failing_proof_of_work() {
+        assert!(global_grinding_bits() > 0, "the global challenge is ground");
+        let host = host_challenge();
+        let below = if host.pow_witness == InnerVal::ZERO {
+            InnerVal::ONE
+        } else {
+            host.pow_witness - InnerVal::ONE
+        };
+        derive_in_circuit(&host, below, false);
+    }
 }

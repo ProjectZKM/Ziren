@@ -83,6 +83,7 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         ("basefold.batch_grinding_bits", crate::basefold::config::batch_grinding_bits() as u64),
         ("whir.batch_grinding_bits", crate::whir::jagged::whir_batch_grinding_bits() as u64),
         ("logup_gkr.grinding_bits", crate::logup_gkr::gkr_grinding_bits() as u64),
+        ("logup_gkr.global_grinding_bits", crate::logup_gkr::global_grinding_bits() as u64),
         // Added when these became overridable: a deployment that lowers one of
         // them must move the digest, or the override would change the transcript
         // without any consumer noticing.
@@ -324,7 +325,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "195ab86a4caed6de344a13fc0573a9db2a95a5ed5c5e8f8372d0c0057208251f",
+            "2de60d43525fbfbf0a6f41e40f521f950754696a127258c323237b2125a79ce2",
             "the transcript profile changed -- see this test's documentation",
         );
     }

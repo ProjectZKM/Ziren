@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir, MachineProgram};
 use crate::koala_bear_poseidon2::KoalaBearPoseidon2;
-use crate::logup_gkr::GlobalChallenge;
+use crate::logup_gkr::{global_grinding_bits, GlobalChallenge};
 use crate::{
     Chip, CpuProver, LookupKind, MachineProof, MachineProver, MachineRecord, StarkGenericConfig,
     StarkMachine, StarkVerifyingKey, Val,
@@ -146,7 +146,7 @@ fn challenge(
     seed: u32,
 ) -> GlobalChallenge<F, <SC as StarkGenericConfig>::Challenge> {
     let h_star: [F; 8] = core::array::from_fn(|i| F::from_u32(seed + i as u32));
-    GlobalChallenge::derive(machine.config().challenger(), h_star, machine.global_beta_seed_dim())
+    GlobalChallenge::grind(machine.config().challenger(), h_star, machine.global_beta_seed_dim())
 }
 
 /// Proves every record as its own shard under `global`.
@@ -273,4 +273,59 @@ fn the_global_sum_is_read_off_the_gkr_output() {
     output.denominator[0] *= scale;
     verify(&machine, &vk, &proof, Some(&global))
         .expect_err("a rescaled output fraction keeps its value but not its GKR binding");
+}
+
+#[test]
+fn the_global_challenge_carries_its_proof_of_work() {
+    let machine = bus_machine(true);
+    let global = challenge(&machine, 7);
+    let dim = machine.global_beta_seed_dim();
+    let derive =
+        |w: F| GlobalChallenge::derive(machine.config().challenger(), global.h_star, w, dim);
+    assert_eq!(derive(global.pow_witness).as_ref(), Some(&global), "the ground witness passes");
+    if global_grinding_bits() > 0 {
+        let below =
+            if global.pow_witness == F::ZERO { F::ONE } else { global.pow_witness - F::ONE };
+        assert!(derive(below).is_none(), "the grind returns the smallest witness that passes");
+    }
+}
+
+#[test]
+fn a_proof_verifies_only_under_its_global_proof_of_work() {
+    let machine = bus_machine(true);
+    let prover = CpuProver::new(bus_machine(true));
+    let (pk, vk) = prover.setup(&BusProgram);
+    let records = vec![sender(&[3, 5, 7]), receiver(&[7, 3, 5])];
+    let proof = prover
+        .prove(&pk, records, &mut machine.config().challenger(), crate::ZKMCoreOpts::default())
+        .unwrap();
+    let witnesses: Vec<_> =
+        proof.shard_proofs.iter().map(|p| p.jagged_shard_proof.global_pow_witness).collect();
+    assert!(witnesses.iter().all(|w| w.is_some() && *w == witnesses[0]), "{witnesses:?}");
+    let verify = |proof: &MachineProof<SC>| {
+        machine.verify(&vk, proof, &mut machine.config().challenger()).map_err(|e| format!("{e}"))
+    };
+    verify(&proof).expect("an honest proof verifies");
+
+    let mut split = proof.clone();
+    let w = split.shard_proofs[1].jagged_shard_proof.global_pow_witness.as_mut().unwrap();
+    *w += F::ONE;
+    let err = verify(&split).expect_err("shards with different witnesses");
+    assert!(err.contains("different global proof-of-work witnesses"), "{err}");
+
+    let mut missing = proof.clone();
+    missing.shard_proofs[0].jagged_shard_proof.global_pow_witness = None;
+    let err = verify(&missing).expect_err("a shard without a witness");
+    assert!(err.contains("no global proof-of-work witness"), "{err}");
+
+    if global_grinding_bits() > 0 {
+        let w0 = witnesses[0].unwrap();
+        let below = if w0 == F::ZERO { F::ONE } else { w0 - F::ONE };
+        let mut failing = proof.clone();
+        for shard in &mut failing.shard_proofs {
+            shard.jagged_shard_proof.global_pow_witness = Some(below);
+        }
+        let err = verify(&failing).expect_err("a witness that fails the proof of work");
+        assert!(err.contains("witness fails"), "{err}");
+    }
 }
