@@ -169,7 +169,7 @@ store_word_event_to_row(
     const InstructionFfi& instruction
 ) {
     populate_common<F>(cols.common, event, instruction);
-    memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);
+    memory::populate_store_v2<F>(cols.memory_access, event.mem_access);
     cols.is_sw = F::from_bool(event.opcode == Opcode::SW);
     cols.is_sc = F::from_bool(event.opcode == Opcode::SC);
 }

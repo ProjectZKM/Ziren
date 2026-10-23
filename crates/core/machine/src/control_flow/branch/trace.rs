@@ -165,7 +165,7 @@ impl BranchChip {
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
         cols.is_branching = F::from_bool(branching);
         if branching {
-            cols.target_add.populate(blu, event.next_pc, event.c);
+            crate::operations::AddOperation::<F>::default().populate(blu, event.next_pc, event.c);
         } else {
             blu.add_u8_range_checks(&event.next_pc.to_le_bytes());
             blu.add_u8_range_checks(&event.next_next_pc.to_le_bytes());

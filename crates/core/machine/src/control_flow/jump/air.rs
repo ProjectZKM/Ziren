@@ -86,11 +86,8 @@ where
             builder,
             local.next_pc,
             local.frame.op_b_val(),
-            local.target_add,
+            crate::operations::AddOperation { value: local.next_next_pc },
             local.is_jumpdirect.into(),
         );
-        builder
-            .when(local.is_jumpdirect)
-            .assert_word_eq(local.target_add.value, local.next_next_pc);
     }
 }

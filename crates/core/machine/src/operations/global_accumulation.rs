@@ -131,15 +131,15 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
     pub fn eval_accumulation<AB: ZKMAirBuilder>(
         builder: &mut AB,
         global_lookup_cols: [GlobalLookupOperation<AB::Var>; N],
-        local_is_real: [AB::Var; N],
+        local_is_real: [AB::Expr; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
     ) {
         for i in 0..N {
-            builder.assert_bool(local_is_real[i]);
+            builder.assert_bool(local_is_real[i].clone());
         }
 
         for i in 0..N - 1 {
-            builder.when_not(local_is_real[i]).assert_zero(local_is_real[i + 1]);
+            builder.when_not(local_is_real[i].clone()).assert_zero(local_is_real[i + 1].clone());
         }
 
         let initial_digest = SepticCurve::<AB::Expr> {
@@ -195,7 +195,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 sum_checker_x,
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
-            builder.when(local_is_real[i]).assert_septic_ext_eq(
+            builder.when(local_is_real[i].clone()).assert_septic_ext_eq(
                 sum_checker_y,
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
@@ -206,7 +206,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                     p.x.0.into_iter().chain(p.y.0).collect()
                 };
                 (
-                    local_is_real[i].into(),
+                    local_is_real[i].clone(),
                     vec![
                         coords(ith_cumulative_sum(i)),
                         coords(current),
@@ -219,7 +219,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             let denominator_inv = SepticExtension::<AB::Expr>::from_base_fn(|j| {
                 local_accumulation.denominator_inv[i].0[j].into()
             });
-            builder.when(local_is_real[i]).assert_septic_ext_eq(
+            builder.when(local_is_real[i].clone()).assert_septic_ext_eq(
                 denominator * denominator_inv,
                 SepticExtension::<AB::Expr>::from_base_fn(|j| {
                     if j == 0 {

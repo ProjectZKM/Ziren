@@ -173,7 +173,7 @@ constraints are fixed, or the value the prover chooses is declared a free value 
 What makes this manual today:
 
 - **Indices.** The analyser names columns by position (`w.v123`), and so do the hand-written
-  parts: the `DivRem` snippets and their generator, and the `Global` snippet. A column added or
+  parts: the `DivRem` and `Global` snippets and their generators. A column added or
   moved breaks them although nothing proved has changed.
 - **Gadget shapes.** Each snippet generator recognises its gadget by the shape of the extracted
   constraints; a gadget whose internal layout changes no longer matches, and the generator has to

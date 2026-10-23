@@ -91,10 +91,5 @@ __ZKM_HOSTDEV__ void event_to_row(
     write_word_from_u32<F>(cols.next_next_pc, event.next_next_pc);
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
     populate_range_checker(cols.next_next_pc_range_checker, event.next_next_pc);
-
-    // The (when taken) target addition — mirrors control_flow/branch/trace.rs.
-    if (branching) {
-        add_sub::populate<F>(cols.target_add, event.next_pc, event.c);
-    }
 }
 }  // namespace zkm::branch

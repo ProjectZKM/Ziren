@@ -144,4 +144,21 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write_v2(
     write_word_from_u32<F>(self.prev_value, prev_record.value);
     populate_access<F>(self.access, current_record, prev_record);
 }
+
+/// `MemoryStoreCols`: `populate_read_write_v2` without the written value, which
+/// the chip takes from `op_a`'s previous value.
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_store_v2(
+    MemoryStoreCols<F>& self,
+    const MemoryRecordEnum& record
+) {
+    MemoryReadWriteCols<F> full;
+    populate_read_write_v2<F>(full, record);
+    self.prev_value = full.prev_value;
+    self.prev_shard = full.access.prev_shard;
+    self.prev_clk = full.access.prev_clk;
+    self.compare_clk = full.access.compare_clk;
+    self.diff_16bit_limb = full.access.diff_16bit_limb;
+    self.diff_high_limb = full.access.diff_high_limb;
+}
 }  // namespace zkm_core_machine_sys::memory

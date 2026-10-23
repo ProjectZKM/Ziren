@@ -16,6 +16,50 @@ pub struct MemoryWriteCols<T> {
     pub access: MemoryAccessCols<T>,
 }
 
+/// A memory write whose new value the chip constrains to a word it already holds (`SW`/`SC`
+/// store `op_a`'s previous value): the [`MemoryReadWriteCols`] columns without `access.value`.
+/// [`Self::with_value`] reassembles the full access for the memory argument, so the access is
+/// evaluated exactly as a `MemoryReadWriteCols` one whose value is that word.
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct MemoryStoreCols<T> {
+    pub prev_value: Word<T>,
+    pub prev_shard: T,
+    pub prev_clk: T,
+    pub compare_clk: T,
+    pub diff_16bit_limb: T,
+    pub diff_high_limb: T,
+}
+
+impl<T: Copy> MemoryStoreCols<T> {
+    /// The full read-write access, writing `value`.
+    pub fn with_value<E: From<T>>(&self, value: Word<E>) -> MemoryReadWriteCols<E> {
+        MemoryReadWriteCols {
+            prev_value: self.prev_value.map(E::from),
+            access: MemoryAccessCols {
+                value,
+                prev_shard: self.prev_shard.into(),
+                prev_clk: self.prev_clk.into(),
+                compare_clk: self.compare_clk.into(),
+                diff_16bit_limb: self.diff_16bit_limb.into(),
+                diff_high_limb: self.diff_high_limb.into(),
+            },
+        }
+    }
+
+    /// The columns of a full access, dropping its value.
+    pub fn from_read_write(full: &MemoryReadWriteCols<T>) -> Self {
+        Self {
+            prev_value: full.prev_value,
+            prev_shard: full.access.prev_shard,
+            prev_clk: full.access.prev_clk,
+            compare_clk: full.access.compare_clk,
+            diff_16bit_limb: full.access.diff_16bit_limb,
+            diff_high_limb: full.access.diff_high_limb,
+        }
+    }
+}
+
 /// Memory read-write access.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]

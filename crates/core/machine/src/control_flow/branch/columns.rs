@@ -2,7 +2,7 @@ use std::mem::size_of;
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{PicusInfo, Word};
 
-use crate::operations::{AddOperation, KoalaBearWordRangeChecker};
+use crate::operations::KoalaBearWordRangeChecker;
 
 pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 
@@ -23,11 +23,9 @@ pub struct BranchColumns<T> {
     pub next_pc: Word<T>,
     pub next_pc_range_checker: KoalaBearWordRangeChecker<T>,
 
-    /// The inlined target addition: `target = next_pc + op_c` (the branch
-    /// delay-slot target, proven in-row instead of via an AddSub request row).
-    pub target_add: AddOperation<T>,
-
-    /// The next next program counter.
+    /// The next next program counter.  On a taken branch it is the result of
+    /// the inlined target addition `next_pc + op_c` (the delay-slot target,
+    /// proven in-row with `next_next_pc` as the `AddOperation` value).
     pub next_next_pc: Word<T>,
 
     /// Range check for next next program counter.

@@ -4,8 +4,8 @@ use zkm_core_executor::events::{
 };
 
 use super::{
-    MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols, RegisterAccessCols,
-    RegisterReadCols, RegisterReadWriteCols,
+    MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryStoreCols, MemoryWriteCols,
+    RegisterAccessCols, RegisterReadCols, RegisterReadWriteCols,
 };
 use crate::air::{TIMESTAMP_HIGH_LIMB_BITS, TIMESTAMP_HIGH_LIMB_MASK};
 
@@ -262,6 +262,15 @@ impl<F: PrimeField32> MemoryReadWriteCols<F> {
         };
         self.prev_value = prev_record.value.into();
         self.access.populate_access(current_record, prev_record, byte_checks, output);
+    }
+}
+
+impl<F: PrimeField32> MemoryStoreCols<F> {
+    /// Populate as [`MemoryReadWriteCols::populate_trusted`] does, without the written value.
+    pub fn populate_trusted(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecord) {
+        let mut full = MemoryReadWriteCols::<F>::default();
+        full.populate_trusted(record, output);
+        *self = Self::from_read_write(&full);
     }
 }
 

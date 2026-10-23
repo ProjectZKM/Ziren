@@ -96,7 +96,7 @@ where
                 builder,
                 local.next_pc,
                 local.frame.op_c_val(),
-                local.target_add,
+                AddOperation { value: local.next_next_pc },
                 local.is_branching.into(),
             );
 
@@ -108,11 +108,6 @@ where
             builder.slice_range_check_u8(&local.next_pc.0, is_real.clone() - local.is_branching);
             builder
                 .slice_range_check_u8(&local.next_next_pc.0, is_real.clone() - local.is_branching);
-
-            builder
-                .when(is_real.clone())
-                .when(local.is_branching)
-                .assert_word_eq(local.target_add.value, local.next_next_pc);
 
             builder.when_not(is_real.clone()).assert_zero(local.is_branching);
 

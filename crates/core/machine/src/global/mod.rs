@@ -10,8 +10,8 @@ use zkm_derive::PicusAnnotations;
 use zkm_pcs::PicusInfo;
 
 use p3_air::{Air, BaseAir, WindowAccess};
-use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -52,11 +52,10 @@ const GLOBAL_COL_MAP: GlobalCols<usize> = make_col_map();
 
 pub const GLOBAL_INITIAL_DIGEST_POS: usize = GLOBAL_COL_MAP.accumulation.initial_digest[0].0[0];
 
-// Option 2: bumped 64 -> 65 — the `index` column added to `GlobalCols`
-// (for the GlobalAccumulation bus chain) shifts `accumulation.initial_digest`
-// one position right.  Kept in sync with the struct-derived
+// `accumulation.initial_digest`'s column: `kind` (1), `lookup` (18), `is_receive`,
+// `is_send` and `index` (3).  Kept in sync with the struct-derived
 // `GLOBAL_INITIAL_DIGEST_POS` by the assert in `name()` below.
-pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 30;
+pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 22;
 
 /// Whether the `GlobalChip` trace (and with it the three per-row byte-table
 /// lookups that need `lift_x`) is generated on the DEVICE.  When set, the host
@@ -100,15 +99,40 @@ pub struct Ghost {
 #[derive(Default)]
 pub struct GlobalChip;
 
+impl GlobalChip {
+    /// The lookup message a row carries, read off its curve point.  The point's `x` embeds the
+    /// message as `x[0] = m[0] + 2^16 * kind`, `x[i] = m[i]` for `i` in `1..6` and
+    /// `x[6] = 2^8 * m[6] + offset`, which
+    /// [`GlobalLookupOperation::eval_single_digest`] constrains for these same expressions,
+    /// together with the `U16Range` check of `m[0]`.  Each relation determines `m[i]`
+    /// uniquely, so the message needs no columns of its own.
+    fn message<AB: ZKMAirBuilder>(local: &GlobalCols<AB::Var>) -> [AB::Expr; 7] {
+        let x = local.lookup.x_coordinate;
+        let inv_256 = AB::F::from_u32(256).inverse();
+        [
+            x[0].into() - local.kind.into() * AB::F::from_u32(1 << 16),
+            x[1].into(),
+            x[2].into(),
+            x[3].into(),
+            x[4].into(),
+            x[5].into(),
+            (x[6].into() - local.lookup.offset.into()) * inv_256,
+        ]
+    }
+}
+
 #[derive(PicusAnnotations, AlignedBorrow)]
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
-    pub message: [T; 7],
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
+    /// A real row is exactly one of a receive or a send (`is_real = is_send + is_receive`), so
+    /// the two flags are the row's selectors: the determinism extraction proves each kind of
+    /// real row separately, as it did with the former `is_real` column specialized to one.
+    #[picus(selector)]
     pub is_receive: T,
+    #[picus(selector)]
     pub is_send: T,
-    pub is_real: T,
     /// Option 2: running real-row index for the GlobalAccumulation bus
     /// chain.  Set to the row's position by trace-gen.  Placed before
     /// `accumulation` so the latter (and its trailing cumulative_sum)
@@ -227,10 +251,8 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut GlobalCols<F> = row.borrow_mut();
                     let event: &GlobalLookupEvent = &events[idx];
-                    cols.message = event.message.map(F::from_u32);
                     cols.kind = F::from_u8(event.kind);
                     cols.lookup.populate_from_row(&digests[idx]);
-                    cols.is_real = F::ONE;
                     cols.index = F::from_u32(idx as u32);
                     if event.is_receive {
                         cols.is_receive = F::ONE;
@@ -313,41 +335,30 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &GlobalCols<AB::Var> = (*local).borrow();
+        let message = Self::message::<AB>(local);
+        let is_real: AB::Expr = local.is_send.into() + local.is_receive.into();
 
+        let mut lookup_vals: Vec<AB::Expr> = message.to_vec();
+        lookup_vals.extend([local.is_send.into(), local.is_receive.into(), local.kind.into()]);
         builder.receive(
-            AirLookup::new(
-                vec![
-                    local.message[0].into(),
-                    local.message[1].into(),
-                    local.message[2].into(),
-                    local.message[3].into(),
-                    local.message[4].into(),
-                    local.message[5].into(),
-                    local.message[6].into(),
-                    local.is_send.into(),
-                    local.is_receive.into(),
-                    local.kind.into(),
-                ],
-                local.is_real.into(),
-                LookupKind::Global,
-            ),
+            AirLookup::new(lookup_vals, is_real.clone(), LookupKind::Global),
             LookupScope::Local,
         );
 
         GlobalLookupOperation::<AB::F>::eval_single_digest(
             builder,
-            local.message.map(Into::into),
+            message,
             local.lookup,
             local.is_receive.into(),
             local.is_send.into(),
-            local.is_real,
+            is_real.clone(),
             local.kind,
         );
 
         GlobalAccumulationOperation::<AB::F, 1>::eval_accumulation(
             builder,
             [local.lookup],
-            [local.is_real],
+            [is_real.clone()],
             local.accumulation,
         );
 
@@ -360,7 +371,7 @@ where
             recv_vals.push(local.accumulation.initial_digest[1].0[i].into());
         }
         builder.receive(
-            AirLookup::new(recv_vals, local.is_real.into(), LookupKind::GlobalAccumulation),
+            AirLookup::new(recv_vals, is_real.clone(), LookupKind::GlobalAccumulation),
             LookupScope::Local,
         );
 
@@ -373,7 +384,7 @@ where
             send_vals.push(local.accumulation.cumulative_sum[0][1].0[i].into());
         }
         builder.send(
-            AirLookup::new(send_vals, local.is_real.into(), LookupKind::GlobalAccumulation),
+            AirLookup::new(send_vals, is_real, LookupKind::GlobalAccumulation),
             LookupScope::Local,
         );
     }

@@ -130,20 +130,20 @@ impl<F: Field> GlobalLookupOperation<F> {
         cols: GlobalLookupOperation<AB::Var>,
         is_receive: AB::Expr,
         is_send: AB::Expr,
-        is_real: AB::Var,
+        is_real: AB::Expr,
         kind: AB::Var,
     ) {
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
         builder.assert_bool(is_send.clone());
         builder.assert_bool(is_receive.clone());
-        builder.assert_eq(is_send.clone() + is_receive.clone(), is_real);
+        builder.assert_eq(is_send.clone() + is_receive.clone(), is_real.clone());
 
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             values[0].clone(),
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            is_real,
+            is_real.clone(),
         );
 
         builder.send_byte(
@@ -151,34 +151,34 @@ impl<F: Field> GlobalLookupOperation<F> {
             cols.y6_lo16,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            is_real,
+            is_real.clone(),
         );
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U8Range as u8),
             AB::Expr::ZERO,
             cols.y6_mid8,
             cols.offset,
-            is_real,
+            is_real.clone(),
         );
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::LTU as u8),
             AB::Expr::ONE,
             cols.y6_top,
             AB::Expr::from_u8(Y6_TOP_BOUND),
-            is_real,
+            is_real.clone(),
         );
 
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 
         builder
-            .when(is_real)
+            .when(is_real.clone())
             .assert_eq(x.0[0].clone(), values[0].clone() + kind.into() * AB::Expr::from_u32(65536));
         for i in 1..6 {
-            builder.when(is_real).assert_eq(x.0[i].clone(), values[i].clone());
+            builder.when(is_real.clone()).assert_eq(x.0[i].clone(), values[i].clone());
         }
         builder
-            .when(is_real)
+            .when(is_real.clone())
             .assert_eq(x.0[6].clone(), values[6].clone() * AB::Expr::from_u32(256) + cols.offset);
 
         let y2 = y.square();
@@ -191,7 +191,7 @@ impl<F: Field> GlobalLookupOperation<F> {
 
         builder.mark_gadget("septic_lift", || {
             (
-                is_real.into(),
+                is_real.clone(),
                 vec![
                     (0..7).map(|i| cols.y_coordinate[i].into()).collect(),
                     (0..7).map(|i| cols.x_coordinate[i].into()).collect(),
