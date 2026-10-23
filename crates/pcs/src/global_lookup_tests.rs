@@ -52,7 +52,7 @@ impl MachineProgram<F> for BusProgram {
 /// local lookup `(v, w, v)` within the chip, so the local and global β tables
 /// differ in size; the sender's rows also send the global lookup `(v)` and the
 /// receiver's receive it. `Local` has no global lookup, so a shard always has
-/// a local main round.
+/// a main round.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BusAir {
     Sender,

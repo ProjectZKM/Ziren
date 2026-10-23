@@ -560,7 +560,7 @@ impl ZKMProofShape {
     ///
     /// A shard's chip set is one of the machine's clusters
     /// (`zkm_pcs::stacked_shapes::build_mips_machine_shape`); the cluster's
-    /// chips with global lookups commit in the global main round and the rest
+    /// chips with global lookups commit in the global round and the rest
     /// in the main round; each committed round lands on a block bucket of
     /// `zkm_pcs::jagged::committed_dense_len`; and under
     /// `zkm_pcs::jagged::unpinned_pad_columns` the padding-column count is a
@@ -568,10 +568,10 @@ impl ZKMProofShape {
     /// height vector inside one class yields the same program.  The
     /// representative keeps the preprocessed chips at their table sizes
     /// (`Program` at `2^k` rows, `MemoryProgram` at `2^m ≥ 2^k`, `Byte` at
-    /// `2^16`, `Range` at `2^11`) and fills each main round just past its
+    /// `2^16`, `Range` at `2^11`) and fills each trace round just past its
     /// bucket's lower edge with the round's other chips, widest first, each up
     /// to the row cube; a bucket a round cannot reach, or a pair of buckets
-    /// whose cells exceed the two main rounds' joint area bound, has no shard
+    /// whose cells exceed the two trace rounds' joint area bound, has no shard
     /// and is skipped.
     pub fn generate_normalize(machine: &CoreMachine) -> Vec<Self> {
         let dims = core_chip_dims(machine);

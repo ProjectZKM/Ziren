@@ -59,8 +59,8 @@ pub struct JaggedShardProof<F, EF> {
     /// — the value the Fiat-Shamir transcript observes (so the per-chip
     /// geometry is cryptographically tied to the commitment).  The RAW
     /// BaseFold root (the value the BaseFold opening binds against) is carried
-    /// separately in [`Self::jagged_original_commitment`].  With hash-bind
-    /// off this equals the raw root and `jagged_original_commitment` is empty.
+    /// separately in [`Self::main_original_commitment`].  With hash-bind
+    /// off this equals the raw root and `main_original_commitment` is empty.
     pub main_commitment: [F; 8],
     /// Shard-level LogUp-GKR sumcheck-stack proof.
     pub logup_gkr_proof: LogupGkrProof<F, EF>,
@@ -99,17 +99,17 @@ pub struct JaggedShardProof<F, EF> {
     /// proof bytes.
     #[serde(default)]
     pub padding_column_counts: Vec<usize>,
-    /// Jagged hash-bind: the **RAW** BaseFold cap root
+    /// Jagged hash-bind: the main round's **RAW** BaseFold cap root
     /// (pre-hash-bind) — the value the BaseFold opening binds against and
     /// the recursion lift populates `original_commitments` from.  The
     /// FS-observed [`Self::main_commitment`] is the MODIFIED digest
     /// `compress([raw_root, hash(counts)])`.  Zero/absent with hash-bind off
     /// (then `main_commitment` is the raw root and the lift falls back to it);
     /// `#[serde(default)]` makes the field optional in proof bytes.
-    #[serde(default = "default_zero_digest")]
-    pub jagged_original_commitment: [F; 8],
+    #[serde(default = "default_zero_digest", alias = "jagged_original_commitment")]
+    pub main_original_commitment: [F; 8],
     /// The PREPROCESSED opening round's **RAW** BaseFold cap root — the same
-    /// role [`Self::jagged_original_commitment`] plays for the main round.  The
+    /// role [`Self::main_original_commitment`] plays for the main round.  The
     /// verifying key holds that round's HASH-BOUND digest, so the opening binds
     /// against this and the verifier re-derives the bound form to check it.
     /// Zero when the machine has no preprocessed chips.
@@ -135,14 +135,14 @@ pub struct JaggedShardProof<F, EF> {
     /// per-round hash-bind pins it.
     #[serde(default)]
     pub padding_row_heights: Vec<Vec<F>>,
-    /// The global main round's **HASH-BOUND** digest, when the shard commits
+    /// The global round's **HASH-BOUND** digest, when the shard commits
     /// one: the transcript observes it right before [`Self::main_commitment`],
     /// which then commits every chip outside that round.  `None` on a shard
     /// with a single main round.
     #[serde(default)]
     pub global_commitment: Option<[F; 8]>,
-    /// The global main round's **RAW** BaseFold cap root, the role
-    /// [`Self::jagged_original_commitment`] plays for the main round.  `Some`
+    /// The global round's **RAW** BaseFold cap root, the role
+    /// [`Self::main_original_commitment`] plays for the main round.  `Some`
     /// exactly when [`Self::global_commitment`] is.
     #[serde(default)]
     pub global_original_commitment: Option<[F; 8]>,
@@ -182,7 +182,7 @@ where
             fold_orientation: FoldOrientation::Msb,
             row_counts: Vec::new(),
             padding_column_counts: Vec::new(),
-            jagged_original_commitment: [F::ZERO; 8],
+            main_original_commitment: [F::ZERO; 8],
             preprocessed_original_commitment: [F::ZERO; 8],
             preprocessed_row_counts: Vec::new(),
             padding_row_heights: Vec::new(),

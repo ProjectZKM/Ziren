@@ -1,20 +1,20 @@
-//! Chip ordering shared by main-round commitment, opening and verification.
+//! Chip ordering shared by trace-round commitment, opening and verification.
 
 use std::collections::BTreeSet;
 
 use crate::{air::MachineAir, Chip};
 
-/// Partitions name-ordered shard chips into the global and local main rounds.
+/// Partitions name-ordered shard chips into the global and main rounds.
 /// Indices always refer to the original chip order; within each round that
-/// order is preserved. The global round, when nonempty, precedes the local one.
+/// order is preserved. The global round, when nonempty, precedes the main one.
 #[derive(Clone, Debug)]
-pub struct MainRoundLayout {
+pub struct TraceRoundLayout {
     global: Vec<usize>,
-    local: Vec<usize>,
+    main: Vec<usize>,
     in_global: Vec<bool>,
 }
 
-impl MainRoundLayout {
+impl TraceRoundLayout {
     pub fn for_chips<F: p3_field::Field, A: MachineAir<F>>(
         chips: &[&Chip<F, A>],
         global_round: Option<&BTreeSet<String>>,
@@ -35,8 +35,8 @@ impl MainRoundLayout {
 
     pub fn from_membership(in_global: impl IntoIterator<Item = bool>) -> Self {
         let in_global: Vec<bool> = in_global.into_iter().collect();
-        let (global, local) = (0..in_global.len()).partition(|&i| in_global[i]);
-        Self { global, local, in_global }
+        let (global, main) = (0..in_global.len()).partition(|&i| in_global[i]);
+        Self { global, main, in_global }
     }
 
     pub fn has_global(&self) -> bool {
@@ -47,17 +47,17 @@ impl MainRoundLayout {
         &self.global
     }
 
-    pub fn local_indices(&self) -> &[usize] {
-        &self.local
+    pub fn main_indices(&self) -> &[usize] {
+        &self.main
     }
 
     pub fn membership(&self) -> &[bool] {
         &self.in_global
     }
 
-    /// Main-round chip indices in opening order, including an empty global
-    /// slice when the shard has only a local round.
+    /// Trace-round chip indices in opening order, including an empty global
+    /// slice when the shard has only a main round.
     pub fn rounds(&self) -> [&[usize]; 2] {
-        [&self.global, &self.local]
+        [&self.global, &self.main]
     }
 }
