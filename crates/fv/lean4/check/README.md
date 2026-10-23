@@ -22,6 +22,7 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 | `flat_det.py` | Rewrites a generated `deterministic` so neither witness is split into its fields: each step lemma gets an adapter that restates it over projections of the whole witnesses. |
 | `leanmod.py` | Shared plumbing: reading and writing modules, locating a theorem, adding modules to the `Makefile`. |
 | `run_mod.sh` | Elaborates one module under a memory gate (`MIN_FREE` GB) and a time cap (`MOD_TIMEOUT`, 1800 s), logging `START`/`END` with `rc`, `sorry`, open-step and error counts to `progress.log`. |
+| `pin_statements.py snapshot DIR`, `compare OLD NEW` | Records the determinism statements of every generated module (`../statements.json`) and classifies the differences of a regeneration as WEAKENING (exit 1) or INFO; see `../README.md`, "Pinning the statements". `test_pin_statements.py` is its self-test. |
 
 A chip is closed when `Check` prints only `propext`, `Classical.choice` and `Quot.sound` for every
 `deterministic`, and every `END` line in `progress.log` shows `rc=0 sorry=0`.
