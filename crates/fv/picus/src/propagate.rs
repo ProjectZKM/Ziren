@@ -53,12 +53,6 @@
 //! - `divrem_unique`: `b = q · c + r`, `|r| < |c|` and `r` of the sign of `b` fix `q` and `r`
 //!   (`c ≠ 0` is constrained; the chip must also show the one overflow row, `−2³¹ / −1`, forces
 //!   `q = b`, `r = 0`).
-//! - `septic_sqrt_sign`: the Global chip's point `(x, y)` on the septic curve: `y² = x³ + 3zx − 3`
-//!   in the field `F[z]/(z⁷ + 2z − 8)` leaves `±y`, and the range of `y₆` the send or receive flag
-//!   selects holds for one of them (`ZirenDet.Septic.sq_unique`, `y6_recv` / `y6_send`);
-//! - `septic_chord`: the running digest `p₃ = p₁ + p₂` from the chord identities
-//!   `(x₁ + x₂ + x₃)(x₂ − x₁)² = (y₂ − y₁)²`, `(y₁ + y₃)(x₂ − x₁) = (y₂ − y₁)(x₁ − x₃)` and the
-//!   witnessed inverse of `x₂ − x₁` (`ZirenDet.Septic.chord_unique`; no field needed).
 //!
 //! Every field-gadget lemma rests on the gadget's limb range checks (bytes for `result` and
 //! `carry`, `u16` for the witness), which hold on real rows.
@@ -224,17 +218,6 @@ fn gadget_fact(
             Some((polys(ops.first()?)?, ins, "gt_bytes_unique"))
         }
         "leading_one" => Some((polys(ops.first()?)?, polys(ops.get(1)?)?, "leading_one_unique")),
-        "septic_lift" | "septic_add" => {
-            let mut ins = vec![];
-            for o in &ops[1..] {
-                ins.extend(polys(o)?);
-            }
-            let lemma = match mark.gadget {
-                "septic_lift" => "septic_sqrt_sign",
-                _ => "septic_chord",
-            };
-            Some((polys(ops.first()?)?, ins, lemma))
-        }
         "keccak_round" => {
             let mut ins = polys(ops.get(1)?)?;
             ins.extend(polys(ops.get(2)?)?);

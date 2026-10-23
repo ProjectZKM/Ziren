@@ -3,7 +3,6 @@
 #include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
-#include "kb31_septic_extension_t.hpp"
 #include "memory.hpp"
 
 namespace zkm_core_machine_sys::mul {

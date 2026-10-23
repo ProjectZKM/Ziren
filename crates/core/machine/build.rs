@@ -145,8 +145,6 @@ mod sys {
             .include_item("OptionU32")
             .include_item("OptionValTag")
             .include_item("Poseidon2StateCols")
-            .include_item("SepticCurve")
-            .include_item("SepticExtension")
             .include_item("ShiftLeftCols")
             .include_item("ShiftLeftImmCols")
             .include_item("ShiftRightCols")

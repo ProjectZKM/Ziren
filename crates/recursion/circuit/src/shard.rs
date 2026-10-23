@@ -302,11 +302,7 @@ impl<P> JaggedShardVerifier<P> {
     ///   * `chip_metadata` — interaction-count bits for the
     ///     LogUp-GKR phase.  Derived from the shard-chip sends/
     ///     receives; the caller computes this once per machine.
-    ///   * `chip_degrees`, `cumulative_sums`, `global_cumulative_sums` —
-    ///     per-chip degree points and cumulative-sum values.
-    ///     These live on the BaseFold-pipeline opening wire; until
-    ///     a `JaggedChipOpenedValues` type bundles them, the
-    ///     caller passes them as parallel slices aligned to
+    ///   * `opened_values` — the shard's per-chip opened values, in
     ///     `shard_chips` order.
     ///   * `insertion_points` — jagged-PCS zero-column insertion
     ///     positions; typically derived via

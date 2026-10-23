@@ -2681,7 +2681,6 @@ hand-maintained `ZirenDet/Lib.lean`.
         "Keccak",
         "OneHot",
         "GtBytes",
-        "Septic",
         "GadgetProofs",
     ] {
         if out_dir.join("ZirenDet").join(format!("{m}.lean")).exists() {
