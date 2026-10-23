@@ -14,5 +14,4 @@ import ZirenDet.Edwards
 import ZirenDet.Keccak
 import ZirenDet.OneHot
 import ZirenDet.GtBytes
-import ZirenDet.Septic
 import ZirenDet.GadgetProofs

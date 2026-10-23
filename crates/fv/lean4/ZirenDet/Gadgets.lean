@@ -24,8 +24,6 @@ fixed modulo `m` by the operation and pinned to a value only by a `FieldLtCols` 
 |                       | overflow row `−2³¹ / −1` (`q = b, r = 0`)|
 | `leading_one_unique`  | `msb_unique`, `msb_ne_zero`             |
 | `gt_bytes_unique`     | `first_diff_unique`                     |
-| `septic_sqrt_sign`    | `Septic.sq_unique`, `y6_recv`/`y6_send` |
-| `septic_chord`        | `Septic.chord_unique`                   |
 | `residue_transfer`    | (`m₁ = m₂` in the branch)               |
 | `canonical_by_width`  | `bytes_lt_width`, `canonical_unique`    |
 

@@ -5,7 +5,6 @@
 #include "utils.hpp"
 #include "memory.hpp"
 #include "add_sub.hpp"
-#include "kb31_septic_extension_t.hpp"
 
 // Device mirror of `crates/core/machine/src/memory/instructions/`.
 //

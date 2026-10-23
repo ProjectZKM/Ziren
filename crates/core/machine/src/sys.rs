@@ -181,25 +181,6 @@ extern "C-unwind" {
 }
 
 #[cfg(test)]
-mod tests {
-    // Septic-extension self-checks inside the C++ library, used only by this test suite.
-    extern "C-unwind" {
-        fn test_mul();
-        fn test_inv();
-        fn test_sqrt();
-        fn test_curve_formula();
-    }
-
-    #[test]
-    fn test_septic() {
-        unsafe { test_mul() };
-        unsafe { test_inv() };
-        unsafe { test_sqrt() };
-        unsafe { test_curve_formula() };
-    }
-}
-
-#[cfg(test)]
 mod parity_tests {
     //! FFI ⇔ Rust trace parity on REAL executed records.
     //!

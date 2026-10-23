@@ -45,9 +45,6 @@ be committed.
 - `DivRem_is_*.lean` rest on `ZirenDet/DivRem.lean` and are produced by
   `tools/gen_divrem.py <split chip file> <1 signed | 0 unsigned> <out>`; `tools/mktest.py`
   builds a file that checks one snippet without the replayed derivation.
-- `Global.lean` rests on `ZirenDet/Septic.lean` (the septic field `F[z]/(z⁷ + 2z − 8)`, its
-  irreducibility certificates, square-root sign and chord addition); `row_spec` names conjuncts
-  and reified variables by index, so regenerate it with `tools/gen_global/` (`README` there).
 
 The field-operation, point and decompression snippets (`Bn254*`, `Bls12381*`, `Bls12831*`,
 `Secp256k1*`, `Secp256r1*`, `Ed*`, `Uint256MulMod`, `*FpOpAssign_is_*`) are generated from the

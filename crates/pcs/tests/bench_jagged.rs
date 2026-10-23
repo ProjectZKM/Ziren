@@ -23,8 +23,6 @@ fn bench_flat_vs_hierarchical() {
         ("ProgramChip", 8192, 11),
         ("SyscallCore", 256, 31),
         ("KeccakPermute", 1024, 200),
-        ("Global", 256, 14),
-        ("SepticCurve", 512, 14),
         ("RangeCheck", 8192, 8),
     ];
 

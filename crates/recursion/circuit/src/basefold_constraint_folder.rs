@@ -246,8 +246,8 @@ mod tests {
 /// is `AirBuilder + EmptyMessageBuilder + ExtensionBuilder +
 /// PermutationAirBuilder + MultiTableAirBuilder`, which through the
 /// blanket impls in `zkm_pcs::air::builder`
-/// becomes a `BaseAirBuilder + ExtensionAirBuilder +
-/// SepticExtensionAirBuilder` → `MachineAirBuilder`, and via
+/// becomes a `BaseAirBuilder + ExtensionAirBuilder` →
+/// `MachineAirBuilder`, and via
 /// the blanket impl in `zkm_recursion_core::builder` becomes a
 /// `ZKMRecursionAirBuilder`.  The existing generic
 /// `impl<AB: ZKMRecursionAirBuilder> Air<AB>` blanket on every

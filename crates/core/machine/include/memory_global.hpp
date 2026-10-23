@@ -2,11 +2,10 @@
 
 #include "prelude.hpp"
 #include "utils.hpp"
-#include "kb31_septic_extension_t.hpp"
 #include "memory_local.hpp"
 
 namespace zkm_core_machine_sys::memory_global {
-    template<class F, class EF7>
+    template<class F>
     __ZKM_HOSTDEV__ void event_to_row(const MemoryInitializeFinalizeEvent* event, const bool is_receive, MemoryInitCols<F>* cols) {
         [[maybe_unused]]MemoryRecord record;
         if (is_receive) {
