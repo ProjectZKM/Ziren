@@ -1513,9 +1513,9 @@ pub mod tests {
         let forged_res = verify(&forged);
         tracing::info!("forged verify => {forged_res}");
         assert!(
-            forged_res.contains("last-layer reconstruction"),
-            "the area-preserving height forgery must be rejected at the last-layer \
-             reconstruction; got: {forged_res}"
+            rejected_on_degree_bits(&forged_res),
+            "the area-preserving height forgery must be rejected on its opened degree \
+             bits; got: {forged_res}"
         );
     }
 
@@ -1737,6 +1737,14 @@ pub mod tests {
         ))
     }
 
+    /// Whether a verifier verdict is the shard verifier's rejection of opened
+    /// degree bits that are not the bits of the chip's observed height.  This
+    /// check runs before the LogUp-GKR verification, so a forged degree never
+    /// reaches the last-layer reconstruction.
+    fn rejected_on_degree_bits(verdict: &str) -> bool {
+        verdict.contains("the opened degree bits are not the bits of its observed height")
+    }
+
     #[test]
     fn test_height_forgery_rejected_at_reconstruction_simple() {
         setup_logger();
@@ -1764,9 +1772,9 @@ pub mod tests {
                 let on = verify_to_string(&machine, &vk, &forged);
                 tracing::info!("(b) forged verify => {on}");
                 assert!(
-                    on.contains("last-layer reconstruction"),
-                    "tiny: the degree-only forgery must be rejected at the last-layer \
-                     reconstruction; got: {on}"
+                    rejected_on_degree_bits(&on),
+                    "tiny: the degree-only forgery must be rejected on its opened degree \
+                     bits; got: {on}"
                 );
             }
         }
@@ -1792,9 +1800,9 @@ pub mod tests {
         let on = verify_to_string(&machine, &vk, &forged);
         tracing::info!("(b) forged verify => {on}");
         assert!(
-            on.contains("last-layer reconstruction"),
-            "fibonacci: the degree-only forgery must be rejected at the last-layer \
-             reconstruction; got: {on}"
+            rejected_on_degree_bits(&on),
+            "fibonacci: the degree-only forgery must be rejected on its opened degree \
+             bits; got: {on}"
         );
     }
 
@@ -1825,8 +1833,8 @@ pub mod tests {
         let i_on = verify_to_string(&machine, &vk, &deg_only);
         tracing::info!("(i) degree-only + honest *_full verify => {i_on}");
         assert!(
-            i_on.contains("last-layer reconstruction"),
-            "(i) forged degree with HONEST *_full must REJECT at the reconstruction \
+            rejected_on_degree_bits(&i_on),
+            "(i) forged degree with HONEST *_full must REJECT on the opened degree bits \
              (so the adversary is forced to change *_full); got: {i_on}"
         );
     }
@@ -1903,8 +1911,8 @@ pub mod tests {
         let forged_on = verify_to_string(&machine, &vk, &forged);
         tracing::info!("forged verify => {forged_on}");
         assert!(
-            forged_on.contains("last-layer reconstruction"),
-            "forged degree must reject at the reconstruction; got: {forged_on}"
+            rejected_on_degree_bits(&forged_on),
+            "forged degree must reject on the opened degree bits; got: {forged_on}"
         );
 
         let bf2 = forged.shard_proofs[0].jagged_shard_proof.as_mut();
