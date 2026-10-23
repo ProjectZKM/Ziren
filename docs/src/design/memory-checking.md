@@ -52,4 +52,4 @@ Within a shard, LogUp balances a bus with challenges \\( (\alpha, \beta) \\) dra
 
 A matching send and receive give opposite fractions and cancel. Because \\( g^\star \\) binds every global row of every shard before \\( (\alpha_g, \beta_g) \\) is drawn, an unbalanced set of global lookups sums to zero only with probability about \\( (d + 1) N_g / |\mathbb{F}_{p^4}| \\), where \\( N_g \\) is the number of global lookups in the execution; the 22 bits of grinding count against that term as the lookup argument's grinding does. This requires \\( N_g < p \\), so that the count of one message cannot wrap around.
 
-The price is order: every shard must commit its global round before any shard is proved. The prover runs a bind pass that executes the program, commits each shard's global round and builds the chain, and then a proving pass under \\( (\alpha_g, \beta_g) \\).
+The price is order: every shard must commit its global round before any shard is proved. The prover runs a global commit pass that executes the program, commits each shard's global round and builds the chain, and then a proving pass under \\( (\alpha_g, \beta_g) \\).

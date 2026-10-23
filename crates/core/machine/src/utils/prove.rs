@@ -94,7 +94,7 @@ where
     let mut challenger = prover.machine().config().challenger();
     pk.observe_into(&mut challenger);
 
-    let bind_round =
+    let commit_global_round =
         |record: ExecutionRecord,
          (),
          cluster_widths: Option<std::collections::BTreeMap<String, usize>>| {
@@ -103,7 +103,7 @@ where
                 ZKMCoreProverError::TracesGenerationError
             })
         };
-    let (rounds, _) = tracing::debug_span!("bind global rounds").in_scope(|| {
+    let (rounds, _) = tracing::debug_span!("commit global rounds").in_scope(|| {
         run_pass::<SC, P, _, _>(
             prover,
             &program,
@@ -111,7 +111,7 @@ where
             shape_config,
             checkpoint.clone(),
             &|_| Ok(()),
-            &bind_round,
+            &commit_global_round,
             None,
         )
     })?;
@@ -280,7 +280,7 @@ where
     Ok(records_rx.into_iter().flatten().collect())
 }
 
-/// Proves one shard and checks it against the global round fixed by the bind pass.
+/// Proves one shard and checks it against the global round fixed by the global commit pass.
 #[allow(clippy::too_many_arguments)]
 fn prove_bound_shard<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
@@ -314,8 +314,10 @@ where
     );
 
     let shard = record.public_values.shard as usize;
-    let bound =
-        shard.checked_sub(1).and_then(|i| rounds.get(i)).expect("the bind pass covers every shard");
+    let bound = shard
+        .checked_sub(1)
+        .and_then(|i| rounds.get(i))
+        .expect("the global commit pass covers every shard");
     assert_eq!(
         &prover.machine().global_round_binding(&proof),
         bound,
