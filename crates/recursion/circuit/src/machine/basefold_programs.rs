@@ -166,6 +166,33 @@ where
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
+    build_wrap_basefold_program_with_digest(
+        machine,
+        input,
+        max_log_row_count,
+        value_assertions,
+        crate::machine::compress::PublicValuesOutputDigest::Reduce,
+    )
+}
+
+/// [`build_wrap_basefold_program`] with an explicit output digest. A
+/// terminal proof that no recursion circuit consumes can commit the root
+/// digest (`ReduceToRoot`): it covers only the statement fields (application
+/// key, committed-value digest, exit code and recursion root), while the
+/// circuit still checks the child's full reduce digest and completeness.
+pub fn build_wrap_basefold_program_with_digest<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
+    input: &ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
+    max_log_row_count: usize,
+    value_assertions: bool,
+    output_digest: crate::machine::compress::PublicValuesOutputDigest,
+) -> RecursionProgram<KoalaBear>
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
+        >,
+{
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Shrink);
     let input_var = input.read(&mut builder);
@@ -175,7 +202,7 @@ where
         machine,
         value_assertions,
         max_log_row_count,
-        crate::machine::compress::PublicValuesOutputDigest::Reduce,
+        output_digest,
     );
     let operations = builder.into_operations();
     builder_span.exit();

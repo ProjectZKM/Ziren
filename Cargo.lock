@@ -6162,6 +6162,7 @@ version = "2.0.0"
 dependencies = [
  "arrayref",
  "bincode",
+ "blake3",
  "hashbrown 0.14.5",
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -6188,6 +6189,7 @@ dependencies = [
  "rayon-scan",
  "rmp-serde",
  "serde",
+ "sha2",
  "strum",
  "strum_macros",
  "sysinfo",

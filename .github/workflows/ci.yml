@@ -49,6 +49,7 @@ jobs:
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy -p zkm-prover --features compact-shrink --lib -- -D warnings
       # The feature changes the executor's fingerprint, so `test-artifacts`
       # reruns its build script and compiles the guests with the zkm toolchain.
       - run: source ~/.zkm-toolchain/env && cargo check -p zkm-core-executor --features event-allocator --all-targets
