@@ -103,8 +103,13 @@ jobs:
             --skip tests::test_e2e_prove_plonk \
             --skip tests::test_generate_dvsnark_r1cs_witness \
             --skip tests::test_groth16_public_values
-          # One at a time: the Plonk case alone takes ~97 GB, so it must not overlap the others.
-          cargo test -r -p zkm-verifier -- --test-threads=1
+          # The gnark cases keep their R1CS and proving key for the life of the
+          # process, so Groth16's footprint stays under Plonk's (~97 GB alone)
+          # when they share one: each runs in its own process, as in `snark`.
+          cargo test -r -p zkm-verifier -- --test-threads=1 \
+            --skip tests::test_verify_groth16 --skip tests::test_verify_plonk
+          cargo test -r -p zkm-verifier -- --exact tests::test_verify_groth16
+          cargo test -r -p zkm-verifier -- --exact tests::test_verify_plonk
           # The recursion gates, all `#[ignore]`d for slowness and all
           # load-bearing: compress and wrap cover core->compress->shrink->wrap,
           # and the circuit gate is the only thing driving the gnark outer circuit
