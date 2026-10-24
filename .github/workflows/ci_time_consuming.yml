@@ -70,6 +70,11 @@ jobs:
       # two share artifacts instead of rebuilding the workspace for each other.
       CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
       RUSTFLAGS: "-C target-cpu=native"
+      # The gnark provers let the Go heap grow well past its live data. Measured
+      # on a 124-core host, a Plonk case alone peaks at ~130 GB, and at ~97 GB
+      # with this soft limit, in the same wall time.
+      GOMEMLIMIT: "60GiB"
+      GOGC: "50"
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
@@ -98,7 +103,8 @@ jobs:
             --skip tests::test_e2e_prove_plonk \
             --skip tests::test_generate_dvsnark_r1cs_witness \
             --skip tests::test_groth16_public_values
-          cargo test -r -p zkm-verifier
+          # One at a time: the Plonk case alone takes ~97 GB, so it must not overlap the others.
+          cargo test -r -p zkm-verifier -- --test-threads=1
           # The recursion gates, all `#[ignore]`d for slowness and all
           # load-bearing: compress and wrap cover core->compress->shrink->wrap,
           # and the circuit gate is the only thing driving the gnark outer circuit
@@ -128,6 +134,8 @@ jobs:
       ELEMENT_THRESHOLD: "115000000"
       CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
       RUSTFLAGS: "-C target-cpu=native"
+      GOMEMLIMIT: "60GiB"
+      GOGC: "50"
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
