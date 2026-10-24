@@ -77,13 +77,21 @@ pub struct SingleMemoryLocal<T: Copy> {
 ///
 /// The memory argument's ordering proof assumes both comparands of every access are bounded --
 /// shards below 2^16 and timestamps below 2^`TIMESTAMP_BITS` -- and that every value limb is a
-/// byte.  A local entry is where a shard's view of an address begins and ends, and its initial
-/// side is otherwise a free witness: without these checks a prover could open the chain of an
-/// address at a shard, timestamp or value the argument was never proved for.
+/// byte.  A local entry is where a shard's view of an address begins and ends.
+///
+/// The initial value is byte-checked here and must stay so: the Global digest packs value limb 3
+/// as `limb * 256 + offset` with the offset only a byte, so an unchecked initial limb 3 could take
+/// 255 other values that hash to the same curve point, and a trusted load would then copy a
+/// non-byte into a register.  The final value is not checked: it is the value of the shard's last
+/// access to the address, written by a chip that byte-checks it (`eval_memory_access`, the frames'
+/// op_a check where op_a is written) or copied from bytes already in memory and registers (stores,
+/// loads, SC's constant), or the entry's own checked initial value.  The shards are not
+/// range-checked here: both enter the Global message as `values[0]`, which the Global chip
+/// range-checks to 16 bits for every message it receives.  Both clocks keep their checks; the
+/// final one is the absolute upper bound on a memory address's timestamps.
 fn local_entry_blu_events(event: &MemoryLocalEvent, blu: &mut impl ByteRecord) {
+    blu.add_u8_range_checks(&event.initial_mem_access.value.to_le_bytes());
     for access in [&event.initial_mem_access, &event.final_mem_access] {
-        blu.add_u8_range_checks(&access.value.to_le_bytes());
-        blu.add_u16_range_check(access.shard as u16);
         blu.add_u16_range_check((access.timestamp & 0xffff) as u16);
         blu.add_bit_range_check((access.timestamp >> 16) as u16, TIMESTAMP_HIGH_LIMB_BITS);
     }
@@ -264,15 +272,10 @@ where
             builder.assert_bool(local.is_real);
 
             builder.slice_range_check_u8(&local.initial_value.0, local.is_real);
-            builder.slice_range_check_u8(&local.final_value.0, local.is_real);
             builder
                 .when(local.is_real)
                 .assert_eq(local.initial_shard, local.initial_shard_16bit_limb);
             builder.when(local.is_real).assert_eq(local.final_shard, local.final_shard_16bit_limb);
-            builder.slice_range_check_u16(
-                &[local.initial_shard_16bit_limb, local.final_shard_16bit_limb],
-                local.is_real,
-            );
             for (clk, limb_16, limb_high) in [
                 (local.initial_clk, local.initial_clk_16bit_limb, local.initial_clk_high_limb),
                 (local.final_clk, local.final_clk_16bit_limb, local.final_clk_high_limb),

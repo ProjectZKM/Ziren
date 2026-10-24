@@ -72,6 +72,7 @@ where
             local.next_pc.reduce::<AB>(),
             AB::Expr::ZERO,
             is_real.clone(),
+            false,
         );
         builder
             .when(is_real.clone())
