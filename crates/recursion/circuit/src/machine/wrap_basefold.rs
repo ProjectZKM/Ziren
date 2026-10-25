@@ -95,6 +95,11 @@ pub struct ZKMWrapBasefoldVerifier<C, SC, A> {
 ///
 /// Terminal-stage single-proof verify over
 /// the basefold shard proof shape.
+///
+/// The key tree's root is bound to the `vk_root` the verified proof's public
+/// values carry, except for the stage that carries its digest: it pins the
+/// key it verifies as a constant, and its one-leaf key tree only gives the
+/// witness its shape.
 pub fn verify_wrap_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMWrapBasefoldWitnessVariable<C, SC>,
@@ -123,9 +128,6 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
-    /// The binary stage pins the key it verifies as a constant and carries the
-    /// digest; its one-leaf key tree only gives the witness its shape, so its
-    /// root is not the `vk_root` the verified proof's public values carry.
     let vk_root = (!matches!(output_digest_kind, PublicValuesOutputDigest::Carried))
         .then(|| SC::digest_public_felts(builder, &vk_root));
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
