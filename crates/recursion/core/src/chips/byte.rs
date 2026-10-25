@@ -64,8 +64,11 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip {
 
     type Error = crate::RecursionChipError;
 
+    /// Distinct from the core machine's byte table, which shares its
+    /// preprocessed columns: a chip's name keys its compiled kernels and its
+    /// shape rows across machines.
     fn name(&self) -> String {
-        "Byte".to_string()
+        "RecursionByte".to_string()
     }
 
     fn num_rows(&self, _input: &Self::Record) -> Option<usize> {

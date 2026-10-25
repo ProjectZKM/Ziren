@@ -1506,13 +1506,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         [
             ("BaseAlu", 1 << 19),
             ("Blake3Compress", 1 << 15),
-            ("Byte", 1 << 16),
             ("ExtAlu", 1 << 19),
             ("FeltLimbs", 1 << 19),
             ("MemoryConst", 1 << 19),
             ("MemoryVar", 1 << 19),
             ("Poseidon2WideDeg3", 1 << 5),
             ("PublicValues", 1 << 4),
+            ("RecursionByte", 1 << 16),
             ("Select", 1 << 19),
         ]
         .into_iter()
