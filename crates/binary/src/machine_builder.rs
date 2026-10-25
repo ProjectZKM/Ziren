@@ -18,7 +18,7 @@ use p3_bus::{
     BusSymbolicBuilder,
 };
 use p3_field::{ExtensionField, Field};
-use p3_lookup::InteractionSymbolicBuilder;
+use p3_lookup::{IndexedLookupBuilder, InteractionSymbolicBuilder, TraceWindow};
 use p3_multi_stark::folder::{InteractionMultilinearFolder, MultilinearFolder};
 use p3_multi_stark::sliced::{SlicedFolder, SlicedQuadraticFolder};
 
@@ -32,13 +32,35 @@ pub trait MachineBuilder: AirBuilder {
         fields: Vec<Self::Expr>,
         activation: BusActivation<Self::Expr>,
     );
+
+    /// Pull the `payload` columns out of `table` at the entry the `bits`
+    /// columns name, least significant first, where the builder records
+    /// lookups.
+    fn read_table(&mut self, table: &str, bits: Vec<usize>, payload: Vec<usize>);
+
+    /// Provide `table` from the `columns` of `window`, where the builder
+    /// records lookups.
+    fn provide_table(&mut self, table: &str, window: TraceWindow, columns: Vec<usize>);
+}
+
+/// The lookup declarations, forwarded where the builder records them.
+macro_rules! records_lookups {
+    () => {
+        fn read_table(&mut self, table: &str, bits: Vec<usize>, payload: Vec<usize>) {
+            self.push_indexed_read_bits(table, bits, payload);
+        }
+
+        fn provide_table(&mut self, table: &str, window: TraceWindow, columns: Vec<usize>) {
+            self.push_indexed_table(table, window, columns);
+        }
+    };
 }
 
 macro_rules! records_buses {
     ($($ty:ty),* $(,)?) => {$(
         impl<'a, F: Field, EF: ExtensionField<F>> MachineBuilder for $ty
         where
-            Self: BusInteractionRecorder,
+            Self: BusInteractionRecorder + IndexedLookupBuilder,
         {
             fn declare_bus(
                 &mut self,
@@ -49,6 +71,8 @@ macro_rules! records_buses {
             ) {
                 self.push_bus_interaction(bus, direction, fields, activation);
             }
+
+            records_lookups!();
         }
     )*};
 }
@@ -61,7 +85,7 @@ records_buses!(
 
 impl<'a, F, Var, Acc> MachineBuilder for MultilinearFolder<'a, F, Var, Acc>
 where
-    Self: BusInteractionRecorder,
+    Self: BusInteractionRecorder + IndexedLookupBuilder,
 {
     fn declare_bus(
         &mut self,
@@ -72,11 +96,13 @@ where
     ) {
         self.push_bus_interaction(bus, direction, fields, activation);
     }
+
+    records_lookups!();
 }
 
 impl<'a, F, Var, Acc> MachineBuilder for InteractionMultilinearFolder<'a, F, Var, Acc>
 where
-    Self: BusInteractionRecorder,
+    Self: BusInteractionRecorder + IndexedLookupBuilder,
 {
     fn declare_bus(
         &mut self,
@@ -87,6 +113,8 @@ where
     ) {
         self.push_bus_interaction(bus, direction, fields, activation);
     }
+
+    records_lookups!();
 }
 
 /// A builder that holds no bus still asserts a selecting activation to be
@@ -101,7 +129,7 @@ fn assert_selector_bool<AB: AirBuilder>(builder: &mut AB, activation: BusActivat
 /// The sliced kernels evaluate constraints only; the bus is reduced elsewhere.
 impl<'a, F, S, R> MachineBuilder for SlicedFolder<'a, F, S, R>
 where
-    Self: AirBuilder,
+    Self: AirBuilder + IndexedLookupBuilder,
 {
     fn declare_bus(
         &mut self,
@@ -112,11 +140,13 @@ where
     ) {
         assert_selector_bool(self, activation);
     }
+
+    records_lookups!();
 }
 
 impl<'a, F, R> MachineBuilder for SlicedQuadraticFolder<'a, F, R>
 where
-    Self: AirBuilder,
+    Self: AirBuilder + IndexedLookupBuilder,
 {
     fn declare_bus(
         &mut self,
@@ -127,6 +157,8 @@ where
     ) {
         assert_selector_bool(self, activation);
     }
+
+    records_lookups!();
 }
 
 /// The plain symbolic builder sees constraints only.
@@ -140,4 +172,8 @@ impl<F: Field, EF: ExtensionField<F>> MachineBuilder for SymbolicAirBuilder<F, E
     ) {
         assert_selector_bool(self, activation);
     }
+
+    fn read_table(&mut self, _table: &str, _bits: Vec<usize>, _payload: Vec<usize>) {}
+
+    fn provide_table(&mut self, _table: &str, _window: TraceWindow, _columns: Vec<usize>) {}
 }

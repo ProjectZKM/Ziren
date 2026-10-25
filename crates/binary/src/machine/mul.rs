@@ -5,8 +5,14 @@
 //! pushes them on the channel; a row here holds the same three words with
 //! the product's witness and pulls them.  The channel is a multiset, so a
 //! product nobody computed, or one computed for nobody, is caught.
+//!
+//! The integer product is summed from the sixteen products of the factors'
+//! bytes, each read out of the [`MUL8`] table by the two bytes, rather than
+//! from the bit products a row would otherwise gate itself: a row holds
+//! fewer than half the bits.
 
 use core::borrow::{Borrow, BorrowMut};
+use core::mem::offset_of;
 
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_bus::{BusActivation, BusDirection};
@@ -15,8 +21,12 @@ use p3_sumcheck::layout::Table;
 use zkm_derive::AlignedBorrow;
 
 use super::bits::{log_height_for, mul_tuple, BitRows, MUL};
+use super::mul8::MUL8;
 use crate::machine_builder::MachineBuilder;
-use crate::word::{bits_le, eval_mul, exprs, fill_mul, MulCols, Word, KB_BITS};
+use crate::word::{
+    bits_le, eval_lookup_product, eval_reduce, exprs, fill_lookup_product, fill_reduce,
+    LookupProductCols, ReduceCols, Word, KB_BITS, LIMBS, LIMB_BITS, LIMB_PRODUCT_BITS,
+};
 use crate::BinaryBase;
 use crate::F;
 
@@ -26,16 +36,51 @@ use crate::F;
 pub struct MulRow<T> {
     /// The row holds a product someone asked for.
     pub is_real: T,
+    /// Always zero: the eighth bit of each factor's top byte, which is
+    /// seven bits wide.
+    pub zero: T,
     /// The left factor.
     pub a: Word<T>,
     /// The right factor.
     pub b: Word<T>,
-    /// `a * b mod p`, with its witness.
-    pub mul: MulCols<T>,
+    /// The integer product `a * b`, from the byte products.
+    pub product: LookupProductCols<T>,
+    /// The product reduced.
+    pub reduce: ReduceCols<T, KB_BITS, 64>,
 }
 
 /// Columns of [`MulRow`].
 pub const NUM_MUL_COLS: usize = core::mem::size_of::<MulRow<u8>>();
+
+/// The column of the zero bit.
+const ZERO_COLUMN: usize = offset_of!(MulRow<u8>, zero);
+/// The first column of the left factor.
+const A_COLUMN: usize = offset_of!(MulRow<u8>, a);
+/// The first column of the right factor.
+const B_COLUMN: usize = offset_of!(MulRow<u8>, b);
+/// The first column of the byte products.
+const LIMBS_COLUMN: usize =
+    offset_of!(MulRow<u8>, product) + offset_of!(LookupProductCols<u8>, limbs);
+
+/// The columns of byte `limb` of the factor starting at column `factor`,
+/// least significant bit first: the top byte's eighth bit is the zero
+/// column.
+fn limb_columns(factor: usize, limb: usize) -> impl Iterator<Item = usize> {
+    (0..LIMB_BITS).map(move |t| {
+        let bit = LIMB_BITS * limb + t;
+        if bit < KB_BITS {
+            factor + bit
+        } else {
+            ZERO_COLUMN
+        }
+    })
+}
+
+/// The columns of the product of bytes `i` and `j`.
+fn limb_product_columns(i: usize, j: usize) -> impl Iterator<Item = usize> {
+    let first = LIMBS_COLUMN + (i * LIMBS + j) * LIMB_PRODUCT_BITS;
+    first..first + LIMB_PRODUCT_BITS
+}
 
 /// The multiply table of one execution: as tall as the products asked for.
 pub struct MulAir {
@@ -69,7 +114,8 @@ impl MulAir {
             cols.is_real = u8::from(r < requests.len());
             cols.a = bits_le::<KB_BITS>(u64::from(a));
             cols.b = bits_le::<KB_BITS>(u64::from(b));
-            fill_mul(a, b, &mut cols.mul);
+            let product = fill_lookup_product(a, b, &mut cols.product);
+            fill_reduce(u128::from(product), &mut cols.reduce);
             rows.set_row(r, &row);
         }
         rows.into_table()
@@ -88,13 +134,24 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MulAir {
         let local: &MulRow<AB::Var> = main.current_slice().borrow();
 
         builder.assert_bool(local.is_real);
+        builder.assert_zero(local.zero);
         for bit in local.a.iter().chain(local.b.iter()) {
             builder.assert_bool(*bit);
         }
         let a = exprs::<AB, KB_BITS>(&local.a);
         let b = exprs::<AB, KB_BITS>(&local.b);
-        eval_mul(builder, &a, &b, &local.mul);
-        let c = exprs::<AB, KB_BITS>(&local.mul.reduce.out);
+        let product = eval_lookup_product(builder, &local.product);
+        eval_reduce(builder, &product, &local.reduce);
+        let c = exprs::<AB, KB_BITS>(&local.reduce.out);
+        for i in 0..LIMBS {
+            for j in 0..LIMBS {
+                builder.read_table(
+                    MUL8,
+                    limb_columns(A_COLUMN, i).chain(limb_columns(B_COLUMN, j)).collect(),
+                    limb_product_columns(i, j).collect(),
+                );
+            }
+        }
         builder.declare_bus(
             MUL,
             BusDirection::Pull,

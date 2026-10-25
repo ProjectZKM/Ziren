@@ -392,7 +392,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ExtAluAir {
                     for i in 0..KB_BITS {
                         builder
                             .when(prep_local.binds_mul)
-                            .assert_eq(cols.mul.reduce[k].out[i], local.z[k][i]);
+                            .assert_eq(cols.mul.out(k)[i], local.z[k][i]);
                     }
                 }
             }

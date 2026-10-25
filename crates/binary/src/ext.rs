@@ -2,9 +2,8 @@
 //!
 //! An element is four words, `c_0 + c_1 X + c_2 X^2 + c_3 X^3` with
 //! `X^4 = 3`.  A product is computed by Karatsuba on `A_0 + A_1 X^2`, nine
-//! products of words from the multiply table, the differences of the
-//! method kept non-negative by offsets of `p`, and each coefficient
-//! reduced once.
+//! products of words from the multiply table, and each coefficient is a
+//! signed sum of them reduced once, kept non-negative by an offset of `p`.
 
 use core::array;
 
@@ -13,9 +12,8 @@ use p3_air::AirBuilder;
 use crate::machine::bits::request_mul;
 use crate::machine_builder::MachineBuilder;
 use crate::word::{
-    bits_le, constant_bits, eval_add, eval_diff, eval_reduce, eval_sum, exprs, fill_add, fill_diff,
-    fill_reduce, fill_sum, shifted, AddCols, DiffCols, ReduceCols, SumCols, Word, KB_BITS,
-    KB_PRIME, NUM_ADD_COLS,
+    bits_le, eval_add, eval_reduce_sum, exprs, fill_add, fill_reduce_sum, AddCols, ReduceSumCols,
+    Word, ZeroTerm, KB_BITS, KB_PRIME, NUM_ADD_COLS,
 };
 use crate::BinaryBase;
 
@@ -24,15 +22,6 @@ pub const EXT_DEGREE: usize = 4;
 
 /// The binomial constant: `X^4 = W`.
 pub const W: u64 = 3;
-
-/// Bits of an unreduced middle term, below `9 p`.
-pub const MID_BITS: usize = 36;
-
-/// Bits of a coefficient's sum, below `13 p`.
-pub const SUM_BITS: usize = 40;
-
-/// Bits of a coefficient's quotient by `p`, the sum being below `13 p`.
-pub const QUOTIENT_BITS: usize = 4;
 
 /// An extension element as words.
 pub type ExtWord<T> = [Word<T>; EXT_DEGREE];
@@ -71,49 +60,45 @@ pub fn fill_ext_add(a: [u32; EXT_DEGREE], b: [u32; EXT_DEGREE], cols: &mut ExtAd
     }
 }
 
-/// The witness of a middle term `x + K p - y - z` of a Karatsuba step,
-/// kept unreduced: the offset makes it non-negative.
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct MidCols<T> {
-    /// `x + K p`.
-    pub plus: SumCols<T, 1, MID_BITS>,
-    /// `x + K p - y`.
-    pub less_y: DiffCols<T, MID_BITS>,
-    /// `x + K p - y - z`.
-    pub less_z: DiffCols<T, MID_BITS>,
-}
+/// Bits of a coefficient's zero sum: the coefficient's terms, its residue
+/// and its quotient's multiple of `p` stay within `2^36` of zero either
+/// way, so vanishing modulo `2^37` is vanishing.
+pub const COEFFICIENT_BITS: usize = 37;
+/// Bits of a coefficient's quotient by `p`, the coefficient being below
+/// `13 p`.
+pub const QUOTIENT_BITS: usize = 4;
+/// Full adders of `c_0`'s zero sum, fixed by its terms.
+pub const C0_ADDERS: usize = 324;
+/// Full adders of `c_1`'s zero sum, fixed by its terms.
+pub const C1_ADDERS: usize = 302;
+/// Full adders of `c_2`'s zero sum, fixed by its terms.
+pub const C2_ADDERS: usize = 207;
+/// Full adders of `c_3`'s zero sum, fixed by its terms.
+pub const C3_ADDERS: usize = 325;
 
-/// Constrain `cols` to hold `x + offset - y - z`, and return it.
-fn eval_mid<AB: AirBuilder>(
-    builder: &mut AB,
-    x: &[AB::Expr],
-    offset: u64,
-    y: &[AB::Expr],
-    z: &[AB::Expr],
-    cols: &MidCols<AB::Var>,
-) -> [AB::Expr; MID_BITS] {
-    let plus = eval_sum::<AB, 1, MID_BITS>(
-        builder,
-        &[shifted::<AB, MID_BITS>(x, 0), constant_bits::<AB, MID_BITS>(offset)],
-        &cols.plus,
-    );
-    let less_y = eval_diff(builder, &plus, &shifted::<AB, MID_BITS>(y, 0), &cols.less_y);
-    eval_diff(builder, &less_y, &shifted::<AB, MID_BITS>(z, 0), &cols.less_z)
-}
-
-/// The witness of [`eval_mid`], and `x + offset - y - z`.
-fn fill_mid(x: u128, offset: u64, y: u128, z: u128, cols: &mut MidCols<u8>) -> u128 {
-    let plus = fill_sum::<1, MID_BITS>(&[x, u128::from(offset)], &mut cols.plus);
-    let less_y = fill_diff(plus, y, &mut cols.less_y);
-    fill_diff(less_y, z, &mut cols.less_z)
-}
+/// The witness of a coefficient of the product: its terms reduced once.
+pub type CoefficientCols<T, const ADDERS: usize> =
+    ReduceSumCols<T, COEFFICIENT_BITS, ADDERS, QUOTIENT_BITS>;
 
 /// The witness of an extension multiplication by Karatsuba: the element is
 /// `A_0 + A_1 X^2` with `A_0`, `A_1` of degree one, each of the three
 /// degree-one products is three products of words from the multiply table,
-/// and `X^4 = 3` folds the result into four coefficients, each reduced
-/// once.
+/// and `X^4 = 3` folds the result into four coefficients.
+///
+/// With `m_0, s, m_2` the products of `A_0 B_0`, `n_0, t, n_2` of `A_1 B_1`
+/// and `q_0, w, q_2` of `(A_0 + A_1)(B_0 + B_1)`, the middle terms are
+/// `m_1 = s - m_0 - m_2`, `n_1 = t - n_0 - n_2`, `q_1 = w - q_0 - q_2`, the
+/// cross terms `d_k = q_k - m_k - n_k`, and the coefficients
+///
+/// ```text
+///     c_0 = m_0 + 3 d_2 + 3 n_0 = m_0 + 3 q_2 - 3 m_2 - 3 n_2 + 3 n_0
+///     c_1 = m_1 + 3 n_1         = s + 3 t - m_0 - m_2 - 3 n_0 - 3 n_2
+///     c_2 = m_2 + d_0 + 3 n_2   = m_2 + q_0 - m_0 - n_0 + 3 n_2
+///     c_3 = d_1                 = w - q_0 - q_2 - s - t + m_0 + m_2 + n_0 + n_2
+/// ```
+///
+/// each a signed sum of the nine products, reduced in one zero sum with an
+/// offset of `6p`, `8p`, `2p`, `4p` keeping it non-negative.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ExtMulCols<T> {
@@ -128,21 +113,27 @@ pub struct ExtMulCols<T> {
     /// `A_0 B_0`, `n_0, n_2, t` of `A_1 B_1`, `q_0, q_2, w` of
     /// `(A_0 + A_1)(B_0 + B_1)`.
     pub products: [Word<T>; 9],
-    /// The middle coefficient of each degree-one product: `s + 2p - m_0 -
-    /// m_2`, `t + 2p - n_0 - n_2`, `w + 2p - q_0 - q_2`.
-    pub mids: [MidCols<T>; 3],
-    /// The coefficients of `(A_0 + A_1)(B_0 + B_1) - A_0 B_0 - A_1 B_1`:
-    /// `q_0 + 2p - m_0 - n_0`, `q_1 + 6p - m_1 - n_1`, `q_2 + 2p - m_2 - n_2`.
-    pub cross: [MidCols<T>; 3],
-    /// `c_0 = m_0 + 3 d_2 + 3 n_0`.
-    pub c0: SumCols<T, 4, SUM_BITS>,
-    /// `c_1 = m_1 + 3 n_1`.
-    pub c1: SumCols<T, 2, SUM_BITS>,
-    /// `c_2 = m_2 + d_0 + 3 n_2`.
-    pub c2: SumCols<T, 3, SUM_BITS>,
-    /// Each coefficient reduced; `reduce[k].out` is the result, `c_3` being
-    /// `d_1` itself.
-    pub reduce: [ReduceCols<T, QUOTIENT_BITS, SUM_BITS>; EXT_DEGREE],
+    /// `c_0` reduced.
+    pub c0: CoefficientCols<T, C0_ADDERS>,
+    /// `c_1` reduced.
+    pub c1: CoefficientCols<T, C1_ADDERS>,
+    /// `c_2` reduced.
+    pub c2: CoefficientCols<T, C2_ADDERS>,
+    /// `c_3` reduced.
+    pub c3: CoefficientCols<T, C3_ADDERS>,
+}
+
+impl<T> ExtMulCols<T> {
+    /// The `k`th coefficient of the product.
+    #[must_use]
+    pub fn out(&self, k: usize) -> &Word<T> {
+        match k {
+            0 => &self.c0.out,
+            1 => &self.c1.out,
+            2 => &self.c2.out,
+            _ => &self.c3.out,
+        }
+    }
 }
 
 /// Columns of [`ExtMulCols`].
@@ -156,7 +147,75 @@ type Factors<'a, AB> =
     [(&'a [<AB as AirBuilder>::Expr; KB_BITS], &'a [<AB as AirBuilder>::Expr; KB_BITS]);
         EXT_MUL_REQUESTS];
 
-/// Constrain `cols.reduce[k].out` to be the `k`th coefficient of `a * b`,
+/// The terms of one coefficient as `(product, shift, subtracted)` over the
+/// products `[m_0, m_2, s, n_0, n_2, t, q_0, q_2, w]`, and its offset in
+/// multiples of `p`.
+type CoefficientTerms = (&'static [(usize, usize, bool)], i128);
+
+/// The terms of each coefficient, a tripled product being the product and
+/// the product shifted up once.
+const COEFFICIENT_TERMS: [CoefficientTerms; EXT_DEGREE] = [
+    (
+        &[
+            (0, 0, false),
+            (7, 0, false),
+            (7, 1, false),
+            (3, 0, false),
+            (3, 1, false),
+            (1, 0, true),
+            (1, 1, true),
+            (4, 0, true),
+            (4, 1, true),
+        ],
+        6,
+    ),
+    (
+        &[
+            (2, 0, false),
+            (5, 0, false),
+            (5, 1, false),
+            (0, 0, true),
+            (1, 0, true),
+            (3, 0, true),
+            (3, 1, true),
+            (4, 0, true),
+            (4, 1, true),
+        ],
+        8,
+    ),
+    (&[(1, 0, false), (6, 0, false), (4, 0, false), (4, 1, false), (0, 0, true), (3, 0, true)], 2),
+    (
+        &[
+            (8, 0, false),
+            (0, 0, false),
+            (1, 0, false),
+            (3, 0, false),
+            (4, 0, false),
+            (6, 0, true),
+            (7, 0, true),
+            (2, 0, true),
+            (5, 0, true),
+        ],
+        4,
+    ),
+];
+
+/// The zero-sum terms of coefficient `k` over `products`, and its offset.
+fn coefficient_terms<B: Clone>(
+    products: &[[B; KB_BITS]; EXT_MUL_REQUESTS],
+    k: usize,
+) -> (Vec<ZeroTerm<B>>, i128) {
+    let (terms, offset) = COEFFICIENT_TERMS[k];
+    (
+        terms
+            .iter()
+            .map(|&(product, shift, negated)| ZeroTerm::word(&products[product], shift, negated))
+            .collect(),
+        offset * i128::from(KB_PRIME),
+    )
+}
+
+/// Constrain `cols.out(k)` to be the `k`th coefficient of `a * b`,
 /// asking the multiply table for every product on rows where `active`.
 pub fn eval_ext_mul<AB: MachineBuilder<F: BinaryBase>>(
     builder: &mut AB,
@@ -182,7 +241,6 @@ pub fn eval_ext_mul<AB: MachineBuilder<F: BinaryBase>>(
     let v1 = sum(builder, &b[1], &b[3], &cols.outer_sums[3]);
     let u01 = sum(builder, &u0, &u1, &cols.outer_inner_sums[0]);
     let v01 = sum(builder, &v0, &v1, &cols.outer_inner_sums[1]);
-
     let factors: Factors<'_, AB> = [
         (&a[0], &b[0]),
         (&a[1], &b[1]),
@@ -202,32 +260,14 @@ pub fn eval_ext_mul<AB: MachineBuilder<F: BinaryBase>>(
         request_mul(builder, factors[i].0, factors[i].1, &product, active.clone());
         product
     });
-    let [m0, m2, s, n0, n2, t, q0, q2, w] = products;
-    let two_p = 2 * u64::from(KB_PRIME);
-    let m1 = eval_mid(builder, &s, two_p, &m0, &m2, &cols.mids[0]);
-    let n1 = eval_mid(builder, &t, two_p, &n0, &n2, &cols.mids[1]);
-    let q1 = eval_mid(builder, &w, two_p, &q0, &q2, &cols.mids[2]);
-    let d0 = eval_mid(builder, &q0, two_p, &m0, &n0, &cols.cross[0]);
-    let d1 = eval_mid(builder, &q1, 3 * two_p, &m1, &n1, &cols.cross[1]);
-    let d2 = eval_mid(builder, &q2, two_p, &m2, &n2, &cols.cross[2]);
-
-    let wide = |x: &[AB::Expr], shift: usize| shifted::<AB, SUM_BITS>(x, shift);
-    let c0 = eval_sum::<AB, 4, SUM_BITS>(
-        builder,
-        &[wide(&m0, 0), wide(&d2, 0), wide(&d2, 1), wide(&n0, 0), wide(&n0, 1)],
-        &cols.c0,
-    );
-    let c1 =
-        eval_sum::<AB, 2, SUM_BITS>(builder, &[wide(&m1, 0), wide(&n1, 0), wide(&n1, 1)], &cols.c1);
-    let c2 = eval_sum::<AB, 3, SUM_BITS>(
-        builder,
-        &[wide(&m2, 0), wide(&d0, 0), wide(&n2, 0), wide(&n2, 1)],
-        &cols.c2,
-    );
-    eval_reduce(builder, &c0, &cols.reduce[0]);
-    eval_reduce(builder, &c1, &cols.reduce[1]);
-    eval_reduce(builder, &c2, &cols.reduce[2]);
-    eval_reduce(builder, &d1, &cols.reduce[3]);
+    let (terms, offset) = coefficient_terms(&products, 0);
+    eval_reduce_sum(builder, &terms, offset, &cols.c0);
+    let (terms, offset) = coefficient_terms(&products, 1);
+    eval_reduce_sum(builder, &terms, offset, &cols.c1);
+    let (terms, offset) = coefficient_terms(&products, 2);
+    eval_reduce_sum(builder, &terms, offset, &cols.c2);
+    let (terms, offset) = coefficient_terms(&products, 3);
+    eval_reduce_sum(builder, &terms, offset, &cols.c3);
 }
 
 /// The witness of [`eval_ext_mul`] for `a * b`, the products it asks the
@@ -261,30 +301,21 @@ pub fn fill_ext_mul(
         (u1, v1),
         (u01, v01),
     ];
-    let mut products = [0u128; EXT_MUL_REQUESTS];
     for (i, &(x, y)) in factors.iter().enumerate() {
         let product = (u64::from(x) * u64::from(y) % p) as u32;
         cols.products[i] = bits_le::<KB_BITS>(u64::from(product));
-        products[i] = u128::from(product);
         requests.push((x, y));
     }
-    let [m0, m2, s, n0, n2, t, q0, q2, w] = products;
-    let two_p = 2 * p;
-    let m1 = fill_mid(s, two_p, m0, m2, &mut cols.mids[0]);
-    let n1 = fill_mid(t, two_p, n0, n2, &mut cols.mids[1]);
-    let q1 = fill_mid(w, two_p, q0, q2, &mut cols.mids[2]);
-    let d0 = fill_mid(q0, two_p, m0, n0, &mut cols.cross[0]);
-    let d1 = fill_mid(q1, 3 * two_p, m1, n1, &mut cols.cross[1]);
-    let d2 = fill_mid(q2, two_p, m2, n2, &mut cols.cross[2]);
-    let c0 = fill_sum::<4, SUM_BITS>(&[m0, d2, d2 << 1, n0, n0 << 1], &mut cols.c0);
-    let c1 = fill_sum::<2, SUM_BITS>(&[m1, n1, n1 << 1], &mut cols.c1);
-    let c2 = fill_sum::<3, SUM_BITS>(&[m2, d0, n2, n2 << 1], &mut cols.c2);
-    [
-        fill_reduce(c0, &mut cols.reduce[0]),
-        fill_reduce(c1, &mut cols.reduce[1]),
-        fill_reduce(c2, &mut cols.reduce[2]),
-        fill_reduce(d1, &mut cols.reduce[3]),
-    ]
+    let products = cols.products;
+    let (terms, offset) = coefficient_terms(&products, 0);
+    let c0 = fill_reduce_sum(&terms, offset, &mut cols.c0);
+    let (terms, offset) = coefficient_terms(&products, 1);
+    let c1 = fill_reduce_sum(&terms, offset, &mut cols.c1);
+    let (terms, offset) = coefficient_terms(&products, 2);
+    let c2 = fill_reduce_sum(&terms, offset, &mut cols.c2);
+    let (terms, offset) = coefficient_terms(&products, 3);
+    let c3 = fill_reduce_sum(&terms, offset, &mut cols.c3);
+    [c0, c1, c2, c3]
 }
 
 /// `a * b` in the extension, as integers, by the schoolbook.
@@ -341,9 +372,6 @@ mod tests {
             let mut requests = Vec::new();
             assert_eq!(fill_ext_mul(a, b, &mut cols, &mut requests), expected);
             assert_eq!(requests.len(), EXT_MUL_REQUESTS);
-            for reduce in &cols.reduce {
-                assert_eq!(reduce.lhs, reduce.rhs);
-            }
         }
     }
 }

@@ -16,6 +16,7 @@ pub mod ledger;
 pub mod limbs;
 pub mod memory;
 pub mod mul;
+pub mod mul8;
 pub mod public_values;
 pub mod select;
 
@@ -42,6 +43,7 @@ use self::ledger::LedgerAir;
 use self::limbs::LimbsAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
 use self::mul::MulAir;
+use self::mul8::Mul8Air;
 use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
@@ -61,6 +63,7 @@ pub enum RecursionAir {
     Limbs(LimbsAir),
     PublicValues(PublicValuesAir),
     Mul(MulAir),
+    Mul8(Mul8Air),
 }
 
 impl RecursionAir {
@@ -79,6 +82,7 @@ impl RecursionAir {
             Self::Blake3Round(air) => &mut air.preprocessed,
             Self::Limbs(air) => &mut air.preprocessed,
             Self::PublicValues(air) => &mut air.preprocessed,
+            Self::Mul8(air) => &mut air.preprocessed,
             Self::Mul(_) => return,
         };
         *bits = Vec::new();
@@ -99,6 +103,7 @@ impl RecursionAir {
             Self::Limbs(air) => air.log_height(),
             Self::PublicValues(air) => air.log_height(),
             Self::Mul(air) => air.log_height(),
+            Self::Mul8(air) => air.log_height(),
         }
     }
 
@@ -117,6 +122,7 @@ impl RecursionAir {
             Self::Limbs(_) => "Limbs",
             Self::PublicValues(_) => "PublicValues",
             Self::Mul(_) => "Mul",
+            Self::Mul8(_) => "Mul8",
         }
     }
 
@@ -131,7 +137,9 @@ impl RecursionAir {
             Self::Select(air) => air.writes(),
             Self::Blake3Io(air) => air.writes(),
             Self::Limbs(air) => air.writes(),
-            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
+            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) | Self::Mul8(_) => {
+                Vec::new()
+            }
         }
     }
 
@@ -164,7 +172,9 @@ impl RecursionAir {
             Self::Select(air) => air.written_values(record),
             Self::Blake3Io(air) => air.written_values(record),
             Self::Limbs(air) => air.written_values(record),
-            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
+            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) | Self::Mul8(_) => {
+                Vec::new()
+            }
         }
     }
 
@@ -188,6 +198,7 @@ impl RecursionAir {
             Self::Limbs(air) => air.main_table(record),
             Self::PublicValues(air) => air.main_table(record),
             Self::Mul(air) => air.main_table(requests),
+            Self::Mul8(air) => air.main_table(),
         }
     }
 }
@@ -206,6 +217,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Limbs(air) => BaseAir::<X>::width(air),
             Self::PublicValues(air) => BaseAir::<X>::width(air),
             Self::Mul(air) => BaseAir::<X>::width(air),
+            Self::Mul8(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -222,6 +234,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Limbs(air) => BaseAir::<X>::preprocessed_width(air),
             Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Mul(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Mul8(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
@@ -245,6 +258,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Limbs(air) => air.preprocessed_trace(),
             Self::PublicValues(air) => air.preprocessed_trace(),
             Self::Mul(air) => air.preprocessed_trace(),
+            Self::Mul8(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -263,6 +277,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RecursionAir {
             Self::Limbs(air) => air.eval(builder),
             Self::PublicValues(air) => air.eval(builder),
             Self::Mul(air) => air.eval(builder),
+            Self::Mul8(air) => air.eval(builder),
         }
     }
 }
@@ -362,6 +377,7 @@ impl RecursionMachine {
         let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
         airs.extend(tables);
         airs.push(RecursionAir::Mul(MulAir::new(products)));
+        airs.push(RecursionAir::Mul8(Mul8Air::new()));
 
         let (main_shapes, preprocessed_shapes) = shapes(&airs);
         let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
