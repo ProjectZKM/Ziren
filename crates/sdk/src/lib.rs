@@ -673,3 +673,37 @@ mod tests {
         client.verify(&proof, &vk).unwrap();
     }
 }
+
+/// Drivers for measuring the stages after compression on a real block.
+#[cfg(test)]
+mod block_dump {
+    use anyhow::Result;
+
+    use crate::{ProverClient, ZKMProof, ZKMStdin};
+
+    /// Prove the guest at `ZIREN_BLOCK_ELF` on the cached client input at
+    /// `ZIREN_BLOCK_INPUT` to a compressed proof through the GPU server
+    /// (`CUDA_ENDPOINT`), and save the reduced proof at
+    /// `ZIREN_BLOCK_PROOF_OUT` for the stages after it.
+    #[test]
+    #[ignore]
+    fn compressed_proof_of_cached_block() -> Result<()> {
+        zkm_core_machine::utils::setup_logger();
+        let elf = std::fs::read(std::env::var("ZIREN_BLOCK_ELF")?)?;
+        let input = std::fs::read(std::env::var("ZIREN_BLOCK_INPUT")?)?;
+        let out = std::env::var("ZIREN_BLOCK_PROOF_OUT")?;
+        let client = ProverClient::cuda();
+        let (pk, _) = client.setup(&elf);
+        let mut stdin = ZKMStdin::new();
+        stdin.write_vec(input);
+        let started = std::time::Instant::now();
+        let proof = client.prove(&pk, stdin).compressed().run()?;
+        tracing::info!("compressed proof in {:.1} s", started.elapsed().as_secs_f64());
+        let ZKMProof::Compressed(reduced) = proof.proof else {
+            anyhow::bail!("a compressed proof was asked for");
+        };
+        std::fs::write(&out, bincode::serialize(&*reduced)?)?;
+        tracing::info!("reduced proof saved to {out}");
+        Ok(())
+    }
+}

@@ -3547,6 +3547,49 @@ pub mod tests {
         Ok(())
     }
 
+    /// The stages after compression on a saved compressed proof
+    /// (`ZIREN_COMPRESSED_PROOF`, as the SDK's block dump writes it): the
+    /// shrink under the Blake3 ring, dumped to `ZIREN_BINARY_WITNESS_DUMP`
+    /// when set, then the binary stage, each timed and verified.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_binary_from_compressed() -> Result<()> {
+        setup_logger();
+        let path = std::env::var("ZIREN_COMPRESSED_PROOF")?;
+        let compressed: ZKMReduceProof<CompressedSC> = bincode::deserialize(&std::fs::read(path)?)?;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let started = std::time::Instant::now();
+        let shrink_proof = prover.shrink_blake3(compressed, opts)?;
+        tracing::info!(
+            "shrink blake3 proof: {} bytes, {:.1} s",
+            bincode::serialize(&shrink_proof.proof).unwrap().len(),
+            started.elapsed().as_secs_f64()
+        );
+        let started = std::time::Instant::now();
+        prover.verify_shrink_blake3(&shrink_proof)?;
+        tracing::info!("shrink blake3 verified in {:.3} s", started.elapsed().as_secs_f64());
+        if let Some(path) = std::env::var_os("ZIREN_BINARY_WITNESS_DUMP") {
+            std::fs::write(&path, bincode::serialize(&shrink_proof)?)?;
+            tracing::info!("shrink blake3 proof dumped to {}", path.to_string_lossy());
+        }
+        let started = std::time::Instant::now();
+        let binary_proof = prover.shrink_binary(shrink_proof)?;
+        tracing::info!(
+            "binary shrink proof: {} bytes, {:.1} s",
+            bincode::serialize(&binary_proof.proof).unwrap().len(),
+            started.elapsed().as_secs_f64()
+        );
+        for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&binary_proof.proof) {
+            tracing::info!("binary shrink proof part {label}: {bytes} bytes");
+        }
+        let started = std::time::Instant::now();
+        prover.verify_shrink_binary(&binary_proof)?;
+        tracing::info!("binary shrink verified in {:.3} s", started.elapsed().as_secs_f64());
+        Ok(())
+    }
+
     /// The binary stage on a fibonacci proof: the shrink proof under the
     /// Blake3 ring verified over bits, and the proof size reported.
     #[test]
