@@ -37,16 +37,54 @@ pub struct MulRow<T> {
 /// Columns of [`MulRow`].
 pub const NUM_MUL_COLS: usize = core::mem::size_of::<MulRow<u8>>();
 
-/// The multiply table of one execution: as tall as the products asked for.
+/// One part of the multiply table of one execution: the requests
+/// `start..start + len`, in a table of `2^log_height` rows.
+///
+/// A table's height is a power of two, so one table over all the requests
+/// pads them by up to half.  Two parts, the larger a power of two and the
+/// smaller sized to the remainder, pad by at most an eighth; the channel is
+/// a multiset, so which part holds a request does not matter.
 pub struct MulAir {
+    name: &'static str,
     log_height: usize,
+    start: usize,
+    len: usize,
 }
 
 impl MulAir {
     /// A table for `requests` products.
     #[must_use]
     pub fn new(requests: usize) -> Self {
-        Self { log_height: log_height_for(requests) }
+        Self { name: "Mul", log_height: log_height_for(requests), start: 0, len: requests }
+    }
+
+    /// The parts of the table for `requests` products: one when a single
+    /// power of two pads them by less than an eighth, two otherwise.
+    #[must_use]
+    pub fn parts(requests: usize) -> Vec<Self> {
+        let log_height = log_height_for(requests);
+        let whole = Self::new(requests);
+        if log_height <= super::bits::MIN_LOG_HEIGHT + 1 {
+            return vec![whole];
+        }
+        let first = 1usize << (log_height - 1);
+        let Some(rest) = requests.checked_sub(first).filter(|&rest| rest > 0) else {
+            return vec![whole];
+        };
+        let rest_log = log_height_for(rest);
+        if rest_log + 2 > log_height {
+            return vec![whole];
+        }
+        vec![
+            Self { name: "Mul", log_height: log_height - 1, start: 0, len: first },
+            Self { name: "MulRest", log_height: rest_log, start: first, len: rest },
+        ]
+    }
+
+    /// The table's name.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
     /// The log height of the table.
@@ -59,6 +97,7 @@ impl MulAir {
     /// multiplying zeros without pulling.
     #[must_use]
     pub fn main_table(&self, requests: &[(u32, u32)]) -> Table<F> {
+        let requests = &requests[self.start..self.start + self.len];
         assert!(requests.len() <= 1 << self.log_height, "the table holds every request");
         let mut rows = BitRows::new(NUM_MUL_COLS, self.log_height);
         let mut row = vec![0u8; NUM_MUL_COLS];

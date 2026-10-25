@@ -116,7 +116,7 @@ impl RecursionAir {
             Self::Blake3Round(_) => "Blake3Round",
             Self::Limbs(_) => "Limbs",
             Self::PublicValues(_) => "PublicValues",
-            Self::Mul(_) => "Mul",
+            Self::Mul(air) => air.name(),
         }
     }
 
@@ -361,7 +361,7 @@ impl RecursionMachine {
         let products = tables.iter().map(RecursionAir::mul_request_count).sum();
         let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
         airs.extend(tables);
-        airs.push(RecursionAir::Mul(MulAir::new(products)));
+        airs.extend(MulAir::parts(products).into_iter().map(RecursionAir::Mul));
 
         let (main_shapes, preprocessed_shapes) = shapes(&airs);
         let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
