@@ -104,6 +104,12 @@ impl ExtAluAir {
             binds_mul.push(flags.binds_mul);
             outputs.push((addrs.out.0.as_canonical_u32(), mult));
         }
+        tracing::info!(
+            "binary stage ExtAlu: {} instructions, {} bind a product, {} rows",
+            outputs.len(),
+            binds_mul.iter().filter(|&&binds| binds).count(),
+            1usize << log_height
+        );
         Self { log_height, preprocessed, direct, binds_mul, outputs }
     }
 

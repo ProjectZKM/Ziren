@@ -3445,8 +3445,8 @@ pub mod tests {
         )
     }
 
-    /// The shapes of the binary stage's tables on the shrink program of a
-    /// compressed fibonacci proof, without proving.
+    /// The shapes of the binary stage's tables on the program verifying the
+    /// Blake3 shrink proof of a fibonacci block, without proving.
     #[test]
     #[serial]
     #[ignore]
@@ -3459,15 +3459,9 @@ pub mod tests {
         let core_proof =
             prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
         let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
-        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
-        let basefold_proof = *compressed_proof.jagged_shard_proof;
-        let vk_merkle_data =
-            prover.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk))?;
-        let input = ZKMWrapBasefoldWitnessValues {
-            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
-            vk_merkle_data,
-        };
-        let program = prover.shrink_program_basefold(&input);
+        let shrink_proof = prover.shrink_blake3(compressed_proof, opts)?;
+        let input = prover.binary_witness(shrink_proof);
+        let program = prover.binary_program(&input);
         prover.binary_machine(&program)?;
         Ok(())
     }
@@ -3549,6 +3543,7 @@ pub mod tests {
             program.iter_instructions().count(),
             record.blake3_compress_events.len()
         );
+        prover.binary_machine(&program)?;
         Ok(())
     }
 
