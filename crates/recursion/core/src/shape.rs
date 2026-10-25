@@ -12,7 +12,10 @@ use crate::{
     chips::{
         alu_base::BaseAluChip,
         alu_ext::ExtAluChip,
+        blake3::Blake3CompressChip,
+        byte::{ByteChip, NUM_BYTE_ROWS},
         ext2felt::Ext2FeltChip,
+        felt_limbs::FeltLimbsChip,
         mem::{MemoryConstChip, MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
         prefix_sum_checks::PrefixSumChecksChip,
@@ -126,6 +129,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::<F, DEGREE>::PrefixSumChecks(PrefixSumChecksChip),
             RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
+            RecursionAir::<F, DEGREE>::Blake3Compress(Blake3CompressChip),
+            RecursionAir::<F, DEGREE>::Byte(ByteChip),
+            RecursionAir::<F, DEGREE>::FeltLimbs(FeltLimbsChip),
         ];
         let main = airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::width(a))).collect();
         let prep =
@@ -272,6 +278,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
         let prefix_sum_checks =
             RecursionAir::<F, DEGREE>::PrefixSumChecks(PrefixSumChecksChip).name();
+        let blake3_compress = RecursionAir::<F, DEGREE>::Blake3Compress(Blake3CompressChip).name();
+        let byte = RecursionAir::<F, DEGREE>::Byte(ByteChip).name();
+        let felt_limbs = RecursionAir::<F, DEGREE>::FeltLimbs(FeltLimbsChip).name();
 
         let rows = |n: usize| -> usize {
             assert!(n.is_multiple_of(32), "recursion shape rows must be a multiple of 32: {n}");
@@ -280,35 +289,58 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let allowed_shapes = vec![
             HashMap::from([
                 (mem_var.clone(), rows(131_072)),
-                (select.clone(), rows(73_728)),
+                (select.clone(), rows(163_840)),
                 (mem_const.clone(), rows(2_048)),
-                (base_alu.clone(), rows(253_536)),
-                (ext_alu.clone(), rows(323_936)),
-                (poseidon2_wide.clone(), rows(34_816)),
-                (ext2felt.clone(), rows(34_272)),
-                (prefix_sum_checks.clone(), rows(24_576)),
+                (base_alu.clone(), rows(65_536)),
+                (ext_alu.clone(), rows(131_072)),
+                (poseidon2_wide.clone(), rows(32)),
+                (ext2felt.clone(), rows(32_768)),
+                (prefix_sum_checks.clone(), rows(131_072)),
+                (blake3_compress.clone(), rows(12_000)),
+                (felt_limbs.clone(), rows(131_072)),
+                (byte.clone(), NUM_BYTE_ROWS),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
             HashMap::from([
                 (mem_var.clone(), rows(262_144)),
-                (select.clone(), rows(147_456)),
+                (select.clone(), rows(163_840)),
                 (mem_const.clone(), rows(4_096)),
-                (base_alu.clone(), rows(507_072)),
-                (ext_alu.clone(), rows(647_872)),
-                (poseidon2_wide.clone(), rows(69_632)),
-                (ext2felt.clone(), rows(68_512)),
-                (prefix_sum_checks.clone(), rows(163_840)),
+                (base_alu.clone(), rows(262_144)),
+                (ext_alu.clone(), rows(393_216)),
+                (poseidon2_wide.clone(), rows(32)),
+                (ext2felt.clone(), rows(65_536)),
+                (prefix_sum_checks.clone(), rows(262_144)),
+                (blake3_compress.clone(), rows(24_000)),
+                (felt_limbs.clone(), rows(262_144)),
+                (byte.clone(), NUM_BYTE_ROWS),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
             HashMap::from([
-                (mem_var.clone(), rows(524_288)),
-                (select.clone(), rows(294_912)),
+                (mem_var.clone(), rows(786_432)),
+                (select.clone(), rows(524_288)),
                 (mem_const.clone(), rows(8_192)),
-                (base_alu.clone(), rows(1_014_144)),
-                (ext_alu.clone(), rows(1_295_744)),
-                (poseidon2_wide.clone(), rows(139_264)),
-                (ext2felt.clone(), rows(137_024)),
-                (prefix_sum_checks.clone(), rows(327_680)),
+                (base_alu.clone(), rows(262_144)),
+                (ext_alu.clone(), rows(524_288)),
+                (poseidon2_wide.clone(), rows(32)),
+                (ext2felt.clone(), rows(131_072)),
+                (prefix_sum_checks.clone(), rows(786_432)),
+                (blake3_compress.clone(), rows(60_000)),
+                (felt_limbs.clone(), rows(786_432)),
+                (byte.clone(), NUM_BYTE_ROWS),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+            ]),
+            HashMap::from([
+                (mem_var.clone(), rows(1_048_576)),
+                (select.clone(), rows(786_432)),
+                (mem_const.clone(), rows(8_192)),
+                (base_alu.clone(), rows(262_144)),
+                (ext_alu.clone(), rows(786_432)),
+                (poseidon2_wide.clone(), rows(32)),
+                (ext2felt.clone(), rows(131_072)),
+                (prefix_sum_checks.clone(), rows(1_048_576)),
+                (blake3_compress.clone(), rows(120_000)),
+                (felt_limbs.clone(), rows(1_048_576)),
+                (byte.clone(), NUM_BYTE_ROWS),
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ]),
         ];

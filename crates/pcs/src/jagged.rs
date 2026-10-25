@@ -166,17 +166,21 @@ impl AreaPin {
 }
 
 /// The largest pin class — the compress machine's DEFAULT pins, what a
-/// program that names no class commits under.  64 stacking blocks (`2^27`
-/// cells) per round, with the gap split into `2^27 / 2^22 = 32` columns of
-/// at most one row cube.  It exists for the leaf verifying a chip-dense core
-/// shard at the core profile's starting rate `2^-1`: that leaf opens 203
-/// first-round queries where `2^-2` opened 124, so its Merkle-path chips grow
-/// by about a fifth and its main round passes `2^26` cells.  The root never
-/// takes it ([`RecursionPins::ROOT_CLASS`]).  `AreaPin::apply` panics past
-/// the pin.
+/// program that names no class commits under.  256 stacking blocks (`2^29`
+/// cells) per round, with the gap split into `2^29 / 2^22 = 128` columns of
+/// at most one row cube.  It exists for the compose of `REDUCE_BATCH_SIZE`
+/// children of the class below under the Blake3 chain: the Blake3
+/// compression chip is 2,829 columns, a compose of three class-2 composes
+/// passes `2^28` cells, and a compose of three children of this class fits
+/// it, which closes the classes.  The preprocessed round is a quarter of the
+/// main one at most (addresses and multiplicities against 2,829 columns of
+/// hashing), so its pin is half the main one; the verifier recovers a node's
+/// class from both committed areas, so every class has its own prep pin.
+/// The root never takes this class ([`RecursionPins::ROOT_CLASS`]).
+/// `AreaPin::apply` panics past the pin.
 pub const RECURSION_PINS: RecursionPins = RecursionPins {
-    prep: AreaPin { area: 1 << 27, pad_columns: 32 },
-    main: AreaPin { area: 1 << 27, pad_columns: 32 },
+    prep: AreaPin { area: 1 << 28, pad_columns: 64 },
+    main: AreaPin { area: 1 << 29, pad_columns: 128 },
 };
 
 /// The pin CLASSES a recursion node can commit under, smallest first.  A
@@ -187,14 +191,18 @@ pub const RECURSION_PINS: RecursionPins = RecursionPins {
 /// shard) at 2^26, and only the densest leaves at 2^27.  The program
 /// verifying a node is a function of the class, so a compose program is keyed
 /// by its children's class tuple; every tuple is enumerable.
-pub const RECURSION_PIN_CLASSES: [RecursionPins; 3] = [
+pub const RECURSION_PIN_CLASSES: [RecursionPins; 4] = [
     RecursionPins {
         prep: AreaPin { area: 1 << 25, pad_columns: 8 },
-        main: AreaPin { area: 1 << 25, pad_columns: 8 },
+        main: AreaPin { area: 1 << 26, pad_columns: 16 },
     },
     RecursionPins {
         prep: AreaPin { area: 1 << 26, pad_columns: 16 },
-        main: AreaPin { area: 1 << 26, pad_columns: 16 },
+        main: AreaPin { area: 1 << 27, pad_columns: 32 },
+    },
+    RecursionPins {
+        prep: AreaPin { area: 1 << 27, pad_columns: 32 },
+        main: AreaPin { area: 1 << 28, pad_columns: 64 },
     },
     RECURSION_PINS,
 ];
@@ -207,16 +215,18 @@ impl RecursionPins {
     ///
     /// The root's proof is the published one, and each of its first-round
     /// queries opens one row of every stripe, so the root takes the smallest
-    /// class rather than the largest: 16 + 16 stripes instead of 32 + 32.
-    /// It is one class for every root so that the shrink program, and the
-    /// wrap circuit behind it, still see one root geometry.  The tree closes
-    /// every execution with an arity-1 root (`compress_tree::Reduction`), so a
-    /// root verifies one child, which is what keeps it inside this class.  A
-    /// root whose
-    /// rows do not fit is a bug the shape check reports; the root programs of
-    /// every child-class tuple are built against it by
-    /// `every_root_fits_the_root_class`.
-    pub const ROOT_CLASS: usize = 0;
+    /// class that holds it rather than the largest: 64 + 64 stripes instead
+    /// of 256 + 256.  Under the Blake3 chain a root verifying even a class-0
+    /// child passes `2^26` cells (its Blake3 compression chip alone is
+    /// 20,384 rows of 2,829 columns), so the smallest class that holds a root
+    /// is class 1.  It is one class for every root so that the shrink
+    /// program, and the binary stage behind it, still see one root geometry.
+    /// The tree closes every execution with an arity-1 root
+    /// (`compress_tree::Reduction`), so a root verifies one child, which is
+    /// what keeps it inside this class.  A root whose rows do not fit is a
+    /// bug the shape check reports; the root programs of every child-class
+    /// tuple are built against it by `every_root_fits_the_root_class`.
+    pub const ROOT_CLASS: usize = 1;
 
     /// The pins of class `index`.
     pub fn class(index: usize) -> RecursionPins {
@@ -852,7 +862,11 @@ mod tests {
     #[test]
     fn pin_classes_are_ordered_and_the_smallest_fitting_one_wins() {
         for w in RECURSION_PIN_CLASSES.windows(2) {
-            assert!(w[0].main.area < w[1].main.area && w[0].prep.area <= w[1].prep.area);
+            assert!(w[0].main.area < w[1].main.area && w[0].prep.area < w[1].prep.area);
+        }
+        for (i, c) in RECURSION_PIN_CLASSES.iter().enumerate() {
+            assert_eq!(c.class_index(), Some(i));
+            assert_eq!(RecursionPins::class_for_committed(c.main.area, c.prep.area), Some(i));
         }
         let small = RECURSION_PIN_CLASSES[0];
         let large = RECURSION_PIN_CLASSES[RecursionPins::LAST_CLASS];
