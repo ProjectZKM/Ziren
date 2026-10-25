@@ -78,6 +78,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v5
+      # The runner's root filesystem is small and nearly full; the gnark
+      # circuits write multi-GB temporaries. The job's temp directory is on
+      # the data disk and is emptied after every job.
+      - run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
