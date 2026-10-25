@@ -1,5 +1,8 @@
 pub mod alu_base;
 pub mod alu_ext;
+pub mod blake3;
+pub mod byte;
+pub mod felt_limbs;
 pub mod ext2felt;
 pub mod mem;
 pub mod poseidon2_wide;
