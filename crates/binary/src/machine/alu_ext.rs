@@ -1,5 +1,9 @@
 //! The extension ALU over bits: one row per extension-field instruction of
 //! the program, with the operand scheme of [`super::alu_base`] on blocks.
+//!
+//! The instructions split into two tables by the gadget they need: the
+//! adds and subtracts carry the add gadget, the multiplies and divides the
+//! multiply gadget, so no row carries the gadget it does not use.
 
 use core::borrow::{Borrow, BorrowMut};
 
@@ -26,10 +30,10 @@ use crate::word::{bits_le, exprs, KB_BITS};
 use crate::BinaryBase;
 use crate::F;
 
-/// The witness part of a row.
+/// The operands of a row, shared by both tables.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct ExtAluCols<T> {
+pub struct ExtOperandCols<T> {
     /// The first operand.
     pub in1: ExtWord<T>,
     /// The second operand.
@@ -43,17 +47,76 @@ pub struct ExtAluCols<T> {
     /// The result the checks bind: `out` for an add or a multiply, `in1`
     /// for a subtract or a divide.
     pub z: ExtWord<T>,
+}
+
+/// The witness part of a row of the add table.
+#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct ExtAluAddRow<T> {
+    pub operands: ExtOperandCols<T>,
     /// `x + y`.
     pub add: ExtAddCols<T>,
+}
+
+/// The witness part of a row of the multiply table.
+#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct ExtAluMulRow<T> {
+    pub operands: ExtOperandCols<T>,
     /// `x * y`.
     pub mul: ExtMulCols<T>,
 }
 
-/// Columns of [`ExtAluCols`].
-pub const NUM_EXT_ALU_COLS: usize = core::mem::size_of::<ExtAluCols<u8>>();
+/// Columns of [`ExtOperandCols`].
+pub const NUM_EXT_OPERAND_COLS: usize = core::mem::size_of::<ExtOperandCols<u8>>();
+/// Columns of [`ExtAluAddRow`].
+pub const NUM_EXT_ALU_ADD_COLS: usize = core::mem::size_of::<ExtAluAddRow<u8>>();
+/// Columns of [`ExtAluMulRow`].
+pub const NUM_EXT_ALU_MUL_COLS: usize = core::mem::size_of::<ExtAluMulRow<u8>>();
 
-/// The extension ALU of one program.
+/// Which instructions a table holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtAluKind {
+    /// Adds and subtracts.
+    Add,
+    /// Multiplies and divides.
+    Mul,
+}
+
+impl ExtAluKind {
+    /// Whether the table holds instructions of `opcode`.
+    #[must_use]
+    pub fn takes(self, opcode: ExtAluOpcode) -> bool {
+        match self {
+            Self::Add => matches!(opcode, ExtAluOpcode::AddE | ExtAluOpcode::SubE),
+            Self::Mul => {
+                matches!(opcode, ExtAluOpcode::MulE | ExtAluOpcode::DivE | ExtAluOpcode::DivEAssert)
+            }
+        }
+    }
+
+    /// The table's name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Add => "ExtAluAdd",
+            Self::Mul => "ExtAluMul",
+        }
+    }
+
+    /// The table's width in bits.
+    #[must_use]
+    pub fn width(self) -> usize {
+        match self {
+            Self::Add => NUM_EXT_ALU_ADD_COLS,
+            Self::Mul => NUM_EXT_ALU_MUL_COLS,
+        }
+    }
+}
+
+/// One of the two extension ALU tables of one program.
 pub struct ExtAluAir {
+    kind: ExtAluKind,
     log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
@@ -62,25 +125,31 @@ pub struct ExtAluAir {
     binds_mul: Vec<bool>,
     /// `(address, reads)` of every result, in order.
     outputs: Vec<(u32, u32)>,
+    /// The index of each row's instruction among the program's extension
+    /// instructions, which is its index among the record's events.
+    events: Vec<usize>,
 }
 
 impl ExtAluAir {
-    /// The extension ALU table of `program`.
+    /// The `kind` table of `program`.
     #[must_use]
-    pub fn new(program: &RecursionProgram<KoalaBear>) -> Self {
-        let instrs: Vec<&ExtAluInstr<KoalaBear>> = program
+    pub fn new(program: &RecursionProgram<KoalaBear>, kind: ExtAluKind) -> Self {
+        let instrs: Vec<(usize, &ExtAluInstr<KoalaBear>)> = program
             .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::ExtAlu(instr) => Some(instr),
                 _ => None,
             })
+            .enumerate()
+            .filter(|(_, instr)| kind.takes(instr.opcode))
             .collect();
         let log_height = log_height_for(instrs.len());
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ALU_PREP_COLS];
         let mut direct = Vec::with_capacity(instrs.len());
         let mut binds_mul = Vec::with_capacity(instrs.len());
         let mut outputs = Vec::with_capacity(instrs.len());
-        for (row, instr) in instrs.iter().enumerate() {
+        let events: Vec<usize> = instrs.iter().map(|(index, _)| *index).collect();
+        for (row, (_, instr)) in instrs.iter().enumerate() {
             let ExtAluInstr { opcode, mult, addrs } = instr;
             let mult = mult.as_canonical_u32();
             let flags = AluFlags {
@@ -105,12 +174,34 @@ impl ExtAluAir {
             outputs.push((addrs.out.0.as_canonical_u32(), mult));
         }
         tracing::info!(
-            "binary stage ExtAlu: {} instructions, {} bind a product, {} rows",
+            "binary stage {}: {} instructions, {} bind a product, {} rows",
+            kind.name(),
             outputs.len(),
             binds_mul.iter().filter(|&&binds| binds).count(),
             1usize << log_height
         );
-        Self { log_height, preprocessed, direct, binds_mul, outputs }
+        Self { kind, log_height, preprocessed, direct, binds_mul, outputs, events }
+    }
+
+    /// Which instructions the table holds.
+    #[must_use]
+    pub fn kind(&self) -> ExtAluKind {
+        self.kind
+    }
+
+    /// The table's name.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        self.kind.name()
+    }
+
+    /// The record's event of row `row`, when the row holds an instruction.
+    fn event<'a>(
+        &self,
+        record: &'a ExecutionRecord<KoalaBear>,
+        row: usize,
+    ) -> Option<&'a zkm_recursion_core::ExtAluEvent<KoalaBear>> {
+        self.events.get(row).map(|&index| &record.ext_alu_events[index])
     }
 
     /// The log height of the table.
@@ -134,13 +225,11 @@ impl ExtAluAir {
     /// The values of [`Self::writes`], in order.
     #[must_use]
     pub fn written_values(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<Cell> {
-        assert_eq!(record.ext_alu_events.len(), self.outputs.len(), "one event per instruction");
-        record
-            .ext_alu_events
+        self.events
             .iter()
             .zip(&self.outputs)
             .filter(|(_, &(_, reads))| reads > 0)
-            .map(|(event, _)| cell_of(&event.out))
+            .map(|(&index, _)| cell_of(&record.ext_alu_events[index].out))
             .collect()
     }
 
@@ -148,20 +237,19 @@ impl ExtAluAir {
     /// rows past the program check `0 + 0` and ask for nothing.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
-        assert_eq!(record.ext_alu_events.len(), self.outputs.len(), "one event per instruction");
-        let mut rows = BitRows::new(NUM_EXT_ALU_COLS, self.log_height);
-        let mut row = vec![0u8; NUM_EXT_ALU_COLS];
+        let width = self.kind.width();
+        let mut rows = BitRows::new(width, self.log_height);
+        let mut row = vec![0u8; width];
         for r in 0..1usize << self.log_height {
             row.fill(0);
-            let (in1, in2, out, direct) = match record.ext_alu_events.get(r).zip(self.direct.get(r))
-            {
+            let (in1, in2, out, direct) = match self.event(record, r).zip(self.direct.get(r)) {
                 Some((event, &direct)) => {
                     (cell_of(&event.in1), cell_of(&event.in2), cell_of(&event.out), direct)
                 }
                 None => ([0; 4], [0; 4], [0; 4], true),
             };
             let mut requests = Vec::new();
-            fill_row(in1, in2, out, direct, &mut row, &mut requests);
+            fill_row(self.kind, in1, in2, out, direct, &mut row, &mut requests);
             rows.set_row(r, &row);
         }
         rows.into_table()
@@ -178,14 +266,19 @@ impl ExtAluAir {
     #[must_use]
     pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
         let mut requests = Vec::with_capacity(self.mul_request_count());
-        let mut row = vec![0u8; NUM_EXT_ALU_COLS];
-        for (event, (&direct, _)) in record
-            .ext_alu_events
+        if self.kind != ExtAluKind::Mul {
+            return requests;
+        }
+        let mut row = vec![0u8; self.kind.width()];
+        for (&index, (&direct, _)) in self
+            .events
             .iter()
             .zip(self.direct.iter().zip(&self.binds_mul))
             .filter(|(_, (_, &binds))| binds)
         {
+            let event = &record.ext_alu_events[index];
             fill_row(
+                self.kind,
                 cell_of(&event.in1),
                 cell_of(&event.in2),
                 cell_of(&event.out),
@@ -203,6 +296,7 @@ impl ExtAluAir {
 /// `(in2, out)` otherwise, adding the products it asks the multiply table
 /// for to `requests`.
 pub fn fill_row(
+    kind: ExtAluKind,
     in1: Cell,
     in2: Cell,
     out: Cell,
@@ -210,22 +304,33 @@ pub fn fill_row(
     row: &mut [u8],
     requests: &mut Vec<(u32, u32)>,
 ) {
-    let cols: &mut ExtAluCols<u8> = row.borrow_mut();
     let words = |cell: Cell| -> ExtWord<u8> { cell.map(|w| bits_le::<KB_BITS>(u64::from(w))) };
-    cols.in1 = words(in1);
-    cols.in2 = words(in2);
-    cols.out = words(out);
     let (x, y) = if direct { (in1, in2) } else { (in2, out) };
-    cols.x = words(x);
-    cols.y = words(y);
-    cols.z = words(if direct { out } else { in1 });
-    fill_ext_add(x, y, &mut cols.add);
-    fill_ext_mul(x, y, &mut cols.mul, requests);
+    let operands = ExtOperandCols {
+        in1: words(in1),
+        in2: words(in2),
+        out: words(out),
+        x: words(x),
+        y: words(y),
+        z: words(if direct { out } else { in1 }),
+    };
+    match kind {
+        ExtAluKind::Add => {
+            let cols: &mut ExtAluAddRow<u8> = row.borrow_mut();
+            cols.operands = operands;
+            fill_ext_add(x, y, &mut cols.add);
+        }
+        ExtAluKind::Mul => {
+            let cols: &mut ExtAluMulRow<u8> = row.borrow_mut();
+            cols.operands = operands;
+            fill_ext_mul(x, y, &mut cols.mul, requests);
+        }
+    }
 }
 
 impl<X: Field> BaseAir<X> for ExtAluAir {
     fn width(&self) -> usize {
-        NUM_EXT_ALU_COLS
+        self.kind.width()
     }
 
     fn preprocessed_width(&self) -> usize {
@@ -240,7 +345,8 @@ impl<X: Field> BaseAir<X> for ExtAluAir {
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ExtAluAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &ExtAluCols<AB::Var> = main.current_slice().borrow();
+        let row: &[AB::Var] = main.current_slice();
+        let local: &ExtOperandCols<AB::Var> = row[..NUM_EXT_OPERAND_COLS].borrow();
         let prep = builder.preprocessed();
         let prep_local: AluPrep<AB::Var> = *prep.current_slice().borrow();
 
@@ -267,14 +373,28 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ExtAluAir {
         }
         let x = ext_exprs::<AB>(&local.x);
         let y = ext_exprs::<AB>(&local.y);
-        eval_ext_add(builder, &x, &y, &local.add);
-        eval_ext_mul(builder, &x, &y, &local.mul, prep_local.binds_mul.into());
-        for k in 0..EXT_DEGREE {
-            for i in 0..KB_BITS {
-                builder.when(prep_local.binds_add).assert_eq(local.add[k].out[i], local.z[k][i]);
-                builder
-                    .when(prep_local.binds_mul)
-                    .assert_eq(local.mul.reduce[k].out[i], local.z[k][i]);
+        match self.kind {
+            ExtAluKind::Add => {
+                let cols: &ExtAluAddRow<AB::Var> = row[..NUM_EXT_ALU_ADD_COLS].borrow();
+                eval_ext_add(builder, &x, &y, &cols.add);
+                for k in 0..EXT_DEGREE {
+                    for i in 0..KB_BITS {
+                        builder
+                            .when(prep_local.binds_add)
+                            .assert_eq(cols.add[k].out[i], local.z[k][i]);
+                    }
+                }
+            }
+            ExtAluKind::Mul => {
+                let cols: &ExtAluMulRow<AB::Var> = row[..NUM_EXT_ALU_MUL_COLS].borrow();
+                eval_ext_mul(builder, &x, &y, &cols.mul, prep_local.binds_mul.into());
+                for k in 0..EXT_DEGREE {
+                    for i in 0..KB_BITS {
+                        builder
+                            .when(prep_local.binds_mul)
+                            .assert_eq(cols.mul.reduce[k].out[i], local.z[k][i]);
+                    }
+                }
             }
         }
 

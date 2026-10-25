@@ -35,7 +35,7 @@ use p3_sumcheck::TableShape;
 use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram, DIGEST_SIZE};
 
 use self::alu_base::BaseAluAir;
-use self::alu_ext::ExtAluAir;
+use self::alu_ext::{ExtAluAir, ExtAluKind};
 use self::bits::Cell;
 use self::blake3::{Blake3IoAir, Blake3RoundAir, Compressions};
 use self::ledger::LedgerAir;
@@ -110,7 +110,7 @@ impl RecursionAir {
             Self::MemoryConst(_) => "MemoryConst",
             Self::MemoryVar(_) => "MemoryVar",
             Self::BaseAlu(_) => "BaseAlu",
-            Self::ExtAlu(_) => "ExtAlu",
+            Self::ExtAlu(air) => air.name(),
             Self::Select(_) => "Select",
             Self::Blake3Io(_) => "Blake3Io",
             Self::Blake3Round(_) => "Blake3Round",
@@ -349,7 +349,8 @@ impl RecursionMachine {
             RecursionAir::MemoryConst(MemoryConstAir::new(program)),
             RecursionAir::MemoryVar(MemoryVarAir::new(program)),
             RecursionAir::BaseAlu(BaseAluAir::new(program)),
-            RecursionAir::ExtAlu(ExtAluAir::new(program)),
+            RecursionAir::ExtAlu(ExtAluAir::new(program, ExtAluKind::Add)),
+            RecursionAir::ExtAlu(ExtAluAir::new(program, ExtAluKind::Mul)),
             RecursionAir::Select(SelectAir::new(program)),
             RecursionAir::Blake3Io(Blake3IoAir::new(compressions.clone())),
             RecursionAir::Blake3Round(Blake3RoundAir::new(compressions)),
