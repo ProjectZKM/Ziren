@@ -10,8 +10,7 @@ use crate::machine::RecursionAirEventCount;
 use super::{
     BaseAluEvent, BatchFRIEvent, Blake3CompressEvent, CommitPublicValuesEvent, ExpReverseBitsEvent,
     ExtAluEvent, FeltLimbsEvent, FriFoldEvent, MemEvent, Poseidon2Event, PrefixSumChecksEvent,
-    RecursionProgram,
-    RecursionPublicValues, SelectEvent,
+    RecursionProgram, RecursionPublicValues, SelectEvent,
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]

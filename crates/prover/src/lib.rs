@@ -2236,6 +2236,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 Instruction::Hint(_) => "Hint",
                 Instruction::Blake3Compress(_) => "Blake3Compress",
                 Instruction::FeltLimbs(_) => "FeltLimbs",
+                Instruction::PrefixSumChecks(_) => "PrefixSumChecks",
             };
             *mix.entry(kind).or_insert(0usize) += 1;
         }

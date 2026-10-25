@@ -52,6 +52,14 @@ pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
 pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     type DigestVariable: Clone + Copy;
 
+    /// The digest as the eight elements the public values carry in
+    /// `vk_root`: the digest itself for an eight-element digest, its
+    /// `root_felts` for a Blake3 one.
+    fn digest_public_felts(
+        builder: &mut Builder<C>,
+        digest: &Self::DigestVariable,
+    ) -> [Felt<C::F>; DIGEST_SIZE];
+
     /// Whether this ring carries the jagged geometry HASH-BIND
     /// (`modified_commitment = compress([raw_root, hash(counts)])`) and must
     /// re-bind it in-circuit inside
@@ -418,6 +426,13 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
 {
     type DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE];
 
+    fn digest_public_felts(
+        _builder: &mut Builder<C>,
+        digest: &Self::DigestVariable,
+    ) -> [Felt<C::F>; DIGEST_SIZE] {
+        *digest
+    }
+
     #[track_caller]
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
         <Self as Poseidon2KoalaBearHasherVariable<C>>::poseidon2_hash(builder, input)
@@ -713,6 +728,13 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
 {
     type DigestVariable = [Felt<KoalaBear>; crate::blake3_circuit::DIGEST_LIMBS];
 
+    fn digest_public_felts(
+        builder: &mut Builder<C>,
+        digest: &Self::DigestVariable,
+    ) -> [Felt<C::F>; DIGEST_SIZE] {
+        crate::blake3_circuit::root_felts(builder, digest)
+    }
+
     /// The ring observes the raw root, as the wrap ring does: there is no
     /// hash-bound digest to rebuild.
     fn jagged_hash_bind_in_circuit() -> bool {
@@ -1006,6 +1028,13 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     for KoalaBearPoseidon2Outer
 {
     type DigestVariable = [Var<Bn254>; BN254_DIGEST_SIZE];
+
+    fn digest_public_felts(
+        _builder: &mut Builder<C>,
+        _digest: &Self::DigestVariable,
+    ) -> [Felt<C::F>; DIGEST_SIZE] {
+        unreachable!("the outer ring verifies no key tree, so it binds no vk_root")
+    }
 
     /// OUTER (gnark wrap) ring: the wrap commitment is the RAW BN254 root with
     /// no jagged counts to hash-bind, so the lift carries `modified == original`

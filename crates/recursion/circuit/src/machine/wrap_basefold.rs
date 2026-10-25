@@ -123,6 +123,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
+    let vk_root = SC::digest_public_felts(builder, &vk_root);
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
     verify_wrap_basefold_core::<C, SC, A>(
         builder,

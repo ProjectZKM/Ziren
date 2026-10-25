@@ -340,6 +340,7 @@ impl RecursionMachine {
                 Instruction::HintAddCurve(_) => "curve hints",
                 Instruction::Ext2Felts(_) => "Ext2Felts",
                 Instruction::Poseidon2(_) => "Poseidon2",
+                Instruction::PrefixSumChecks(_) => "PrefixSumChecks",
             };
             return Err(MachineError::Unsupported(unsupported));
         }

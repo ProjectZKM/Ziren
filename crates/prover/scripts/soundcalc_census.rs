@@ -244,7 +244,9 @@ fn main() {
     let log_rows =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     let width = |name: &str| {
-        core.chips().iter().find(|chip| chip.name() == name).unwrap().preprocessed_width()
+        zkm_pcs::air::MachineAir::<Val<CoreSC>>::preprocessed_width(
+            core.chips().iter().find(|chip| chip.name() == name).unwrap(),
+        )
     };
     let prep_cells = (1usize << log_rows) * width("Program")
         + (1usize << 16) * width("Byte")
