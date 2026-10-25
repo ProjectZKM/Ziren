@@ -16,7 +16,6 @@
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
-use zkm_pcs::koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress};
 use zkm_pcs::StarkMachine;
 use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_compiler::circuit::AsmCompiler;
@@ -36,12 +35,21 @@ use super::wrap_basefold::{verify_wrap_basefold, ZKMWrapBasefoldWitnessValues};
 ///
 /// Direct analog of [`zkm_prover::ZKMProver::recursion_program`] but
 /// consuming the shard-level basefold proof shape.
-pub fn build_normalize_basefold_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    input: &ZKMCoreBasefoldWitnessValues<KoalaBearPoseidon2>,
+pub fn build_normalize_basefold_program<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMCoreBasefoldWitnessValues<SC>,
     max_log_row_count: usize,
 ) -> RecursionProgram<KoalaBear>
 where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMCoreBasefoldWitnessValues<SC>: Witnessable<
+        InnerConfig,
+        WitnessVariable = super::core_basefold::ZKMCoreBasefoldWitnessVariable<InnerConfig, SC>,
+    >,
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
@@ -52,7 +60,7 @@ where
     let input_var = input.read(&mut builder);
     let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
         input.shard_proofs.iter().map(|sp| sp.chip_heights.clone()).collect();
-    verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
+    verify_core_basefold::<InnerConfig, SC, A>(
         &mut builder,
         input_var,
         machine,
@@ -79,14 +87,26 @@ where
 /// so the program's VK is stable across vk_map regen.  `value_assertions`
 /// controls whether the merkle membership proofs are enforced (true) or
 /// only witnessed (false).
-pub fn build_compose_basefold_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    input: &ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>,
+pub fn build_compose_basefold_program<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMCompressBasefoldWitnessValues<SC>,
     max_log_row_count: usize,
     value_assertions: bool,
     kind: super::compress::PublicValuesOutputDigest,
 ) -> RecursionProgram<KoalaBear>
 where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMCompressBasefoldWitnessValues<SC>: Witnessable<
+        InnerConfig,
+        WitnessVariable = super::compress_basefold::ZKMCompressBasefoldWitnessVariable<
+            InnerConfig,
+            SC,
+        >,
+    >,
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
@@ -95,7 +115,7 @@ where
     let builder_span = tracing::debug_span!("build compose-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Compress);
     let input_var = input.read(&mut builder);
-    verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
+    verify_compress_basefold::<InnerConfig, SC, A>(
         &mut builder,
         input_var,
         machine,
@@ -116,13 +136,25 @@ where
 /// Build the Deferred program.  Verifies a batch of deferred recursive
 /// proofs, each a completed inner recursion, and rebuilds the
 /// reconstruct-deferred-digest chain.
-pub fn build_deferred_basefold_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
-    input: &ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
+pub fn build_deferred_basefold_program<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMDeferredBasefoldWitnessValues<SC>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
 where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMDeferredBasefoldWitnessValues<SC>: Witnessable<
+        InnerConfig,
+        WitnessVariable = super::deferred_basefold::ZKMDeferredBasefoldWitnessVariable<
+            InnerConfig,
+            SC,
+        >,
+    >,
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
@@ -131,7 +163,7 @@ where
     let builder_span = tracing::debug_span!("build deferred-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
-    verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2Compress, A>(
+    verify_deferred_basefold::<InnerConfig, SC, A>(
         &mut builder,
         input_var,
         machine,
@@ -154,19 +186,28 @@ where
 /// Wrap (terminal) takes `value_assertions` like compose to control
 /// whether merkle membership proofs are enforced (true) or only
 /// witnessed (false).
-pub fn build_wrap_basefold_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
-    input: &ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
+pub fn build_wrap_basefold_program<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMWrapBasefoldWitnessValues<SC>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
 where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMWrapBasefoldWitnessValues<SC>: Witnessable<
+        InnerConfig,
+        WitnessVariable = super::wrap_basefold::ZKMWrapBasefoldWitnessVariable<InnerConfig, SC>,
+    >,
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
-    build_wrap_basefold_program_for::<KoalaBearPoseidon2Compress, A>(
+    build_wrap_basefold_program_for::<SC, A>(
         machine,
         input,
         max_log_row_count,
@@ -348,11 +389,10 @@ mod tests {
         let max_log_row_count =
             zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
-        let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
-            &machine,
-            &witness,
-            max_log_row_count,
-        );
+        let program = build_normalize_basefold_program::<
+            KoalaBearPoseidon2,
+            MipsAir<p3_koala_bear::KoalaBear>,
+        >(&machine, &witness, max_log_row_count);
         let _ = program;
     }
 
@@ -368,11 +408,10 @@ mod tests {
         let max_log_row_count =
             zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
-        let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
-            &machine,
-            &witness,
-            max_log_row_count,
-        );
+        let program = build_normalize_basefold_program::<
+            KoalaBearPoseidon2,
+            MipsAir<p3_koala_bear::KoalaBear>,
+        >(&machine, &witness, max_log_row_count);
         println!("NORMALIZE_PROGRAM_INSTRUCTION_COUNT={}", program.instruction_count());
     }
 
@@ -448,11 +487,10 @@ mod tests {
                 super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
             let total_values = addsub_width * (1usize << log_h);
             let log_stacking = pick_log_stacking_height(total_values);
-            let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
-                &machine,
-                &witness,
-                max_log_row_count,
-            );
+            let program = build_normalize_basefold_program::<
+                KoalaBearPoseidon2,
+                MipsAir<p3_koala_bear::KoalaBear>,
+            >(&machine, &witness, max_log_row_count);
             (program.instruction_count(), log_stacking)
         };
 
@@ -521,8 +559,10 @@ mod tests {
             >,
             &super::ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
             usize,
-        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
-            build_normalize_basefold_program::<MipsAir<KoalaBear>>;
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> = build_normalize_basefold_program::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            MipsAir<KoalaBear>,
+        >;
 
         let _deferred: fn(
             &zkm_pcs::StarkMachine<
@@ -534,8 +574,10 @@ mod tests {
             >,
             usize,
             bool,
-        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
-            build_deferred_basefold_program::<MipsAir<KoalaBear>>;
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> = build_deferred_basefold_program::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            MipsAir<KoalaBear>,
+        >;
 
         let _wrap: fn(
             &zkm_pcs::StarkMachine<
@@ -547,7 +589,9 @@ mod tests {
             >,
             usize,
             bool,
-        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
-            build_wrap_basefold_program::<MipsAir<KoalaBear>>;
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> = build_wrap_basefold_program::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            MipsAir<KoalaBear>,
+        >;
     }
 }

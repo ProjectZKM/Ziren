@@ -142,12 +142,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
     max_log_row_count: usize,
     value_assertions: bool,
 ) where
-    SC: KoalaBearFriParametersVariable<
-            C,
-            FriChallengerVariable = crate::challenger::DuplexChallengerVariable<C>,
-            DigestVariable = [Felt<p3_koala_bear::KoalaBear>; DIGEST_SIZE],
-            Val = InnerVal,
-        > + FieldHasherVariable<C>,
+    SC: KoalaBearFriParametersVariable<C, Val = InnerVal> + FieldHasherVariable<C>,
+    <SC as FieldHasherVariable<C>>::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
@@ -169,7 +165,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         is_complete,
     } = input;
 
-    let vk_root = vk_merkle_data.root;
+    let vk_root = SC::digest_public_felts(builder, &vk_merkle_data.root);
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
@@ -289,7 +285,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                 ));
                 whir_evaluation_proof_var =
-                    Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _, _>(
+                    Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
                         builder,
                         host,
                         whir_proof.clone(),
@@ -316,7 +312,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 expected_eval,
                 commit_root,
                 modified_commitment,
-            } => Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+            } => Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_bundle_dispatch(
                 builder,
                 host,
                 basefold_proof.clone(),
@@ -332,25 +328,57 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 None,
                 chip_height_felts_pre.as_deref(),
             )),
-            LiftedEvalProof::WhirBundleBlake3 { .. } => {
-                unreachable!("the Blake3 ring is verified by the binary stage alone")
+            LiftedEvalProof::WhirBundleBlake3 {
+                host,
+                whir_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                main_commitment,
+            } => {
+                pack_info = Some((
+                    host.packing.offsets.len().saturating_sub(1),
+                    host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                ));
+                let preceding_roots: Vec<
+                    <SC as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+                > = if prep_widths.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+                whir_evaluation_proof_var = Some(
+                    <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                        builder,
+                        host,
+                        whir_proof.clone(),
+                        sumcheck.clone(),
+                        jagged_eval.clone(),
+                        *expected_eval,
+                        *commit_root,
+                        *main_commitment,
+                        &preceding_roots,
+                        &preprocessed_round.padding_heights,
+                        max_log_row_count,
+                        &column_counts_by_round,
+                        chip_height_felts_pre.as_deref(),
+                    ),
+                );
+                None
             }
-            LiftedEvalProof::Bytes(bytes) => {
-                Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+            LiftedEvalProof::Bytes(bytes) => Some(
+                <SC as crate::hash::FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                     builder,
                     bytes,
                     max_log_row_count,
                     &column_counts_by_round,
-                ))
-            }
-            LiftedEvalProof::Empty => {
-                Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                ),
+            ),
+            LiftedEvalProof::Empty => Some(
+                <SC as crate::hash::FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                     builder,
                     &[],
                     max_log_row_count,
                     &column_counts_by_round,
-                ))
-            }
+                ),
+            ),
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("deferred path never carries an OUTER (gnark) bundle")
             }
@@ -438,6 +466,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         if let Some(whir_pv) = &whir_shard_proof_variable {
             let lsh = match &evaluation_proof {
                 LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+                LiftedEvalProof::WhirBundleBlake3 { host, .. } => host.commit.log_stacking_height,
                 _ => unreachable!("whir proof variable implies a WhirBundle"),
             };
             let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
@@ -531,7 +560,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 inputs[j * WORD_SIZE + k + 16] = element;
             }
         }
-        reconstruct_deferred_digest = SC::hash(builder, &inputs);
+        let hashed = SC::hash(builder, &inputs);
+        reconstruct_deferred_digest = SC::digest_public_felts(builder, &hashed);
     }
 
     deferred_public_values.start_pc = end_pc;
@@ -563,34 +593,33 @@ pub fn verify_deferred_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *deferred_public_values);
 }
 
-impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress> {
+impl<SC> ZKMDeferredBasefoldWitnessValues<SC>
+where
+    SC: zkm_pcs::BasefoldRing
+        + zkm_pcs::StarkGenericConfig<Val = p3_koala_bear::KoalaBear, Challenge = InnerChallenge>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    SC::Pcs: zkm_pcs::ZeroCommitment<SC>,
+{
     /// Construct a dummy deferred witness for a given deferred shape.
     /// Wraps a basefold compress dummy +
     /// the existing `ZKMMerkleProofWitnessValues::dummy`.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<SC, A>,
         shape: &super::deferred::ZKMDeferredShape,
     ) -> Self
     where
         A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
-            + for<'b> p3_air::Air<
-                zkm_pcs::folder::VerifierConstraintFolder<
-                    'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
-                >,
-            >,
+            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, SC>>,
     {
         use p3_field::PrimeCharacteristicRing;
         let inner_shape = super::ZKMCompressWithVkeyShape {
             compress_shape: shape.inner.clone(),
             merkle_tree_height: shape.height,
         };
-        let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
-        >::dummy::<A>(machine, &inner_shape);
+        let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<SC>::dummy::<A>(
+            machine,
+            &inner_shape,
+        );
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
             inner.vks_and_proofs.len(),
             shape.height,

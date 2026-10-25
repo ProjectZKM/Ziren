@@ -21,10 +21,7 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_core_machine::utils::setup_cli_logger;
 use zkm_pcs::ZKMProverOpts;
 use zkm_prover::components::DefaultProverComponents;
-use zkm_prover::{HashableKey, ZKMProver};
-use zkm_recursion_core::DIGEST_SIZE;
-
-type KB = p3_koala_bear::KoalaBear;
+use zkm_prover::{VkDigest, ZKMProver};
 
 /// Paths to pre-built guest ELFs inside the test-artifacts build
 /// tree.  Hardcoded because the script can't take `test-artifacts`
@@ -51,7 +48,7 @@ fn main() {
     let workloads: Vec<(&str, Vec<u8>, ZKMStdin)> =
         vec![("fibonacci", fib_elf, fib_stdin), ("hello-world", hello_elf, ZKMStdin::default())];
 
-    let mut hashes: BTreeMap<[KB; DIGEST_SIZE], usize> = BTreeMap::new();
+    let mut hashes: BTreeMap<VkDigest, usize> = BTreeMap::new();
 
     for (idx, (label, elf, stdin)) in workloads.iter().enumerate() {
         tracing::info!("\n=== [{}/{}] workload: {} ===", idx + 1, workloads.len(), label);
@@ -70,7 +67,7 @@ fn main() {
             .compress(&vk, core_proof, vec![], opts)
             .unwrap_or_else(|e| panic!("compress failed for {}: {:?}", label, e));
 
-        let h = compressed.vk.hash_koalabear();
+        let h = zkm_prover::types::RingVkDigest::ring_digest(&compressed.vk);
         let new_idx = hashes.len();
         let was_new = !hashes.contains_key(&h);
         hashes.entry(h).or_insert(new_idx);
@@ -80,7 +77,7 @@ fn main() {
         let shrunk = prover
             .shrink(compressed, opts)
             .unwrap_or_else(|e| panic!("shrink failed for {}: {:?}", label, e));
-        let sh = shrunk.vk.hash_koalabear();
+        let sh = zkm_prover::types::RingVkDigest::ring_digest(&shrunk.vk);
         let new_idx = hashes.len();
         let was_new = !hashes.contains_key(&sh);
         hashes.entry(sh).or_insert(new_idx);

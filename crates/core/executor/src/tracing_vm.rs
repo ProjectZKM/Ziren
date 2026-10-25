@@ -125,8 +125,8 @@ impl<'a> TracingVM<'a> {
         chunk: &TraceChunk,
         input_stream: &[Vec<u8>],
         proof_stream: &[(
-            crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
-            zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+            crate::ZKMReduceProof<crate::subproof::SubproofCompressedRing>,
+            zkm_pcs::StarkVerifyingKey<crate::subproof::SubproofCoreRing>,
         )],
     ) -> Result<(), ExecutionError> {
         use crate::events::MemoryRecord;
@@ -371,8 +371,8 @@ pub fn drive_tracing_vm_parallel_with_streams(
     trace: &MinimalTrace,
     input_stream: &[Vec<u8>],
     proof_stream: &[(
-        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
-        zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        crate::ZKMReduceProof<crate::subproof::SubproofCompressedRing>,
+        zkm_pcs::StarkVerifyingKey<crate::subproof::SubproofCoreRing>,
     )],
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
     drive_tracing_vm_parallel_with_shapes(program, opts, trace, input_stream, proof_stream, None)
@@ -387,8 +387,8 @@ pub fn drive_tracing_vm_parallel_with_shapes(
     trace: &MinimalTrace,
     input_stream: &[Vec<u8>],
     proof_stream: &[(
-        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
-        zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        crate::ZKMReduceProof<crate::subproof::SubproofCompressedRing>,
+        zkm_pcs::StarkVerifyingKey<crate::subproof::SubproofCoreRing>,
     )],
     maximal_shapes: Option<MaximalShapes>,
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {

@@ -223,7 +223,7 @@ where
         })
         .collect();
 
-    let evaluation_proof = {
+    let (evaluation_proof, row_counts, padding_column_counts) = {
         let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
@@ -248,26 +248,43 @@ where
                 Some((w, rows))
             })
             .collect();
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_basefold_bundle(
-            &prep_dims,
-            &chip_dims,
-            max_log_row_count,
-            pins,
-            profile,
-        ))
-    };
-
-    let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
-    {
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+        let counts = |packing: &zkm_pcs::jagged_pcs::jagged::PackingMeta| {
             let (rc, pcc) = zkm_pcs::jagged::derive_row_and_padding_counts(
-                &bundle.packing.column_counts,
-                &bundle.packing.offsets,
-                bundle.packing.total_values,
+                &packing.column_counts,
+                &packing.offsets,
+                packing.total_values,
             );
             (vec![rc], vec![pcc])
+        };
+        if profile == zkm_pcs::whir::jagged::WhirProfile::Blake3 {
+            let bundle = dummy_jagged_blake3_bundle(
+                &prep_dims,
+                &chip_dims,
+                max_log_row_count,
+                pins,
+                profile,
+            );
+            let (row_counts, padding_column_counts) = counts(&bundle.packing);
+            (
+                zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes()),
+                row_counts,
+                padding_column_counts,
+            )
+        } else {
+            let bundle = dummy_jagged_basefold_bundle(
+                &prep_dims,
+                &chip_dims,
+                max_log_row_count,
+                pins,
+                profile,
+            );
+            let (row_counts, padding_column_counts) = counts(&bundle.packing);
+            (
+                zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle),
+                row_counts,
+                padding_column_counts,
+            )
         }
-        _ => (Vec::new(), Vec::new()),
     };
 
     let n_prep =
@@ -363,14 +380,66 @@ pub fn dummy_jagged_basefold_bundle(
     pins: Option<zkm_pcs::jagged::RecursionPins>,
     profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
+    let whir_mode =
+        <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::BasefoldRing>::WHIR_INNER_PCS;
+    dummy_jagged_bundle_generic::<zkm_pcs::jagged_pcs::JaggedMmcs, [zkm_pcs::InnerVal; 8]>(
+        prep_dims,
+        chip_dims,
+        max_log_row_count,
+        pins,
+        profile,
+        whir_mode,
+        || [zkm_pcs::InnerVal::ZERO; 8],
+    )
+}
+
+/// The Blake3 ring's dummy bundle: the same geometry, every root and path
+/// node a zero Blake3 digest, opened under WHIR.
+pub fn dummy_jagged_blake3_bundle(
+    prep_dims: &[(usize, usize)],
+    chip_dims: &[(usize, usize)],
+    max_log_row_count: usize,
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs> {
+    dummy_jagged_bundle_generic::<zkm_pcs::kb31_blake3::Blake3Mmcs, [u8; 32]>(
+        prep_dims,
+        chip_dims,
+        max_log_row_count,
+        pins,
+        profile,
+        true,
+        || [0u8; 32],
+    )
+}
+
+/// A dummy bundle over any Merkle hash: `zero_digest` is the hash family's
+/// zero root and path node, `whir_mode` whether the bundle opens under WHIR.
+fn dummy_jagged_bundle_generic<MT, D>(
+    prep_dims: &[(usize, usize)],
+    chip_dims: &[(usize, usize)],
+    max_log_row_count: usize,
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+    whir_mode: bool,
+    zero_digest: impl Fn() -> D + Copy,
+) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<MT>
+where
+    MT: p3_commit::Mmcs<
+        zkm_pcs::InnerVal,
+        Commitment = p3_symmetric::MerkleCap<zkm_pcs::InnerVal, D>,
+        Proof = Vec<D>,
+    >,
+    D: Clone,
+{
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
     use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
     use zkm_pcs::basefold::stacked::StackedBasefoldProof;
     use zkm_pcs::jagged::pack_traces_jagged;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
-    use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProof, PackingMeta};
-    use zkm_pcs::jagged_pcs::{lb_fri_config, pick_log_stacking_height, JaggedCommit, JaggedMmcs};
+    use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProofGeneric, PackingMeta};
+    use zkm_pcs::jagged_pcs::{lb_fri_config, pick_log_stacking_height, JaggedCommitGeneric};
     use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
     use zkm_pcs::{InnerChallenge, InnerVal};
@@ -487,7 +556,7 @@ pub fn dummy_jagged_basefold_bundle(
     };
     let jagged_n = 2 * (log_m + 1);
 
-    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
+    let zero_cap = || MerkleCap::<F, D>::new(vec![zero_digest()]);
 
     let round_arities: Vec<usize> = {
         let k = inner_log_folding_arity.max(1);
@@ -502,35 +571,35 @@ pub fn dummy_jagged_basefold_bundle(
     };
     let univariate_messages: Vec<[EF; 2]> = vec![[EF::ZERO; 2]; log_stacking];
     let fri_commitments: Vec<_> = round_arities.iter().map(|_| zero_cap()).collect();
-    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = {
+    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, MT>> = {
         let mut consumed = 0usize;
         round_arities
             .iter()
             .map(|&arity| {
                 consumed += arity;
                 let path_len = log_stacking + inner_log_blowup - consumed;
-                let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
+                let leaves: Vec<LeafOpening<F, MT>> = (0..num_queries)
                     .map(|_| LeafOpening {
                         values: vec![vec![F::ZERO; (1usize << arity) * D]],
-                        proof: vec![[F::ZERO; 8]; path_len],
+                        proof: vec![zero_digest(); path_len],
                     })
                     .collect();
                 MerkleOpening { leaves }
             })
             .collect()
     };
-    let component_openings_dummy: Vec<MerkleOpening<F, JaggedMmcs>> = round_stripes
+    let component_openings_dummy: Vec<MerkleOpening<F, MT>> = round_stripes
         .iter()
         .map(|stripes| MerkleOpening {
             leaves: (0..num_queries)
                 .map(|_| LeafOpening {
                     values: vec![vec![F::ZERO; *stripes]],
-                    proof: vec![[F::ZERO; 8]; log_stacking + inner_log_blowup],
+                    proof: vec![zero_digest(); log_stacking + inner_log_blowup],
                 })
                 .collect(),
         })
         .collect();
-    let bf_proof = BasefoldProof::<F, EF, JaggedMmcs> {
+    let bf_proof = BasefoldProof::<F, EF, MT> {
         univariate_messages,
         fri_commitments,
         component_polynomials_query_openings_and_proofs: component_openings_dummy,
@@ -539,16 +608,14 @@ pub fn dummy_jagged_basefold_bundle(
         pow_witness: F::ZERO,
         batch_grinding_witness: F::ZERO,
     };
-    let stacked = StackedBasefoldProof::<F, EF, JaggedMmcs> {
+    let stacked = StackedBasefoldProof::<F, EF, MT> {
         basefold_proof: bf_proof,
         batch_evaluations: round_stripes.iter().map(|stripes| vec![EF::ZERO; *stripes]).collect(),
     };
 
-    let whir_mode =
-        <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::BasefoldRing>::WHIR_INNER_PCS;
     let (stacked, whir_proof) = if whir_mode {
-        let empty = StackedBasefoldProof::<F, EF, JaggedMmcs> {
-            basefold_proof: BasefoldProof::<F, EF, JaggedMmcs> {
+        let empty = StackedBasefoldProof::<F, EF, MT> {
+            basefold_proof: BasefoldProof::<F, EF, MT> {
                 univariate_messages: Vec::new(),
                 fri_commitments: Vec::new(),
                 component_polynomials_query_openings_and_proofs: Vec::new(),
@@ -559,7 +626,15 @@ pub fn dummy_jagged_basefold_bundle(
             },
             batch_evaluations: Vec::new(),
         };
-        (empty, Some(dummy_stacked_whir_proof(log_stacking, &round_stripes, profile)))
+        (
+            empty,
+            Some(dummy_stacked_whir_proof::<MT, D>(
+                log_stacking,
+                &round_stripes,
+                profile,
+                zero_digest,
+            )),
+        )
     } else {
         (stacked, None)
     };
@@ -581,12 +656,12 @@ pub fn dummy_jagged_basefold_bundle(
         },
     };
 
-    JaggedPcsProof {
+    JaggedPcsProofGeneric {
         reduction,
         basefold_proof: stacked,
         whir_proof,
         y_per_chip: column_counts.iter().map(|c| vec![EF::ZERO; *c]).collect(),
-        commit: JaggedCommit {
+        commit: JaggedCommitGeneric {
             original_commitment: zero_cap(),
             chip_dims: vec![(1, main_log_dense as u32)],
             area: 0,
@@ -632,18 +707,22 @@ pub fn dummy_jagged_basefold_bundle(
 ///   committed round, `sum ff + (R - 1)`.
 /// * `batch_evaluations[r]`: `round_stripes[r]` claims, then one batching
 ///   grind witness.
-fn dummy_stacked_whir_proof(
+fn dummy_stacked_whir_proof<MT, D>(
     log_stacking: usize,
     round_stripes: &[usize],
     profile: zkm_pcs::whir::jagged::WhirProfile,
-) -> zkm_pcs::whir::stacked::StackedWhirProof<
-    zkm_pcs::InnerVal,
-    zkm_pcs::InnerChallenge,
-    zkm_pcs::jagged_pcs::JaggedMmcs,
-> {
+    zero_digest: impl Fn() -> D + Copy,
+) -> zkm_pcs::whir::stacked::StackedWhirProof<zkm_pcs::InnerVal, zkm_pcs::InnerChallenge, MT>
+where
+    MT: p3_commit::Mmcs<
+        zkm_pcs::InnerVal,
+        Commitment = p3_symmetric::MerkleCap<zkm_pcs::InnerVal, D>,
+        Proof = Vec<D>,
+    >,
+    D: Clone,
+{
     use p3_symmetric::MerkleCap;
     use zkm_pcs::basefold::proof::{LeafOpening, MerkleOpening};
-    use zkm_pcs::jagged_pcs::JaggedMmcs;
     use zkm_pcs::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
     use zkm_pcs::whir::stacked::StackedWhirProof;
     use zkm_pcs::{InnerChallenge, InnerVal};
@@ -656,13 +735,13 @@ fn dummy_stacked_whir_proof(
     let rounds = &config.round_parameters;
     let num_rounds = rounds.len();
     let ff0 = rounds[0].folding_factor;
-    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
+    let zero_cap = || MerkleCap::<F, D>::new(vec![zero_digest()]);
     let poly = || SumcheckPoly(vec![EF::ZERO; 3]);
 
     let mut round_sumcheck_polys: Vec<Vec<SumcheckPoly<EF>>> = Vec::new();
     let mut round_ood_answers: Vec<Vec<EF>> = Vec::new();
     let mut round_commitments = Vec::new();
-    let mut round_query_openings: Vec<MerkleOpening<F, JaggedMmcs>> = Vec::new();
+    let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
     let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
     let mut prev_domain_log = (log_stacking - ff0) + config.starting_log_inv_rate;
@@ -679,18 +758,18 @@ fn dummy_stacked_whir_proof(
         round_commitments.push(zero_cap());
         round_ood_answers.push(vec![EF::ZERO; rc.ood_samples]);
         folding_pow.push(ProofOfWork(F::ZERO));
-        let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..rc.num_queries)
+        let leaves: Vec<LeafOpening<F, MT>> = (0..rc.num_queries)
             .flat_map(|_| match prev_leaf {
                 None => round_stripes
                     .iter()
                     .map(|stripes| LeafOpening {
                         values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
-                        proof: vec![[F::ZERO; 8]; prev_domain_log],
+                        proof: vec![zero_digest(); prev_domain_log],
                     })
                     .collect::<Vec<_>>(),
                 Some(width) => vec![LeafOpening {
                     values: vec![vec![F::ZERO; width]],
-                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                    proof: vec![zero_digest(); prev_domain_log],
                 }],
             })
             .collect();
@@ -698,18 +777,18 @@ fn dummy_stacked_whir_proof(
         prev_domain_log = (rem - next_ff) + rc.log_inv_rate;
         prev_leaf = Some((1 << next_ff) * D);
     }
-    let final_leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..config.final_queries)
+    let final_leaves: Vec<LeafOpening<F, MT>> = (0..config.final_queries)
         .flat_map(|_| match prev_leaf {
             None => round_stripes
                 .iter()
                 .map(|stripes| LeafOpening {
                     values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
-                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                    proof: vec![zero_digest(); prev_domain_log],
                 })
                 .collect::<Vec<_>>(),
             Some(width) => vec![LeafOpening {
                 values: vec![vec![F::ZERO; width]],
-                proof: vec![[F::ZERO; 8]; prev_domain_log],
+                proof: vec![zero_digest(); prev_domain_log],
             }],
         })
         .collect();

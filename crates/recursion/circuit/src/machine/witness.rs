@@ -6,10 +6,8 @@ use p3_symmetric::{Hash, MerkleCap};
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_pcs::{
-    koala_bear_poseidon2::{
-        KoalaBearPoseidon2, KoalaBearPoseidon2Compress, KoalaBearPoseidon2Ring,
-    },
-    Com, InnerChallenge, InnerPerm, InnerVal, StarkVerifyingKey, Word,
+    koala_bear_poseidon2::KoalaBearPoseidon2Ring, Com, InnerChallenge, InnerPerm, InnerVal,
+    StarkVerifyingKey, Word,
 };
 use zkm_recursion_compiler::ir::Builder;
 
@@ -279,11 +277,18 @@ mod basefold_witness {
         wrap_basefold::{ZKMWrapBasefoldWitnessValues, ZKMWrapBasefoldWitnessVariable},
     };
 
-    impl<C> Witnessable<C> for ZKMCoreBasefoldWitnessValues<KoalaBearPoseidon2>
+    impl<C, SC> Witnessable<C> for ZKMCoreBasefoldWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+        SC: zkm_pcs::StarkGenericConfig
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
-        type WitnessVariable = ZKMCoreBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMCoreBasefoldWitnessVariable<C, SC>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
@@ -375,11 +380,18 @@ mod basefold_witness {
         }
     }
 
-    impl<C> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>
+    impl<C, SC> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+        SC: zkm_pcs::StarkGenericConfig
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
-        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2Compress>;
+        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, SC>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);

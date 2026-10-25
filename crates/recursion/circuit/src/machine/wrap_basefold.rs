@@ -620,27 +620,23 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let _zero: Felt<_> = builder.eval(C::F::ZERO);
 }
 
-impl<const P: u8>
-    ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+impl<SC> ZKMWrapBasefoldWitnessValues<SC>
+where
+    SC: zkm_pcs::BasefoldRing
+        + zkm_pcs::StarkGenericConfig<Val = p3_koala_bear::KoalaBear, Challenge = InnerChallenge>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    SC::Pcs: zkm_pcs::ZeroCommitment<SC>,
 {
     /// Construct a dummy wrap witness for a given compress shape.
     /// Wrap takes a single `(vk, root-proof)` pair, so the input
     /// shape's first proof_shape drives the dummy proof construction.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<SC, A>,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
         A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
-            + for<'b> p3_air::Air<
-                zkm_pcs::folder::VerifierConstraintFolder<
-                    'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-                >,
-            >,
+            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, SC>>,
     {
         let vks_and_proofs: Vec<_> = shape
             .compress_shape

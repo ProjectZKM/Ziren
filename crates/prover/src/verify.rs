@@ -2,7 +2,7 @@ use std::{borrow::Borrow, path::Path, str::FromStr};
 
 use anyhow::Result;
 use num_bigint::BigUint;
-use p3_field::{PrimeCharacteristicRing, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
@@ -27,6 +27,7 @@ use zkm_recursion_gnark_ffi::{
 use crate::{
     build::zkm_imm_wrap_vk_mode,
     components::ZKMProverComponents,
+    types::{RingDigests, RingVkDigest},
     utils::{is_recursion_public_values_valid, is_root_public_values_valid},
     CompressedSC, CoreSC, HashableKey, OuterSC, ShrinkBlake3SC, ShrinkSC, ZKMCoreProofData,
     ZKMProver, ZKMVerifyingKey,
@@ -259,14 +260,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             ));
         }
 
-        if public_values.vk_root != self.recursion_vk_root {
+        if public_values.vk_root != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
-        crate::vk_collect_record(&compress_vk.hash_koalabear());
-        if self.vk_verification
-            && !self.recursion_vk_map.contains_key(&compress_vk.hash_koalabear())
-        {
+        crate::vk_collect_record(&compress_vk.ring_digest());
+        if self.vk_verification && !self.recursion_vk_map.contains_key(&compress_vk.ring_digest()) {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
@@ -274,7 +273,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        let vkey_hash = vk.hash_koalabear();
+        let vkey_hash = <CoreSC as RingDigests>::vk_public_digest(&vk.vk);
         if public_values.zkm_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
@@ -290,9 +289,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         proof: &ZKMReduceProof<ShrinkBlake3SC>,
     ) -> Result<(), MachineVerificationError<ShrinkBlake3SC>> {
-        let mut challenger = self.shrink_blake3_prover.machine().config().challenger();
+        let mut challenger = self.shrink_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
-        self.shrink_blake3_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
+        self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RecursionPublicValues<_> =
             proof.proof.public_values.as_slice().borrow();
@@ -302,7 +301,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 "recursion public values are invalid",
             ));
         }
-        if public_values.vk_root != self.recursion_vk_root {
+        if public_values.vk_root != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
         Ok(())
@@ -327,12 +326,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             ));
         }
 
-        if public_values.vk_root != self.recursion_vk_root {
+        if public_values.vk_root != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
-        crate::vk_collect_record(&proof.vk.hash_koalabear());
-        if self.vk_verification && !self.recursion_vk_map.contains_key(&proof.vk.hash_koalabear()) {
+        crate::vk_collect_record(&proof.vk.ring_digest());
+        if self.vk_verification && !self.recursion_vk_map.contains_key(&proof.vk.ring_digest()) {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
@@ -340,7 +339,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        let vkey_hash = vk.hash_koalabear();
+        let vkey_hash = <CoreSC as RingDigests>::vk_public_digest(&vk.vk);
         if public_values.zkm_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
@@ -370,11 +369,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        if *public_values.vk_root() != self.recursion_vk_root {
+        if *public_values.vk_root() != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
-        let vkey_hash = vk.hash_koalabear();
+        let vkey_hash = <CoreSC as RingDigests>::vk_public_digest(&vk.vk);
         if *public_values.zkm_vk_digest() != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
@@ -396,7 +395,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.vk_root_felts()).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(PlonkVerificationError::InvalidVerificationKey.into());
         }
@@ -422,7 +421,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.vk_root_felts()).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(Groth16VerificationError::InvalidVerificationKey.into());
         }
@@ -504,7 +503,7 @@ impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<CompressedSC>> {
-        if vk.hash_u32() != vk_hash {
+        if <CoreSC as RingDigests>::vk_public_digest(vk).map(|n| n.as_canonical_u32()) != vk_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "vk hash from syscall does not match vkey from input",
             ));
@@ -515,7 +514,7 @@ impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
         )?;
         let public_values: &RecursionPublicValues<_> =
             proof.proof.public_values.as_slice().borrow();
-        if public_values.vk_root != self.recursion_vk_root {
+        if public_values.vk_root != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
         for (i, word) in public_values.committed_value_digest.iter().enumerate() {

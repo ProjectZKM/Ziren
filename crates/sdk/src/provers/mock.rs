@@ -77,7 +77,9 @@ impl Prover<DefaultProverComponents> for MockProver {
                 };
 
                 let reduce_vk = StarkVerifyingKey {
-                    commit: vec![[KoalaBear::ZERO; 8]].into(),
+                    commit: zkm_pcs::ZeroCommitment::<zkm_prover::CompressedSC>::zero_commitment(
+                        zkm_pcs::StarkGenericConfig::pcs(&zkm_prover::CompressedSC::default()),
+                    ),
                     pc_start: KoalaBear::ZERO,
                     chip_information: vec![],
                     chip_ordering: HashMap::new(),

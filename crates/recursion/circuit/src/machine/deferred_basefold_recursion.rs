@@ -16,7 +16,6 @@
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress;
 use zkm_pcs::StarkMachine;
 use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_compiler::circuit::AsmCompiler;
@@ -34,13 +33,25 @@ use super::deferred_basefold::{verify_deferred_basefold, ZKMDeferredBasefoldWitn
 /// expected to be invoked with `A = RecursionAir<KoalaBear, DEGREE>`.
 /// The verifier body is shared with the MIPS path — see the parallel
 /// scaffold module for the architectural rationale.
-pub fn build_deferred_basefold_recursion_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
-    input: &ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
+pub fn build_deferred_basefold_recursion_program<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMDeferredBasefoldWitnessValues<SC>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
 where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMDeferredBasefoldWitnessValues<SC>: crate::witness::Witnessable<
+        InnerConfig,
+        WitnessVariable = super::deferred_basefold::ZKMDeferredBasefoldWitnessVariable<
+            InnerConfig,
+            SC,
+        >,
+    >,
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
@@ -49,7 +60,7 @@ where
     let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
-    verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2Compress, A>(
+    verify_deferred_basefold::<InnerConfig, SC, A>(
         &mut builder,
         input_var,
         machine,
@@ -79,7 +90,7 @@ mod tests {
     fn shares_verifier_body_with_mips_path() {
         let _ = verify_deferred_basefold::<
             InnerConfig,
-            KoalaBearPoseidon2Compress,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
             RecursionAir<KoalaBear, 9>,
         >;
     }

@@ -9,10 +9,9 @@ use itertools::Itertools;
 use p3_bn254_fr::Bn254;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use p3_symmetric::CryptographicHasher;
 use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
-use zkm_pcs::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
+use zkm_pcs::{Word, ZKMCoreOpts};
 use zkm_recursion_circuit::machine::RootPublicValues;
 use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
@@ -48,20 +47,18 @@ pub fn zkm_vk_root_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn2
 }
 
 /// Compute the digest of the public values.
-pub fn recursion_public_values_digest<const P: u8>(
-    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
+pub fn recursion_public_values_digest<SC: crate::types::RingDigests>(
+    config: &SC,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
-    let hash = InnerHash::new(config.perm.clone());
     let pv_array = public_values.as_array();
-    hash.hash_slice(&pv_array[0..NUM_PV_ELMS_TO_HASH])
+    config.hash_public_felts(&pv_array[0..NUM_PV_ELMS_TO_HASH])
 }
 
-pub fn root_public_values_digest<const P: u8>(
-    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
+pub fn root_public_values_digest<SC: crate::types::RingDigests>(
+    config: &SC,
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
-    let hash = InnerHash::new(config.perm.clone());
     let input = (*public_values.zkm_vk_digest())
         .into_iter()
         .chain(
@@ -72,11 +69,11 @@ pub fn root_public_values_digest<const P: u8>(
         .chain(std::iter::once(*public_values.exit_code()))
         .chain(*public_values.vk_root())
         .collect::<Vec<_>>();
-    hash.hash_slice(&input)
+    config.hash_public_felts(&input)
 }
 
-pub fn is_root_public_values_valid<const P: u8>(
-    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
+pub fn is_root_public_values_valid<SC: crate::types::RingDigests>(
+    config: &SC,
     public_values: &RootPublicValues<KoalaBear>,
 ) -> bool {
     let expected_digest = root_public_values_digest(config, public_values);
@@ -89,8 +86,8 @@ pub fn is_root_public_values_valid<const P: u8>(
 }
 
 /// Check if the digest of the public values is correct.
-pub fn is_recursion_public_values_valid<const P: u8>(
-    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
+pub fn is_recursion_public_values_valid<SC: crate::types::RingDigests>(
+    config: &SC,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> bool {
     let expected_digest = recursion_public_values_digest(config, public_values);

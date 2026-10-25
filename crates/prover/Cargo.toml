@@ -20,6 +20,7 @@ zkm-recursion-circuit = { workspace = true }
 zkm-recursion-gnark-ffi = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-pcs = { workspace = true }
+p3-blake3 = { workspace = true }
 p3-symmetric = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-primitives = { workspace = true }

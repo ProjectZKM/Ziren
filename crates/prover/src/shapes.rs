@@ -17,7 +17,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
-use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
+use zkm_pcs::{shape::OrderedShape, MachineProver};
 use zkm_recursion_circuit::machine::{
     ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape, ZKMCoreBasefoldWitnessValues,
     ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape, ZKMRecursionShape,
@@ -28,7 +28,7 @@ use zkm_recursion_core::{
     RecursionProgram,
 };
 
-use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
+use crate::{components::ZKMProverComponents, CompressAir, ZKMProver};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
@@ -167,7 +167,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
     num_compiler_workers: usize,
     num_setup_workers: usize,
     indices: Option<Vec<usize>>,
-) -> (BTreeSet<[KoalaBear; DIGEST_SIZE]>, Vec<usize>, usize) {
+) -> (BTreeSet<crate::VkDigest>, Vec<usize>, usize) {
     let prover = ZKMProver::<C>::new_with_vk_verification(Some(!dummy));
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
@@ -261,15 +261,15 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         let vk_digest =
                             tracing::debug_span!("setup for program {}", i).in_scope(|| {
                                 match is_shrink {
-                                    Stage::Shrink => {
-                                        prover.shrink_prover.setup(&program).1.hash_koalabear()
-                                    }
-                                    Stage::Root => {
-                                        prover.root_prover.setup(&program).1.hash_koalabear()
-                                    }
-                                    Stage::Compress => {
-                                        prover.compress_prover.setup(&program).1.hash_koalabear()
-                                    }
+                                    Stage::Shrink => <crate::ShrinkSC as crate::types::RingDigests>::vk_map_digest(
+                                        &prover.shrink_prover.setup(&program).1,
+                                    ),
+                                    Stage::Root => <crate::CompressedSC as crate::types::RingDigests>::vk_map_digest(
+                                        &prover.root_prover.setup(&program).1,
+                                    ),
+                                    Stage::Compress => <crate::InnerSC as crate::types::RingDigests>::vk_map_digest(
+                                        &prover.compress_prover.setup(&program).1,
+                                    ),
                                 }
                             });
                         let setup_ns = setup_start.elapsed().as_nanos() as u64;
@@ -376,10 +376,8 @@ pub fn build_vk_map_to_file<C: ZKMProverComponents>(
 }
 
 /// The core (MIPS) machine the normalize shapes are enumerated over.
-pub type CoreMachine = zkm_pcs::StarkMachine<
-    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-    zkm_core_machine::mips::MipsAir<KoalaBear>,
->;
+pub type CoreMachine =
+    zkm_pcs::StarkMachine<crate::CoreSC, zkm_core_machine::mips::MipsAir<KoalaBear>>;
 
 const LOG_STACK: usize = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
 
@@ -657,10 +655,13 @@ impl ZKMProofShape {
     pub fn dummy_vk_map(
         recursion_shape_config: &RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
-    ) -> BTreeMap<[KoalaBear; DIGEST_SIZE], usize> {
+    ) -> BTreeMap<crate::VkDigest, usize> {
         Self::generate(recursion_shape_config, reduce_batch_size)
             .enumerate()
-            .map(|(i, _)| ([KoalaBear::from_usize(i); DIGEST_SIZE], i))
+            .map(|(i, _)| {
+                let digest: crate::VkDigest = core::array::from_fn(|_| KoalaBear::from_usize(i));
+                (digest, i)
+            })
             .collect()
     }
 }
@@ -870,9 +871,8 @@ mod tests {
                     compress_shape: compress_shape.clone(),
                     merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
                 };
-                let mut witness = ZKMCompressBasefoldWitnessValues::<
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-                >::dummy(machine, &shape);
+                let mut witness =
+                    ZKMCompressBasefoldWitnessValues::<crate::InnerSC>::dummy(machine, &shape);
                 witness.is_complete = is_complete;
                 let program = build_compose_basefold_recursion_program(
                     machine,
@@ -887,9 +887,10 @@ mod tests {
             }
             let dshape =
                 ZKMDeferredShape::new(compress_shape.clone(), crate::VK_MERKLE_TREE_HEIGHT);
-            let witness = ZKMDeferredBasefoldWitnessValues::<
-                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
-            >::dummy(prover.root_prover.machine(), &dshape);
+            let witness = ZKMDeferredBasefoldWitnessValues::<crate::CompressedSC>::dummy(
+                prover.root_prover.machine(),
+                &dshape,
+            );
             let program = build_deferred_basefold_recursion_program(
                 prover.root_prover.machine(),
                 &witness,
@@ -963,7 +964,7 @@ mod tests {
             );
             let program = prover.compose_program_basefold(&input);
             let (_pk, vk) = prover.compress_prover.setup(&program.0);
-            format!("{:?}", vk.hash_koalabear())
+            format!("{:?}", <crate::InnerSC as crate::types::RingDigests>::vk_map_digest(&vk))
         };
 
         for arity in [1usize, 4] {
@@ -1280,15 +1281,17 @@ mod tests {
         let bands: Vec<usize> = band_reps.keys().cloned().collect();
         tracing::info!("[HETERO] cluster chips={} bands={:?}", names.len(), bands);
 
-        let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
+        let setup_vk = |shape: &ZKMRecursionShape| -> Option<crate::VkDigest> {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let d = ZKMCoreBasefoldWitnessValues::dummy(machine, shape);
                 let p = prover.recursion_program_basefold(&d);
-                prover.compress_prover.setup(&p.0).1.hash_koalabear()
+                <crate::InnerSC as crate::types::RingDigests>::vk_map_digest(
+                    &prover.compress_prover.setup(&p.0).1,
+                )
             }))
             .ok()
         };
-        let mut uniform_vks: BTreeSet<[KoalaBear; DIGEST_SIZE]> = BTreeSet::new();
+        let mut uniform_vks: BTreeSet<crate::VkDigest> = BTreeSet::new();
         for (b, os) in band_reps.iter() {
             if *b > 30 {
                 continue;
@@ -1368,7 +1371,7 @@ mod tests {
         let shrink_count =
             all_shapes.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
 
-        let map: std::collections::BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+        let map: std::collections::BTreeMap<crate::VkDigest, usize> =
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap();
         let map_size = map.len();
         let prod_height = map_size.next_power_of_two().ilog2() as usize;
@@ -1485,7 +1488,9 @@ mod normalize_enumeration_tests {
         let (program, _) = prover.recursion_program_basefold(&input);
         let (_, vk) = prover.compress_prover.setup(&program);
         assert!(
-            prover.recursion_vk_map.contains_key(&vk.hash_koalabear()),
+            prover
+                .recursion_vk_map
+                .contains_key(&<crate::InnerSC as crate::types::RingDigests>::vk_map_digest(&vk)),
             "vk_map.bin must cover the padded Keccak shard"
         );
     }
@@ -1630,7 +1635,7 @@ mod shape_program_dump {
             };
             std::fs::write(format!("{dir}/p{index}.bin"), &bytes).expect("write dump");
             let (_, vk) = prover.compress_prover.setup(&program);
-            let digest = vk.hash_koalabear();
+            let digest = <crate::InnerSC as crate::types::RingDigests>::vk_map_digest(&vk);
             tracing::info!(
                 "DUMP shape={index} program={program_digest:016x} bytes={} vk={digest:?} heights={heights:?}",
                 bytes.len()

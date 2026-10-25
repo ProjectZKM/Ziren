@@ -64,11 +64,11 @@ pub trait HashableKey {
 
 impl HashableKey for ZKMVerifyingKey {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        self.vk.hash_koalabear()
+        <CoreSC as RingDigests>::vk_public_digest(&self.vk)
     }
 
     fn hash_u32(&self) -> [u32; DIGEST_SIZE] {
-        self.vk.hash_u32()
+        self.hash_koalabear().map(|n| n.as_canonical_u32())
     }
 }
 
@@ -237,7 +237,7 @@ pub struct BinaryShrinkProof {
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 #[error("vk not allowed: {digest:?} (map_size={map_size})")]
 pub struct VkNotAllowed {
-    pub digest: [u32; 8],
+    pub digest: Vec<u32>,
     pub map_size: usize,
 }
 
@@ -259,4 +259,91 @@ pub enum ZKMCircuitWitness {
     /// Basefold-shape deferred input — verifies already-recursed deferred
     /// branches. Dispatches to `build_deferred_basefold_program`.
     DeferredBasefold(ZKMDeferredBasefoldWitnessValues<CompressedSC>),
+}
+
+/// What a ring hashes on the host as its circuit hashes it in-ring: the
+/// digests of verifying keys and of public values.
+pub trait RingDigests:
+    StarkGenericConfig<Val = KoalaBear> + zkm_recursion_circuit::hash::FieldHasher<KoalaBear>
+{
+    /// The key's digest, which keys the recursion key map and its tree.
+    fn vk_map_digest(
+        vk: &StarkVerifyingKey<Self>,
+    ) -> <Self as zkm_recursion_circuit::hash::FieldHasher<KoalaBear>>::Digest;
+
+    /// A digest as the eight elements the public values carry: the digest
+    /// itself for an eight-element digest, its root felts for a Blake3 one.
+    fn public_felts(
+        digest: <Self as zkm_recursion_circuit::hash::FieldHasher<KoalaBear>>::Digest,
+    ) -> [KoalaBear; DIGEST_SIZE];
+
+    /// The key's digest as the eight elements the public values carry.
+    fn vk_public_digest(vk: &StarkVerifyingKey<Self>) -> [KoalaBear; DIGEST_SIZE] {
+        Self::public_felts(Self::vk_map_digest(vk))
+    }
+
+    /// The hash of `values` as the eight elements of a public values digest.
+    fn hash_public_felts(&self, values: &[KoalaBear]) -> [KoalaBear; DIGEST_SIZE];
+}
+
+impl<const P: u8> RingDigests for zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P> {
+    fn vk_map_digest(vk: &StarkVerifyingKey<Self>) -> [KoalaBear; DIGEST_SIZE] {
+        vk.hash_koalabear()
+    }
+
+    fn public_felts(digest: [KoalaBear; DIGEST_SIZE]) -> [KoalaBear; DIGEST_SIZE] {
+        digest
+    }
+
+    fn hash_public_felts(&self, values: &[KoalaBear]) -> [KoalaBear; DIGEST_SIZE] {
+        use p3_symmetric::CryptographicHasher;
+        zkm_pcs::InnerHash::new(self.perm.clone()).hash_slice(values)
+    }
+}
+
+impl RingDigests for zkm_pcs::KoalaBearBlake3 {
+    fn vk_map_digest(
+        vk: &StarkVerifyingKey<Self>,
+    ) -> [KoalaBear; zkm_recursion_circuit::blake3_circuit::DIGEST_LIMBS] {
+        zkm_recursion_circuit::blake3_circuit::vk_digest(vk)
+    }
+
+    fn public_felts(
+        digest: [KoalaBear; zkm_recursion_circuit::blake3_circuit::DIGEST_LIMBS],
+    ) -> [KoalaBear; DIGEST_SIZE] {
+        zkm_pcs::kb31_blake3::root_felts(&zkm_recursion_circuit::blake3_circuit::limbs_digest(
+            &digest,
+        ))
+    }
+
+    fn hash_public_felts(&self, values: &[KoalaBear]) -> [KoalaBear; DIGEST_SIZE] {
+        use p3_symmetric::CryptographicHasher;
+        let bytes = values.iter().flat_map(|v| v.as_canonical_u32().to_le_bytes());
+        let digest: [u8; 32] = p3_blake3::Blake3.hash_iter(bytes);
+        zkm_pcs::kb31_blake3::root_felts(&digest)
+    }
+}
+
+/// A verifying key's digest under its ring, as the recursion key map knows it.
+pub trait RingVkDigest {
+    /// The ring's digest of the key.
+    type Digest;
+
+    fn ring_digest(&self) -> Self::Digest;
+}
+
+impl<SC: RingDigests> RingVkDigest for StarkVerifyingKey<SC> {
+    type Digest = <SC as zkm_recursion_circuit::hash::FieldHasher<KoalaBear>>::Digest;
+
+    fn ring_digest(&self) -> Self::Digest {
+        SC::vk_map_digest(self)
+    }
+}
+
+impl RingVkDigest for ZKMVerifyingKey {
+    type Digest = <CoreSC as zkm_recursion_circuit::hash::FieldHasher<KoalaBear>>::Digest;
+
+    fn ring_digest(&self) -> Self::Digest {
+        CoreSC::vk_map_digest(&self.vk)
+    }
 }

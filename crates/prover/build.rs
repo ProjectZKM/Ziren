@@ -6,5 +6,4 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=vk_map.bin");
-    println!("cargo:rerun-if-changed=dummy_vk_map.bin");
 }

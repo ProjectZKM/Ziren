@@ -123,12 +123,8 @@ pub fn verify_core_basefold<C, SC, A>(
     max_log_row_count: usize,
     chip_heights_per_shard: &[std::collections::BTreeMap<String, usize>],
 ) where
-    SC: KoalaBearFriParametersVariable<
-        C,
-        FriChallengerVariable = crate::challenger::DuplexChallengerVariable<C>,
-        DigestVariable = [Felt<p3_koala_bear::KoalaBear>; DIGEST_SIZE],
-        Val = InnerVal,
-    >,
+    SC: KoalaBearFriParametersVariable<C, Val = InnerVal> + crate::hash::FieldHasherVariable<C>,
+    <SC as crate::hash::FieldHasherVariable<C>>::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
@@ -287,7 +283,7 @@ pub fn verify_core_basefold<C, SC, A>(
                         host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                     ));
                     whir_evaluation_proof_var =
-                        Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _, _>(
+                        Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
                             builder,
                             host,
                             whir_proof.clone(),
@@ -311,7 +307,7 @@ pub fn verify_core_basefold<C, SC, A>(
                         host.packing.offsets.len().saturating_sub(1),
                         host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                     ));
-                    Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+                    Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_bundle_dispatch(
                         builder,
                         host,
                         basefold_proof.clone(),
@@ -328,11 +324,41 @@ pub fn verify_core_basefold<C, SC, A>(
                         cps_heights,
                     ))
                 }
-                LiftedEvalProof::WhirBundleBlake3 { .. } => {
-                    unreachable!("the Blake3 ring is verified by the binary stage alone")
+LiftedEvalProof::WhirBundleBlake3 {
+                    host,
+                    whir_proof,
+                    sumcheck,
+                    jagged_eval,
+                    expected_eval,
+                    commit_root,
+                    main_commitment,
+                } => {
+                    pack_info = Some((
+                        host.packing.offsets.len().saturating_sub(1),
+                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                    ));
+                    let preceding_roots: Vec<<SC as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
+                        if prep_widths_pre.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+                    whir_evaluation_proof_var =
+                        Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                            builder,
+                            host,
+                            whir_proof.clone(),
+                            sumcheck.clone(),
+                            jagged_eval.clone(),
+                            *expected_eval,
+                            *commit_root,
+                            *main_commitment,
+                            &preceding_roots,
+                            &preprocessed_round.padding_heights,
+                            max_log_row_count,
+                            &column_counts_by_round_pre,
+                            cps_heights,
+                        ));
+                    None
                 }
                 LiftedEvalProof::Bytes(bytes) => {
-                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                    Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                         builder,
                         bytes,
                         max_log_row_count,
@@ -340,7 +366,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     ))
                 }
                 LiftedEvalProof::Empty => {
-                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                    Some(<SC as crate::hash::FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                         builder,
                         &[],
                         max_log_row_count,
@@ -455,6 +481,7 @@ pub fn verify_core_basefold<C, SC, A>(
             if let Some(whir_pv) = &whir_shard_proof_variable {
                 let lsh = match &evaluation_proof {
                     LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+                    LiftedEvalProof::WhirBundleBlake3 { host, .. } => host.commit.log_stacking_height,
                     _ => unreachable!("whir proof variable implies a WhirBundle"),
                 };
                 let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
@@ -772,7 +799,7 @@ pub fn verify_core_basefold<C, SC, A>(
     recursion_public_values.last_init_addr_bits = current_init_addr_bits;
     recursion_public_values.previous_finalize_addr_bits = initial_previous_finalize_addr_bits;
     recursion_public_values.last_finalize_addr_bits = current_finalize_addr_bits;
-    recursion_public_values.zkm_vk_digest = vk_digest;
+    recursion_public_values.zkm_vk_digest = SC::digest_public_felts(builder, &vk_digest);
     recursion_public_values.global_cumulative_sum = global_cumulative_sum;
     recursion_public_values.start_reconstruct_deferred_digest = start_deferred_digest;
     recursion_public_values.end_reconstruct_deferred_digest = end_deferred_digest;
@@ -790,7 +817,14 @@ pub fn verify_core_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *recursion_public_values);
 }
 
-impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl<SC> ZKMCoreBasefoldWitnessValues<SC>
+where
+    SC: zkm_pcs::BasefoldRing
+        + zkm_pcs::StarkGenericConfig<Val = p3_koala_bear::KoalaBear, Challenge = InnerChallenge>,
+    SC::Pcs: zkm_pcs::ZeroCommitment<SC>,
+    zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>:
+        for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, SC>>,
+{
     /// Construct a dummy witness for a given recursion shape.
     /// Drives the multi-chip basefold dummy helper for each shard
     /// in `shape.proof_shapes`, producing a witness whose
@@ -802,7 +836,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     /// programs from cached shapes.
     pub fn dummy(
         machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            SC,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
         shape: &super::core::ZKMRecursionShape,
@@ -828,7 +862,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     /// normalize program compared with an enumerated representative's.
     pub fn dummy_rows(
         machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            SC,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
         rows: &[(String, usize)],
@@ -870,7 +904,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             .map(|(i, (name, _, _))| (name.clone(), i))
             .collect::<hashbrown::HashMap<_, _>>();
         let vk = StarkVerifyingKey {
-            commit: crate::fri::dummy_commit(),
+            commit: zkm_pcs::ZeroCommitment::<SC>::zero_commitment(machine.config().pcs()),
             pc_start: p3_koala_bear::KoalaBear::ZERO,
             initial_global_cumulative_sum: zkm_pcs::septic_digest::SepticDigest::<
                 p3_koala_bear::KoalaBear,

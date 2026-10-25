@@ -17,7 +17,7 @@ use p3_air::BaseAir;
 use p3_uni_stark::{get_symbolic_constraints, AirLayout};
 use zkm_core_machine::mips::MipsAir;
 use zkm_pcs::PROOF_MAX_NUM_PVS;
-use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig, Val};
+use zkm_pcs::{air::MachineAir, StarkGenericConfig, Val};
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
 
 fn census<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
@@ -189,7 +189,7 @@ fn whir_schedule(
 }
 
 fn main() {
-    let core = MipsAir::<Val<CoreSC>>::machine(KoalaBearPoseidon2::default());
+    let core = MipsAir::<Val<CoreSC>>::machine(CoreSC::default());
     census("core", &core);
     let compress = CompressAir::<Val<InnerSC>>::compress_machine(InnerSC::default());
     census("compress", &compress);

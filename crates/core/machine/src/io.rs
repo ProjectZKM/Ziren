@@ -1,9 +1,7 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use zkm_core_executor::subproof::{SubproofCompressedRing, SubproofCoreRing};
 use zkm_core_executor::ZKMReduceProof;
-use zkm_pcs::{
-    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
-    StarkVerifyingKey,
-};
+use zkm_pcs::StarkVerifyingKey;
 
 /// Standard input for the prover.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -12,8 +10,7 @@ pub struct ZKMStdin {
     /// a vec of bytes at a time.
     pub buffer: Vec<Vec<u8>>,
     pub ptr: usize,
-    pub proofs:
-        Vec<(ZKMReduceProof<KoalaBearPoseidon2Compress>, StarkVerifyingKey<KoalaBearPoseidon2>)>,
+    pub proofs: Vec<(ZKMReduceProof<SubproofCompressedRing>, StarkVerifyingKey<SubproofCoreRing>)>,
 }
 
 impl ZKMStdin {
@@ -59,8 +56,8 @@ impl ZKMStdin {
 
     pub fn write_proof(
         &mut self,
-        proof: ZKMReduceProof<KoalaBearPoseidon2Compress>,
-        vk: StarkVerifyingKey<KoalaBearPoseidon2>,
+        proof: ZKMReduceProof<SubproofCompressedRing>,
+        vk: StarkVerifyingKey<SubproofCoreRing>,
     ) {
         self.proofs.push((proof, vk));
     }
