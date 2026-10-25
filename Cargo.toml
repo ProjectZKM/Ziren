@@ -151,6 +151,8 @@ test-artifacts = { path = "crates/test-artifacts" }
 # misc
 hashbrown = "0.14.5"
 
+blake3 = { version = "1.8.5", default-features = false }
+
 [patch."https://github.com/ProjectZKM/Ziren.git"]
 zkm-lib = { path = "crates/zkvm/lib" }
 zkm-primitives = { path = "crates/primitives" }
