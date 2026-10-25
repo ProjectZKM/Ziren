@@ -183,5 +183,5 @@ fn test_incorrect_public_value() {
     let challenger = Challenger::from_hasher(vec![], byte_hash);
     let config = p3_uni_stark::StarkConfig::new(pcs, challenger);
     let pis = vec![Mersenne31::from_u64(0), Mersenne31::from_u64(1), Mersenne31::from_u64(123_123)];
-    p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis);
+    p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis).expect("the test proof proves");
 }

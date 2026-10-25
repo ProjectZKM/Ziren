@@ -183,26 +183,28 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RewireAir {
             cell::<AB>(&prep.in_base, 0, element.clone()),
             BusActivation::Boolean(prep.reads_element.into()),
         );
-        for u in 0..WIDTH {
+        for (u, (row, reads)) in m.iter().zip(prep.reads.iter()).enumerate() {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
-                cell::<AB>(&prep.in_base, u as u32, pack::<AB>(&m[u])),
-                BusActivation::Boolean(prep.reads[u].into()),
+                cell::<AB>(&prep.in_base, u as u32, pack::<AB>(row)),
+                BusActivation::Boolean((*reads).into()),
             );
         }
-        for j in 0..ELEMENT_BYTES {
+        for (j, (row, (bytes, split))) in
+            m.iter().zip(prep.bytes.iter().zip(prep.split.iter())).enumerate().take(ELEMENT_BYTES)
+        {
             builder.declare_bus(
                 WRITE,
                 BusDirection::Push,
-                cell::<AB>(&prep.out_base, j as u32, pack::<AB>(&m[j])),
-                BusActivation::Boolean(prep.bytes[j].into()),
+                cell::<AB>(&prep.out_base, j as u32, pack::<AB>(row)),
+                BusActivation::Boolean((*bytes).into()),
             );
             builder.declare_bus(
                 WRITE,
                 BusDirection::Push,
-                cell::<AB>(&prep.out_base, 128 * j as u32, pack::<AB>(&m[j])),
-                BusActivation::Boolean(prep.split[j].into()),
+                cell::<AB>(&prep.out_base, 128 * j as u32, pack::<AB>(row)),
+                BusActivation::Boolean((*split).into()),
             );
         }
         for i in 0..VALUE_BITS {
@@ -213,13 +215,13 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RewireAir {
                 BusActivation::Boolean(prep.bits[i].into()),
             );
         }
-        for j in 0..8 {
-            let column: Vec<AB::Var> = (0..WIDTH).map(|u| m[u][j]).collect();
+        for (j, gathered) in prep.gathered.iter().enumerate().take(8) {
+            let column: Vec<AB::Var> = m.iter().map(|row| row[j]).collect();
             builder.declare_bus(
                 WRITE,
                 BusDirection::Push,
                 cell::<AB>(&prep.out_base, j as u32, pack::<AB>(&column)),
-                BusActivation::Boolean(prep.gathered[j].into()),
+                BusActivation::Boolean((*gathered).into()),
             );
         }
         builder.declare_bus(

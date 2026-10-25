@@ -378,7 +378,6 @@ impl RecursionMachine {
     }
 
     /// The stage's public values of a program committing `digest`.
-    #[must_use]
     pub fn public_values(digest: &[u32; DIGEST_SIZE]) -> [F; DIGEST_SIZE] {
         digest.map(public_value)
     }

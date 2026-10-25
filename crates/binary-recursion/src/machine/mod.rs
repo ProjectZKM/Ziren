@@ -223,7 +223,6 @@ impl TapeMachine {
 
     /// The public values of a run on `inputs`: its first public inputs,
     /// padded with zeros to what the ledger binds.
-    #[must_use]
     pub fn public_values(&self, inputs: &[F]) -> [F; MAX_PUBLIC] {
         core::array::from_fn(|i| if i < self.program.num_public { inputs[i] } else { F::ZERO })
     }

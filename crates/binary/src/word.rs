@@ -426,9 +426,9 @@ pub fn eval_product<AB: AirBuilder>(
     b: &[AB::Expr; KB_BITS],
     cols: &ProductCols<AB::Var>,
 ) -> [AB::Expr; PRODUCT_BITS] {
-    for i in 0..KB_BITS {
-        for j in 0..KB_BITS {
-            builder.assert_zero(a[i].clone() * b[j].clone() + cols.gated[i][j].into());
+    for (a_bit, gated_row) in a.iter().zip(cols.gated.iter()) {
+        for (b_bit, &gated_bit) in b.iter().zip(gated_row.iter()) {
+            builder.assert_zero(a_bit.clone() * b_bit.clone() + gated_bit.into());
         }
     }
     let gated: [[AB::Expr; KB_BITS]; KB_BITS] =

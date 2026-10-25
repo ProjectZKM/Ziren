@@ -266,7 +266,6 @@ pub const ROOT_WORD_BITS: u32 = 30;
 /// low thirty bits of each little-endian word of the digest.  Thirty bits
 /// fit below the field order, so the map is injective on what it keeps,
 /// and dropping sixteen bits of a Blake3 digest leaves a 240-bit binding.
-#[must_use]
 pub fn root_felts(root: &Blake3Digest) -> [Val; BLAKE3_DIGEST_FELTS] {
     core::array::from_fn(|i| {
         let word =

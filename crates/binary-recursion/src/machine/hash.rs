@@ -343,11 +343,11 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for HashAir {
         builder.assert_zero(is_msg.clone() * (AB::Expr::ONE - prep.is_merkle.into()) * bit.clone());
 
         let cells: [AB::Expr; 2] = core::array::from_fn(|k| pack::<AB>(&msg.cells[k]));
-        for k in 0..2 {
+        for (slot, packed) in prep.slots.iter().zip(cells.iter()) {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
-                cell::<AB>(&prep.slots[k], 0, cells[k].clone()),
+                cell::<AB>(slot, 0, packed.clone()),
                 BusActivation::Boolean(prep.reads_slots.into()),
             );
         }
