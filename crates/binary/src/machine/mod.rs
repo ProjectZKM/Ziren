@@ -617,6 +617,7 @@ mod tests {
                 out_addrs,
                 cv_addrs,
                 block_addrs,
+                0,
                 block_len,
                 flags,
             ));

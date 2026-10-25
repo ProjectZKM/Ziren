@@ -454,4 +454,21 @@ pub mod tests {
 
         test_instructions(instructions);
     }
+
+    /// The main and preprocessed width of every chip of the compress
+    /// machine, for sizing the recursion shape classes.
+    #[test]
+    fn chip_width_census() {
+        use p3_air::BaseAir;
+        use zkm_pcs::air::MachineAir;
+        let machine = A::compress_machine(KoalaBearPoseidon2::default());
+        for chip in machine.chips() {
+            println!(
+                "[WIDTHS] {} main={} prep={}",
+                MachineAir::<F>::name(chip),
+                BaseAir::<F>::width(&chip.air),
+                MachineAir::<F>::preprocessed_width(chip)
+            );
+        }
+    }
 }

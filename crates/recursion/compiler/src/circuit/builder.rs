@@ -39,6 +39,7 @@ pub trait CircuitV2Builder<C: Config> {
         &mut self,
         chaining_value: [Felt<C::F>; BLAKE3_CV_LIMBS],
         block: [Felt<C::F>; BLAKE3_BLOCK_LIMBS],
+        counter: u32,
         block_len: u32,
         flags: u32,
     ) -> [Felt<C::F>; BLAKE3_OUT_LIMBS];
@@ -260,12 +261,13 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     }
 
     /// One Blake3 compression of `block` under `chaining_value`, over
-    /// 16-bit limbs, with the counter zero; the output is the eight words
-    /// that chain to the next block or form the digest.
+    /// 16-bit limbs, at chunk `counter`; the output is the eight words that
+    /// chain to the next block or form the digest.
     fn blake3_compress_v2(
         &mut self,
         chaining_value: [Felt<C::F>; BLAKE3_CV_LIMBS],
         block: [Felt<C::F>; BLAKE3_BLOCK_LIMBS],
+        counter: u32,
         block_len: u32,
         flags: u32,
     ) -> [Felt<C::F>; BLAKE3_OUT_LIMBS] {
@@ -274,6 +276,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             output,
             chaining_value,
             block,
+            counter,
             block_len,
             flags,
         ))));

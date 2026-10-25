@@ -198,6 +198,7 @@ pub fn blake3_compress<F: PrimeCharacteristicRing>(
     output: [u32; BLAKE3_OUT_LIMBS],
     chaining_value: [u32; BLAKE3_CV_LIMBS],
     block: [u32; BLAKE3_BLOCK_LIMBS],
+    counter: u32,
     block_len: u32,
     flags: u32,
 ) -> Instruction<F> {
@@ -207,6 +208,7 @@ pub fn blake3_compress<F: PrimeCharacteristicRing>(
             block: block.map(F::from_u32).map(Address),
             output: output.map(F::from_u32).map(Address),
         },
+        counter: F::from_u32(counter),
         block_len: F::from_u32(block_len),
         flags: F::from_u32(flags),
         mults: mults.map(F::from_u32),

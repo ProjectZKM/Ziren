@@ -357,6 +357,7 @@ where
         dst: [impl Reg<C>; BLAKE3_OUT_LIMBS],
         chaining_value: [impl Reg<C>; BLAKE3_CV_LIMBS],
         block: [impl Reg<C>; BLAKE3_BLOCK_LIMBS],
+        counter: u32,
         block_len: u32,
         flags: u32,
     ) -> Instruction<C::F> {
@@ -366,6 +367,7 @@ where
                 block: block.map(|r| r.read(self)),
                 output: dst.map(|r| r.write(self)),
             },
+            counter: C::F::from_u32(counter),
             block_len: C::F::from_u32(block_len),
             flags: C::F::from_u32(flags),
             mults: [C::F::ZERO; BLAKE3_OUT_LIMBS],
@@ -625,8 +627,8 @@ where
                 f(self.poseidon2_permute(data.0, data.1))
             }
             DslIr::CircuitV2Blake3Compress(data) => {
-                let (output, chaining_value, block, block_len, flags) = *data;
-                f(self.blake3_compress(output, chaining_value, block, block_len, flags))
+                let (output, chaining_value, block, counter, block_len, flags) = *data;
+                f(self.blake3_compress(output, chaining_value, block, counter, block_len, flags))
             }
             DslIr::CircuitV2FeltLimbs(output, value) => f(self.felt_limbs(output, value)),
             DslIr::CircuitV2HintBitsF(output, value) => {

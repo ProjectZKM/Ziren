@@ -653,7 +653,7 @@ where
                 }
             }
             Instruction::Blake3Compress(instr) => {
-                let Blake3CompressInstr { addrs, block_len, flags, mults } = &**instr;
+                let Blake3CompressInstr { addrs, counter, block_len, flags, mults } = &**instr;
                 let limb = |addr: &Address<F>| {
                     let value = self.mr_us(*addr).val[0];
                     debug_assert!(value.as_canonical_u32() < 1 << 16, "a Blake3 limb is 16 bits");
@@ -671,7 +671,7 @@ where
                 let out = blake3::compress(
                     &cv,
                     &block,
-                    0,
+                    u64::from(counter.as_canonical_u32()),
                     block_len.as_canonical_u32(),
                     flags.as_canonical_u32(),
                 );
@@ -689,6 +689,7 @@ where
                                 block: block_limbs,
                                 output: out_limbs,
                             },
+                            counter: *counter,
                             block_len: *block_len,
                             flags: *flags,
                         },

@@ -165,22 +165,26 @@ pub struct Blake3CompressIo<V> {
     pub output: [V; BLAKE3_OUT_LIMBS],
 }
 
-/// An instruction invoking the Blake3 compression function; the block
-/// length and the domain flags are immediates, fixed by the program.
+/// An instruction invoking the Blake3 compression function; the chunk
+/// counter, the block length and the domain flags are immediates, fixed by
+/// the program.  The counter's high word is zero.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Blake3CompressInstr<F> {
     pub addrs: Blake3CompressIo<Address<F>>,
+    pub counter: F,
     pub block_len: F,
     pub flags: F,
     pub mults: [F; BLAKE3_OUT_LIMBS],
 }
 
-/// The event of one Blake3 compression: its limbs, length and flags.
+/// The event of one Blake3 compression: its limbs, counter, length and
+/// flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Blake3CompressEvent<F> {
     pub io: Blake3CompressIo<F>,
+    pub counter: F,
     pub block_len: F,
     pub flags: F,
 }

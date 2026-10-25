@@ -13,8 +13,9 @@
 //!
 //! Memory holds the inputs and outputs as 16-bit limbs, two per word; a row
 //! exchanges each limb as the linear combination of its two bytes.  The
-//! counter is zero, every hash the verifier computes being at most one chunk,
-//! and the block length and flags are the instruction's immediates.
+//! counter's low word, the block length and the flags are the instruction's
+//! immediates; the counter's high word is zero, a hash the verifier computes
+//! being far below 2^32 chunks.
 //!
 //! The IV words are `is_real · IV`, so an all-zero padding row satisfies
 //! every constraint without gating them by `is_real`, which keeps the degree
@@ -119,6 +120,7 @@ pub struct Blake3Cols<T> {
     pub block: [Word<T>; 16],
     pub block_len: Word<T>,
     pub flags: Word<T>,
+    pub counter: Word<T>,
     pub g: [[GCols<T>; 8]; ROUNDS],
     pub out: [Word<T>; 8],
 }
@@ -136,6 +138,7 @@ pub struct Blake3PreprocessedCols<T: Copy> {
     pub output: [MemoryAccessColsChips<T>; BLAKE3_OUT_LIMBS],
     pub block_len: T,
     pub flags: T,
+    pub counter: T,
     pub is_real_neg: T,
 }
 
@@ -151,6 +154,7 @@ pub struct Blake3CompressChip;
 pub struct CompressInput {
     pub cv: [u32; 8],
     pub block: [u32; 16],
+    pub counter: u32,
     pub block_len: u32,
     pub flags: u32,
 }
@@ -162,6 +166,7 @@ pub fn compress_input<F: PrimeField32>(event: &Blake3CompressEvent<F>) -> Compre
     CompressInput {
         cv: core::array::from_fn(|i| word(&event.io.chaining_value[2 * i..])),
         block: core::array::from_fn(|i| word(&event.io.block[2 * i..])),
+        counter: event.counter.as_canonical_u32(),
         block_len: event.block_len.as_canonical_u32(),
         flags: event.flags.as_canonical_u32(),
     }
@@ -174,6 +179,7 @@ pub fn compress_state(input: &CompressInput) -> [u32; 16] {
     let mut v = [0u32; 16];
     v[..8].copy_from_slice(&input.cv);
     v[8..12].copy_from_slice(&IV[..4]);
+    v[12] = input.counter;
     v[14] = input.block_len;
     v[15] = input.flags;
     for sr in schedule().iter() {
@@ -257,9 +263,12 @@ pub fn populate_row<F: PrimeCharacteristicRing>(
     record_range(input.block_len, lookup);
     cols.flags = word(input.flags);
     record_range(input.flags, lookup);
+    cols.counter = word(input.counter);
+    record_range(input.counter, lookup);
     let mut v = [0u32; 16];
     v[..8].copy_from_slice(&input.cv);
     v[8..12].copy_from_slice(&IV[..4]);
+    v[12] = input.counter;
     v[14] = input.block_len;
     v[15] = input.flags;
     for (r, sr) in schedule().iter().enumerate() {
@@ -401,6 +410,7 @@ impl<F: PrimeField32> MachineAir<F> for Blake3CompressChip {
                     }),
                     block_len: instr.block_len,
                     flags: instr.flags,
+                    counter: instr.counter,
                     is_real_neg: F::NEG_ONE,
                 };
             });
@@ -544,11 +554,16 @@ where
         let m: E<AB> = local.is_real.into();
         builder.assert_bool(local.is_real);
 
-        for w in local.cv.iter().chain(local.block.iter()).chain([&local.block_len, &local.flags]) {
+        for w in local.cv.iter().chain(local.block.iter()).chain([
+            &local.block_len,
+            &local.flags,
+            &local.counter,
+        ]) {
             range_u8(builder, &we::<AB>(w), &m);
         }
         builder.assert_eq(value::<AB>(&local.block_len), prep_local.block_len);
         builder.assert_eq(value::<AB>(&local.flags), prep_local.flags);
+        builder.assert_eq(value::<AB>(&local.counter), prep_local.counter);
 
         for i in 0..BLAKE3_CV_LIMBS {
             builder.send_single(
@@ -580,7 +595,7 @@ where
             let b = iv.to_le_bytes();
             v.push(core::array::from_fn(|k| m.clone() * AB::F::from_u8(b[k])));
         }
-        v.push(core::array::from_fn(|_| E::<AB>::ZERO));
+        v.push(we::<AB>(&local.counter));
         v.push(core::array::from_fn(|_| E::<AB>::ZERO));
         v.push(we::<AB>(&local.block_len));
         v.push(we::<AB>(&local.flags));
@@ -635,6 +650,7 @@ mod tests {
             let input = CompressInput {
                 cv: core::array::from_fn(|_| rng.gen()),
                 block: core::array::from_fn(|_| rng.gen()),
+                counter: rng.gen_range(0..1 << 20),
                 block_len: rng.gen_range(0..=64),
                 flags: rng.gen_range(0..16),
             };
@@ -643,7 +659,7 @@ mod tests {
             let expected = crate::runtime::blake3::compress(
                 &input.cv,
                 &input.block,
-                0,
+                u64::from(input.counter),
                 input.block_len,
                 input.flags,
             );
@@ -662,6 +678,7 @@ mod tests {
         for _ in 0..2 {
             let cv: [u32; 8] = core::array::from_fn(|_| rng.gen());
             let block: [u32; 16] = core::array::from_fn(|_| rng.gen());
+            let counter: u32 = rng.gen_range(0..1 << 20);
             let block_len = 64;
             let flags = 11;
             let limbs = |words: &[u32]| -> Vec<u32> {
@@ -687,10 +704,12 @@ mod tests {
                 out_addrs,
                 cv_addrs,
                 block_addrs,
+                counter,
                 block_len,
                 flags,
             ));
-            let out = crate::runtime::blake3::compress(&cv, &block, 0, block_len, flags);
+            let out =
+                crate::runtime::blake3::compress(&cv, &block, u64::from(counter), block_len, flags);
             let out_limbs = limbs(&out[..8]);
             for (i, &addr) in out_addrs.iter().enumerate() {
                 instructions.push(instr::mem(MemAccessKind::Read, 1, addr, out_limbs[i]));

@@ -1498,16 +1498,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    /// The FROZEN shrink proof shape (per-chip log2 heights).  See
-    /// [`Self::shrink_program_basefold`] — do not edit without re-running
-    /// the gnark ceremony.
+    /// The FROZEN shrink proof shape (per-chip rows).  See
+    /// [`Self::shrink_program_basefold`].  The shrink verifies a Blake3
+    /// root, so its program spends its rows on Blake3 compressions and limb
+    /// splits; no BN254 wrap verifies this shape, so no ceremony pins it.
     fn shrink_shape() -> RecursionShape {
         [
-            ("BaseAlu", 1 << 18),
-            ("ExtAlu", 1 << 18),
+            ("BaseAlu", 1 << 19),
+            ("Blake3Compress", 1 << 15),
+            ("Byte", 1 << 16),
+            ("ExtAlu", 1 << 19),
+            ("FeltLimbs", 1 << 19),
             ("MemoryConst", 1 << 19),
-            ("MemoryVar", 1 << 18),
-            ("Poseidon2WideDeg3", 1 << 18),
+            ("MemoryVar", 1 << 19),
+            ("Poseidon2WideDeg3", 1 << 5),
             ("PublicValues", 1 << 4),
             ("Select", 1 << 19),
         ]

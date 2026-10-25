@@ -18,7 +18,7 @@ use zkm_recursion_compiler::{
     ir::{Builder, Felt, SymbolicFelt},
 };
 use zkm_recursion_core::runtime::blake3::{
-    BLOCK_LEN, BLOCK_WORDS, CHUNK_END, CHUNK_LEN, CHUNK_START, IV, ROOT,
+    BLOCK_LEN, BLOCK_WORDS, CHUNK_END, CHUNK_LEN, CHUNK_START, IV, PARENT, ROOT,
 };
 use zkm_recursion_core::{BLAKE3_BLOCK_LIMBS, BLAKE3_CV_LIMBS, BLAKE3_OUT_LIMBS};
 
@@ -30,7 +30,7 @@ pub const LIMB_BITS: usize = 16;
 /// Limbs of a digest.
 pub const DIGEST_LIMBS: usize = BLAKE3_OUT_LIMBS;
 
-/// Limbs a run of compressions hashes at most: one chunk.
+/// Limbs of one chunk.
 pub const CHUNK_LIMBS: usize = CHUNK_LEN / 2;
 
 /// A digest in the circuit.
@@ -108,13 +108,15 @@ fn iv_limbs<C: CircuitConfig<F = KoalaBear>>(
     core::array::from_fn(|i| builder.constant(word_limbs(IV[i / 2])[i % 2]))
 }
 
-/// The Blake3 digest of at most one chunk of limbs: the run of
-/// compressions of [`zkm_recursion_core::runtime::blake3::chunk_schedule`].
-pub fn hash_limbs<C: CircuitConfig<F = KoalaBear>>(
+/// The chaining value of one chunk of limbs at chunk `counter`: its blocks
+/// compressed in a run, the last one flagged as the root when the chunk is
+/// the whole input.
+fn chunk_chaining_value<C: CircuitConfig<F = KoalaBear>>(
     builder: &mut Builder<C>,
     limbs: &[Felt<KoalaBear>],
+    counter: u32,
+    is_root: bool,
 ) -> DigestLimbs<KoalaBear> {
-    assert!(limbs.len() <= CHUNK_LIMBS, "a run of compressions hashes at most one chunk");
     let blocks: Vec<&[Felt<KoalaBear>]> =
         if limbs.is_empty() { vec![&[][..]] } else { limbs.chunks(BLOCK_WORDS * 2).collect() };
     let last = blocks.len() - 1;
@@ -126,15 +128,65 @@ pub fn hash_limbs<C: CircuitConfig<F = KoalaBear>>(
             flags |= CHUNK_START;
         }
         if i == last {
-            flags |= CHUNK_END | ROOT;
+            flags |= CHUNK_END;
+            if is_root {
+                flags |= ROOT;
+            }
         }
         let padded: [Felt<KoalaBear>; BLAKE3_BLOCK_LIMBS] =
             core::array::from_fn(|j| block.get(j).copied().unwrap_or(zero));
         let block_len = (2 * block.len()) as u32;
         debug_assert!(block_len as usize <= BLOCK_LEN);
-        chaining_value = builder.blake3_compress_v2(chaining_value, padded, block_len, flags);
+        chaining_value =
+            builder.blake3_compress_v2(chaining_value, padded, counter, block_len, flags);
     }
     chaining_value
+}
+
+/// The parent node of two chaining values, flagged as the root when it is
+/// the tree's top.
+fn parent_chaining_value<C: CircuitConfig<F = KoalaBear>>(
+    builder: &mut Builder<C>,
+    left: DigestLimbs<KoalaBear>,
+    right: DigestLimbs<KoalaBear>,
+    is_root: bool,
+) -> DigestLimbs<KoalaBear> {
+    let block: [Felt<KoalaBear>; BLAKE3_BLOCK_LIMBS] =
+        core::array::from_fn(|j| if j < DIGEST_LIMBS { left[j] } else { right[j - DIGEST_LIMBS] });
+    let chaining_value = iv_limbs(builder);
+    let flags = if is_root { PARENT | ROOT } else { PARENT };
+    builder.blake3_compress_v2(chaining_value, block, 0, BLOCK_LEN as u32, flags)
+}
+
+/// The Blake3 digest of limbs, each limb two bytes: the chunks hashed at
+/// their counters and merged as Blake3's tree merges them, every completed
+/// chunk pushed on a stack that collapses one parent per trailing zero of
+/// the chunk count, and the last chunk folded into the stack from the top,
+/// the final parent being the root.  One chunk is one run of compressions,
+/// its last block the root.
+pub fn hash_limbs<C: CircuitConfig<F = KoalaBear>>(
+    builder: &mut Builder<C>,
+    limbs: &[Felt<KoalaBear>],
+) -> DigestLimbs<KoalaBear> {
+    let chunks: Vec<&[Felt<KoalaBear>]> =
+        if limbs.is_empty() { vec![&[][..]] } else { limbs.chunks(CHUNK_LIMBS).collect() };
+    let last = chunks.len() - 1;
+    let mut stack: Vec<DigestLimbs<KoalaBear>> = Vec::new();
+    for (index, chunk) in chunks[..last].iter().enumerate() {
+        let mut chaining_value = chunk_chaining_value(builder, chunk, index as u32, false);
+        let mut total = index + 1;
+        while total & 1 == 0 {
+            let left = stack.pop().expect("a merge has a left child");
+            chaining_value = parent_chaining_value(builder, left, chaining_value, false);
+            total >>= 1;
+        }
+        stack.push(chaining_value);
+    }
+    let mut output = chunk_chaining_value(builder, chunks[last], last as u32, stack.is_empty());
+    while let Some(left) = stack.pop() {
+        output = parent_chaining_value(builder, left, output, stack.is_empty());
+    }
+    output
 }
 
 /// The Blake3 digest of elements, each hashed as its canonical bytes.
@@ -163,6 +215,7 @@ pub fn compress_digests<C: CircuitConfig<F = KoalaBear>>(
     builder.blake3_compress_v2(
         chaining_value,
         block,
+        0,
         BLOCK_LEN as u32,
         CHUNK_START | CHUNK_END | ROOT,
     )
@@ -257,11 +310,13 @@ mod execution_tests {
     }
 
     /// The circuit's hash of elements, and the node of two digests, are
-    /// the host's, at every length up to a chunk's worth of elements.
+    /// the host's: within a chunk, at a chunk's boundary, and over trees of
+    /// two, three, four and six chunks, an odd count and a partial last
+    /// chunk among them.
     #[test]
     fn hash_and_compress_match_the_host() {
         let mut builder = Builder::<InnerConfig>::default();
-        for len in [0usize, 1, 2, 15, 16, 17, 100, 248] {
+        for len in [0usize, 1, 2, 15, 16, 17, 100, 248, 256, 257, 512, 700, 1024, 1300] {
             let values = elements(len, len as u64 + 1);
             let felts: Vec<Felt<KoalaBear>> = values.iter().map(|v| builder.constant(*v)).collect();
             let computed = hash_felts(&mut builder, &felts);

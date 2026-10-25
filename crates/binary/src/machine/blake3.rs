@@ -10,8 +10,8 @@
 //! the last round and writes the eight output words as limbs.  Over a
 //! binary field the xors and rotations of a round are wiring, so a round's
 //! witness is the sums and carries of its forty-eight 32-bit additions.
-//! The block length and the flags are the program's, preprocessed; the
-//! counter is zero.
+//! The counter's low word, the block length and the flags are the
+//! program's, preprocessed; the counter's high word is zero.
 
 use core::borrow::{Borrow, BorrowMut};
 use std::sync::Arc;
@@ -108,6 +108,8 @@ pub struct Blake3IoPrep<T> {
     pub block_len: WordBits<T>,
     /// The domain flags.
     pub flags: WordBits<T>,
+    /// The chunk counter's low word.
+    pub counter: WordBits<T>,
     /// The row holds an instruction.
     pub is_real: T,
     /// Each output limb is read at least once.
@@ -203,6 +205,7 @@ struct CompressionSite {
     block: [u32; BLAKE3_BLOCK_LIMBS],
     /// `(address, reads)` of each output limb.
     out: [(u32, u32); BLAKE3_OUT_LIMBS],
+    counter: u32,
     block_len: u32,
     flags: u32,
 }
@@ -234,6 +237,7 @@ impl Compressions {
                     out: core::array::from_fn(|i| {
                         (output[i].0.as_canonical_u32(), instr.mults[i].as_canonical_u32())
                     }),
+                    counter: instr.counter.as_canonical_u32(),
                     block_len: instr.block_len.as_canonical_u32(),
                     flags: instr.flags.as_canonical_u32(),
                 })
@@ -266,9 +270,11 @@ impl Compressions {
                 let block: [u32; STATE_WORDS] = words_of_limbs(&event.io.block);
                 assert_eq!(event.block_len.as_canonical_u32(), site.block_len);
                 assert_eq!(event.flags.as_canonical_u32(), site.flags);
+                assert_eq!(event.counter.as_canonical_u32(), site.counter);
                 let mut state = [0u32; STATE_WORDS];
                 state[..8].copy_from_slice(&cv);
                 state[8..12].copy_from_slice(&IV[..4]);
+                state[12] = site.counter;
                 state[14] = site.block_len;
                 state[15] = site.flags;
                 let Filled { states, rounds } = fill_compression(state, block);
@@ -465,6 +471,7 @@ impl Blake3IoAir {
             prep.has_out = site.out.map(|(_, reads)| u8::from(reads > 0));
             prep.block_len = word_bits(site.block_len);
             prep.flags = word_bits(site.flags);
+            prep.counter = word_bits(site.counter);
             prep.is_real = 1;
         }
         Self { log_height, preprocessed, compressions }
@@ -579,7 +586,8 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3IoAir {
                 let iv = constant_bits::<AB, WORD_BITS>(u64::from(IV[i - 8]));
                 core::array::from_fn(|k| iv[k].clone() * is_real.clone())
             }
-            12 | 13 => constant_bits::<AB, WORD_BITS>(0),
+            12 => exprs::<AB, WORD_BITS>(&prep_local.counter),
+            13 => constant_bits::<AB, WORD_BITS>(0),
             14 => exprs::<AB, WORD_BITS>(&prep_local.block_len),
             _ => exprs::<AB, WORD_BITS>(&prep_local.flags),
         });
