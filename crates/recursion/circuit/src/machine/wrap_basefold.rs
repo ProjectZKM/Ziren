@@ -123,7 +123,11 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
-    let vk_root = SC::digest_public_felts(builder, &vk_root);
+    /// The binary stage pins the key it verifies as a constant and carries the
+    /// digest; its one-leaf key tree only gives the witness its shape, so its
+    /// root is not the `vk_root` the verified proof's public values carry.
+    let vk_root = (!matches!(output_digest_kind, PublicValuesOutputDigest::Carried))
+        .then(|| SC::digest_public_felts(builder, &vk_root));
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
     verify_wrap_basefold_core::<C, SC, A>(
         builder,
@@ -134,7 +138,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         machine,
         max_log_row_count,
         output_digest_kind,
-        Some(vk_root),
+        vk_root,
     );
 }
 
