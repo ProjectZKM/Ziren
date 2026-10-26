@@ -293,6 +293,11 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// than per proof.  A program with another digest replaces the entry.
     pub wrap_keys_cache: Mutex<Option<([u8; 32], Arc<WrapKeys<C>>)>>,
 
+    /// Cache for the wrap program, keyed by
+    /// [`ZKMWrapBasefoldWitnessValues::shape_key`].  The shrink proof's shape
+    /// is frozen, so a process reaches one entry.
+    pub wrap_programs_basefold_cache: Mutex<RecursionProgramCache>,
+
     /// Whether to verify verification keys.
     pub vk_verification: bool,
 
@@ -720,6 +725,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_verification,
             wrap_vk: OnceLock::new(),
             wrap_keys_cache: Mutex::new(None),
+            wrap_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
@@ -1530,10 +1536,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `zkm_recursion_circuit`), so the same verifier function works
     /// unchanged here.
     ///
-    /// Not cached — like [`Self::shrink_program_basefold`], the program
-    /// is built fresh per call from the real input shape (cumulative-sum
-    /// maps, chip names, column counts).  `wrap_bn254` is invoked once
-    /// per end-to-end proof, so the per-call build cost is acceptable.
+    /// Builds fresh on every call; [`Self::wrap_bn254`] goes through
+    /// [`Self::wrap_programs_basefold_cache`].
     pub fn wrap_bn254_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
@@ -2117,7 +2121,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
         };
-        let program = self.wrap_bn254_program_basefold(&input);
+        let (program, digest) = self.cached_program(
+            &self.wrap_programs_basefold_cache,
+            input.shape_key(),
+            "wrap",
+            || self.wrap_bn254_program_basefold(&input),
+        );
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -2130,8 +2139,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.print_stats();
         tracing::debug!("wrap_bn254 basefold program executed successfully");
 
-        let wrap_keys =
-            tracing::debug_span!("setup wrap_bn254 basefold").in_scope(|| self.wrap_keys(&program));
+        let wrap_keys = tracing::debug_span!("setup wrap_bn254 basefold")
+            .in_scope(|| self.wrap_keys(&program, digest));
         let (wrap_pk, wrap_vk) = &*wrap_keys;
         if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
             tracing::debug!("wrap verifier key set (basefold)");
@@ -2167,12 +2176,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
-    /// The wrap `(pk, vk)` for `program`, set up on the first wrap and reused
-    /// while the program's setup digest stays the same; see
+    /// The wrap `(pk, vk)` for `program`, whose setup digest is `digest`, set
+    /// up on the first wrap and reused while the digest stays the same; see
     /// [`Self::wrap_keys_cache`].  The lock is held across a setup, so a
     /// concurrent wrap waits for the key instead of building it again.
-    pub fn wrap_keys(&self, program: &RecursionProgram<KoalaBear>) -> Arc<WrapKeys<C>> {
-        let digest = zkm_recursion_core::setup_digest(program);
+    pub fn wrap_keys(
+        &self,
+        program: &RecursionProgram<KoalaBear>,
+        digest: [u8; 32],
+    ) -> Arc<WrapKeys<C>> {
         let mut cache = self.wrap_keys_cache.lock().unwrap();
         if let Some((cached, keys)) = cache.as_ref() {
             if *cached == digest {
@@ -2455,6 +2467,37 @@ pub mod tests {
         assert!(Arc::ptr_eq(&first, &second));
         let g = prover.recursion_pks_basefold_cache.lock().unwrap();
         assert_eq!((g.hits, g.misses, g.builds, g.waits), (1, 1, 1, 0));
+    }
+
+    /// The wrap program cache key is stable for one shrink shape and moves
+    /// with the chip heights, and two inputs of one key build one program.
+    #[test]
+    fn wrap_program_shape_key_follows_the_shrink_shape() {
+        use crate::components::DefaultProverComponents;
+        let prover = ZKMProver::<DefaultProverComponents>::uninitialized();
+        let input = |rows: &[(String, usize)]| ZKMWrapBasefoldWitnessValues::<ShrinkSC> {
+            vks_and_proofs: vec![
+                zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof_rows(
+                    prover.shrink_prover.machine(),
+                    rows,
+                ),
+            ],
+            vk_merkle_data: ZKMMerkleProofWitnessValues::dummy(1, VK_MERKLE_TREE_HEIGHT),
+        };
+        let mut rows: Vec<(String, usize)> = ZKMProver::<DefaultProverComponents>::shrink_shape()
+            .clone_into_hash_map()
+            .into_iter()
+            .collect();
+        rows.sort();
+        let (a, b) = (input(&rows), input(&rows));
+        assert_eq!(a.shape_key(), b.shape_key());
+        let mut taller = rows.clone();
+        taller[0].1 *= 2;
+        assert_ne!(a.shape_key(), input(&taller).shape_key());
+        assert_eq!(
+            bincode::serialize(&*prover.wrap_bn254_program_basefold(&a)).unwrap(),
+            bincode::serialize(&*prover.wrap_bn254_program_basefold(&b)).unwrap(),
+        );
     }
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
     use p3_field::PrimeField32;

@@ -623,4 +623,47 @@ impl<const P: u8>
         );
         Self { vks_and_proofs, vk_merkle_data }
     }
+
+    /// Structural signature of the witness layout — the wrap program cache
+    /// key.
+    ///
+    /// `shape_key(a) == shape_key(b)  ⟹  wrap_program(a) == wrap_program(b)`
+    /// bytewise.  Besides the variable-length collections the compose key
+    /// walks, `read` compiles each verifying key's chip information and
+    /// ordering and each proof's chip heights into the program as constants,
+    /// so those are hashed by value.
+    ///
+    /// Walk order MUST mirror this type's `Witnessable::write` in
+    /// `crates/recursion/circuit/src/machine/witness.rs`; any change there
+    /// requires a matching update here.
+    pub fn shape_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+
+        0x3A_FE_BA_61_u32.hash(&mut h);
+
+        self.vks_and_proofs.len().hash(&mut h);
+        for (vk, sp) in self.vks_and_proofs.iter() {
+            vk.chip_information.len().hash(&mut h);
+            for (name, domain, dims) in vk.chip_information.iter() {
+                name.hash(&mut h);
+                domain.log_size.hash(&mut h);
+                domain.shift.hash(&mut h);
+                dims.hash(&mut h);
+            }
+            let mut ordering: Vec<_> = vk.chip_ordering.iter().collect();
+            ordering.sort();
+            ordering.hash(&mut h);
+            super::shape_signature::hash_shard_proof_structure(sp, &mut h);
+            sp.chip_heights.hash(&mut h);
+        }
+
+        self.vk_merkle_data.vk_merkle_proofs.len().hash(&mut h);
+        for proof in self.vk_merkle_data.vk_merkle_proofs.iter() {
+            proof.path.len().hash(&mut h);
+        }
+        self.vk_merkle_data.values.len().hash(&mut h);
+
+        h.finish()
+    }
 }
