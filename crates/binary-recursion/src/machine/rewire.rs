@@ -35,7 +35,7 @@ use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
 
 use super::cells::{addr_bits, cell, pack, VALUE_BITS};
-use super::program::{Program, RewireKind, ADDR_BITS};
+use super::program::{Program, RewireKind, Via, ADDR_BITS};
 use crate::tape::F;
 
 /// Bytes of a row.
@@ -108,13 +108,13 @@ impl RewireAir {
             prep.out_base = addr_bits(op.out_base);
             match op.kind {
                 RewireKind::ToBytes | RewireKind::Split | RewireKind::Bits { .. } => {
-                    prep.reads_element = u8::from(!op.direct[0]);
-                    prep.direct_element = u8::from(op.direct[0]);
+                    prep.reads_element = u8::from(op.via[0] == Via::Ledger);
+                    prep.direct_element = u8::from(op.via[0] == Via::Write);
                 }
                 RewireKind::FromBytes | RewireKind::Gather => {
-                    for (u, &direct) in op.direct.iter().enumerate() {
-                        prep.reads[u] = u8::from(!direct);
-                        prep.direct_reads[u] = u8::from(direct);
+                    for (u, &via) in op.via.iter().enumerate() {
+                        prep.reads[u] = u8::from(via == Via::Ledger);
+                        prep.direct_reads[u] = u8::from(via == Via::Write);
                     }
                 }
             }

@@ -1,8 +1,9 @@
-//! The arithmetic table: one row per field operation, assertion, select or
-//! copy.
+//! The arithmetic table: one row per field operation, assertion or copy;
+//! the selects have a table of their own.
 //!
-//! A row reads its operands `a`, `b` and the selector bit `s` from
-//! [`MEMORY`] and writes `c` on [`WRITE`], each where the program says.
+//! A row reads its operands `a` and `b` from [`MEMORY`] and writes `c` on
+//! [`WRITE`], each where the program says: three values, two aligned
+//! blocks of columns.
 //! One packed constraint per kind relates them; an operand a kind does not
 //! read is free, and no constraint of another kind looks at it.
 
@@ -19,7 +20,7 @@ use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
 
 use super::cells::{addr_bits, cell, pack, value_bits, VALUE_BITS};
-use super::program::{ArithKind, ArithRow, Program, Read, ADDR_BITS};
+use super::program::{ArithKind, ArithRow, Program, Read, Via, ADDR_BITS};
 use crate::tape::F;
 
 /// The program's part of an arithmetic row.
@@ -28,26 +29,22 @@ use crate::tape::F;
 pub struct ArithPrep<T> {
     pub addr_a: [T; ADDR_BITS],
     pub addr_b: [T; ADDR_BITS],
-    pub addr_s: [T; ADDR_BITS],
     pub addr_c: [T; ADDR_BITS],
     /// The operand is read through the ledger.
     pub read_a: T,
     pub read_b: T,
-    pub read_s: T,
     /// The operand is its cell's only read, pulled from the write itself.
     pub direct_a: T,
     pub direct_b: T,
-    pub direct_s: T,
     pub write_c: T,
     pub is_add: T,
     pub is_mul: T,
     pub is_square: T,
     pub is_inv: T,
     pub is_eq: T,
-    pub is_select: T,
     pub is_copy: T,
     /// Zeros, which make the width a power of two.
-    pub pad: [T; 128 - 4 * ADDR_BITS - 14],
+    pub pad: [T; 128 - 3 * ADDR_BITS - 11],
 }
 
 /// The witness part of an arithmetic row.
@@ -57,9 +54,6 @@ pub struct ArithCols<T> {
     pub a: [T; VALUE_BITS],
     pub b: [T; VALUE_BITS],
     pub c: [T; VALUE_BITS],
-    pub s: T,
-    /// Zeros, which make the width a power of two.
-    pub pad: [T; 512 - 3 * VALUE_BITS - 1],
 }
 
 pub const NUM_ARITH_PREP_COLS: usize = core::mem::size_of::<ArithPrep<u8>>();
@@ -74,20 +68,23 @@ pub struct ArithAir {
 impl ArithAir {
     #[must_use]
     pub fn new(program: &Program) -> Self {
-        let log_height = log_height_for(program.arith.len());
+        let log_height = log_height_for(arith_rows(program).count());
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ARITH_PREP_COLS];
-        for (row, op) in program.arith.iter().enumerate() {
+        for (row, op) in arith_rows(program).enumerate() {
             let prep: &mut ArithPrep<u8> = preprocessed
                 [row * NUM_ARITH_PREP_COLS..(row + 1) * NUM_ARITH_PREP_COLS]
                 .borrow_mut();
             let place = |read: Option<Read>| {
                 read.map_or((addr_bits(0), 0, 0), |r| {
-                    (addr_bits(r.addr), u8::from(!r.direct), u8::from(r.direct))
+                    (
+                        addr_bits(r.addr),
+                        u8::from(r.via == Via::Ledger),
+                        u8::from(r.via == Via::Write),
+                    )
                 })
             };
             (prep.addr_a, prep.read_a, prep.direct_a) = place(op.a);
             (prep.addr_b, prep.read_b, prep.direct_b) = place(op.b);
-            (prep.addr_s, prep.read_s, prep.direct_s) = place(op.s);
             prep.addr_c = addr_bits(op.c.unwrap_or(0));
             prep.write_c = u8::from(op.write_c);
             match op.kind {
@@ -96,8 +93,8 @@ impl ArithAir {
                 ArithKind::Square => prep.is_square = 1,
                 ArithKind::Inv => prep.is_inv = 1,
                 ArithKind::Eq => prep.is_eq = 1,
-                ArithKind::Select => prep.is_select = 1,
                 ArithKind::Copy => prep.is_copy = 1,
+                ArithKind::Select => unreachable!("selects have a table of their own"),
             }
         }
         Self { log_height, preprocessed }
@@ -113,37 +110,34 @@ impl ArithAir {
     pub fn main_table(&self, program: &Program, values: &[F]) -> Table<F> {
         let mut rows = BitRows::new(NUM_ARITH_COLS, self.log_height);
         let mut row_bits = vec![0u8; NUM_ARITH_COLS];
-        for (row, op) in program.arith.iter().enumerate() {
+        for (row, op) in arith_rows(program).enumerate() {
             let value =
                 |read: Option<Read>| read.map_or(F::ZERO, |r| Program::value(values, r.cell));
-            let (a, b, s) = (value(op.a), value(op.b), value(op.s));
-            let c = result(op, a, b, s);
+            let (a, b) = (value(op.a), value(op.b));
+            let c = result(op, a, b);
             let cols: &mut ArithCols<u8> = row_bits.as_mut_slice().borrow_mut();
             cols.a = value_bits(a);
             cols.b = value_bits(b);
             cols.c = value_bits(c);
-            cols.s = u8::from(s == F::ONE);
             rows.set_row(row, &row_bits);
         }
         rows.into_table()
     }
 }
 
+/// The rows of `program` the table holds: all but the selects, in order.
+fn arith_rows(program: &Program) -> impl Iterator<Item = &ArithRow> {
+    program.arith.iter().filter(|row| row.kind != ArithKind::Select)
+}
+
 /// What a row's `c` holds.
-fn result(op: &ArithRow, a: F, b: F, s: F) -> F {
+fn result(op: &ArithRow, a: F, b: F) -> F {
     match op.kind {
         ArithKind::Add => a + b,
         ArithKind::Mul => a * b,
         ArithKind::Square => a.square(),
         ArithKind::Inv => a.try_inverse().expect("the run inverts only nonzero values"),
-        ArithKind::Eq => F::ZERO,
-        ArithKind::Select => {
-            if s == F::ONE {
-                b
-            } else {
-                a
-            }
-        }
+        ArithKind::Eq | ArithKind::Select => F::ZERO,
         ArithKind::Copy => a,
     }
 }
@@ -172,21 +166,16 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ArithAir {
         let a = pack::<AB>(&local.a);
         let b = pack::<AB>(&local.b);
         let c = pack::<AB>(&local.c);
-        let s: AB::Expr = local.s.into();
         builder.when(prep.is_add).assert_eq(c.clone(), a.clone() + b.clone());
         builder.when(prep.is_mul).assert_eq(c.clone(), a.clone() * b.clone());
         builder.when(prep.is_square).assert_eq(c.clone(), a.clone() * a.clone());
         builder.when(prep.is_inv).assert_one(a.clone() * c.clone());
         builder.when(prep.is_eq).assert_eq(a.clone(), b.clone());
-        builder
-            .when(prep.is_select)
-            .assert_eq(c.clone(), a.clone() + s.clone() * (a.clone() + b.clone()));
         builder.when(prep.is_copy).assert_eq(c.clone(), a.clone());
 
         for (addr, value, read, direct) in [
             (&prep.addr_a, a, prep.read_a, prep.direct_a),
             (&prep.addr_b, b, prep.read_b, prep.direct_b),
-            (&prep.addr_s, s, prep.read_s, prep.direct_s),
         ] {
             builder.declare_bus(
                 MEMORY,

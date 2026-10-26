@@ -27,7 +27,7 @@ use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
 
 use super::cells::{addr_bits, cell, pack};
-use super::program::{Program, Read, ADDR_BITS};
+use super::program::{Program, Read, Via, ADDR_BITS};
 use crate::tape::{as_kb, KbOp, F};
 
 /// The program's part of a row.
@@ -97,8 +97,9 @@ impl KbAir {
             prep.addr_a = addr_bits(op.a.addr);
             prep.addr_b = addr_bits(op.b.addr);
             prep.addr_c = addr_bits(op.c);
-            (prep.read_a, prep.direct_a) = (u8::from(!op.a.direct), u8::from(op.a.direct));
-            (prep.read_b, prep.direct_b) = (u8::from(!op.b.direct), u8::from(op.b.direct));
+            let flags = |via: Via| (u8::from(via == Via::Ledger), u8::from(via == Via::Write));
+            (prep.read_a, prep.direct_a) = flags(op.a.via);
+            (prep.read_b, prep.direct_b) = flags(op.b.via);
             prep.write_c = u8::from(op.write_c);
             match op.kind {
                 KbOp::Add => prep.is_add = 1,

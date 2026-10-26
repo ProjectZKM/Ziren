@@ -25,6 +25,7 @@ pub mod ledger;
 pub mod program;
 pub mod rewire;
 pub mod rounds;
+pub mod select;
 
 use p3_air::symbolic::AirLayout;
 use p3_air::{Air, BaseAir};
@@ -52,6 +53,7 @@ use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
 use self::rewire::RewireAir;
 use self::rounds::RoundsAir;
+use self::select::SelectAir;
 use crate::tape::{RunError, Tape, F};
 
 /// One table of the machine.
@@ -62,6 +64,7 @@ pub enum TapeAir {
     Hash(HashAir),
     Rounds(RoundsAir),
     Kb(KbAir),
+    Select(SelectAir),
 }
 
 impl TapeAir {
@@ -74,6 +77,7 @@ impl TapeAir {
             Self::Hash(air) => air.log_height(),
             Self::Rounds(air) => air.log_height(),
             Self::Kb(air) => air.log_height(),
+            Self::Select(air) => air.log_height(),
         }
     }
 
@@ -86,6 +90,7 @@ impl TapeAir {
             Self::Hash(_) => "Hash",
             Self::Rounds(_) => "Rounds",
             Self::Kb(_) => "Kb",
+            Self::Select(_) => "Select",
         }
     }
 }
@@ -99,6 +104,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Hash(air) => BaseAir::<X>::width(air),
             Self::Rounds(air) => BaseAir::<X>::width(air),
             Self::Kb(air) => BaseAir::<X>::width(air),
+            Self::Select(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -110,6 +116,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Hash(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Rounds(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Kb(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
@@ -138,6 +145,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Hash(air) => air.preprocessed_trace(),
             Self::Rounds(air) => air.preprocessed_trace(),
             Self::Kb(air) => air.preprocessed_trace(),
+            Self::Select(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -151,6 +159,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for TapeAir {
             Self::Hash(air) => air.eval(builder),
             Self::Rounds(air) => air.eval(builder),
             Self::Kb(air) => air.eval(builder),
+            Self::Select(air) => air.eval(builder),
         }
     }
 }
@@ -190,6 +199,9 @@ impl TapeMachine {
         ];
         if !program.kb.is_empty() {
             airs.push(TapeAir::Kb(KbAir::new(&program)));
+        }
+        if select::selects(&program).next().is_some() {
+            airs.push(TapeAir::Select(SelectAir::new(&program)));
         }
         let (main, preprocessed) = Self::shapes_of(&airs);
         let config =
@@ -338,6 +350,7 @@ impl TapeMachine {
                 TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
                 TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
                 TapeAir::Kb(a) => a.main_table(&self.program, values),
+                TapeAir::Select(a) => a.main_table(&self.program, values),
             })
             .collect()
     }
