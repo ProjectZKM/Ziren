@@ -182,6 +182,30 @@ impl Blake3Challenger {
     pub fn state(&self) -> &Blake3Digest {
         &self.state
     }
+
+    /// The transcript as words, for a device running it: everything it
+    /// absorbs is a whole number of words, so the pending input is too.
+    #[must_use]
+    pub fn word_snapshot(&self) -> Blake3WordSnapshot {
+        let words = |bytes: &[u8]| -> Vec<u32> {
+            bytes.chunks_exact(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()
+        };
+        debug_assert_eq!(self.buffer.len() % 4, 0, "the transcript absorbs whole words");
+        Blake3WordSnapshot {
+            state: words(&self.state).try_into().expect("a digest is eight words"),
+            pending: words(&self.buffer),
+            words_left: self.words_left as u32,
+        }
+    }
+}
+
+/// [`Blake3Challenger`] as little-endian words: the state, the input not yet
+/// folded into it, and how many state words samples have not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Blake3WordSnapshot {
+    pub state: [u32; SQUEEZE_WORDS],
+    pub pending: Vec<u32>,
+    pub words_left: u32,
 }
 
 impl CanObserve<Val> for Blake3Challenger {
