@@ -122,6 +122,14 @@ pub type CompressedSC = KoalaBearPoseidon2Compress;
 /// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
 
+/// Configurable compact shrinker over KoalaBear.
+#[cfg(feature = "compact-shrink")]
+pub use zkm_pcs::shrink::{Blake3Suite, CompactShrink, Keccak256Suite, Sha256Suite};
+pub mod shrink;
+#[cfg(feature = "compact-shrink")]
+pub use shrink::{compact_shrink_prover, CompactShrinkStrategy};
+pub use shrink::{NativeShrink, ShrinkStrategy};
+
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
     KoalaBearPoseidon2,
     MipsAir<KoalaBear>,
@@ -2037,7 +2045,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
     #[instrument(name = "shrink", level = "info", skip_all)]
-    pub fn shrink(
+    pub(crate) fn shrink_native(
         &self,
         reduced_proof: ZKMReduceProof<CompressedSC>,
         opts: ZKMProverOpts,

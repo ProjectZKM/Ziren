@@ -24,6 +24,8 @@
 //! module's tests, so they compile only with them; the verdict type they
 //! share with the production verifier lives in [`error`].
 
+#[cfg(feature = "compact-shrink")]
+pub mod compact_params;
 pub mod config;
 pub mod error;
 #[cfg(test)]

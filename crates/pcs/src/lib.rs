@@ -34,6 +34,8 @@ pub mod septic_digest;
 pub mod septic_extension;
 pub mod shape;
 pub mod shard_level;
+#[cfg(feature = "compact-shrink")]
+pub mod shrink;
 pub mod stacked_shapes;
 #[cfg(test)]
 mod stark_testing;
@@ -60,6 +62,8 @@ pub use permutation::*;
 pub use proof::*;
 pub use prover::*;
 pub use record::*;
+#[cfg(feature = "compact-shrink")]
+pub use shrink::{Blake3Suite, CompactShrink, HashSuite, Keccak256Suite, Sha256Suite};
 pub use traces::Traces;
 pub use types::*;
 pub use verifier::*;
