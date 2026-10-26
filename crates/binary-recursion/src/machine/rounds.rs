@@ -1,29 +1,29 @@
-//! The Blake3 round table: one row per half quarter-round.
+//! The Blake3 round table: one row per round.
 //!
-//! A quarter-round `G` on lanes `(a, b, c, d)` with message words
-//! `(m0, m1)` is two halves of one shape, rotations `(16, 12)` then
-//! `(8, 7)`:
+//! A round is eight quarter-rounds `G`, each on lanes `(a, b, c, d)` with
+//! message words `(m0, m1)` and two halves of one shape, rotations
+//! `(16, 12)` then `(8, 7)`:
 //!
 //! ```text
 //!     a1 = a + b + m       d1 = (a1 ^ d) >>> r1
 //!     c1 = c + d1          b1 = (c1 ^ b) >>> r2
 //! ```
 //!
-//! A row pulls the four lanes it reads on [`LANE`] at their version and
-//! pushes `(a1, b1, c1, d1)` at the next, and pulls its message word on
-//! [`MSG`] at its round and pushes it at the next, for the round that uses
-//! it after.  Over a binary field the xors and rotations are wiring, so a
-//! row's witness is its lanes, its word, its three 32-bit additions and the
-//! two rotated lanes; which rotations apply is the row's half, preprocessed.
-//! A round is sixteen rows, a compression 112, and the table is 512
-//! columns wide where a row holding a whole round was 4,096: every column of
-//! a table is a value the machine's verifier opens.
+//! A row pulls the sixteen lanes on [`LANE`] at the round's version and
+//! pushes them at the next, four touches later, and pulls the round's
+//! sixteen message words on [`MSG`] at its round and pushes them at the
+//! next, for the round that uses them after.  Over a binary field the xors
+//! and rotations are wiring, so a row's witness is the lanes and words it
+//! reads and the sum and carries of each of its 48 additions: 4,096
+//! columns, seven rows a compression.  Rows of one half quarter-round each
+//! were 512 columns but 112 rows a compression, twice the bits, and the
+//! machine commits a power of two of its total bits.
 
 use core::borrow::{Borrow, BorrowMut};
 
-use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_bus::{BusActivation, BusDirection};
-use p3_field::Field;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, PERMUTATION_ID_BITS};
@@ -40,10 +40,14 @@ use crate::tape::F;
 /// Quarter-rounds of a round.
 const QUARTER_ROUNDS: usize = 8;
 
-/// Rows of a compression.
-pub const ROWS_PER_COMPRESSION: usize = ROUNDS * QUARTER_ROUNDS * 2;
+/// Halves of a round, two per quarter-round.
+const HALVES: usize = 2 * QUARTER_ROUNDS;
 
-/// The version every lane has after the last round.
+/// Rows of a compression.
+pub const ROWS_PER_COMPRESSION: usize = ROUNDS;
+
+/// The version every lane has after the last round: a round touches each
+/// lane four times.
 pub const FINAL_VERSION: usize = 4 * ROUNDS;
 
 /// The rotations of each half.
@@ -63,41 +67,29 @@ pub struct AddCols<T> {
 #[repr(C)]
 pub struct RoundsPrep<T> {
     pub id: [T; PERMUTATION_ID_BITS],
-    /// The lanes `a, b, c, d` are read from.
-    pub lanes: [[T; LANE_BITS]; 4],
     /// The version the lanes are read at, and written at.
     pub version: [T; VERSION_BITS],
     pub next_version: [T; VERSION_BITS],
-    /// The message word, and the round it is used at.
-    pub msg: [T; MSG_INDEX_BITS],
+    /// The round, which the words are used at, and the next.
     pub round: [T; USE_BITS],
     pub next_round: [T; USE_BITS],
-    /// The row is the second half of its quarter-round.
-    pub second: T,
+    /// The block word at each of the round's positions.
+    pub msg: [[T; MSG_INDEX_BITS]; HALVES],
     pub is_real: T,
-    /// The word is used again, in the next round.
+    /// The words are used again, in the next round.
     pub relays: T,
-    /// Zeros, which make the width a power of two.
-    pub pad: T,
 }
 
 /// The witness part of a row.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct RoundsCols<T> {
-    /// The lanes `a, b, c, d` as read.
-    pub lanes: [[T; WORD_BITS]; 4],
-    pub msg: [T; WORD_BITS],
-    /// `a + b`.
-    pub a_b: AddCols<T>,
-    /// `a1 = a + b + m`.
-    pub a1: AddCols<T>,
-    /// `c1 = c + d1`.
-    pub c1: AddCols<T>,
-    pub d1: [T; WORD_BITS],
-    pub b1: [T; WORD_BITS],
-    /// Zeros, which make the width a power of two.
-    pub pad: [T; 512 - 13 * WORD_BITS],
+    /// The lanes as the round reads them.
+    pub lanes: [[T; WORD_BITS]; STATE_WORDS],
+    /// The round's words, in the order its positions use them.
+    pub msg: [[T; WORD_BITS]; HALVES],
+    /// Each half's `a + b`, `a1 = a + b + m` and `c1 = c + d1`.
+    pub adds: [[AddCols<T>; 3]; HALVES],
 }
 
 pub const NUM_ROUNDS_PREP_COLS: usize = core::mem::size_of::<RoundsPrep<u8>>();
@@ -121,36 +113,6 @@ fn message_index(round: usize, position: usize) -> usize {
     (0..round).fold(position, |p, _| MSG_PERMUTATION[p])
 }
 
-/// What one row does, as numbers.
-#[derive(Clone, Copy)]
-struct RowPlan {
-    lanes: [usize; 4],
-    version: usize,
-    msg: usize,
-    round: usize,
-    second: bool,
-}
-
-/// The rows of one compression, in order.
-fn plan() -> Vec<RowPlan> {
-    let mut rows = Vec::with_capacity(ROWS_PER_COMPRESSION);
-    for round in 0..ROUNDS {
-        for q in 0..QUARTER_ROUNDS {
-            let version = 4 * round + if q < 4 { 0 } else { 2 };
-            for half in 0..2 {
-                rows.push(RowPlan {
-                    lanes: lanes(q),
-                    version: version + half,
-                    msg: message_index(round, 2 * q + half),
-                    round,
-                    second: half == 1,
-                });
-            }
-        }
-    }
-    rows
-}
-
 /// The witness of `x + y mod 2^32`, returning the sum.
 fn fill_add(x: u32, y: u32, cols: &mut AddCols<u8>) -> u32 {
     let sum = x.wrapping_add(y);
@@ -172,22 +134,21 @@ impl RoundsAir {
     pub fn new(count: usize) -> Self {
         let log_height = log_height_for(count * ROWS_PER_COMPRESSION);
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ROUNDS_PREP_COLS];
-        let rows = plan();
         for c in 0..count {
-            for (r, row) in rows.iter().enumerate() {
-                let at = (c * ROWS_PER_COMPRESSION + r) * NUM_ROUNDS_PREP_COLS;
+            for round in 0..ROUNDS {
+                let at = (c * ROWS_PER_COMPRESSION + round) * NUM_ROUNDS_PREP_COLS;
                 let prep: &mut RoundsPrep<u8> =
                     preprocessed[at..at + NUM_ROUNDS_PREP_COLS].borrow_mut();
                 prep.id = bits_le::<PERMUTATION_ID_BITS>(c as u64);
-                prep.lanes = row.lanes.map(|l| bits_le::<LANE_BITS>(l as u64));
-                prep.version = bits_le::<VERSION_BITS>(row.version as u64);
-                prep.next_version = bits_le::<VERSION_BITS>(row.version as u64 + 1);
-                prep.msg = bits_le::<MSG_INDEX_BITS>(row.msg as u64);
-                prep.round = bits_le::<USE_BITS>(row.round as u64);
-                prep.next_round = bits_le::<USE_BITS>(row.round as u64 + 1);
-                prep.second = u8::from(row.second);
+                prep.version = bits_le::<VERSION_BITS>(4 * round as u64);
+                prep.next_version = bits_le::<VERSION_BITS>(4 * round as u64 + 4);
+                prep.round = bits_le::<USE_BITS>(round as u64);
+                prep.next_round = bits_le::<USE_BITS>(round as u64 + 1);
+                prep.msg = core::array::from_fn(|p| {
+                    bits_le::<MSG_INDEX_BITS>(message_index(round, p) as u64)
+                });
                 prep.is_real = 1;
-                prep.relays = u8::from(row.round + 1 < ROUNDS);
+                prep.relays = u8::from(round + 1 < ROUNDS);
             }
         }
         Self { log_height, preprocessed }
@@ -212,33 +173,31 @@ impl RoundsAir {
             inputs.len() * ROWS_PER_COMPRESSION <= 1 << self.log_height,
             "one input per compression"
         );
-        let rows_plan = plan();
         let mut rows = BitRows::new(NUM_ROUNDS_COLS, self.log_height);
         let mut row_bits = vec![0u8; NUM_ROUNDS_COLS];
         let mut finals = Vec::with_capacity(inputs.len());
         for (c, &(state, block)) in inputs.iter().enumerate() {
             let mut s = state;
-            for (r, row) in rows_plan.iter().enumerate() {
+            for round in 0..ROUNDS {
                 row_bits.fill(0);
                 let cols: &mut RoundsCols<u8> = row_bits.as_mut_slice().borrow_mut();
-                let [ia, ib, ic, id] = row.lanes;
-                let (a, b, c_, d) = (s[ia], s[ib], s[ic], s[id]);
-                let m = block[row.msg];
-                let (r1, r2) = ROTATIONS[usize::from(row.second)];
-                cols.lanes = [a, b, c_, d].map(|w| bits_le::<WORD_BITS>(u64::from(w)));
-                cols.msg = bits_le::<WORD_BITS>(u64::from(m));
-                let a_b = fill_add(a, b, &mut cols.a_b);
-                let a1 = fill_add(a_b, m, &mut cols.a1);
-                let d1 = (a1 ^ d).rotate_right(r1 as u32);
-                let c1 = fill_add(c_, d1, &mut cols.c1);
-                let b1 = (c1 ^ b).rotate_right(r2 as u32);
-                cols.d1 = bits_le::<WORD_BITS>(u64::from(d1));
-                cols.b1 = bits_le::<WORD_BITS>(u64::from(b1));
-                s[ia] = a1;
-                s[ib] = b1;
-                s[ic] = c1;
-                s[id] = d1;
-                rows.set_row(c * ROWS_PER_COMPRESSION + r, &row_bits);
+                cols.lanes = s.map(|w| bits_le::<WORD_BITS>(u64::from(w)));
+                let words: [u32; HALVES] = core::array::from_fn(|p| block[message_index(round, p)]);
+                cols.msg = words.map(|w| bits_le::<WORD_BITS>(u64::from(w)));
+                for (h, adds) in cols.adds.iter_mut().enumerate() {
+                    let [ia, ib, ic, id] = lanes(h / 2);
+                    let (r1, r2) = ROTATIONS[h % 2];
+                    let a_b = fill_add(s[ia], s[ib], &mut adds[0]);
+                    let a1 = fill_add(a_b, words[h], &mut adds[1]);
+                    let d1 = (a1 ^ s[id]).rotate_right(r1 as u32);
+                    let c1 = fill_add(s[ic], d1, &mut adds[2]);
+                    let b1 = (c1 ^ s[ib]).rotate_right(r2 as u32);
+                    s[ia] = a1;
+                    s[ib] = b1;
+                    s[ic] = c1;
+                    s[id] = d1;
+                }
+                rows.set_row(c * ROWS_PER_COMPRESSION + round, &row_bits);
             }
             finals.push(s);
         }
@@ -265,22 +224,12 @@ fn rotate_right<E: Clone>(x: &[E; WORD_BITS], n: usize) -> [E; WORD_BITS] {
     core::array::from_fn(|k| x[(k + n) % WORD_BITS].clone())
 }
 
-/// Constrain `out` to `x` rotated right by `r1` on a first half and by
-/// `r2` on a second.
-fn assert_rotation<AB: AirBuilder>(
-    builder: &mut AB,
-    second: &AB::Expr,
-    x: &[AB::Expr; WORD_BITS],
-    out: &[AB::Var; WORD_BITS],
-    (first_shift, second_shift): (usize, usize),
-) {
-    let first_way = rotate_right(x, first_shift);
-    let second_way = rotate_right(x, second_shift);
-    for k in 0..WORD_BITS {
-        let rotated =
-            first_way[k].clone() + second.clone() * (first_way[k].clone() + second_way[k].clone());
-        builder.assert_eq(out[k], rotated);
-    }
+/// `x ^ y`, bit by bit: a sum over a field of characteristic two.
+fn xor<E: Clone + core::ops::Add<Output = E>>(
+    x: &[E; WORD_BITS],
+    y: &[E; WORD_BITS],
+) -> [E; WORD_BITS] {
+    core::array::from_fn(|k| x[k].clone() + y[k].clone())
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RoundsAir {
@@ -290,60 +239,66 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RoundsAir {
         let prep = builder.preprocessed();
         let prep: RoundsPrep<AB::Var> = *prep.current_slice().borrow();
 
-        let lane: [[AB::Expr; WORD_BITS]; 4] =
+        let read: [[AB::Expr; WORD_BITS]; STATE_WORDS] =
             core::array::from_fn(|i| exprs::<AB, WORD_BITS>(&local.lanes[i]));
-        let [a, b, c, d] = &lane;
-        let m = exprs::<AB, WORD_BITS>(&local.msg);
-        let second: AB::Expr = prep.second.into();
-
-        let a_b = exprs::<AB, WORD_BITS>(&local.a_b.sum);
-        let _ = add_bits::<AB, WORD_BITS>(builder, a, b, &local.a_b.carries, &a_b);
-        let a1 = exprs::<AB, WORD_BITS>(&local.a1.sum);
-        let _ = add_bits::<AB, WORD_BITS>(builder, &a_b, &m, &local.a1.carries, &a1);
-        let a1_d: [AB::Expr; WORD_BITS] = core::array::from_fn(|k| a1[k].clone() + d[k].clone());
-        let rotations = (ROTATIONS[0].0, ROTATIONS[1].0);
-        assert_rotation(builder, &second, &a1_d, &local.d1, rotations);
-        let d1 = exprs::<AB, WORD_BITS>(&local.d1);
-        let c1 = exprs::<AB, WORD_BITS>(&local.c1.sum);
-        let _ = add_bits::<AB, WORD_BITS>(builder, c, &d1, &local.c1.carries, &c1);
-        let c1_b: [AB::Expr; WORD_BITS] = core::array::from_fn(|k| c1[k].clone() + b[k].clone());
-        let rotations = (ROTATIONS[0].1, ROTATIONS[1].1);
-        assert_rotation(builder, &second, &c1_b, &local.b1, rotations);
-        let b1 = exprs::<AB, WORD_BITS>(&local.b1);
+        let words: [[AB::Expr; WORD_BITS]; HALVES] =
+            core::array::from_fn(|p| exprs::<AB, WORD_BITS>(&local.msg[p]));
+        let mut state = read.clone();
+        for (h, adds) in local.adds.iter().enumerate() {
+            let [ia, ib, ic, id] = lanes(h / 2);
+            let (r1, r2) = ROTATIONS[h % 2];
+            let a_b = exprs::<AB, WORD_BITS>(&adds[0].sum);
+            let _ =
+                add_bits::<AB, WORD_BITS>(builder, &state[ia], &state[ib], &adds[0].carries, &a_b);
+            let a1 = exprs::<AB, WORD_BITS>(&adds[1].sum);
+            let _ = add_bits::<AB, WORD_BITS>(builder, &a_b, &words[h], &adds[1].carries, &a1);
+            let d1 = rotate_right(&xor(&a1, &state[id]), r1);
+            let c1 = exprs::<AB, WORD_BITS>(&adds[2].sum);
+            let _ = add_bits::<AB, WORD_BITS>(builder, &state[ic], &d1, &adds[2].carries, &c1);
+            let b1 = rotate_right(&xor(&c1, &state[ib]), r2);
+            state[ia] = a1;
+            state[ib] = b1;
+            state[ic] = c1;
+            state[id] = d1;
+        }
 
         let id = exprs::<AB, PERMUTATION_ID_BITS>(&prep.id);
         let version = exprs::<AB, VERSION_BITS>(&prep.version);
         let next_version = exprs::<AB, VERSION_BITS>(&prep.next_version);
         let is_real: AB::Expr = prep.is_real.into();
-        let outputs = [&a1, &b1, &c1, &d1];
-        for i in 0..4 {
-            let index = exprs::<AB, LANE_BITS>(&prep.lanes[i]);
+        for lane in 0..STATE_WORDS {
+            let index: [AB::Expr; LANE_BITS] =
+                core::array::from_fn(|k| AB::Expr::from_bool((lane >> k) & 1 == 1));
             builder.declare_bus(
                 LANE,
                 BusDirection::Pull,
-                word_tuple::<AB>(&id, &index, &version, &lane[i]),
+                word_tuple::<AB>(&id, &index, &version, &read[lane]),
                 BusActivation::Boolean(is_real.clone()),
             );
             builder.declare_bus(
                 LANE,
                 BusDirection::Push,
-                word_tuple::<AB>(&id, &index, &next_version, outputs[i]),
+                word_tuple::<AB>(&id, &index, &next_version, &state[lane]),
                 BusActivation::Boolean(is_real.clone()),
             );
         }
-        let msg = exprs::<AB, MSG_INDEX_BITS>(&prep.msg);
-        builder.declare_bus(
-            MSG,
-            BusDirection::Pull,
-            word_tuple::<AB>(&id, &msg, &exprs::<AB, USE_BITS>(&prep.round), &m),
-            BusActivation::Boolean(is_real),
-        );
-        builder.declare_bus(
-            MSG,
-            BusDirection::Push,
-            word_tuple::<AB>(&id, &msg, &exprs::<AB, USE_BITS>(&prep.next_round), &m),
-            BusActivation::Boolean(prep.relays.into()),
-        );
+        let round = exprs::<AB, USE_BITS>(&prep.round);
+        let next_round = exprs::<AB, USE_BITS>(&prep.next_round);
+        for (p, word) in words.iter().enumerate() {
+            let msg = exprs::<AB, MSG_INDEX_BITS>(&prep.msg[p]);
+            builder.declare_bus(
+                MSG,
+                BusDirection::Pull,
+                word_tuple::<AB>(&id, &msg, &round, word),
+                BusActivation::Boolean(is_real.clone()),
+            );
+            builder.declare_bus(
+                MSG,
+                BusDirection::Push,
+                word_tuple::<AB>(&id, &msg, &next_round, word),
+                BusActivation::Boolean(prep.relays.into()),
+            );
+        }
     }
 }
 
@@ -374,20 +329,23 @@ mod tests {
         }
     }
 
-    /// Every lane is touched four times a round, and every word once.
+    /// Every round reads each block word once, and touches each lane four
+    /// times.
     #[test]
     fn versions_and_uses_count() {
-        let rows = plan();
-        let mut touches = [0usize; STATE_WORDS];
-        let mut uses = [[0usize; ROUNDS]; STATE_WORDS];
-        for row in &rows {
-            for lane in row.lanes {
-                assert_eq!(row.version, touches[lane], "lane {lane} read at its version");
-                touches[lane] += 1;
+        for round in 0..ROUNDS {
+            let mut used = [false; HALVES];
+            for p in 0..HALVES {
+                used[message_index(round, p)] = true;
             }
-            uses[row.msg][row.round] += 1;
+            assert!(used.iter().all(|&u| u), "round {round} uses every word once");
         }
-        assert!(touches.iter().all(|&t| t == FINAL_VERSION));
-        assert!(uses.iter().flatten().all(|&u| u == 1));
+        let mut touches = [0usize; STATE_WORDS];
+        for q in 0..QUARTER_ROUNDS {
+            for lane in lanes(q) {
+                touches[lane] += 2;
+            }
+        }
+        assert!(touches.iter().all(|&t| t == FINAL_VERSION / ROUNDS));
     }
 }
