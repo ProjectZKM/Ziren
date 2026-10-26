@@ -12,11 +12,13 @@ pub mod alu_base;
 pub mod alu_ext;
 pub mod bits;
 pub mod blake3;
+pub mod ext2felts;
 pub mod ledger;
 pub mod limbs;
 pub mod memory;
 pub mod mul;
 pub mod mul8;
+pub mod prefix_sum;
 pub mod public_values;
 pub mod select;
 
@@ -39,11 +41,13 @@ use self::alu_base::BaseAluAir;
 use self::alu_ext::{ExtAluAir, ExtAluKind};
 use self::bits::Cell;
 use self::blake3::{Blake3IoAir, Blake3RoundAir, Compressions};
+use self::ext2felts::Ext2FeltsAir;
 use self::ledger::LedgerAir;
 use self::limbs::LimbsAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
 use self::mul::MulAir;
 use self::mul8::Mul8Air;
+use self::prefix_sum::PrefixSumAir;
 use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
@@ -58,6 +62,8 @@ pub enum RecursionAir {
     BaseAlu(BaseAluAir),
     ExtAlu(ExtAluAir),
     Select(SelectAir),
+    Ext2Felts(Ext2FeltsAir),
+    PrefixSum(PrefixSumAir),
     Blake3Io(Blake3IoAir),
     Blake3Round(Blake3RoundAir),
     Limbs(LimbsAir),
@@ -78,6 +84,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => &mut air.preprocessed,
             Self::ExtAlu(air) => &mut air.preprocessed,
             Self::Select(air) => &mut air.preprocessed,
+            Self::Ext2Felts(air) => &mut air.preprocessed,
+            Self::PrefixSum(air) => &mut air.preprocessed,
             Self::Blake3Io(air) => &mut air.preprocessed,
             Self::Blake3Round(air) => &mut air.preprocessed,
             Self::Limbs(air) => &mut air.preprocessed,
@@ -98,6 +106,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.log_height(),
             Self::ExtAlu(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
+            Self::Ext2Felts(air) => air.log_height(),
+            Self::PrefixSum(air) => air.log_height(),
             Self::Blake3Io(air) => air.log_height(),
             Self::Blake3Round(air) => air.log_height(),
             Self::Limbs(air) => air.log_height(),
@@ -117,6 +127,8 @@ impl RecursionAir {
             Self::BaseAlu(_) => "BaseAlu",
             Self::ExtAlu(air) => air.name(),
             Self::Select(_) => "Select",
+            Self::Ext2Felts(_) => "Ext2Felts",
+            Self::PrefixSum(_) => "PrefixSum",
             Self::Blake3Io(_) => "Blake3Io",
             Self::Blake3Round(_) => "Blake3Round",
             Self::Limbs(_) => "Limbs",
@@ -135,6 +147,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.writes(),
             Self::ExtAlu(air) => air.writes(),
             Self::Select(air) => air.writes(),
+            Self::Ext2Felts(air) => air.writes(),
+            Self::PrefixSum(air) => air.writes(),
             Self::Blake3Io(air) => air.writes(),
             Self::Limbs(air) => air.writes(),
             Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) | Self::Mul8(_) => {
@@ -148,6 +162,7 @@ impl RecursionAir {
         match self {
             Self::BaseAlu(air) => air.mul_request_count(),
             Self::ExtAlu(air) => air.mul_request_count(),
+            Self::PrefixSum(air) => air.mul_request_count(),
             _ => 0,
         }
     }
@@ -157,6 +172,7 @@ impl RecursionAir {
         match self {
             Self::BaseAlu(air) => air.mul_requests(record),
             Self::ExtAlu(air) => air.mul_requests(record),
+            Self::PrefixSum(air) => air.mul_requests(record),
             _ => Vec::new(),
         }
     }
@@ -170,6 +186,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.written_values(record),
             Self::ExtAlu(air) => air.written_values(record),
             Self::Select(air) => air.written_values(record),
+            Self::Ext2Felts(air) => air.written_values(record),
+            Self::PrefixSum(air) => air.written_values(record),
             Self::Blake3Io(air) => air.written_values(record),
             Self::Limbs(air) => air.written_values(record),
             Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) | Self::Mul8(_) => {
@@ -193,6 +211,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.main_table(record),
             Self::ExtAlu(air) => air.main_table(record),
             Self::Select(air) => air.main_table(record),
+            Self::Ext2Felts(air) => air.main_table(record),
+            Self::PrefixSum(air) => air.main_table(record),
             Self::Blake3Io(air) => air.main_table(record),
             Self::Blake3Round(air) => air.main_table(record),
             Self::Limbs(air) => air.main_table(record),
@@ -212,6 +232,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::width(air),
             Self::ExtAlu(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
+            Self::Ext2Felts(air) => BaseAir::<X>::width(air),
+            Self::PrefixSum(air) => BaseAir::<X>::width(air),
             Self::Blake3Io(air) => BaseAir::<X>::width(air),
             Self::Blake3Round(air) => BaseAir::<X>::width(air),
             Self::Limbs(air) => BaseAir::<X>::width(air),
@@ -229,6 +251,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::ExtAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Ext2Felts(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::PrefixSum(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Blake3Io(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Blake3Round(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Limbs(air) => BaseAir::<X>::preprocessed_width(air),
@@ -253,6 +277,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => air.preprocessed_trace(),
             Self::ExtAlu(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
+            Self::Ext2Felts(air) => air.preprocessed_trace(),
+            Self::PrefixSum(air) => air.preprocessed_trace(),
             Self::Blake3Io(air) => air.preprocessed_trace(),
             Self::Blake3Round(air) => air.preprocessed_trace(),
             Self::Limbs(air) => air.preprocessed_trace(),
@@ -272,6 +298,8 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RecursionAir {
             Self::BaseAlu(air) => air.eval(builder),
             Self::ExtAlu(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
+            Self::Ext2Felts(air) => air.eval(builder),
+            Self::PrefixSum(air) => air.eval(builder),
             Self::Blake3Io(air) => air.eval(builder),
             Self::Blake3Round(air) => air.eval(builder),
             Self::Limbs(air) => air.eval(builder),
@@ -351,11 +379,11 @@ impl RecursionMachine {
                 | Instruction::HintExt2Felts(_)
                 | Instruction::Blake3Compress(_)
                 | Instruction::FeltLimbs(_)
+                | Instruction::HintAddCurve(_)
+                | Instruction::Ext2Felts(_)
+                | Instruction::PrefixSumChecks(_)
                 | Instruction::Print(_) => continue,
-                Instruction::HintAddCurve(_) => "curve hints",
-                Instruction::Ext2Felts(_) => "Ext2Felts",
                 Instruction::Poseidon2(_) => "Poseidon2",
-                Instruction::PrefixSumChecks(_) => "PrefixSumChecks",
             };
             return Err(MachineError::Unsupported(unsupported));
         }
@@ -367,6 +395,8 @@ impl RecursionMachine {
             RecursionAir::ExtAlu(ExtAluAir::new(program, ExtAluKind::Add)),
             RecursionAir::ExtAlu(ExtAluAir::new(program, ExtAluKind::Mul)),
             RecursionAir::Select(SelectAir::new(program)),
+            RecursionAir::Ext2Felts(Ext2FeltsAir::new(program)),
+            RecursionAir::PrefixSum(PrefixSumAir::new(program)),
             RecursionAir::Blake3Io(Blake3IoAir::new(compressions.clone())),
             RecursionAir::Blake3Round(Blake3RoundAir::new(compressions)),
             RecursionAir::Limbs(LimbsAir::new(program)),
@@ -902,6 +932,160 @@ mod tests {
             Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a changed extension result must not verify");
+    }
+
+    /// `n` prefix-sum chains, `n` extension splits and one curve hint, each
+    /// result read back against the host's value.
+    fn leaf_ops_program(n: usize) -> RecursionProgram<KoalaBear> {
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
+        use zkm_recursion_core::runtime::instruction::{HintAddCurveInstr, HintExt2FeltsInstr};
+        use zkm_recursion_core::Address;
+
+        let values = elements(64 * n + 28);
+        let at = |a: u32| Address(KoalaBear::from_u32(a));
+        let mut addr = 0u32;
+        let mut instructions = Vec::new();
+        for c in 0..n {
+            let len = 2 + 2 * (c % 4);
+            let bits: Vec<KoalaBear> = (0..len)
+                .map(|i| KoalaBear::from_bool((values[64 * c + i].as_canonical_u32() & 1) == 1))
+                .collect();
+            let point: Vec<EF> = (0..len)
+                .map(|i| EF::from_basis_coefficients_fn(|k| values[64 * c + 16 + 4 * i + k]))
+                .collect();
+            let mut acc = EF::ONE;
+            let mut felt_acc = KoalaBear::ZERO;
+            for (&b, &p) in bits.iter().zip(&point) {
+                let prod = p * b;
+                acc *= EF::ONE - b - p + prod + prod;
+                felt_acc = b + felt_acc * KoalaBear::TWO;
+            }
+            let l = len as u32;
+            let base = addr;
+            addr += 4 * l + 2;
+            for (i, &b) in bits.iter().enumerate() {
+                instructions.push(instr::mem_single(MemAccessKind::Write, 1, base + i as u32, b));
+            }
+            for (i, &p) in point.iter().enumerate() {
+                instructions.push(instr::mem_ext::<KoalaBear, EF>(
+                    MemAccessKind::Write,
+                    1,
+                    base + l + i as u32,
+                    p,
+                ));
+            }
+            instructions.push(instr::mem_single(
+                MemAccessKind::Write,
+                1,
+                base + 2 * l,
+                KoalaBear::ZERO,
+            ));
+            instructions.push(instr::mem_ext::<KoalaBear, EF>(
+                MemAccessKind::Write,
+                1,
+                base + 2 * l + 1,
+                EF::ONE,
+            ));
+            let accs: Vec<u32> = (0..l).map(|i| base + 2 * l + 2 + i).collect();
+            let faccs: Vec<u32> = (0..l).map(|i| base + 3 * l + 2 + i).collect();
+            instructions.push(instr::prefix_sum_checks(
+                vec![1u32; len],
+                vec![1u32; len],
+                (0..l).map(|i| base + i).collect(),
+                (0..l).map(|i| base + l + i).collect(),
+                base + 2 * l,
+                base + 2 * l + 1,
+                accs.clone(),
+                faccs.clone(),
+            ));
+            instructions.push(instr::mem_ext::<KoalaBear, EF>(
+                MemAccessKind::Read,
+                1,
+                accs[len - 1],
+                acc,
+            ));
+            instructions.push(instr::mem_single(MemAccessKind::Read, 1, faccs[len - 1], felt_acc));
+
+            let element = EF::from_basis_coefficients_fn(|k| values[64 * c + 48 + k]);
+            let split: Vec<u32> = (0..4).map(|k| addr + 1 + k).collect();
+            instructions.push(instr::mem_ext::<KoalaBear, EF>(
+                MemAccessKind::Write,
+                1,
+                addr,
+                element,
+            ));
+            instructions.push(Instruction::Ext2Felts(HintExt2FeltsInstr {
+                output_addrs_mults: array::from_fn(|k| (at(split[k]), KoalaBear::ONE)),
+                input_addr: at(addr),
+            }));
+            for (k, &coefficient) in element.as_basis_coefficients_slice().iter().enumerate() {
+                instructions.push(instr::mem_single(MemAccessKind::Read, 1, split[k], coefficient));
+            }
+            addr += 5;
+        }
+
+        let coordinates = &values[64 * n..];
+        let septic =
+            |offset: usize| SepticExtension::<KoalaBear>::from_base_fn(|i| coordinates[offset + i]);
+        let (x1, y1, x2, y2) = (septic(0), septic(7), septic(14), septic(21));
+        let sum = SepticCurve { x: x1, y: y1 }.add_incomplete(SepticCurve { x: x2, y: y2 });
+        let inputs: Vec<u32> = (0..28).map(|i| addr + i).collect();
+        let outputs: Vec<u32> = (0..14).map(|i| addr + 28 + i).collect();
+        addr += 42;
+        for (i, &a) in inputs.iter().enumerate() {
+            instructions.push(instr::mem_single(MemAccessKind::Write, 0, a, coordinates[i]));
+        }
+        instructions.push(Instruction::HintAddCurve(Box::new(HintAddCurveInstr {
+            output_x_addrs_mults: (0..7).map(|i| (at(outputs[i]), KoalaBear::ONE)).collect(),
+            output_y_addrs_mults: (0..7).map(|i| (at(outputs[7 + i]), KoalaBear::ONE)).collect(),
+            input1_x_addrs: (0..7).map(|i| at(inputs[i])).collect(),
+            input1_y_addrs: (0..7).map(|i| at(inputs[7 + i])).collect(),
+            input2_x_addrs: (0..7).map(|i| at(inputs[14 + i])).collect(),
+            input2_y_addrs: (0..7).map(|i| at(inputs[21 + i])).collect(),
+        })));
+        for i in 0..7 {
+            instructions.push(instr::mem_single(MemAccessKind::Read, 1, outputs[i], sum.x.0[i]));
+            instructions.push(instr::mem_single(
+                MemAccessKind::Read,
+                1,
+                outputs[7 + i],
+                sum.y.0[i],
+            ));
+        }
+
+        instructions.extend(commit(addr, [KoalaBear::ZERO; DIGEST_SIZE]));
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    /// Prefix-sum chains, extension splits and a curve hint prove through
+    /// the real runtime, and a record with a changed Lagrange product, a
+    /// changed Horner sum or a changed split does not.
+    #[test]
+    fn leaf_ops_prove_and_tampering_fails() {
+        let program = Arc::new(leaf_ops_program(12));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        let proof = machine.prove(&record).expect("the execution proves");
+        let digest = PublicValuesAir::digest(&record);
+        machine.verify(&proof, &digest).expect("the execution verifies");
+
+        let rejects = |record: &ExecutionRecord<KoalaBear>| match machine.prove(record) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof, &digest).is_err(),
+        };
+        let mut wrong_product = record.clone();
+        wrong_product.prefix_sum_checks_events[3].new_acc.0[2] += KoalaBear::ONE;
+        assert!(rejects(&wrong_product), "a changed Lagrange product must not verify");
+        let mut wrong_sum = record.clone();
+        wrong_sum.prefix_sum_checks_events[5].new_field_acc += KoalaBear::ONE;
+        assert!(rejects(&wrong_sum), "a changed Horner sum must not verify");
+        let mut wrong_split = record;
+        wrong_split.ext2felt_events[1].inner.0[3] += KoalaBear::ONE;
+        assert!(rejects(&wrong_split), "a changed split must not verify");
     }
 
     /// The extension and select program at the scale `ZIREN_BINARY_SCALE`

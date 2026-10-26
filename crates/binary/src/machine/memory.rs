@@ -213,16 +213,15 @@ impl MemoryVarAir {
             .flat_map(|instruction| match instruction {
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr { output_addrs_mults, .. }) => {
-                    output_addrs_mults.as_slice()
+                    output_addrs_mults.as_slice().iter().chain(&[])
                 }
                 Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, .. }) => {
-                    output_addrs_mults.as_slice()
+                    output_addrs_mults.as_slice().iter().chain(&[])
                 }
                 Instruction::HintAddCurve(instr) => {
-                    let _ = instr;
-                    unimplemented!("curve hints are not part of the binary machine yet")
+                    instr.output_x_addrs_mults.iter().chain(&instr.output_y_addrs_mults)
                 }
-                _ => &[],
+                _ => [].iter().chain(&[]),
             })
             .map(|(addr, mult)| (addr.0.as_canonical_u32(), mult.as_canonical_u32()))
             .collect();

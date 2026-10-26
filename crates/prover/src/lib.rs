@@ -2235,6 +2235,31 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(BinaryShrinkProof { program, digest, proof })
     }
 
+    /// Prove a leaf over bits: the normalize program that verifies `input`'s
+    /// core shard, proven by the recursion machine over `GF(2^128)`.
+    #[instrument(name = "leaf_binary", level = "info", skip_all)]
+    pub fn leaf_binary(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+    ) -> Result<BinaryShrinkProof, ZKMRecursionProverError> {
+        let program = self.recursion_program_basefold(input).0;
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program.clone(),
+            zkm_pcs::inner_perm(),
+        );
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(input, &mut witness_stream);
+        runtime.witness_stream = witness_stream.into();
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+        let record = runtime.record;
+        let machine = self.binary_machine(&program)?;
+        let digest = PublicValuesAir::digest(&record);
+        let proof = tracing::debug_span!("binary machine prove")
+            .in_scope(|| machine.prove(&record))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        Ok(BinaryShrinkProof { program, digest, proof })
+    }
+
     /// The binary machine of `program`, with its tables' shapes and the
     /// program's instruction mix reported.
     pub fn binary_machine(
@@ -3625,6 +3650,41 @@ pub mod tests {
         let started = std::time::Instant::now();
         prover.verify_shrink_binary(&binary_proof)?;
         tracing::info!("binary shrink verified in {:.3} s", started.elapsed().as_secs_f64());
+        Ok(())
+    }
+
+    /// The leaf of a fibonacci proof's first core shard proved over bits,
+    /// then verified on the host.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_leaf_binary_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof =
+            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        let inputs =
+            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+        let started = std::time::Instant::now();
+        let leaf_proof = prover.leaf_binary(&inputs[0])?;
+        tracing::info!(
+            "binary leaf proof: {} bytes, {:.1} s",
+            bincode::serialize(&leaf_proof.proof).unwrap().len(),
+            started.elapsed().as_secs_f64()
+        );
+        for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&leaf_proof.proof) {
+            tracing::info!("binary leaf proof part {label}: {bytes} bytes");
+        }
+        tracing::info!(
+            "binary leaf program: {} instructions",
+            leaf_proof.program.iter_instructions().count()
+        );
+        let started = std::time::Instant::now();
+        prover.verify_shrink_binary(&leaf_proof)?;
+        tracing::info!("binary leaf verified in {:.3} s", started.elapsed().as_secs_f64());
         Ok(())
     }
 
