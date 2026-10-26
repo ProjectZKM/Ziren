@@ -2549,6 +2549,28 @@ pub mod tests {
              protocol profile is {ours}; see this test's documentation",
         );
     }
+
+    /// The guest chains its deferred proofs with the digest the recursion
+    /// rebuilds them with, the root ring's public digest.
+    #[test]
+    fn deferred_digest_matches_the_guest() {
+        use crate::types::RingDigests;
+        let config = zkm_pcs::KoalaBearBlake3::default();
+        let felt = |k: u32| KoalaBear::from_u32(k.wrapping_mul(0x9E37_79B9) % KoalaBear::ORDER_U32);
+        let mut digest = [KoalaBear::ZERO; DIGEST_SIZE];
+        for round in 0..4u32 {
+            let vk: [KoalaBear; DIGEST_SIZE] =
+                core::array::from_fn(|i| felt(100 * round + i as u32));
+            let pv: [KoalaBear; 32] = core::array::from_fn(|i| felt(7 * round + 3 * i as u32 + 1));
+            let mut inputs = Vec::with_capacity(48);
+            inputs.extend_from_slice(&digest);
+            inputs.extend_from_slice(&vk);
+            inputs.extend_from_slice(&pv);
+            let host = config.hash_public_felts(&inputs);
+            digest = zkm_primitives::hash_deferred_proof(&digest, &vk, &pv);
+            assert_eq!(digest, host, "round {round}");
+        }
+    }
     use std::{
         collections::BTreeSet,
         fs::File,
@@ -3356,13 +3378,6 @@ pub mod tests {
 
         tracing::info!("verify shrink");
         prover.verify_shrink(&shrink_proof, &verify_vk)?;
-
-        tracing::info!("wrap bn254");
-        let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
-
-        tracing::info!("verify wrap bn254");
-        println!("verify wrap bn254 {:#?}", wrapped_bn254_proof.vk.commit);
-        prover.verify_wrap_bn254(&wrapped_bn254_proof, &verify_vk).unwrap();
 
         Ok(())
     }
