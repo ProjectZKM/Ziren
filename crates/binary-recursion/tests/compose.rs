@@ -7,7 +7,7 @@
 
 use p3_binary_field::TowerLevel;
 use p3_field::PrimeCharacteristicRing;
-use zkm_binary_recursion::compose::{record_compose, Child, Compose};
+use zkm_binary_recursion::compose::{record_compose, Child, Compose, Composed};
 use zkm_binary_recursion::machine::program::Program;
 use zkm_binary_recursion::machine::TapeMachine;
 use zkm_binary_recursion::{Tape, F};
@@ -166,6 +166,142 @@ fn composes_leaves() {
     );
     machine.verify(&proof, &public).expect("the node verifies");
     mark("verified");
+    let mut wrong = public;
+    wrong[0] += F::ONE;
+    assert!(machine.verify(&proof, &wrong).is_err(), "another digest is refused");
+}
+
+/// Record, lay out and prove a compose node over `children`, returning its
+/// machine, kept to verify, its proof and what it commits to.
+fn prove_node(
+    label: &str,
+    children: Vec<Child<'_>>,
+    schedule: &BinarySchedule,
+) -> (TapeMachine, zkm_binary_stark::config::MachineProof, Composed) {
+    let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+    let (composed, tape) = record_compose(&node);
+    let composed = composed.expect("the children compose");
+    census(label, &tape);
+    let program = Program::new(&tape, DIGEST_SIZE);
+    println!("  {}", program.census());
+    let mut machine = TapeMachine::new(program, schedule).expect("the tape machine");
+    let started = std::time::Instant::now();
+    let proof = machine.prove(&tape, &tape.inputs).expect("the node proves");
+    println!(
+        "{label} proof: {} bytes in {:.1} s",
+        postcard::to_allocvec(&proof).expect("serializes").len(),
+        started.elapsed().as_secs_f64()
+    );
+    let public = machine.public_values(&tape.inputs);
+    machine.verify(&proof, &public).expect("the node verifies");
+    machine.drop_proving_key();
+    (machine, proof, composed)
+}
+
+/// A node over two nodes over two leaves each, from the four comma-separated
+/// leaves in `ZIREN_BINARY_LEAVES`: its program is recorded and run, it
+/// refuses a child node whose public values do not chain, and with
+/// `ZIREN_COMPOSE_PROVE` it is proved.
+#[test]
+#[ignore]
+fn composes_nodes() {
+    trace_phases();
+    let paths = std::env::var("ZIREN_BINARY_LEAVES").expect("ZIREN_BINARY_LEAVES names leaves");
+    let leaves: Vec<ProvedProgram> = paths
+        .split(',')
+        .map(|path| {
+            ProvedProgram::from_bytes(&std::fs::read(path).expect("the leaf reads"))
+                .expect("the leaf deserializes")
+        })
+        .collect();
+    assert_eq!(leaves.len(), 4, "four leaves make two nodes of two");
+    let schedule = BinarySchedule::default();
+    let machines: Vec<RecursionMachine> = leaves
+        .iter()
+        .map(|leaf| RecursionMachine::verifier(&leaf.program, &schedule).expect("the leaf machine"))
+        .collect();
+    let leaf_children = |range: core::ops::Range<usize>| -> Vec<Child<'_>> {
+        range
+            .map(|i| {
+                Child::leaf(
+                    &machines[i],
+                    &leaves[i].proof,
+                    leaves[i].public_values.clone(),
+                    &schedule,
+                )
+            })
+            .collect()
+    };
+    mark("leaf machines built");
+    let left = prove_node("node 0..2", leaf_children(0..2), &schedule);
+    mark("left node proved");
+    let right = prove_node("node 2..4", leaf_children(2..4), &schedule);
+    mark("right node proved");
+
+    let nodes = [&left, &right];
+    let children = |values: &dyn Fn(usize) -> Vec<u32>| -> Vec<Child<'_>> {
+        nodes
+            .iter()
+            .enumerate()
+            .map(|(i, (machine, proof, _))| Child::node(machine, proof, values(i), &schedule))
+            .collect()
+    };
+    let honest = |i: usize| nodes[i].2.public_values.clone();
+    let node =
+        Compose { children: children(&honest), is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+    let started = std::time::Instant::now();
+    let (composed, tape) = record_compose(&node);
+    let composed = composed.expect("the nodes compose");
+    census("compose of 2 nodes", &tape);
+    println!("recorded in {:.1} s; digest {:?}", started.elapsed().as_secs_f64(), composed.digest);
+    let values = tape.run(&tape.inputs).expect("the program accepts its own run");
+    assert!(values == tape.values, "the run reproduces the recorded values");
+
+    let map = &RECURSION_PUBLIC_VALUES_COL_MAP;
+    let broken = |i: usize| {
+        let mut values = nodes[i].2.public_values.clone();
+        if i == 1 {
+            values[map.start_pc] = (values[map.start_pc] + 1) % 0x7f00_0001;
+        }
+        values
+    };
+    let refused = match record_compose(&Compose {
+        children: children(&broken),
+        is_complete: false,
+        max_log_shards: MAX_LOG_SHARDS,
+    }) {
+        (Err(_), _) => true,
+        (Ok(_), tape) => tape.run(&tape.inputs).is_err(),
+    };
+    assert!(refused, "a child node that does not chain must be refused");
+    mark("tampers refused");
+
+    let program = Program::new(&tape, DIGEST_SIZE);
+    println!("  {}", program.census());
+    if std::env::var_os("ZIREN_COMPOSE_PROVE").is_none() {
+        return;
+    }
+    let machine = TapeMachine::new(program, &schedule).expect("the tape machine");
+    for air in machine.airs() {
+        println!(
+            "  {:>7}: 2^{} rows x {} + {} prep",
+            air.name(),
+            air.log_height(),
+            p3_air::BaseAir::<F>::width(air),
+            p3_air::BaseAir::<F>::preprocessed_width(air)
+        );
+    }
+    let public = machine.public_values(&tape.inputs);
+    mark("prove start");
+    let started = std::time::Instant::now();
+    let proof = machine.prove(&tape, &tape.inputs).expect("the level-two node proves");
+    println!(
+        "level-two proof: {} bytes in {:.1} s",
+        postcard::to_allocvec(&proof).expect("serializes").len(),
+        started.elapsed().as_secs_f64()
+    );
+    mark("prove end");
+    machine.verify(&proof, &public).expect("the level-two node verifies");
     let mut wrong = public;
     wrong[0] += F::ONE;
     assert!(machine.verify(&proof, &wrong).is_err(), "another digest is refused");

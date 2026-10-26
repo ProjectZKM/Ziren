@@ -232,8 +232,14 @@ impl TapeMachine {
     /// Returns an error if the configuration or the keys cannot be built.
     pub fn verifier(program: Program, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
         let mut machine = Self::new(program, schedule)?;
-        machine.pk = None;
+        machine.drop_proving_key();
         Ok(machine)
+    }
+
+    /// Keep only what a verifier reads, once the machine has proved what it
+    /// will: the proving key holds the preprocessed commitment's prover data.
+    pub fn drop_proving_key(&mut self) {
+        self.pk = None;
     }
 
     fn shapes_of(airs: &[TapeAir]) -> (Vec<TableShape>, Vec<TableShape>) {
