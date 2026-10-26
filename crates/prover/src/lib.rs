@@ -2182,10 +2182,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let _ = self.wrap_program_cached(&self.dummy_wrap_input());
     }
 
-    /// Set up the wrap keys into [`Self::wrap_keys_cache`] ahead of the
-    /// first wrap, building the program first if
-    /// [`Self::prewarm_wrap_program`] has not.  Unlike that, this runs the
-    /// wrap prover's setup, so a device prover needs its device.
+    /// Populate the wrap program and key caches before the first wrap.
+    ///
+    /// Calls the wrap prover's setup, which requires device access for
+    /// device-backed provers.
     pub fn prewarm_wrap_keys(&self) {
         let (program, digest) = self.wrap_program_cached(&self.dummy_wrap_input());
         let _ = self.wrap_keys_cached(&program, digest);
@@ -2545,10 +2545,10 @@ pub mod tests {
         );
     }
 
-    /// After the program prewarm, a wrap input at the frozen shrink shape
-    /// finds its program in the cache.
+    /// After prewarming, another dummy input at the frozen shrink shape
+    /// hits the program cache.
     #[test]
-    fn wrap_program_prewarm_serves_the_first_wrap() {
+    fn wrap_program_prewarm_populates_cache() {
         use crate::components::DefaultProverComponents;
         let prover = ZKMProver::<DefaultProverComponents>::uninitialized();
         prover.prewarm_wrap_program();
