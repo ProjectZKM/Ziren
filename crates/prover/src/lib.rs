@@ -296,7 +296,7 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// Cache for the wrap program, keyed by
     /// [`ZKMWrapBasefoldWitnessValues::shape_key`].  The shrink proof's shape
     /// is frozen, so a process reaches one entry.
-    pub wrap_programs_basefold_cache: Mutex<RecursionProgramCache>,
+    pub wrap_programs_cache: Mutex<RecursionProgramCache>,
 
     /// Whether to verify verification keys.
     pub vk_verification: bool,
@@ -725,7 +725,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_verification,
             wrap_vk: OnceLock::new(),
             wrap_keys_cache: Mutex::new(None),
-            wrap_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
+            wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
@@ -1537,7 +1537,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// unchanged here.
     ///
     /// Builds fresh on every call; [`Self::wrap_bn254`] goes through
-    /// [`Self::wrap_programs_basefold_cache`].
+    /// [`Self::wrap_programs_cache`].
     pub fn wrap_bn254_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
@@ -2171,7 +2171,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
-    /// Build the wrap program into [`Self::wrap_programs_basefold_cache`]
+    /// Build the wrap program into [`Self::wrap_programs_cache`]
     /// ahead of the first wrap, on the host only.
     ///
     /// The wrap program depends only on the frozen shrink shape
@@ -2208,12 +2208,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// The wrap program for `input` and its setup digest, through
-    /// [`Self::wrap_programs_basefold_cache`].
+    /// [`Self::wrap_programs_cache`].
     fn wrap_program_cached(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        self.cached_program(&self.wrap_programs_basefold_cache, input.shape_key(), "wrap", || {
+        self.cached_program(&self.wrap_programs_cache, input.shape_key(), "wrap", || {
             self.wrap_bn254_program_basefold(input)
         })
     }
@@ -2554,7 +2554,7 @@ pub mod tests {
         prover.prewarm_wrap_program();
         let (program, digest) = prover.wrap_program_cached(&prover.dummy_wrap_input());
         assert_eq!(digest, zkm_recursion_core::setup_digest(&program));
-        let cache = prover.wrap_programs_basefold_cache.lock().unwrap();
+        let cache = prover.wrap_programs_cache.lock().unwrap();
         assert_eq!((cache.hits, cache.misses), (1, 1));
     }
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
