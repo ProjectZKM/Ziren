@@ -30,9 +30,14 @@ pub struct ArithPrep<T> {
     pub addr_b: [T; ADDR_BITS],
     pub addr_s: [T; ADDR_BITS],
     pub addr_c: [T; ADDR_BITS],
+    /// The operand is read through the ledger.
     pub read_a: T,
     pub read_b: T,
     pub read_s: T,
+    /// The operand is its cell's only read, pulled from the write itself.
+    pub direct_a: T,
+    pub direct_b: T,
+    pub direct_s: T,
     pub write_c: T,
     pub is_add: T,
     pub is_mul: T,
@@ -42,7 +47,7 @@ pub struct ArithPrep<T> {
     pub is_select: T,
     pub is_copy: T,
     /// Zeros, which make the width a power of two.
-    pub pad: [T; 128 - 4 * ADDR_BITS - 11],
+    pub pad: [T; 128 - 4 * ADDR_BITS - 14],
 }
 
 /// The witness part of an arithmetic row.
@@ -75,11 +80,14 @@ impl ArithAir {
             let prep: &mut ArithPrep<u8> = preprocessed
                 [row * NUM_ARITH_PREP_COLS..(row + 1) * NUM_ARITH_PREP_COLS]
                 .borrow_mut();
-            let place =
-                |read: Option<Read>| read.map_or((addr_bits(0), 0), |r| (addr_bits(r.addr), 1));
-            (prep.addr_a, prep.read_a) = place(op.a);
-            (prep.addr_b, prep.read_b) = place(op.b);
-            (prep.addr_s, prep.read_s) = place(op.s);
+            let place = |read: Option<Read>| {
+                read.map_or((addr_bits(0), 0, 0), |r| {
+                    (addr_bits(r.addr), u8::from(!r.direct), u8::from(r.direct))
+                })
+            };
+            (prep.addr_a, prep.read_a, prep.direct_a) = place(op.a);
+            (prep.addr_b, prep.read_b, prep.direct_b) = place(op.b);
+            (prep.addr_s, prep.read_s, prep.direct_s) = place(op.s);
             prep.addr_c = addr_bits(op.c.unwrap_or(0));
             prep.write_c = u8::from(op.write_c);
             match op.kind {
@@ -175,16 +183,22 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ArithAir {
             .assert_eq(c.clone(), a.clone() + s.clone() * (a.clone() + b.clone()));
         builder.when(prep.is_copy).assert_eq(c.clone(), a.clone());
 
-        for (addr, value, read) in [
-            (&prep.addr_a, a, prep.read_a),
-            (&prep.addr_b, b, prep.read_b),
-            (&prep.addr_s, s, prep.read_s),
+        for (addr, value, read, direct) in [
+            (&prep.addr_a, a, prep.read_a, prep.direct_a),
+            (&prep.addr_b, b, prep.read_b, prep.direct_b),
+            (&prep.addr_s, s, prep.read_s, prep.direct_s),
         ] {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
-                cell::<AB>(addr, 0, value),
+                cell::<AB>(addr, 0, value.clone()),
                 BusActivation::Boolean(read.into()),
+            );
+            builder.declare_bus(
+                WRITE,
+                BusDirection::Pull,
+                cell::<AB>(addr, 0, value),
+                BusActivation::Boolean(direct.into()),
             );
         }
         builder.declare_bus(

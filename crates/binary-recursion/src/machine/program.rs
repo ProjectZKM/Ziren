@@ -27,7 +27,7 @@
 //!   A rewiring row is then 128 bytes wide where a whole transpose would be
 //!   128 elements: every column of a table is a value the verifier opens.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use p3_binary_field::TowerLevel;
 use p3_field::PrimeCharacteristicRing;
@@ -102,6 +102,9 @@ pub enum ArithKind {
 pub struct Read {
     pub addr: u32,
     pub cell: Operand,
+    /// The read is the cell's only one and pulls its write directly, the
+    /// cell having no ledger rows; [`Program::new`] settles it last.
+    pub direct: bool,
 }
 
 /// One row of the KoalaBear table.
@@ -171,6 +174,22 @@ pub struct RewireRow {
     pub out_base: u32,
     /// Whether each output is read, which [`Program::new`] settles last.
     pub out_reads: Vec<bool>,
+    /// Whether each input is its cell's only read, pulled from the write
+    /// itself, which [`Program::new`] settles last.
+    pub direct: Vec<bool>,
+}
+
+impl RewireRow {
+    /// The address of each input the row reads.
+    #[must_use]
+    pub fn input_addrs(&self) -> Vec<u32> {
+        match self.kind {
+            RewireKind::FromBytes | RewireKind::Gather => {
+                (0..self.inputs.len()).map(|u| self.in_base ^ u as u32).collect()
+            }
+            _ => vec![self.in_base],
+        }
+    }
 }
 
 /// Where a compression's chaining value comes from.
@@ -269,7 +288,7 @@ impl Builder {
     fn read(&mut self, operand: Operand) -> Read {
         let (addr, source) = self.address(operand);
         self.count(addr, Cell::Value(operand), source);
-        Read { addr, cell: operand }
+        Read { addr, cell: operand, direct: false }
     }
 
     /// One more read of the cell at `addr`.
@@ -440,6 +459,7 @@ impl Program {
                         inputs: vec![Cell::Value(*x)],
                         out_base: base.expect("a rewiring has outputs"),
                         out_reads: vec![false; outputs],
+                        direct: Vec::new(),
                     });
                 }
                 Op::Transpose(rows) if rows.len() == 1 => {
@@ -450,6 +470,7 @@ impl Program {
                         inputs: vec![Cell::Value(rows[0])],
                         out_base: base.expect("a transpose has outputs"),
                         out_reads: vec![false; 128],
+                        direct: Vec::new(),
                     });
                 }
                 Op::Transpose(rows) => {
@@ -464,6 +485,7 @@ impl Program {
                             inputs: vec![Cell::Value(row)],
                             out_base: bytes ^ u as u32,
                             out_reads: vec![false; 16],
+                            direct: Vec::new(),
                         });
                     }
                     for c in 0..16u32 {
@@ -478,6 +500,7 @@ impl Program {
                             inputs,
                             out_base: out ^ (8 * c),
                             out_reads: vec![false; 8],
+                            direct: Vec::new(),
                         });
                     }
                 }
@@ -489,6 +512,7 @@ impl Program {
                         inputs: bytes.iter().map(|&b| Cell::Value(b)).collect(),
                         out_base: base.expect("an assembly has an output"),
                         out_reads: vec![false; 1],
+                        direct: Vec::new(),
                     });
                 }
                 Op::Blake3 { slots, len } => {
@@ -514,9 +538,39 @@ impl Program {
             }
         }
 
-        let reads = core::mem::take(&mut builder.reads);
+        let mut reads = core::mem::take(&mut builder.reads);
         let is_read = |addr: u32| reads.contains_key(&addr);
         let mut program = builder.program;
+        let direct_candidates: HashSet<u32> = program
+            .arith
+            .iter()
+            .flat_map(|row| [row.a, row.b, row.s])
+            .flatten()
+            .chain(program.kb.iter().flat_map(|row| [row.a, row.b]))
+            .map(|read| read.addr)
+            .chain(program.rewire.iter().flat_map(RewireRow::input_addrs))
+            .collect();
+        let direct: HashSet<u32> = direct_candidates
+            .into_iter()
+            .filter(|addr| {
+                reads
+                    .get(addr)
+                    .is_some_and(|&(count, _, source)| count == 1 && source == Source::Write)
+            })
+            .collect();
+        let settle = |read: &mut Read| read.direct = direct.contains(&read.addr);
+        for row in &mut program.arith {
+            for read in [&mut row.a, &mut row.b, &mut row.s].into_iter().flatten() {
+                settle(read);
+            }
+        }
+        for row in &mut program.kb {
+            settle(&mut row.a);
+            settle(&mut row.b);
+        }
+        for row in &mut program.rewire {
+            row.direct = row.input_addrs().iter().map(|addr| direct.contains(addr)).collect();
+        }
         for row in &mut program.arith {
             row.write_c = row.c.is_some_and(is_read);
         }
@@ -533,6 +587,7 @@ impl Program {
                 *reads = [is_read(*base), is_read(*base ^ 1)];
             }
         }
+        reads.retain(|addr, _| !direct.contains(addr));
         let mut groups: Vec<Group> = reads
             .into_iter()
             .map(|(addr, (reads, cell, source))| Group { addr, reads, source, cell })
@@ -608,6 +663,15 @@ impl Program {
     #[must_use]
     pub fn census(&self) -> String {
         let reads: u64 = self.groups.iter().map(|g| u64::from(g.reads)).sum();
+        let direct = self
+            .arith
+            .iter()
+            .flat_map(|row| [row.a, row.b, row.s])
+            .flatten()
+            .chain(self.kb.iter().flat_map(|row| [row.a, row.b]))
+            .filter(|read| read.direct)
+            .count()
+            + self.rewire.iter().flat_map(|row| &row.direct).filter(|&&d| d).count();
         let kinds = [
             ArithKind::Add,
             ArithKind::Mul,
@@ -625,7 +689,7 @@ impl Program {
             })
             .collect();
         format!(
-            "{} cells read {reads} times; arith {} rows ({}); rewire {} rows; {} compressions; {} KoalaBear rows",
+            "{} ledger cells read {reads} times; {direct} direct reads; arith {} rows ({}); rewire {} rows; {} compressions; {} KoalaBear rows",
             self.groups.len(),
             self.arith.len(),
             arith.join(", "),

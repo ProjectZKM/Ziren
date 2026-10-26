@@ -37,8 +37,12 @@ pub struct KbPrep<T> {
     pub addr_a: [T; ADDR_BITS],
     pub addr_b: [T; ADDR_BITS],
     pub addr_c: [T; ADDR_BITS],
-    /// The row holds an operation, and reads its operands.
-    pub is_real: T,
+    /// Each operand is read through the ledger.
+    pub read_a: T,
+    pub read_b: T,
+    /// Each operand is its cell's only read, pulled from the write itself.
+    pub direct_a: T,
+    pub direct_b: T,
     /// The result is read.
     pub write_c: T,
     pub is_add: T,
@@ -93,7 +97,8 @@ impl KbAir {
             prep.addr_a = addr_bits(op.a.addr);
             prep.addr_b = addr_bits(op.b.addr);
             prep.addr_c = addr_bits(op.c);
-            prep.is_real = 1;
+            (prep.read_a, prep.direct_a) = (u8::from(!op.a.direct), u8::from(op.a.direct));
+            (prep.read_b, prep.direct_b) = (u8::from(!op.b.direct), u8::from(op.b.direct));
             prep.write_c = u8::from(op.write_c);
             match op.kind {
                 KbOp::Add => prep.is_add = 1,
@@ -176,12 +181,21 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for KbAir {
             builder.when(prep.is_mul).assert_eq(local.c[i], local.mul.reduce.out[i]);
         }
 
-        for (addr, value) in [(&prep.addr_a, &local.a), (&prep.addr_b, &local.b)] {
+        for (addr, value, read, direct) in [
+            (&prep.addr_a, &local.a, prep.read_a, prep.direct_a),
+            (&prep.addr_b, &local.b, prep.read_b, prep.direct_b),
+        ] {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
                 cell::<AB>(addr, 0, pack::<AB>(value)),
-                BusActivation::Boolean(prep.is_real.into()),
+                BusActivation::Boolean(read.into()),
+            );
+            builder.declare_bus(
+                WRITE,
+                BusDirection::Pull,
+                cell::<AB>(addr, 0, pack::<AB>(value)),
+                BusActivation::Boolean(direct.into()),
             );
         }
         builder.declare_bus(

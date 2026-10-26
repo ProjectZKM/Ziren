@@ -50,10 +50,14 @@ const ELEMENT_BYTES: usize = 16;
 pub struct RewirePrep<T> {
     pub in_base: [T; ADDR_BITS],
     pub out_base: [T; ADDR_BITS],
-    /// The row reads one element.
+    /// The row reads one element through the ledger.
     pub reads_element: T,
-    /// Which bytes the row reads.
+    /// The row reads one element, its cell's only read, from the write.
+    pub direct_element: T,
+    /// Which bytes the row reads through the ledger.
     pub reads: [T; WIDTH],
+    /// Which bytes the row reads, each its cell's only read, from the write.
+    pub direct_reads: [T; WIDTH],
     /// Which bytes a split into bytes writes.
     pub bytes: [T; ELEMENT_BYTES],
     /// Which bytes a split of a transpose's row writes.
@@ -65,7 +69,7 @@ pub struct RewirePrep<T> {
     /// The row writes the element its bytes assemble.
     pub assembles: T,
     /// Zeros, which make the width a power of two.
-    pub pad: [T; 512 - 2 * ADDR_BITS - 2 - WIDTH - 2 * ELEMENT_BYTES - VALUE_BITS - 8],
+    pub pad: [T; 512 - 2 * ADDR_BITS - 3 - 2 * WIDTH - 2 * ELEMENT_BYTES - VALUE_BITS - 8],
 }
 
 /// The witness part of a rewiring row.
@@ -104,10 +108,14 @@ impl RewireAir {
             prep.out_base = addr_bits(op.out_base);
             match op.kind {
                 RewireKind::ToBytes | RewireKind::Split | RewireKind::Bits { .. } => {
-                    prep.reads_element = 1;
+                    prep.reads_element = u8::from(!op.direct[0]);
+                    prep.direct_element = u8::from(op.direct[0]);
                 }
                 RewireKind::FromBytes | RewireKind::Gather => {
-                    prep.reads[..op.inputs.len()].fill(1);
+                    for (u, &direct) in op.direct.iter().enumerate() {
+                        prep.reads[u] = u8::from(!direct);
+                        prep.direct_reads[u] = u8::from(direct);
+                    }
                 }
             }
             match op.kind {
@@ -183,12 +191,26 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RewireAir {
             cell::<AB>(&prep.in_base, 0, element.clone()),
             BusActivation::Boolean(prep.reads_element.into()),
         );
-        for (u, (row, reads)) in m.iter().zip(prep.reads.iter()).enumerate() {
+        builder.declare_bus(
+            WRITE,
+            BusDirection::Pull,
+            cell::<AB>(&prep.in_base, 0, element.clone()),
+            BusActivation::Boolean(prep.direct_element.into()),
+        );
+        for (u, (row, (reads, direct))) in
+            m.iter().zip(prep.reads.iter().zip(prep.direct_reads.iter())).enumerate()
+        {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
                 cell::<AB>(&prep.in_base, u as u32, pack::<AB>(row)),
                 BusActivation::Boolean((*reads).into()),
+            );
+            builder.declare_bus(
+                WRITE,
+                BusDirection::Pull,
+                cell::<AB>(&prep.in_base, u as u32, pack::<AB>(row)),
+                BusActivation::Boolean((*direct).into()),
             );
         }
         for (j, (row, (bytes, split))) in
