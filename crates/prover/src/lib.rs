@@ -127,7 +127,7 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
-/// The wrap prover's `(pk, vk)`, as [`ZKMProver::wrap_keys`] keeps them.
+/// The wrap prover's proving and verifying keys, held by [`ZKMProver::wrap_keys_cache`].
 pub type WrapKeys<C> = (
     <<C as ZKMProverComponents>::WrapProver as MachineProver<
         OuterSC,
@@ -2140,7 +2140,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         tracing::debug!("wrap_bn254 basefold program executed successfully");
 
         let wrap_keys = tracing::debug_span!("setup wrap_bn254 basefold")
-            .in_scope(|| self.wrap_keys(&program, digest));
+            .in_scope(|| self.wrap_keys_cached(&program, digest));
         let (wrap_pk, wrap_vk) = &*wrap_keys;
         if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
             tracing::debug!("wrap verifier key set (basefold)");
@@ -2176,26 +2176,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
-    /// The wrap `(pk, vk)` for `program`, whose setup digest is `digest`, set
-    /// up on the first wrap and reused while the digest stays the same; see
-    /// [`Self::wrap_keys_cache`].  The lock is held across a setup, so a
-    /// concurrent wrap waits for the key instead of building it again.
-    pub fn wrap_keys(
+    /// Return cached wrap keys, running setup if the program's digest differs.
+    ///
+    /// `setup_digest` must be the digest returned with `program` by
+    /// [`Self::cached_program`]. The lock is held through setup so concurrent
+    /// calls for the same digest reuse the resulting keys.
+    fn wrap_keys_cached(
         &self,
         program: &RecursionProgram<KoalaBear>,
-        digest: [u8; 32],
+        setup_digest: [u8; 32],
     ) -> Arc<WrapKeys<C>> {
         let mut cache = self.wrap_keys_cache.lock().unwrap();
-        if let Some((cached, keys)) = cache.as_ref() {
-            if *cached == digest {
+        if let Some((cached_digest, keys)) = cache.as_ref() {
+            if *cached_digest == setup_digest {
                 tracing::debug!("wrap keys cache hit");
                 return Arc::clone(keys);
             }
         }
-        // Release another program's key before building, so both are never held.
+        // Drop the cache's reference to the old keys before setup. In-flight
+        // wraps may still hold their own Arc references to those keys.
         *cache = None;
         let keys = Arc::new(self.wrap_prover.setup(program));
-        *cache = Some((digest, Arc::clone(&keys)));
+        *cache = Some((setup_digest, Arc::clone(&keys)));
         keys
     }
 
@@ -2469,8 +2471,9 @@ pub mod tests {
         assert_eq!((g.hits, g.misses, g.builds, g.waits), (1, 1, 1, 0));
     }
 
-    /// The wrap program cache key is stable for one shrink shape and moves
-    /// with the chip heights, and two inputs of one key build one program.
+    /// The wrap program cache key is stable for one shrink shape and changes
+    /// with the chip heights. Independently built programs for the same dummy
+    /// input shape are byte-identical.
     #[test]
     fn wrap_program_shape_key_follows_the_shrink_shape() {
         use crate::components::DefaultProverComponents;

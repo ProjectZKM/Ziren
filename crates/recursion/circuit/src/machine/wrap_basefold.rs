@@ -624,18 +624,19 @@ impl<const P: u8>
         Self { vks_and_proofs, vk_merkle_data }
     }
 
-    /// Structural signature of the witness layout — the wrap program cache
-    /// key.
+    /// Wrap program cache key covering witness layout and compile-time constants.
     ///
-    /// `shape_key(a) == shape_key(b)  ⟹  wrap_program(a) == wrap_program(b)`
-    /// bytewise.  Besides the variable-length collections the compose key
-    /// walks, `read` compiles each verifying key's chip information and
-    /// ordering and each proof's chip heights into the program as constants,
-    /// so those are hashed by value.
+    /// For a fixed prover configuration and in the absence of hash collisions,
+    /// equal keys must imply byte-identical wrap programs. Variable-length
+    /// collections determine the witness layout; each verifying key's chip
+    /// information and ordering and each proof's chip heights are compiled
+    /// into the program as constants, so those are hashed by value.
     ///
-    /// Walk order MUST mirror this type's `Witnessable::write` in
-    /// `crates/recursion/circuit/src/machine/witness.rs`; any change there
-    /// requires a matching update here.
+    /// Review this key when changing `Witnessable::read` or `Witnessable::write`
+    /// in `machine/witness.rs`, the shard-proof traversal in
+    /// `shard_level_witness.rs`, or the verifier's program-generation logic.
+    /// Any new input-dependent layout or compile-time constant must be covered
+    /// here or by [`super::shape_signature::hash_shard_proof_structure`].
     pub fn shape_key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
