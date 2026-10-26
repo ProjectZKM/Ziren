@@ -6,10 +6,10 @@
 //! the product's witness and pulls them.  The channel is a multiset, so a
 //! product nobody computed, or one computed for nobody, is caught.
 //!
-//! The integer product is summed from the sixteen products of the factors'
-//! bytes, each read out of the [`MUL8`] table by the two bytes, rather than
-//! from the bit products a row would otherwise gate itself: a row holds
-//! fewer than half the bits.
+//! The product is summed from the sixteen products of the factors' bytes,
+//! each read out of the [`MUL8`] table by the two bytes, rather than from
+//! the bit products a row would otherwise gate itself, and reduced in the
+//! same zero sum: a row holds fewer than a third of the bits.
 
 use core::borrow::{Borrow, BorrowMut};
 use core::mem::offset_of;
@@ -24,8 +24,8 @@ use super::bits::{log_height_for, mul_tuple, BitRows, MUL};
 use super::mul8::MUL8;
 use crate::machine_builder::MachineBuilder;
 use crate::word::{
-    bits_le, eval_lookup_product, eval_reduce, exprs, fill_lookup_product, fill_reduce,
-    LookupProductCols, ReduceCols, Word, KB_BITS, LIMBS, LIMB_BITS, LIMB_PRODUCT_BITS,
+    bits_le, eval_lookup_mul_mod, exprs, fill_lookup_mul_mod, LookupMulModCols, Word, KB_BITS,
+    LIMBS, LIMB_BITS, LIMB_PRODUCT_BITS,
 };
 use crate::BinaryBase;
 use crate::F;
@@ -43,10 +43,8 @@ pub struct MulRow<T> {
     pub a: Word<T>,
     /// The right factor.
     pub b: Word<T>,
-    /// The integer product `a * b`, from the byte products.
-    pub product: LookupProductCols<T>,
-    /// The product reduced.
-    pub reduce: ReduceCols<T, KB_BITS, 64>,
+    /// `a * b mod p`, from the byte products.
+    pub product: LookupMulModCols<T>,
 }
 
 /// Columns of [`MulRow`].
@@ -60,7 +58,7 @@ const A_COLUMN: usize = offset_of!(MulRow<u8>, a);
 const B_COLUMN: usize = offset_of!(MulRow<u8>, b);
 /// The first column of the byte products.
 const LIMBS_COLUMN: usize =
-    offset_of!(MulRow<u8>, product) + offset_of!(LookupProductCols<u8>, limbs);
+    offset_of!(MulRow<u8>, product) + offset_of!(LookupMulModCols<u8>, limbs);
 
 /// The columns of byte `limb` of the factor starting at column `factor`,
 /// least significant bit first: the top byte's eighth bit is the zero
@@ -114,8 +112,7 @@ impl MulAir {
             cols.is_real = u8::from(r < requests.len());
             cols.a = bits_le::<KB_BITS>(u64::from(a));
             cols.b = bits_le::<KB_BITS>(u64::from(b));
-            let product = fill_lookup_product(a, b, &mut cols.product);
-            fill_reduce(u128::from(product), &mut cols.reduce);
+            fill_lookup_mul_mod(a, b, &mut cols.product);
             rows.set_row(r, &row);
         }
         rows.into_table()
@@ -140,9 +137,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MulAir {
         }
         let a = exprs::<AB, KB_BITS>(&local.a);
         let b = exprs::<AB, KB_BITS>(&local.b);
-        let product = eval_lookup_product(builder, &local.product);
-        eval_reduce(builder, &product, &local.reduce);
-        let c = exprs::<AB, KB_BITS>(&local.reduce.out);
+        let c = eval_lookup_mul_mod(builder, &local.product);
         for i in 0..LIMBS {
             for j in 0..LIMBS {
                 builder.read_table(

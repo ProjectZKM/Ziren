@@ -640,6 +640,100 @@ pub fn tree_mod<B: Clone>(
     (row(0), row(1))
 }
 
+/// Bits of the zero sum of a product reduced from its byte products: the
+/// sum spans less than `2^64` over every value its bits can take.
+pub const MUL_MOD_BITS: usize = 64;
+/// Full adders of that zero sum, fixed by its terms.
+pub const MUL_MOD_ADDERS: usize = 309;
+
+/// The witness of `out = a * b mod p` in one zero sum: the sixteen byte
+/// products, each read out of a table by the two bytes, and `2^24 q` add up
+/// to `2^31 q + q + out`, which is `a b = q p + out` as `p = 2^31 - 2^24 +
+/// 1`, with `out < p` by the borrows of `out - p`.  The product is never
+/// written out as an integer: its bits, the reduction's additions and the
+/// final carry chain are one carry-save tree.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct LookupMulModCols<T> {
+    /// The byte products, pulled from the table.
+    pub limbs: [[[T; LIMB_PRODUCT_BITS]; LIMBS]; LIMBS],
+    /// The quotient by `p`.
+    pub quotient: [T; KB_BITS],
+    /// The product reduced.
+    pub out: Word<T>,
+    /// Borrows of `out - p` over 32 bits; the last is `1`, as `out < p`.
+    pub out_borrows: [T; 32],
+    /// The zero sum.
+    pub sum: ZeroSumCols<T, MUL_MOD_BITS, MUL_MOD_ADDERS>,
+}
+
+/// The terms of [`LookupMulModCols`]'s zero sum.
+fn mul_mod_terms<B: Clone>(
+    limbs: &[[[B; LIMB_PRODUCT_BITS]; LIMBS]; LIMBS],
+    quotient: &[B],
+    out: &[B],
+) -> Vec<ZeroTerm<B>> {
+    let mut terms = Vec::with_capacity(LIMBS * LIMBS + 4);
+    for (i, row) in limbs.iter().enumerate() {
+        for (j, product) in row.iter().enumerate() {
+            terms.push(ZeroTerm::word(
+                &product[..limb_product_width(i, j)],
+                LIMB_BITS * (i + j),
+                false,
+            ));
+        }
+    }
+    terms.push(ZeroTerm::word(quotient, 24, false));
+    terms.push(ZeroTerm::word(quotient, 31, true));
+    terms.push(ZeroTerm::word(quotient, 0, true));
+    terms.push(ZeroTerm::word(out, 0, true));
+    terms
+}
+
+/// Constrain `cols.out = a * b mod p` from its byte products, and return
+/// its bits; that the byte products are what the table holds is the
+/// lookup's job.
+pub fn eval_lookup_mul_mod<AB: AirBuilder>(
+    builder: &mut AB,
+    cols: &LookupMulModCols<AB::Var>,
+) -> [AB::Expr; KB_BITS] {
+    for bit in cols.quotient.iter().chain(cols.out.iter()) {
+        builder.assert_bool(*bit);
+    }
+    let limbs: [[[AB::Expr; LIMB_PRODUCT_BITS]; LIMBS]; LIMBS] =
+        array::from_fn(|i| array::from_fn(|j| array::from_fn(|t| cols.limbs[i][j][t].into())));
+    let quotient = exprs::<AB, KB_BITS>(&cols.quotient);
+    let out = exprs::<AB, KB_BITS>(&cols.out);
+    eval_zero_sum(builder, &mul_mod_terms(&limbs, &quotient, &out), 0, &cols.sum);
+    sub_chain::<AB, 32>(
+        builder,
+        &widen::<AB, KB_BITS, 32>(&out),
+        &constant_bits::<AB, 32>(u64::from(KB_PRIME)),
+        &cols.out_borrows,
+    );
+    builder.assert_zero(AB::Expr::from(cols.out_borrows[31]) + AB::Expr::ONE);
+    out
+}
+
+/// The witness of [`eval_lookup_mul_mod`] for `a * b mod p`, which it
+/// returns.
+pub fn fill_lookup_mul_mod(a: u32, b: u32, cols: &mut LookupMulModCols<u8>) -> u32 {
+    for (i, row) in cols.limbs.iter_mut().enumerate() {
+        for (j, product) in row.iter_mut().enumerate() {
+            *product = bits_le::<LIMB_PRODUCT_BITS>(u64::from(limb(a, i) * limb(b, j)));
+        }
+    }
+    let product = u64::from(a) * u64::from(b);
+    let p = u64::from(KB_PRIME);
+    let (q, r) = (product / p, product % p);
+    cols.quotient = bits_le::<KB_BITS>(q);
+    cols.out = bits_le::<KB_BITS>(r);
+    let terms = mul_mod_terms(&cols.limbs, &cols.quotient, &cols.out);
+    fill_zero_sum(&terms, 0, &mut cols.sum);
+    cols.out_borrows = sub_borrows::<32>(r, p);
+    r as u32
+}
+
 /// One term of a zero sum: bits at their weights, added or subtracted.
 #[derive(Clone, Debug)]
 pub struct ZeroTerm<B> {

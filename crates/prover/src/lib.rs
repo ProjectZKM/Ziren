@@ -3815,8 +3815,8 @@ pub mod tests {
     /// The leaves of a cached block's first core shards proved over bits: the
     /// guest at `ZIREN_BLOCK_ELF` on the input at `ZIREN_BLOCK_INPUT`, its
     /// core proved on the host up to `ZIREN_CORE_SHARD_LIMIT` shards, and a
-    /// leaf for each of the first `ZIREN_BINARY_LEAVES`, dumped as the
-    /// fibonacci test dumps them.
+    /// leaf for each of `ZIREN_BINARY_LEAVES` shards from
+    /// `ZIREN_BINARY_LEAF_FROM`, dumped as the fibonacci test dumps them.
     #[test]
     #[serial]
     #[ignore]
@@ -3848,7 +3848,9 @@ pub mod tests {
             prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
         let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
             .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
-        for (i, input) in inputs.iter().enumerate().take(count) {
+        let from: usize = std::env::var("ZIREN_BINARY_LEAF_FROM")
+            .map_or(0, |n| n.parse().expect("ZIREN_BINARY_LEAF_FROM is an index"));
+        for (i, input) in inputs.iter().enumerate().skip(from).take(count) {
             let started = std::time::Instant::now();
             let leaf_proof = prover.leaf_binary(input)?;
             tracing::info!(

@@ -68,17 +68,36 @@ pub fn cell_bits(cell: &Cell) -> [u8; BLOCK_BITS] {
 /// the table, so a width is padded with zero columns to the next power of
 /// two when that adds at most half again, and otherwise to the sum of its
 /// top power of two and the power of two that covers the rest: two blocks.
+/// A table of 512 columns or more takes a third block when that saves an
+/// eighth of the width: its bits, which the prover pays for row by row,
+/// outweigh the verifier's claim.
 #[must_use]
 pub const fn padded_width(raw: usize) -> usize {
     if raw == 0 {
         return 0;
     }
     let next = raw.next_power_of_two();
-    if next - raw <= raw / 2 {
-        return next;
+    let top = if next == raw { raw } else { next / 2 };
+    let fewest = if next - raw <= raw / 2 || top == raw {
+        next
+    } else {
+        top + (raw - top).next_power_of_two()
+    };
+    let rest = raw - top;
+    if rest == 0 {
+        return fewest;
     }
-    let top = next / 2;
-    top + (raw - top).next_power_of_two()
+    let second = if rest.is_power_of_two() { rest } else { rest.next_power_of_two() / 2 };
+    let three = if rest == second {
+        top + second
+    } else {
+        top + second + (rest - second).next_power_of_two()
+    };
+    if raw >= 512 && three <= fewest - fewest / 8 {
+        three
+    } else {
+        fewest
+    }
 }
 
 /// The log height of a table of `rows` rows, at least [`MIN_LOG_HEIGHT`].
