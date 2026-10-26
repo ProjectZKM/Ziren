@@ -124,6 +124,19 @@ impl<X: Field> BaseAir<X> for LedgerAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
         Some(dense(&self.preprocessed, NUM_LEDGER_PREP_COLS))
     }
+
+    /// The value, which each row copies from the row before it.
+    fn main_next_row_columns(&self) -> Vec<usize> {
+        (0..NUM_LEDGER_COLS).collect()
+    }
+
+    /// Every preprocessed column, though only the flag that says a row
+    /// continues the one before it is read ahead: the commitment batches a
+    /// table's openings only when a batch reads every column, and claims
+    /// each column on its own otherwise.
+    fn preprocessed_next_row_columns(&self) -> Vec<usize> {
+        (0..NUM_LEDGER_PREP_COLS).collect()
+    }
 }
 
 /// The first row never continues a group, so the window that wraps from the

@@ -30,7 +30,7 @@ use crate::tape::F;
 pub const MAX_PUBLIC: usize = 8;
 
 /// Bits of a copy's index within its cell.
-pub const INDEX_BITS: usize = 20;
+pub const INDEX_BITS: usize = 24;
 
 /// The channel a cell's value travels on from one of its rows to the next.
 pub const COPIES: BusName<'static> = BusName::new("copies");

@@ -269,6 +269,22 @@ impl<X: Field> BaseAir<X> for RecursionAir {
         }
     }
 
+    /// Only the ledger reads a row ahead; every other table opens its
+    /// columns at one point.
+    fn main_next_row_columns(&self) -> Vec<usize> {
+        match self {
+            Self::Ledger(air) => BaseAir::<X>::main_next_row_columns(air),
+            _ => Vec::new(),
+        }
+    }
+
+    fn preprocessed_next_row_columns(&self) -> Vec<usize> {
+        match self {
+            Self::Ledger(air) => BaseAir::<X>::preprocessed_next_row_columns(air),
+            _ => Vec::new(),
+        }
+    }
+
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
         match self {
             Self::Ledger(air) => air.preprocessed_trace(),
@@ -351,6 +367,27 @@ fn shapes(airs: &[RecursionAir]) -> (Vec<TableShape>, Vec<TableShape>) {
         .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::preprocessed_width(air)))
         .collect();
     (main, preprocessed)
+}
+
+/// A program, the digest it commits to and a proof of one of its
+/// executions: what a stage verifying the proof needs.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ProvedProgram {
+    pub program: RecursionProgram<KoalaBear>,
+    pub digest: [u32; DIGEST_SIZE],
+    pub proof: MachineProof,
+}
+
+impl ProvedProgram {
+    /// The bytes of the triple.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
+        postcard::to_allocvec(self)
+    }
+
+    /// The triple of `bytes`.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        postcard::from_bytes(bytes)
+    }
 }
 
 /// The machine of one program: its tables, their configuration and keys.

@@ -46,7 +46,7 @@ pub const BLAKE3: BusName<'static> = BusName::new("blake3");
 pub const BLAKE3_ROUND_BITS: usize = 3;
 
 /// Bits of a compression's identity on that channel.
-pub const PERMUTATION_ID_BITS: usize = 24;
+pub const PERMUTATION_ID_BITS: usize = 26;
 
 /// A memory block as integers.
 pub type Cell = [u32; 4];

@@ -3685,6 +3685,15 @@ pub mod tests {
         let started = std::time::Instant::now();
         prover.verify_shrink_binary(&leaf_proof)?;
         tracing::info!("binary leaf verified in {:.3} s", started.elapsed().as_secs_f64());
+        if let Some(path) = std::env::var_os("ZIREN_BINARY_LEAF_DUMP") {
+            let dump = zkm_binary_stark::machine::ProvedProgram {
+                program: (*leaf_proof.program).clone(),
+                digest: leaf_proof.digest,
+                proof: leaf_proof.proof,
+            };
+            std::fs::write(&path, dump.to_bytes().expect("the leaf serializes"))?;
+            tracing::info!("binary leaf written to {}", path.to_string_lossy());
+        }
         Ok(())
     }
 
