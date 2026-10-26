@@ -269,6 +269,16 @@ impl JitMemoryBridge {
         self.seen_addrs.insert(addr & !3);
     }
 
+    /// Whether the word at guest address `addr` lies inside the host
+    /// buffer.  A syscall's memory range comes from guest registers, so the
+    /// per-syscall syncs skip words past the buffer instead of writing or
+    /// reading out of it.
+    #[inline]
+    #[must_use]
+    pub fn holds_word(&self, addr: u32) -> bool {
+        host_offset_of(addr & !3) + 8 <= self.len
+    }
+
     /// Read a 4-byte word at the host offset corresponding to
     /// MIPS guest address `addr`.
     #[inline]
@@ -299,6 +309,10 @@ impl JitMemoryBridge {
         let end = base.wrapping_add(nbytes).wrapping_add(3) & !3;
         let mut addr = start;
         while addr < end {
+            if !self.holds_word(addr) {
+                addr = addr.wrapping_add(4);
+                continue;
+            }
             let word = self.load_word(addr);
             executor
                 .state
@@ -321,6 +335,10 @@ impl JitMemoryBridge {
         let end = base.wrapping_add(nbytes).wrapping_add(3) & !3;
         let mut addr = start;
         while addr < end {
+            if !self.holds_word(addr) {
+                addr = addr.wrapping_add(4);
+                continue;
+            }
             if let Some(rec) = executor.state.memory.page_table.get(addr) {
                 self.store_word(addr, rec.value);
             }
@@ -341,6 +359,10 @@ impl JitMemoryBridge {
         let end = base.wrapping_add(nbytes).wrapping_add(3) & !3;
         let mut addr = start;
         while addr < end {
+            if !self.holds_word(addr) {
+                addr = addr.wrapping_add(4);
+                continue;
+            }
             if let Some(&word) = executor.state.uninitialized_memory.page_table.get(addr) {
                 self.store_word(addr, word);
             }
@@ -558,6 +580,10 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
         SyscallCode::POSEIDON2_PERMUTE => {
             mem_bridge.sync_range_to_executor(executor, a0, 64);
         }
+        SyscallCode::VERIFY_ZKM_PROOF | SyscallCode::SYSVERIFY => {
+            mem_bridge.sync_range_to_executor(executor, a0, 32);
+            mem_bridge.sync_range_to_executor(executor, a1, 32);
+        }
         SyscallCode::HALT
         | SyscallCode::SYSHINTLEN
         | SyscallCode::SYSHINTREAD
@@ -728,6 +754,8 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
         SyscallCode::HALT
         | SyscallCode::SYSHINTLEN
         | SyscallCode::WRITE
+        | SyscallCode::VERIFY_ZKM_PROOF
+        | SyscallCode::SYSVERIFY
         | SyscallCode::COMMIT
         | SyscallCode::COMMIT_DEFERRED_PROOFS
         | SyscallCode::ENTER_UNCONSTRAINED
