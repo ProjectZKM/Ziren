@@ -75,6 +75,24 @@ pub const NODE_FLOOR: &[(&str, usize)] = &[
     ("Public", 6),
 ];
 
+/// The least log height of each table of a node over two nodes, by name.
+/// Every node over leaves is a machine of [`NODE_FLOOR`]'s shape, so every
+/// node over two of them records one program, whose own heights these are;
+/// a node over two nodes of this shape verifies smaller machines, so its
+/// tables fit too, and from there up every node has one program.  It
+/// commits `2^32` bits, half a node over leaves.
+pub const UPPER_NODE_FLOOR: &[(&str, usize)] = &[
+    ("Ledger", 22),
+    ("Arith", 21),
+    ("Rewire", 19),
+    ("Gather", 16),
+    ("Hash", 17),
+    ("Rounds", 19),
+    ("Kb", 14),
+    ("Select", 16),
+    ("Public", 6),
+];
+
 /// One table of the machine.
 pub enum TapeAir {
     Ledger(LedgerAir),

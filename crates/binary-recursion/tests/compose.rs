@@ -11,7 +11,7 @@ use zkm_binary_recursion::compose::{
     binary_key_digest, record_compose, Child, Compose, Composed, KeyKind, VkMembership,
 };
 use zkm_binary_recursion::machine::program::Program;
-use zkm_binary_recursion::machine::{TapeMachine, NODE_FLOOR};
+use zkm_binary_recursion::machine::{TapeMachine, NODE_FLOOR, UPPER_NODE_FLOOR};
 use zkm_binary_recursion::{Tape, F};
 use zkm_binary_stark::machine::{leaf_floor, ProvedProgram, RecursionMachine};
 use zkm_binary_stark::BinarySchedule;
@@ -321,6 +321,12 @@ fn composes_nodes() {
     let (composed, tape) = record_compose(&node);
     let composed = composed.expect("the nodes compose");
     census("compose of 2 nodes", &tape);
+    let own = TapeMachine::table_shapes(&Program::new(&tape, DIGEST_SIZE));
+    println!(
+        "level-two own shape: {:.2} Gbit, heights {:?}",
+        own.iter().map(|&(_, h, w)| (w as u64) << h).sum::<u64>() as f64 / f64::from(1u32 << 30),
+        own.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
+    );
     println!("recorded in {:.1} s; digest {:?}", started.elapsed().as_secs_f64(), composed.digest);
     let values = tape.run(&tape.inputs).expect("the program accepts its own run");
     assert!(values == tape.values, "the run reproduces the recorded values");
@@ -373,8 +379,8 @@ fn composes_nodes() {
     if std::env::var_os("ZIREN_COMPOSE_PROVE").is_none() {
         return;
     }
-    let machine =
-        TapeMachine::new_with_floor(program, &schedule, NODE_FLOOR).expect("the tape machine");
+    let machine = TapeMachine::new_with_floor(program, &schedule, UPPER_NODE_FLOOR)
+        .expect("the tape machine");
     for air in machine.airs() {
         println!(
             "  {:>7}: 2^{} rows x {} + {} prep",
@@ -398,6 +404,29 @@ fn composes_nodes() {
     let mut wrong = public;
     wrong[0] += F::ONE;
     assert!(machine.verify(&proof, &wrong).is_err(), "another digest is refused");
+
+    let unplaced = || VkMembership { index: 0, path: vec![[0; 32]; KEY_TREE_HEIGHT] };
+    let upper: Vec<Child<'_>> = (0..2)
+        .map(|_| {
+            Child::node(&machine, &proof, composed.public_values.clone(), unplaced(), &schedule)
+        })
+        .collect();
+    let (_, tape) = record_compose(&Compose {
+        children: upper,
+        is_complete: false,
+        max_log_shards: MAX_LOG_SHARDS,
+    });
+    let own = TapeMachine::table_shapes(&Program::new(&tape, DIGEST_SIZE));
+    println!(
+        "level-three own shape: {} ops, {:.2} Gbit, heights {:?}",
+        tape.ops.len(),
+        own.iter().map(|&(_, h, w)| (w as u64) << h).sum::<u64>() as f64 / f64::from(1u32 << 30),
+        own.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
+    );
+    let fits = own.iter().all(|&(name, height, _)| {
+        UPPER_NODE_FLOOR.iter().any(|&(known, most)| known == name && height <= most)
+    });
+    assert!(fits, "a node over two upper nodes fits the upper floor");
 }
 
 /// The key digests the tree must hold for nodes over the leaves in
