@@ -3655,6 +3655,52 @@ pub mod tests {
         Ok(())
     }
 
+    /// Add the binary key digests in `hex`, one per line, to the prover's key
+    /// tree, which every leaf then carries the root of, and write each one's
+    /// index and path to `ZIREN_BINARY_VK_PROOFS`, a line each: the digest,
+    /// the index and the siblings, in hex.
+    fn add_binary_keys(prover: &mut ZKMProver<DefaultProverComponents>, hex: &str) {
+        use zkm_recursion_circuit::blake3_circuit::{digest_limbs, limbs_digest};
+        let parse = |line: &str| -> [u8; 32] {
+            core::array::from_fn(|i| u8::from_str_radix(&line[2 * i..2 * i + 2], 16).unwrap())
+        };
+        let encode = |bytes: [u8; 32]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let extra: Vec<VkDigest> = hex
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| digest_limbs(&parse(l.trim())))
+            .collect();
+        let mut keys: Vec<VkDigest> = prover.recursion_vk_map.keys().copied().collect();
+        keys.extend(extra.iter().copied());
+        keys.sort();
+        keys.dedup();
+        assert!(keys.len() <= 1 << VK_MERKLE_TREE_HEIGHT, "the key tree holds every key");
+        prover.recursion_vk_map = keys.iter().enumerate().map(|(i, &k)| (k, i)).collect();
+        let mut leaves = keys.clone();
+        leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, VkDigest::default());
+        let (root, tree) = MerkleTree::commit(leaves);
+        prover.recursion_vk_root = root;
+        prover.recursion_vk_tree = tree;
+        let mut lines = String::new();
+        for digest in &extra {
+            let index = prover.recursion_vk_map[digest];
+            let (value, proof) = MerkleTree::open(&prover.recursion_vk_tree, index);
+            assert_eq!(&value, digest, "the tree opens the digest at its index");
+            let path: Vec<String> =
+                proof.path.iter().map(|sibling| encode(limbs_digest(sibling))).collect();
+            lines.push_str(&format!(
+                "{} {} {}\n",
+                encode(limbs_digest(digest)),
+                proof.index,
+                path.join(",")
+            ));
+        }
+        if let Some(out) = std::env::var_os("ZIREN_BINARY_VK_PROOFS") {
+            std::fs::write(out, lines).expect("the proofs write");
+        }
+        tracing::info!("binary keys: {} added, tree of {} keys", extra.len(), keys.len());
+    }
+
     /// The leaf of a fibonacci proof's first core shard proved over bits,
     /// then verified on the host.
     #[test]
@@ -3664,7 +3710,10 @@ pub mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         setup_logger();
         let opts = ZKMProverOpts::default();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let mut prover = ZKMProver::<DefaultProverComponents>::new();
+        if let Some(path) = std::env::var_os("ZIREN_BINARY_VK_EXTRA") {
+            add_binary_keys(&mut prover, &std::fs::read_to_string(path)?);
+        }
         let (_, pk_d, program, vk) = prover.setup(elf);
         let core_proof =
             prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;

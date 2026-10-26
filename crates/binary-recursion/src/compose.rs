@@ -11,9 +11,17 @@
 //! tape's KoalaBear operations, the global cumulative sums being points of
 //! a curve over the septic extension.  The node's own digest is the
 //! program's public values, its first eight inputs.
+//!
+//! A child's verifying key is no constant of the program: its preprocessed
+//! commitment is read as inputs, hashed with the shapes the program fixes
+//! into the child's key digest, and that digest is shown a leaf of the key
+//! tree whose root the children's public values carry, as the field
+//! machine shows its children's keys.  One program then verifies any
+//! child the tree allows, and the tree can hold the program's own key.
 
 use core::borrow::{Borrow, BorrowMut};
 
+use p3_binary_field::TowerLevel;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::septic_curve::SepticCurve;
@@ -29,17 +37,19 @@ use zkm_binary_stark::config::MachineProof;
 use zkm_binary_stark::machine::RecursionMachine;
 use zkm_binary_stark::{BinarySchedule, TRANSCRIPT_DOMAIN};
 
-use crate::bytes::{blake3, byte_bits, digest_bytes, to_bytes, Piece};
+use crate::bytes::{blake3, byte_bits, digest_bytes, merkle_node, to_bytes, Piece};
 use crate::challenger::TracedChallenger;
-use crate::config::{lift_key, reread, TracedConfig, TracedProof};
+use crate::config::{reread, TracedConfig, TracedProof};
 use crate::machine::{TapeAir, TapeMachine};
+use crate::mmcs::{TracedCap, TracedDigest};
 use crate::tape::{as_kb, kb_value, record, KbOp, Tape};
 use crate::Traced;
 
 /// The recorded verification of a child's proof against the digest its
-/// public values hash to, which the proof commits to as its public values.
+/// public values hash to, which the proof commits to as its public values,
+/// returning the child's key digest.
 pub type ChildVerifier<'a> =
-    Box<dyn Fn(&[Traced; DIGEST_SIZE]) -> Result<(), String> + Send + Sync + 'a>;
+    Box<dyn Fn(&[Traced; DIGEST_SIZE]) -> Result<[Traced; 2], String> + Send + Sync + 'a>;
 
 /// A child of a compose node.
 pub struct Child<'a> {
@@ -47,6 +57,115 @@ pub struct Child<'a> {
     pub public_values: Vec<u32>,
     /// The verification of its proof.
     pub verify: ChildVerifier<'a>,
+    /// Where its key digest sits in the key tree.
+    pub membership: VkMembership,
+}
+
+/// A key digest's place in the key tree: its index and the siblings from
+/// the leaf up, as the field machine's `MerkleTree::open` gives them.
+#[derive(Clone, Debug)]
+pub struct VkMembership {
+    pub index: usize,
+    pub path: Vec<[u8; 32]>,
+}
+
+/// What kind of machine a key belongs to, which its digest names.
+#[derive(Clone, Copy, Debug)]
+pub enum KeyKind {
+    /// The binary machine of a normalize program.
+    Leaf = 1,
+    /// The tape machine of a compose node.
+    Node = 2,
+}
+
+/// The key digest of a binary machine of `kind` with these shapes and
+/// preprocessed commitment roots: the Blake3 hash of a tag, the kind, the
+/// shapes and the roots.  Outside a recording the digest is a constant.
+fn key_digest(
+    kind: KeyKind,
+    main: &[p3_sumcheck::TableShape],
+    preprocessed: &[p3_sumcheck::TableShape],
+    roots: &[[Traced; 2]],
+) -> [Traced; 2] {
+    let mut header: Vec<u8> = b"ziren binary key".to_vec();
+    header.push(kind as u8);
+    for shapes in [main, preprocessed] {
+        header.extend((shapes.len() as u32).to_le_bytes());
+        for shape in shapes {
+            header.extend((shape.num_variables() as u32).to_le_bytes());
+            header.extend((shape.width() as u32).to_le_bytes());
+        }
+    }
+    let pieces: Vec<Piece> = header
+        .into_iter()
+        .map(|byte| Piece::Byte(Traced::constant(kb_value(u32::from(byte)))))
+        .chain(roots.iter().flat_map(|root| root.map(Piece::Element)))
+        .collect();
+    blake3(&pieces)
+}
+
+/// The key digest of `vk` for a machine of `kind` with these shapes, as
+/// the key tree holds it.
+///
+/// # Panics
+/// Panics if called during a recording.
+#[must_use]
+pub fn binary_key_digest(
+    kind: KeyKind,
+    main: &[p3_sumcheck::TableShape],
+    preprocessed: &[p3_sumcheck::TableShape],
+    vk: &p3_multi_stark::VerifyingKey<zkm_binary_stark::config::MachineConfig>,
+) -> [u8; 32] {
+    assert!(!crate::tape::recording(), "the digest is taken outside a recording");
+    let mut roots = Vec::new();
+    let _ = vk.lift::<TracedConfig>(|commitment| {
+        let cap: TracedCap = reread(commitment);
+        roots = cap.roots();
+        cap
+    });
+    let digest = key_digest(kind, main, preprocessed, &roots);
+    let [lo, hi] = digest.map(|half| half.value().to_repr().to_le_bytes());
+    core::array::from_fn(|i| if i < 16 { lo[i] } else { hi[i - 16] })
+}
+
+/// `vk` lifted inside a recording, its commitment read as inputs, with the
+/// commitment's roots.
+fn lift_as_inputs(
+    vk: &p3_multi_stark::VerifyingKey<zkm_binary_stark::config::MachineConfig>,
+) -> (p3_multi_stark::VerifyingKey<TracedConfig>, Vec<[Traced; 2]>) {
+    let mut roots = Vec::new();
+    let lifted = vk.lift::<TracedConfig>(|commitment| {
+        let cap: TracedCap = reread(commitment);
+        roots = cap.roots();
+        cap
+    });
+    (lifted, roots)
+}
+
+/// Show `digest` a leaf of the key tree whose root `vk_root` carries: the
+/// path from it, under the bit order of the field machine's
+/// `MerkleTree::verify`, reaches a root whose words are `vk_root`.
+fn check_membership(
+    digest: [Traced; 2],
+    membership: &VkMembership,
+    vk_root: &[Traced; DIGEST_SIZE],
+) {
+    let height = membership.path.len();
+    let index = (0..height)
+        .fold(0usize, |reversed, k| reversed | (((membership.index >> k) & 1) << (height - 1 - k)));
+    let mut current = digest;
+    for (k, sibling) in membership.path.iter().enumerate() {
+        let bit = Traced::input(if (index >> k) & 1 == 1 {
+            crate::tape::F::ONE
+        } else {
+            crate::tape::F::ZERO
+        });
+        current = merkle_node(bit, current, TracedDigest::read(*sibling).0);
+    }
+    let root = digest_bytes(current);
+    for (w, &word) in vk_root.iter().enumerate() {
+        assert_digest_word(word, &root, w);
+    }
 }
 
 impl<'a> Child<'a> {
@@ -61,21 +180,24 @@ impl<'a> Child<'a> {
         machine: &'a RecursionMachine,
         proof: &'a MachineProof,
         public_values: Vec<u32>,
+        membership: VkMembership,
         schedule: &BinarySchedule,
     ) -> Self {
         let (main, preprocessed) = machine.shapes();
         let config = TracedConfig::new(&main, &preprocessed, schedule).expect("traced config");
-        let vk = lift_key(machine.verifying_key());
         Self {
             public_values,
+            membership,
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
+                let (vk, roots) = lift_as_inputs(machine.verifying_key());
+                let digest = key_digest(KeyKind::Leaf, &main, &preprocessed, &roots);
                 let proof: TracedProof = reread(proof);
                 let instances = machine.verifier_instances(&vk, public);
                 let mut challenger = TracedChallenger::new(TRANSCRIPT_DOMAIN);
                 let verdict = verify(&config, instances, &proof, 0, &mut challenger)
                     .map_err(|e| format!("{e:?}"));
                 crate::queries::take();
-                verdict
+                verdict.map(|()| digest)
             }),
         }
     }
@@ -91,14 +213,17 @@ impl<'a> Child<'a> {
         machine: &'a TapeMachine,
         proof: &'a MachineProof,
         public_values: Vec<u32>,
+        membership: VkMembership,
         schedule: &BinarySchedule,
     ) -> Self {
         let (main, preprocessed) = machine.shapes();
         let config = TracedConfig::new(&main, &preprocessed, schedule).expect("traced config");
-        let vk = lift_key(machine.verifying_key());
         Self {
             public_values,
+            membership,
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
+                let (vk, roots) = lift_as_inputs(machine.verifying_key());
+                let digest = key_digest(KeyKind::Node, &main, &preprocessed, &roots);
                 let proof: TracedProof = reread(proof);
                 let instances = VerifierInstances::new(
                     machine
@@ -117,7 +242,7 @@ impl<'a> Child<'a> {
                 let verdict = verify(&config, instances, &proof, 0, &mut challenger)
                     .map_err(|e| format!("{e:?}"));
                 crate::queries::take();
-                verdict
+                verdict.map(|()| digest)
             }),
         }
     }
@@ -386,7 +511,8 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         for (w, &word) in current.digest.iter().enumerate() {
             assert_digest_word(word, &digest, w);
         }
-        (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?;
+        let key = (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?;
+        check_membership(key, &child.membership, &current.vk_root);
 
         if i == 0 {
             vk_root = current.vk_root;

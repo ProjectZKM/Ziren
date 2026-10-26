@@ -7,7 +7,9 @@
 
 use p3_binary_field::TowerLevel;
 use p3_field::PrimeCharacteristicRing;
-use zkm_binary_recursion::compose::{record_compose, Child, Compose, Composed};
+use zkm_binary_recursion::compose::{
+    binary_key_digest, record_compose, Child, Compose, Composed, KeyKind, VkMembership,
+};
 use zkm_binary_recursion::machine::program::Program;
 use zkm_binary_recursion::machine::TapeMachine;
 use zkm_binary_recursion::{Tape, F};
@@ -17,6 +19,61 @@ use zkm_recursion_core::air::RECURSION_PUBLIC_VALUES_COL_MAP;
 use zkm_recursion_core::DIGEST_SIZE;
 
 const MAX_LOG_SHARDS: usize = 16;
+
+/// Height of the key tree.
+const KEY_TREE_HEIGHT: usize = zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
+
+fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> [u8; 32] {
+    core::array::from_fn(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).expect("hex"))
+}
+
+/// The place of `digest` in the key tree, from the proofs in
+/// `ZIREN_BINARY_VK_PROOFS` as the prover's leaf test writes them; without
+/// them, a place in no tree, which records the same program and fails its
+/// run.
+fn membership(digest: &[u8; 32]) -> VkMembership {
+    let Some(path) = std::env::var_os("ZIREN_BINARY_VK_PROOFS") else {
+        return VkMembership { index: 0, path: vec![[0; 32]; KEY_TREE_HEIGHT] };
+    };
+    let text = std::fs::read_to_string(path).expect("the proofs read");
+    let line = text
+        .lines()
+        .find(|line| line.starts_with(&hex(digest)))
+        .unwrap_or_else(|| panic!("key {} is in the tree", hex(digest)));
+    let mut fields = line.split(' ');
+    let _ = fields.next();
+    let index = fields.next().expect("an index").parse().expect("an index");
+    let path = fields.next().expect("a path").split(',').map(unhex).collect();
+    VkMembership { index, path }
+}
+
+/// A leaf child, with its key's place in the tree.
+fn leaf_child<'a>(
+    machine: &'a RecursionMachine,
+    leaf: &'a ProvedProgram,
+    public_values: Vec<u32>,
+    schedule: &BinarySchedule,
+) -> Child<'a> {
+    let (main, preprocessed) = machine.shapes();
+    let digest = binary_key_digest(KeyKind::Leaf, &main, &preprocessed, machine.verifying_key());
+    Child::leaf(machine, &leaf.proof, public_values, membership(&digest), schedule)
+}
+
+/// A node child, with its key's place in the tree.
+fn node_child<'a>(
+    machine: &'a TapeMachine,
+    proof: &'a zkm_binary_stark::config::MachineProof,
+    public_values: Vec<u32>,
+    schedule: &BinarySchedule,
+) -> Child<'a> {
+    let (main, preprocessed) = machine.shapes();
+    let digest = binary_key_digest(KeyKind::Node, &main, &preprocessed, machine.verifying_key());
+    Child::node(machine, proof, public_values, membership(&digest), schedule)
+}
 
 /// With `ZIREN_PHASES`, print `label` with the wall clock, which a memory
 /// sampler's log lines up against, and the prover's phases as they close.
@@ -82,7 +139,7 @@ fn composes_leaves() {
             .iter()
             .zip(&machines)
             .enumerate()
-            .map(|(i, (leaf, machine))| Child::leaf(machine, &leaf.proof, values(i), &schedule))
+            .map(|(i, (leaf, machine))| leaf_child(machine, leaf, values(i), &schedule))
             .collect()
     };
     mark("leaf machines built");
@@ -223,12 +280,7 @@ fn composes_nodes() {
     let leaf_children = |range: core::ops::Range<usize>| -> Vec<Child<'_>> {
         range
             .map(|i| {
-                Child::leaf(
-                    &machines[i],
-                    &leaves[i].proof,
-                    leaves[i].public_values.clone(),
-                    &schedule,
-                )
+                leaf_child(&machines[i], &leaves[i], leaves[i].public_values.clone(), &schedule)
             })
             .collect()
     };
@@ -243,7 +295,7 @@ fn composes_nodes() {
         nodes
             .iter()
             .enumerate()
-            .map(|(i, (machine, proof, _))| Child::node(machine, proof, values(i), &schedule))
+            .map(|(i, (machine, proof, _))| node_child(machine, proof, values(i), &schedule))
             .collect()
     };
     let honest = |i: usize| nodes[i].2.public_values.clone();
@@ -274,6 +326,30 @@ fn composes_nodes() {
         (Ok(_), tape) => tape.run(&tape.inputs).is_err(),
     };
     assert!(refused, "a child node that does not chain must be refused");
+
+    let misplaced: Vec<Child<'_>> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (machine, proof, composed))| {
+            let (main, preprocessed) = machine.shapes();
+            let digest =
+                binary_key_digest(KeyKind::Node, &main, &preprocessed, machine.verifying_key());
+            let mut place = membership(&digest);
+            if i == 1 {
+                place.index ^= 1;
+            }
+            Child::node(machine, proof, composed.public_values.clone(), place, &schedule)
+        })
+        .collect();
+    let refused = match record_compose(&Compose {
+        children: misplaced,
+        is_complete: false,
+        max_log_shards: MAX_LOG_SHARDS,
+    }) {
+        (Err(_), _) => true,
+        (Ok(_), tape) => tape.run(&tape.inputs).is_err(),
+    };
+    assert!(refused, "a child key at the wrong place in the tree must be refused");
     mark("tampers refused");
 
     let program = Program::new(&tape, DIGEST_SIZE);
@@ -305,4 +381,58 @@ fn composes_nodes() {
     let mut wrong = public;
     wrong[0] += F::ONE;
     assert!(machine.verify(&proof, &wrong).is_err(), "another digest is refused");
+}
+
+/// The key digests the tree must hold for nodes over the leaves in
+/// `ZIREN_BINARY_LEAVES`, written to `ZIREN_BINARY_VK_OUT` a line each: each
+/// leaf's, and the key of the node over each pair of them.  The programs
+/// read their keys as inputs, so leaves under any tree give the same keys.
+#[test]
+#[ignore]
+fn binary_key_digests() {
+    let paths = std::env::var("ZIREN_BINARY_LEAVES").expect("ZIREN_BINARY_LEAVES names leaves");
+    let leaves: Vec<ProvedProgram> = paths
+        .split(',')
+        .map(|path| {
+            ProvedProgram::from_bytes(&std::fs::read(path).expect("the leaf reads"))
+                .expect("the leaf deserializes")
+        })
+        .collect();
+    let schedule = BinarySchedule::default();
+    let machines: Vec<RecursionMachine> = leaves
+        .iter()
+        .map(|leaf| RecursionMachine::verifier(&leaf.program, &schedule).expect("the leaf machine"))
+        .collect();
+    let mut digests: Vec<[u8; 32]> = machines
+        .iter()
+        .map(|machine| {
+            let (main, preprocessed) = machine.shapes();
+            binary_key_digest(KeyKind::Leaf, &main, &preprocessed, machine.verifying_key())
+        })
+        .collect();
+    for pair in (0..leaves.len()).collect::<Vec<_>>().chunks(2).filter(|pair| pair.len() == 2) {
+        let children = pair
+            .iter()
+            .map(|&i| {
+                leaf_child(&machines[i], &leaves[i], leaves[i].public_values.clone(), &schedule)
+            })
+            .collect();
+        let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+        let (_, tape) = record_compose(&node);
+        let machine = TapeMachine::verifier(Program::new(&tape, DIGEST_SIZE), &schedule)
+            .expect("the tape machine");
+        let (main, preprocessed) = machine.shapes();
+        digests.push(binary_key_digest(
+            KeyKind::Node,
+            &main,
+            &preprocessed,
+            machine.verifying_key(),
+        ));
+    }
+    digests.sort_unstable();
+    digests.dedup();
+    let text: String = digests.iter().map(|digest| format!("{}\n", hex(digest))).collect();
+    print!("{text}");
+    let out = std::env::var("ZIREN_BINARY_VK_OUT").expect("ZIREN_BINARY_VK_OUT names the output");
+    std::fs::write(out, text).expect("the digests write");
 }
