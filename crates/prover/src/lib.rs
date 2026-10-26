@@ -2121,12 +2121,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
         };
-        let (program, digest) = self.cached_program(
-            &self.wrap_programs_basefold_cache,
-            input.shape_key(),
-            "wrap",
-            || self.wrap_bn254_program_basefold(&input),
-        );
+        let (program, digest) = self.wrap_program_cached(&input);
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -2174,6 +2169,53 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         tracing::info!("wrapping (basefold) successful");
 
         Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
+    }
+
+    /// Build the wrap program into [`Self::wrap_programs_basefold_cache`]
+    /// ahead of the first wrap, on the host only.
+    ///
+    /// The wrap program depends only on the frozen shrink shape
+    /// ([`Self::shrink_shape`]), so a dummy shrink proof of that shape has
+    /// the shape key of every real one and builds the same program.  Should
+    /// the two keys ever differ, the first wrap misses and builds its own.
+    pub fn prewarm_wrap_program(&self) {
+        let _ = self.wrap_program_cached(&self.dummy_wrap_input());
+    }
+
+    /// Set up the wrap keys into [`Self::wrap_keys_cache`] ahead of the
+    /// first wrap, building the program first if
+    /// [`Self::prewarm_wrap_program`] has not.  Unlike that, this runs the
+    /// wrap prover's setup, so a device prover needs its device.
+    pub fn prewarm_wrap_keys(&self) {
+        let (program, digest) = self.wrap_program_cached(&self.dummy_wrap_input());
+        let _ = self.wrap_keys_cached(&program, digest);
+    }
+
+    /// The wrap witness of a dummy shrink proof at the frozen shrink shape.
+    fn dummy_wrap_input(&self) -> ZKMWrapBasefoldWitnessValues<ShrinkSC> {
+        let mut rows: Vec<(String, usize)> =
+            Self::shrink_shape().clone_into_hash_map().into_iter().collect();
+        rows.sort();
+        ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![
+                zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof_rows(
+                    self.shrink_prover.machine(),
+                    &rows,
+                ),
+            ],
+            vk_merkle_data: ZKMMerkleProofWitnessValues::dummy(1, VK_MERKLE_TREE_HEIGHT),
+        }
+    }
+
+    /// The wrap program for `input` and its setup digest, through
+    /// [`Self::wrap_programs_basefold_cache`].
+    fn wrap_program_cached(
+        &self,
+        input: &ZKMWrapBasefoldWitnessValues<ShrinkSC>,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        self.cached_program(&self.wrap_programs_basefold_cache, input.shape_key(), "wrap", || {
+            self.wrap_bn254_program_basefold(input)
+        })
     }
 
     /// Return cached wrap keys, running setup if the program's digest differs.
@@ -2501,6 +2543,19 @@ pub mod tests {
             bincode::serialize(&*prover.wrap_bn254_program_basefold(&a)).unwrap(),
             bincode::serialize(&*prover.wrap_bn254_program_basefold(&b)).unwrap(),
         );
+    }
+
+    /// After the program prewarm, a wrap input at the frozen shrink shape
+    /// finds its program in the cache.
+    #[test]
+    fn wrap_program_prewarm_serves_the_first_wrap() {
+        use crate::components::DefaultProverComponents;
+        let prover = ZKMProver::<DefaultProverComponents>::uninitialized();
+        prover.prewarm_wrap_program();
+        let (program, digest) = prover.wrap_program_cached(&prover.dummy_wrap_input());
+        assert_eq!(digest, zkm_recursion_core::setup_digest(&program));
+        let cache = prover.wrap_programs_basefold_cache.lock().unwrap();
+        assert_eq!((cache.hits, cache.misses), (1, 1));
     }
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
     use p3_field::PrimeField32;
