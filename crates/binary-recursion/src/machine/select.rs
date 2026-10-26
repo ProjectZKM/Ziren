@@ -65,8 +65,8 @@ pub fn selects(program: &Program) -> impl Iterator<Item = &ArithRow> {
 
 /// The select table of one program.
 pub struct SelectAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 impl SelectAir {

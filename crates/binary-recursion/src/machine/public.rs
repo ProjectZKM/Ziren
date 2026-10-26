@@ -48,8 +48,8 @@ pub const NUM_PUBLIC_COLS: usize = core::mem::size_of::<PublicCols<u8>>();
 
 /// The public table of one program.
 pub struct PublicAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 impl PublicAir {

@@ -61,8 +61,8 @@ pub const NUM_ARITH_COLS: usize = core::mem::size_of::<ArithCols<u8>>();
 
 /// The arithmetic table of one program.
 pub struct ArithAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 impl ArithAir {

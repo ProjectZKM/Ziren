@@ -11,7 +11,7 @@ use zkm_binary_recursion::compose::{
     binary_key_digest, record_compose, Child, Compose, Composed, KeyKind, VkMembership,
 };
 use zkm_binary_recursion::machine::program::Program;
-use zkm_binary_recursion::machine::TapeMachine;
+use zkm_binary_recursion::machine::{TapeMachine, NODE_FLOOR};
 use zkm_binary_recursion::{Tape, F};
 use zkm_binary_stark::machine::{leaf_floor, ProvedProgram, RecursionMachine};
 use zkm_binary_stark::BinarySchedule;
@@ -206,7 +206,8 @@ fn composes_leaves() {
         BinarySchedule { log_inv_rate: rate.parse().expect("a rate"), ..schedule }
     });
     println!("node commits at rate 2^-{}", node_schedule.log_inv_rate);
-    let machine = TapeMachine::new(program, &node_schedule).expect("the tape machine");
+    let machine =
+        TapeMachine::new_with_floor(program, &node_schedule, NODE_FLOOR).expect("the tape machine");
     println!("tape machine set up in {:.1} s", started.elapsed().as_secs_f64());
     mark("tape machine set up");
     for air in machine.airs() {
@@ -248,7 +249,8 @@ fn prove_node(
     census(label, &tape);
     let program = Program::new(&tape, DIGEST_SIZE);
     println!("  {}", program.census());
-    let mut machine = TapeMachine::new(program, schedule).expect("the tape machine");
+    let mut machine =
+        TapeMachine::new_with_floor(program, schedule, NODE_FLOOR).expect("the tape machine");
     let started = std::time::Instant::now();
     let proof = machine.prove(&tape, &tape.inputs).expect("the node proves");
     println!(
@@ -371,7 +373,8 @@ fn composes_nodes() {
     if std::env::var_os("ZIREN_COMPOSE_PROVE").is_none() {
         return;
     }
-    let machine = TapeMachine::new(program, &schedule).expect("the tape machine");
+    let machine =
+        TapeMachine::new_with_floor(program, &schedule, NODE_FLOOR).expect("the tape machine");
     for air in machine.airs() {
         println!(
             "  {:>7}: 2^{} rows x {} + {} prep",
@@ -440,8 +443,12 @@ fn binary_key_digests() {
             .collect();
         let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
         let (_, tape) = record_compose(&node);
-        let machine = TapeMachine::verifier(Program::new(&tape, DIGEST_SIZE), &schedule)
-            .expect("the tape machine");
+        let machine = TapeMachine::verifier_with_floor(
+            Program::new(&tape, DIGEST_SIZE),
+            &schedule,
+            NODE_FLOOR,
+        )
+        .expect("the tape machine");
         let (main, preprocessed) = machine.shapes();
         digests.push(binary_key_digest(
             KeyKind::Node,
@@ -456,4 +463,61 @@ fn binary_key_digests() {
     print!("{text}");
     let out = std::env::var("ZIREN_BINARY_VK_OUT").expect("ZIREN_BINARY_VK_OUT names the output");
     std::fs::write(out, text).expect("the digests write");
+}
+
+/// The table heights of a node over each ordered pair of the leaves in
+/// `ZIREN_BINARY_LEAVES`, and the floor that covers them all: what one node
+/// shape needs.
+#[test]
+#[ignore]
+fn node_shape_census() {
+    let paths = std::env::var("ZIREN_BINARY_LEAVES").expect("ZIREN_BINARY_LEAVES names leaves");
+    let leaves: Vec<ProvedProgram> = paths
+        .split(',')
+        .map(|path| {
+            ProvedProgram::from_bytes(&std::fs::read(path).expect("the leaf reads"))
+                .expect("the leaf deserializes")
+        })
+        .collect();
+    let schedule = BinarySchedule::default();
+    let machines: Vec<RecursionMachine> = leaves
+        .iter()
+        .map(|leaf| {
+            RecursionMachine::verifier_with_floor(
+                &leaf.program,
+                &schedule,
+                leaf_floor(&leaf.program).expect("a leaf class"),
+            )
+            .expect("the leaf machine")
+        })
+        .collect();
+    let mut floor: Vec<(&'static str, usize)> = Vec::new();
+    for i in 0..leaves.len() {
+        for j in 0..leaves.len() {
+            let children = [i, j]
+                .map(|k| {
+                    leaf_child(&machines[k], &leaves[k], leaves[k].public_values.clone(), &schedule)
+                })
+                .into_iter()
+                .collect();
+            let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+            let (_, tape) = record_compose(&node);
+            let program = Program::new(&tape, DIGEST_SIZE);
+            let tables = TapeMachine::table_shapes(&program);
+            let bits: u64 = tables.iter().map(|&(_, h, w)| (w as u64) << h).sum();
+            println!(
+                "node over leaves {i},{j}: {} ops, {:.2} Gbit, heights {:?}",
+                tape.ops.len(),
+                bits as f64 / f64::from(1u32 << 30),
+                tables.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
+            );
+            for (name, log_height, _) in tables {
+                match floor.iter_mut().find(|(known, _)| *known == name) {
+                    Some((_, most)) => *most = (*most).max(log_height),
+                    None => floor.push((name, log_height)),
+                }
+            }
+        }
+    }
+    println!("node floor: {floor:?}");
 }

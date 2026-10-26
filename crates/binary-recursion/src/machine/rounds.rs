@@ -123,8 +123,8 @@ fn fill_add(x: u32, y: u32, cols: &mut AddCols<u8>) -> u32 {
 
 /// The round table of a program's compressions.
 pub struct RoundsAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 impl RoundsAir {

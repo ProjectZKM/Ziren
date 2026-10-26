@@ -74,8 +74,8 @@ pub const NUM_LEDGER_COLS: usize = core::mem::size_of::<LedgerCols<u8>>();
 
 /// The ledger of one program.
 pub struct LedgerAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 /// The bits of a copy's index.

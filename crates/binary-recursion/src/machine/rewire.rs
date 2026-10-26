@@ -15,7 +15,10 @@
 //!
 //! A transpose is 128 splits and 16 gathers (see [`super::program`]), so a
 //! row is 128 bytes wide where a whole transpose would be 128 elements:
-//! every column of a table is a value its verifier opens.  Every output is
+//! every column of a table is a value its verifier opens.  Only a gather
+//! reads more than an element's sixteen bytes, and a transpose has eight
+//! splits to each gather, so the gathers have a table [`WIDTH`] bytes wide
+//! and every other kind one [`NARROW`] bytes wide.  Every output is
 //! a packing of the row's bits, so the table has no constraint of its own:
 //! the channels are all of it.  A byte pulled from memory equals a cell
 //! below `2^8`, and an element pulled equals the packing of all 128 bits of
@@ -29,17 +32,22 @@ use p3_bus::{BusActivation, BusDirection};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, MEMORY, WRITE};
+use zkm_binary_stark::machine::bits::{
+    dense_padded, log_height_for, padded_width, BitRows, MEMORY, WRITE,
+};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
 
 use super::cells::{addr_bits, cell, pack, VALUE_BITS};
-use super::program::{Program, RewireKind, Via, ADDR_BITS};
+use super::program::{Program, RewireKind, RewireRow, Via, ADDR_BITS};
 use crate::tape::F;
 
-/// Bytes of a row.
+/// Bytes of a row of the gathers' table.
 pub const WIDTH: usize = 128;
+
+/// Bytes of a row of every other kind's table: an element's.
+pub const NARROW: usize = 16;
 
 /// Bytes of an element.
 const ELEMENT_BYTES: usize = 16;
@@ -47,7 +55,7 @@ const ELEMENT_BYTES: usize = 16;
 /// The program's part of a rewiring row.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct RewirePrep<T> {
+pub struct RewirePrep<T, const W: usize> {
     pub in_base: [T; ADDR_BITS],
     pub out_base: [T; ADDR_BITS],
     /// The row reads one element through the ledger.
@@ -55,9 +63,9 @@ pub struct RewirePrep<T> {
     /// The row reads one element, its cell's only read, from the write.
     pub direct_element: T,
     /// Which bytes the row reads through the ledger.
-    pub reads: [T; WIDTH],
+    pub reads: [T; W],
     /// Which bytes the row reads, each its cell's only read, from the write.
-    pub direct_reads: [T; WIDTH],
+    pub direct_reads: [T; W],
     /// Which bytes a split into bytes writes.
     pub bytes: [T; ELEMENT_BYTES],
     /// Which bytes a split of a transpose's row writes.
@@ -68,24 +76,20 @@ pub struct RewirePrep<T> {
     pub gathered: [T; 8],
     /// The row writes the element its bytes assemble.
     pub assembles: T,
-    /// Zeros, which make the width a power of two.
-    pub pad: [T; 512 - 2 * ADDR_BITS - 3 - 2 * WIDTH - 2 * ELEMENT_BYTES - VALUE_BITS - 8],
 }
 
 /// The witness part of a rewiring row.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct RewireCols<T> {
-    pub bytes: [[T; 8]; WIDTH],
+pub struct RewireCols<T, const W: usize> {
+    pub bytes: [[T; 8]; W],
 }
 
-pub const NUM_REWIRE_PREP_COLS: usize = core::mem::size_of::<RewirePrep<u8>>();
-pub const NUM_REWIRE_COLS: usize = core::mem::size_of::<RewireCols<u8>>();
-
-/// The rewiring table of one program.
-pub struct RewireAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+/// The rewiring table of one program holding the kinds whose rows are `W`
+/// bytes wide.
+pub struct RewireAir<const W: usize> {
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 /// The flags of `flags` that `reads` marks.
@@ -95,15 +99,25 @@ fn mark(flags: &mut [u8], reads: &[bool]) {
     }
 }
 
-impl RewireAir {
+impl<const W: usize> RewireAir<W> {
+    /// Columns of the program's part of a row, before padding.
+    const PREP_COLS: usize = core::mem::size_of::<RewirePrep<u8, W>>();
+    /// Columns of the witness part of a row.
+    const COLS: usize = core::mem::size_of::<RewireCols<u8, W>>();
+
+    /// The rows of `program` the table holds, in order: the gathers in the
+    /// wide table, every other kind in the narrow one.
+    pub fn rows(program: &Program) -> impl Iterator<Item = &RewireRow> {
+        program.rewire.iter().filter(|row| (row.kind == RewireKind::Gather) == (W == WIDTH))
+    }
+
     #[must_use]
     pub fn new(program: &Program) -> Self {
-        let log_height = log_height_for(program.rewire.len());
-        let mut preprocessed = vec![0u8; (1 << log_height) * NUM_REWIRE_PREP_COLS];
-        for (row, op) in program.rewire.iter().enumerate() {
-            let prep: &mut RewirePrep<u8> = preprocessed
-                [row * NUM_REWIRE_PREP_COLS..(row + 1) * NUM_REWIRE_PREP_COLS]
-                .borrow_mut();
+        let log_height = log_height_for(Self::rows(program).count());
+        let mut preprocessed = vec![0u8; (1 << log_height) * Self::PREP_COLS];
+        for (row, op) in Self::rows(program).enumerate() {
+            let prep: &mut RewirePrep<u8, W> =
+                preprocessed[row * Self::PREP_COLS..(row + 1) * Self::PREP_COLS].borrow_mut();
             prep.in_base = addr_bits(op.in_base);
             prep.out_base = addr_bits(op.out_base);
             match op.kind {
@@ -137,11 +151,11 @@ impl RewireAir {
     /// The witness: each row's bytes.
     #[must_use]
     pub fn main_table(&self, program: &Program, values: &[F]) -> Table<F> {
-        let mut rows = BitRows::new(NUM_REWIRE_COLS, self.log_height);
-        let mut row_bits = vec![0u8; NUM_REWIRE_COLS];
-        for (row, op) in program.rewire.iter().enumerate() {
+        let mut rows = BitRows::new(Self::COLS, self.log_height);
+        let mut row_bits = vec![0u8; Self::COLS];
+        for (row, op) in Self::rows(program).enumerate() {
             row_bits.fill(0);
-            let cols: &mut RewireCols<u8> = row_bits.as_mut_slice().borrow_mut();
+            let cols: &mut RewireCols<u8, W> = row_bits.as_mut_slice().borrow_mut();
             let bytes: Vec<u8> = match op.kind {
                 RewireKind::ToBytes | RewireKind::Split | RewireKind::Bits { .. } => {
                     Program::cell_value(values, op.inputs[0]).to_repr().to_le_bytes().to_vec()
@@ -161,26 +175,26 @@ impl RewireAir {
     }
 }
 
-impl<X: Field> BaseAir<X> for RewireAir {
+impl<X: Field, const W: usize> BaseAir<X> for RewireAir<W> {
     fn width(&self) -> usize {
-        NUM_REWIRE_COLS
+        Self::COLS
     }
 
     fn preprocessed_width(&self) -> usize {
-        NUM_REWIRE_PREP_COLS
+        padded_width(Self::PREP_COLS)
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_REWIRE_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, Self::PREP_COLS))
     }
 }
 
-impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RewireAir {
+impl<AB: MachineBuilder<F: BinaryBase>, const W: usize> Air<AB> for RewireAir<W> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &RewireCols<AB::Var> = main.current_slice().borrow();
+        let local: &RewireCols<AB::Var, W> = main.current_slice().borrow();
         let prep = builder.preprocessed();
-        let prep: RewirePrep<AB::Var> = *prep.current_slice().borrow();
+        let prep: RewirePrep<AB::Var, W> = *prep.current_slice()[..Self::PREP_COLS].borrow();
         let m = &local.bytes;
 
         let element_bits: Vec<AB::Var> = m[..ELEMENT_BYTES].iter().flatten().copied().collect();

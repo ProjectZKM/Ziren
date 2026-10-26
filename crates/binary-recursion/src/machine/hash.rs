@@ -126,8 +126,8 @@ const _: () = assert!(ADDR_BITS == PERMUTATION_ID_BITS);
 
 /// The compression table of one program.
 pub struct HashAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 /// The bits of a word.

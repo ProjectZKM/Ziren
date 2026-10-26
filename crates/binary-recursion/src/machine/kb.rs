@@ -71,8 +71,8 @@ pub const NUM_KB_COLS: usize = core::mem::size_of::<KbCols<u8>>();
 
 /// The KoalaBear table of one program.
 pub struct KbAir {
-    log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) log_height: usize,
+    pub(super) preprocessed: Vec<u8>,
 }
 
 /// Fill `row` with the witness of `kind` on `a` and `b`.

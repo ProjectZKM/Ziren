@@ -53,16 +53,34 @@ use self::kb::KbAir;
 use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
 use self::public::PublicAir;
-use self::rewire::RewireAir;
+use self::rewire::{RewireAir, NARROW, WIDTH};
 use self::rounds::RoundsAir;
 use self::select::SelectAir;
 use crate::tape::{RunError, Tape, F};
+
+/// The least log height of each table of a compose node, by name: a node
+/// over any two leaves of the first two leaf classes, or over two nodes, is
+/// a machine of this shape, which one parent program verifies.  The floor is
+/// a node's over two leaves of the second class, the tallest of them, and
+/// commits `2^33` bits.
+pub const NODE_FLOOR: &[(&str, usize)] = &[
+    ("Ledger", 23),
+    ("Arith", 22),
+    ("Rewire", 21),
+    ("Gather", 18),
+    ("Hash", 19),
+    ("Rounds", 20),
+    ("Kb", 14),
+    ("Select", 16),
+    ("Public", 6),
+];
 
 /// One table of the machine.
 pub enum TapeAir {
     Ledger(LedgerAir),
     Arith(ArithAir),
-    Rewire(RewireAir),
+    Rewire(RewireAir<NARROW>),
+    Gather(RewireAir<WIDTH>),
     Hash(HashAir),
     Rounds(RoundsAir),
     Kb(KbAir),
@@ -77,6 +95,7 @@ impl TapeAir {
             Self::Ledger(air) => air.log_height(),
             Self::Arith(air) => air.log_height(),
             Self::Rewire(air) => air.log_height(),
+            Self::Gather(air) => air.log_height(),
             Self::Hash(air) => air.log_height(),
             Self::Rounds(air) => air.log_height(),
             Self::Kb(air) => air.log_height(),
@@ -85,12 +104,36 @@ impl TapeAir {
         }
     }
 
+    /// Pad the table with zero rows up to `2^log_height`, when it is lower:
+    /// a zero row is what every table holds past its program, so the padded
+    /// table holds the same program at the height a floor fixes.
+    fn raise(&mut self, log_height: usize) {
+        let (height, bits) = match self {
+            Self::Ledger(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Arith(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Rewire(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Gather(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Hash(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Rounds(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Kb(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Select(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::Public(air) => (&mut air.log_height, &mut air.preprocessed),
+        };
+        if log_height <= *height {
+            return;
+        }
+        let width = bits.len() >> *height;
+        bits.resize(width << log_height, 0);
+        *height = log_height;
+    }
+
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Ledger(_) => "Ledger",
             Self::Arith(_) => "Arith",
             Self::Rewire(_) => "Rewire",
+            Self::Gather(_) => "Gather",
             Self::Hash(_) => "Hash",
             Self::Rounds(_) => "Rounds",
             Self::Kb(_) => "Kb",
@@ -106,6 +149,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Ledger(air) => BaseAir::<X>::width(air),
             Self::Arith(air) => BaseAir::<X>::width(air),
             Self::Rewire(air) => BaseAir::<X>::width(air),
+            Self::Gather(air) => BaseAir::<X>::width(air),
             Self::Hash(air) => BaseAir::<X>::width(air),
             Self::Rounds(air) => BaseAir::<X>::width(air),
             Self::Kb(air) => BaseAir::<X>::width(air),
@@ -119,6 +163,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Ledger(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Arith(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Rewire(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Gather(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Hash(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Rounds(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Kb(air) => BaseAir::<X>::preprocessed_width(air),
@@ -149,6 +194,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Ledger(air) => air.preprocessed_trace(),
             Self::Arith(air) => air.preprocessed_trace(),
             Self::Rewire(air) => air.preprocessed_trace(),
+            Self::Gather(air) => air.preprocessed_trace(),
             Self::Hash(air) => air.preprocessed_trace(),
             Self::Rounds(air) => air.preprocessed_trace(),
             Self::Kb(air) => air.preprocessed_trace(),
@@ -164,6 +210,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for TapeAir {
             Self::Ledger(air) => air.eval(builder),
             Self::Arith(air) => air.eval(builder),
             Self::Rewire(air) => air.eval(builder),
+            Self::Gather(air) => air.eval(builder),
             Self::Hash(air) => air.eval(builder),
             Self::Rounds(air) => air.eval(builder),
             Self::Kb(air) => air.eval(builder),
@@ -203,20 +250,26 @@ impl TapeMachine {
     /// # Errors
     /// Returns an error if the configuration or the keys cannot be built.
     pub fn new(program: Program, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
-        let mut airs = vec![
-            TapeAir::Ledger(LedgerAir::new(&program)),
-            TapeAir::Arith(ArithAir::new(&program)),
-            TapeAir::Rewire(RewireAir::new(&program)),
-            TapeAir::Hash(HashAir::new(&program)),
-            TapeAir::Rounds(RoundsAir::new(program.compressions.len())),
-        ];
-        if !program.kb.is_empty() {
-            airs.push(TapeAir::Kb(KbAir::new(&program)));
+        Self::new_with_floor(program, schedule, &[])
+    }
+
+    /// The machine of `program` under `schedule`, every table at least as
+    /// tall as `floor` names it: nodes of one kind are then machines of one
+    /// shape, which one parent program verifies.
+    ///
+    /// # Errors
+    /// Returns an error if the configuration or the keys cannot be built.
+    pub fn new_with_floor(
+        program: Program,
+        schedule: &BinarySchedule,
+        floor: &[(&str, usize)],
+    ) -> Result<Self, TapeMachineError> {
+        let mut airs = Self::airs_of(&program);
+        for air in &mut airs {
+            if let Some(&(_, log_height)) = floor.iter().find(|(name, _)| *name == air.name()) {
+                air.raise(log_height);
+            }
         }
-        if select::selects(&program).next().is_some() {
-            airs.push(TapeAir::Select(SelectAir::new(&program)));
-        }
-        airs.push(TapeAir::Public(PublicAir::new(&program)));
         let (main, preprocessed) = Self::shapes_of(&airs);
         let config =
             MachineConfig::new(&main, &preprocessed, schedule).map_err(TapeMachineError::Config)?;
@@ -225,13 +278,55 @@ impl TapeMachine {
         Ok(Self { program, airs, config, pk: Some(pk), vk })
     }
 
+    /// The log height and width of each table of `program`'s machine, by
+    /// name, with no key built.
+    #[must_use]
+    pub fn table_shapes(program: &Program) -> Vec<(&'static str, usize, usize)> {
+        Self::airs_of(program)
+            .iter()
+            .map(|air| (air.name(), air.log_height(), BaseAir::<F>::width(air)))
+            .collect()
+    }
+
+    /// The tables of `program`'s machine.
+    fn airs_of(program: &Program) -> Vec<TapeAir> {
+        let mut airs = vec![
+            TapeAir::Ledger(LedgerAir::new(program)),
+            TapeAir::Arith(ArithAir::new(program)),
+            TapeAir::Rewire(RewireAir::new(program)),
+            TapeAir::Gather(RewireAir::new(program)),
+            TapeAir::Hash(HashAir::new(program)),
+            TapeAir::Rounds(RoundsAir::new(program.compressions.len())),
+        ];
+        if !program.kb.is_empty() {
+            airs.push(TapeAir::Kb(KbAir::new(program)));
+        }
+        if select::selects(program).next().is_some() {
+            airs.push(TapeAir::Select(SelectAir::new(program)));
+        }
+        airs.push(TapeAir::Public(PublicAir::new(program)));
+        airs
+    }
+
     /// The machine of `program` under `schedule`, keeping only what a
     /// verifier reads.
     ///
     /// # Errors
     /// Returns an error if the configuration or the keys cannot be built.
     pub fn verifier(program: Program, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
-        let mut machine = Self::new(program, schedule)?;
+        Self::verifier_with_floor(program, schedule, &[])
+    }
+
+    /// [`Self::verifier`] with every table at least as tall as `floor` names.
+    ///
+    /// # Errors
+    /// Returns an error if the configuration or the keys cannot be built.
+    pub fn verifier_with_floor(
+        program: Program,
+        schedule: &BinarySchedule,
+        floor: &[(&str, usize)],
+    ) -> Result<Self, TapeMachineError> {
+        let mut machine = Self::new_with_floor(program, schedule, floor)?;
         machine.drop_proving_key();
         Ok(machine)
     }
@@ -379,6 +474,7 @@ impl TapeMachine {
                 TapeAir::Ledger(a) => a.main_table(&self.program, values),
                 TapeAir::Arith(a) => a.main_table(&self.program, values),
                 TapeAir::Rewire(a) => a.main_table(&self.program, values),
+                TapeAir::Gather(a) => a.main_table(&self.program, values),
                 TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
                 TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
                 TapeAir::Kb(a) => a.main_table(&self.program, values),
