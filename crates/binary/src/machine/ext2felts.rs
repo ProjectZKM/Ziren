@@ -55,7 +55,7 @@ pub const NUM_EXT2FELTS_COLS: usize = core::mem::size_of::<Ext2FeltsCols<u8>>();
 
 /// The extension-split table of one program.
 pub struct Ext2FeltsAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// `(address, reads)` of each instruction's four outputs, in order.
     outputs: Vec<[(u32, u32); EXT_DEGREE]>,

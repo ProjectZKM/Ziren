@@ -95,7 +95,7 @@ pub const NUM_PREFIX_SUM_COLS: usize = core::mem::size_of::<PrefixSumCols<u8>>()
 
 /// The prefix-sum table of one program.
 pub struct PrefixSumAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// `(address, reads)` of each row's new Lagrange product and new Horner
     /// sum, in order.

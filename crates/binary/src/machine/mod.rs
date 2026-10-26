@@ -54,6 +54,12 @@ use crate::config::{MachineConfig, MachineConfigError, MachineProof};
 use crate::machine_builder::MachineBuilder;
 use crate::{challenger, BinaryBase, BinarySchedule, F};
 
+/// The least log height of each leaf table, by name: the largest any
+/// normalize program of the recursion shape set makes, so that every leaf
+/// is a machine of one shape and one node program verifies all of them.
+/// The prover's `binary_leaf_floor` census computes it.
+pub const LEAF_FLOOR: &[(&str, usize)] = &[];
+
 /// One table of the machine.
 pub enum RecursionAir {
     Ledger(LedgerAir),
@@ -94,6 +100,36 @@ impl RecursionAir {
             Self::Mul(_) => return,
         };
         *bits = Vec::new();
+    }
+
+    /// Pad the table with zero rows up to `2^log_height`, when it is lower:
+    /// a zero row is what every table holds past its program, so the
+    /// padded table holds the same program at the height a floor fixes.
+    fn raise(&mut self, log_height: usize) {
+        let (height, preprocessed) = match self {
+            Self::Ledger(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::MemoryConst(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::MemoryVar(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::BaseAlu(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::ExtAlu(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Select(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Ext2Felts(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::PrefixSum(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Blake3Io(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Blake3Round(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Limbs(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::PublicValues(air) => (&mut air.log_height, Some(&mut air.preprocessed)),
+            Self::Mul(air) => (&mut air.log_height, None),
+            Self::Mul8(_) => return,
+        };
+        if log_height <= *height {
+            return;
+        }
+        if let Some(bits) = preprocessed {
+            let width = bits.len() >> *height;
+            bits.resize(width << log_height, 0);
+        }
+        *height = log_height;
     }
 
     /// The log height of the table.
@@ -414,7 +450,16 @@ impl RecursionMachine {
         program: &RecursionProgram<KoalaBear>,
         schedule: &BinarySchedule,
     ) -> Result<Self, MachineError> {
-        let mut machine = Self::new(program, schedule)?;
+        Self::verifier_with_floor(program, schedule, &[])
+    }
+
+    /// [`Self::verifier`] with every table at least as tall as `floor` names.
+    pub fn verifier_with_floor(
+        program: &RecursionProgram<KoalaBear>,
+        schedule: &BinarySchedule,
+        floor: &[(&str, usize)],
+    ) -> Result<Self, MachineError> {
+        let mut machine = Self::new_with_floor(program, schedule, floor)?;
         machine.pk = None;
         Ok(machine)
     }
@@ -424,6 +469,42 @@ impl RecursionMachine {
         program: &RecursionProgram<KoalaBear>,
         schedule: &BinarySchedule,
     ) -> Result<Self, MachineError> {
+        Self::new_with_floor(program, schedule, &[])
+    }
+
+    /// The log height of each table of `program`'s machine, by name, with no
+    /// key built.
+    pub fn table_heights(
+        program: &RecursionProgram<KoalaBear>,
+    ) -> Result<Vec<(&'static str, usize)>, MachineError> {
+        Ok(Self::tables(program)?.iter().map(|air| (air.name(), air.log_height())).collect())
+    }
+
+    /// The machine of `program` under `schedule`, every table at least as
+    /// tall as `floor` names it: programs of one shape class then make
+    /// machines of one shape, which one verifier program reads.
+    pub fn new_with_floor(
+        program: &RecursionProgram<KoalaBear>,
+        schedule: &BinarySchedule,
+        floor: &[(&str, usize)],
+    ) -> Result<Self, MachineError> {
+        let mut airs = Self::tables(program)?;
+        for air in &mut airs {
+            if let Some(&(_, log_height)) = floor.iter().find(|(name, _)| *name == air.name()) {
+                air.raise(log_height);
+            }
+        }
+        let (main_shapes, preprocessed_shapes) = shapes(&airs);
+        let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
+            .map_err(MachineError::Config)?;
+        let refs: Vec<&RecursionAir> = airs.iter().collect();
+        let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(MachineError::Setup)?;
+        airs.iter_mut().for_each(RecursionAir::release_preprocessed);
+        Ok(Self { airs, config, pk: Some(pk), vk })
+    }
+
+    /// The tables of `program`'s machine.
+    fn tables(program: &RecursionProgram<KoalaBear>) -> Result<Vec<RecursionAir>, MachineError> {
         for instruction in program.iter_instructions() {
             let unsupported = match instruction {
                 Instruction::BaseAlu(_)
@@ -465,14 +546,7 @@ impl RecursionMachine {
         airs.extend(tables);
         airs.push(RecursionAir::Mul(MulAir::new(products)));
         airs.push(RecursionAir::Mul8(Mul8Air::new()));
-
-        let (main_shapes, preprocessed_shapes) = shapes(&airs);
-        let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
-            .map_err(MachineError::Config)?;
-        let refs: Vec<&RecursionAir> = airs.iter().collect();
-        let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(MachineError::Setup)?;
-        airs.iter_mut().for_each(RecursionAir::release_preprocessed);
-        Ok(Self { airs, config, pk: Some(pk), vk })
+        Ok(airs)
     }
 
     /// The tables of the machine.

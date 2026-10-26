@@ -119,7 +119,7 @@ impl ExtAluKind {
 /// One of the two extension ALU tables of one program.
 pub struct ExtAluAir {
     kind: ExtAluKind,
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
     direct: Vec<bool>,

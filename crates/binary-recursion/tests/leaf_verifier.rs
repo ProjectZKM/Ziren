@@ -11,7 +11,7 @@ use zkm_binary_recursion::config::{
 use zkm_binary_recursion::machine::program::Program;
 use zkm_binary_recursion::machine::{TapeAir, TapeMachine};
 use zkm_binary_recursion::{record, Tape, Traced};
-use zkm_binary_stark::machine::{ProvedProgram, RecursionMachine};
+use zkm_binary_stark::machine::{ProvedProgram, RecursionMachine, LEAF_FLOOR};
 use zkm_binary_stark::{BinarySchedule, TRANSCRIPT_DOMAIN};
 use zkm_recursion_core::DIGEST_SIZE;
 
@@ -23,7 +23,8 @@ fn proves_the_verifier_of_a_leaf() {
         .expect("the leaf deserializes");
     let schedule = BinarySchedule::default();
     let started = std::time::Instant::now();
-    let machine = RecursionMachine::verifier(&leaf.program, &schedule).expect("the leaf machine");
+    let machine = RecursionMachine::verifier_with_floor(&leaf.program, &schedule, LEAF_FLOOR)
+        .expect("the leaf machine");
     println!("leaf machine set up in {:.1} s", started.elapsed().as_secs_f64());
     machine.verify(&leaf.proof, &leaf.digest).expect("the leaf verifies natively");
 

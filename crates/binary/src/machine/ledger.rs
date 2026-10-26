@@ -57,7 +57,7 @@ pub const NUM_LEDGER_COLS: usize = core::mem::size_of::<LedgerCols<u8>>();
 
 /// The ledger of one program: one group per write, as long as its reads.
 pub struct LedgerAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// The number of rows of each group, in order.
     group_sizes: Vec<usize>,

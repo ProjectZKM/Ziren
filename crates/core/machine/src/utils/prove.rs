@@ -410,6 +410,8 @@ where
             .map(|c| (MachineAir::<SC::Val>::name(c), p3_air::BaseAir::<SC::Val>::width(c).max(1)))
             .collect();
 
+        let shard_limit: Option<u32> =
+            std::env::var("ZIREN_CORE_SHARD_LIMIT").ok().and_then(|limit| limit.parse().ok());
         let p2_prover_span = tracing::Span::current().clone();
         let p2_prover_handle = s.spawn(move || {
             let _span = p2_prover_span.enter();
@@ -419,8 +421,14 @@ where
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
                         shard_proofs.par_extend(
-                            records.into_par_iter().zip(traces.into_par_iter()).map(
-                                |(record, main_traces)| {
+                            records
+                                .into_par_iter()
+                                .zip(traces.into_par_iter())
+                                .filter(|(record, _)| {
+                                    shard_limit
+                                        .is_none_or(|limit| record.public_values.shard <= limit)
+                                })
+                                .map(|(record, main_traces)| {
                                     let _span = span.enter();
 
                                     let cluster_widths: Option<
@@ -481,8 +489,7 @@ where
                                     });
 
                                     proof
-                                },
-                            ),
+                                }),
                         );
                     });
                 }

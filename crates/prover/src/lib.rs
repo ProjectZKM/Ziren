@@ -2227,7 +2227,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<BinaryShrinkProof, ZKMRecursionProverError> {
         let input = self.binary_witness(shrink_proof);
         let (program, record) = self.binary_execute(&input)?;
-        let machine = self.binary_machine(&program)?;
+        let machine = self.binary_machine(&program, &[])?;
         let digest = PublicValuesAir::digest(&record);
         let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")
@@ -2253,7 +2253,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.witness_stream = witness_stream.into();
         runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         let record = runtime.record;
-        let machine = self.binary_machine(&program)?;
+        let machine = self.binary_machine(&program, zkm_binary_stark::machine::LEAF_FLOOR)?;
         let digest = PublicValuesAir::digest(&record);
         let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")
@@ -2262,11 +2262,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(BinaryShrinkProof { program, digest, public_values, proof })
     }
 
-    /// The binary machine of `program`, with its tables' shapes and the
-    /// program's instruction mix reported.
+    /// The binary machine of `program`, every table at least as tall as
+    /// `floor` names, with its tables' shapes and the program's instruction
+    /// mix reported.
     pub fn binary_machine(
         &self,
         program: &Arc<RecursionProgram<KoalaBear>>,
+        floor: &[(&str, usize)],
     ) -> Result<RecursionMachine, ZKMRecursionProverError> {
         let mut mix = std::collections::BTreeMap::new();
         for instruction in program.iter_instructions() {
@@ -2291,7 +2293,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         tracing::info!("binary stage program mix: {mix:?}");
         let machine = tracing::debug_span!("binary machine setup")
-            .in_scope(|| RecursionMachine::new(program, &BinarySchedule::default()))
+            .in_scope(|| {
+                RecursionMachine::new_with_floor(program, &BinarySchedule::default(), floor)
+            })
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         for air in machine.airs() {
             tracing::info!(
@@ -2311,6 +2315,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<(), ZKMRecursionProverError> {
         let machine = RecursionMachine::verifier(&proof.program, &BinarySchedule::default())
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        machine
+            .verify(&proof.proof, &proof.digest)
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))
+    }
+
+    /// Verify a leaf over bits against the program it names, its tables at
+    /// the leaf floor.
+    pub fn verify_leaf_binary(
+        &self,
+        proof: &BinaryShrinkProof,
+    ) -> Result<(), ZKMRecursionProverError> {
+        let machine = RecursionMachine::verifier_with_floor(
+            &proof.program,
+            &BinarySchedule::default(),
+            zkm_binary_stark::machine::LEAF_FLOOR,
+        )
+        .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         machine
             .verify(&proof.proof, &proof.digest)
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))
@@ -3491,7 +3512,7 @@ pub mod tests {
         let shrink_proof = prover.shrink_blake3(compressed_proof, opts)?;
         let input = prover.binary_witness(shrink_proof);
         let program = prover.binary_program(&input);
-        prover.binary_machine(&program)?;
+        prover.binary_machine(&program, &[])?;
         Ok(())
     }
 
@@ -3572,7 +3593,7 @@ pub mod tests {
             program.iter_instructions().count(),
             record.blake3_compress_events.len()
         );
-        prover.binary_machine(&program)?;
+        prover.binary_machine(&program, &[])?;
         Ok(())
     }
 
@@ -3701,6 +3722,165 @@ pub mod tests {
         tracing::info!("binary keys: {} added, tree of {} keys", extra.len(), keys.len());
     }
 
+    /// The least log height of each binary table over every normalize program
+    /// of the recursion shape set: the leaf floor, printed as the constant
+    /// `zkm_binary_stark::machine::LEAF_FLOOR` holds.
+    #[test]
+    #[ignore]
+    fn binary_leaf_floor() {
+        use crate::shapes::{ZKMCompressProgramShape, ZKMProofShape};
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let mut floor: Vec<(&'static str, usize)> = Vec::new();
+        let mut programs = 0usize;
+        for shape in ZKMProofShape::generate_normalize(prover.core_prover.machine()) {
+            let shape = ZKMCompressProgramShape::from_proof_shape(shape, VK_MERKLE_TREE_HEIGHT);
+            let program = prover.program_from_shape_basefold(shape);
+            let heights = RecursionMachine::table_heights(&program).expect("a binary machine");
+            for (name, log_height) in heights {
+                match floor.iter_mut().find(|(known, _)| *known == name) {
+                    Some((_, most)) => *most = (*most).max(log_height),
+                    None => floor.push((name, log_height)),
+                }
+            }
+            programs += 1;
+        }
+        let entries: Vec<String> =
+            floor.iter().map(|(name, log_height)| format!("(\"{name}\", {log_height})")).collect();
+        tracing::info!(
+            "binary leaf floor over {programs} normalize programs: &[{}]",
+            entries.join(", ")
+        );
+    }
+
+    /// The binary table heights of every core shard's normalize program of a
+    /// cached block: the guest at `ZIREN_BLOCK_ELF` on the input at
+    /// `ZIREN_BLOCK_INPUT`, its core proved on the host, each shard's program
+    /// built and measured, and no leaf proved.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn binary_block_heights() -> Result<()> {
+        setup_logger();
+        let elf = std::fs::read(std::env::var("ZIREN_BLOCK_ELF")?)?;
+        let input = std::fs::read(std::env::var("ZIREN_BLOCK_INPUT")?)?;
+        let mut stdin = ZKMStdin::new();
+        stdin.write_vec(input);
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(&elf);
+        let started = std::time::Instant::now();
+        let core_proof = prover.prove_core(
+            &pk_d,
+            program,
+            &stdin,
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        tracing::info!(
+            "block core: {} shards proved on the host in {:.1} s",
+            core_proof.proof.0.len(),
+            started.elapsed().as_secs_f64()
+        );
+        let inputs =
+            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+        let mut floor: Vec<(&'static str, usize)> = Vec::new();
+        let mut shapes: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
+        for (i, input) in inputs.iter().enumerate() {
+            let program = prover.recursion_program_basefold(input).0;
+            let heights = RecursionMachine::table_heights(&program).expect("a binary machine");
+            tracing::info!(
+                "shard {i}: {} instructions, heights {:?}",
+                program.iter_instructions().count(),
+                heights.iter().map(|(name, h)| format!("{name}:{h}")).collect::<Vec<_>>()
+            );
+            *shapes.entry(heights.iter().map(|&(_, h)| h).collect()).or_default() += 1;
+            for (name, log_height) in heights {
+                match floor.iter_mut().find(|(known, _)| *known == name) {
+                    Some((_, most)) => *most = (*most).max(log_height),
+                    None => floor.push((name, log_height)),
+                }
+            }
+        }
+        let entries: Vec<String> =
+            floor.iter().map(|(name, log_height)| format!("(\"{name}\", {log_height})")).collect();
+        tracing::info!(
+            "binary block floor over {} shards, {} shapes: &[{}]",
+            inputs.len(),
+            shapes.len(),
+            entries.join(", ")
+        );
+        Ok(())
+    }
+
+    /// The leaves of a cached block's first core shards proved over bits: the
+    /// guest at `ZIREN_BLOCK_ELF` on the input at `ZIREN_BLOCK_INPUT`, its
+    /// core proved on the host up to `ZIREN_CORE_SHARD_LIMIT` shards, and a
+    /// leaf for each of the first `ZIREN_BINARY_LEAVES`, dumped as the
+    /// fibonacci test dumps them.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_leaf_binary_block() -> Result<()> {
+        setup_logger();
+        let elf = std::fs::read(std::env::var("ZIREN_BLOCK_ELF")?)?;
+        let input = std::fs::read(std::env::var("ZIREN_BLOCK_INPUT")?)?;
+        let mut stdin = ZKMStdin::new();
+        stdin.write_vec(input);
+        let mut prover = ZKMProver::<DefaultProverComponents>::new();
+        if let Some(path) = std::env::var_os("ZIREN_BINARY_VK_EXTRA") {
+            add_binary_keys(&mut prover, &std::fs::read_to_string(path)?);
+        }
+        let (_, pk_d, program, vk) = prover.setup(&elf);
+        let started = std::time::Instant::now();
+        let core_proof = prover.prove_core(
+            &pk_d,
+            program,
+            &stdin,
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        tracing::info!(
+            "block core: {} shards proved on the host in {:.1} s",
+            core_proof.proof.0.len(),
+            started.elapsed().as_secs_f64()
+        );
+        let inputs =
+            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+        let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
+            .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
+        for (i, input) in inputs.iter().enumerate().take(count) {
+            let started = std::time::Instant::now();
+            let leaf_proof = prover.leaf_binary(input)?;
+            tracing::info!(
+                "binary block leaf {i}: {} bytes, {:.1} s, {} instructions",
+                bincode::serialize(&leaf_proof.proof).unwrap().len(),
+                started.elapsed().as_secs_f64(),
+                leaf_proof.program.iter_instructions().count()
+            );
+            for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&leaf_proof.proof) {
+                tracing::info!("binary block leaf {i} part {label}: {bytes} bytes");
+            }
+            let started = std::time::Instant::now();
+            prover.verify_leaf_binary(&leaf_proof)?;
+            tracing::info!(
+                "binary block leaf {i} verified in {:.3} s",
+                started.elapsed().as_secs_f64()
+            );
+            if let Some(path) = std::env::var_os("ZIREN_BINARY_LEAF_DUMP") {
+                let path = format!("{}.{i}", path.to_string_lossy());
+                let dump = zkm_binary_stark::machine::ProvedProgram {
+                    program: (*leaf_proof.program).clone(),
+                    digest: leaf_proof.digest,
+                    public_values: leaf_proof.public_values,
+                    proof: leaf_proof.proof,
+                };
+                std::fs::write(&path, dump.to_bytes().expect("the leaf serializes"))?;
+                tracing::info!("binary block leaf written to {path}");
+            }
+        }
+        Ok(())
+    }
+
     /// The leaf of a fibonacci proof's first core shard proved over bits,
     /// then verified on the host.
     #[test]
@@ -3739,7 +3919,7 @@ pub mod tests {
                 leaf_proof.program.iter_instructions().count()
             );
             let started = std::time::Instant::now();
-            prover.verify_shrink_binary(&leaf_proof)?;
+            prover.verify_leaf_binary(&leaf_proof)?;
             tracing::info!("binary leaf verified in {:.3} s", started.elapsed().as_secs_f64());
             if let Some(path) = std::env::var_os("ZIREN_BINARY_LEAF_DUMP") {
                 let path = if all {

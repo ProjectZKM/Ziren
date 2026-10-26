@@ -449,7 +449,7 @@ fn eval_round<AB: AirBuilder>(
 
 /// The input and output table.
 pub struct Blake3IoAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     compressions: Arc<Compressions>,
 }
@@ -662,7 +662,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3IoAir {
 
 /// The round table.
 pub struct Blake3RoundAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     compressions: Arc<Compressions>,
 }

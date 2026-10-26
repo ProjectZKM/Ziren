@@ -84,7 +84,7 @@ fn limb_product_columns(i: usize, j: usize) -> impl Iterator<Item = usize> {
 
 /// The multiply table of one execution: as tall as the products asked for.
 pub struct MulAir {
-    log_height: usize,
+    pub(super) log_height: usize,
 }
 
 impl MulAir {

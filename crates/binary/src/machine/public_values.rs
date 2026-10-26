@@ -59,7 +59,7 @@ pub fn public_value(word: u32) -> F {
 
 /// The public values table of one program: one row per digest word.
 pub struct PublicValuesAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
 }
 

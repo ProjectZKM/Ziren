@@ -111,7 +111,7 @@ pub const NUM_BASE_ALU_COLS: usize = core::mem::size_of::<BaseAluCols<u8>>();
 
 /// The base ALU of one program.
 pub struct BaseAluAir {
-    log_height: usize,
+    pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
     direct: Vec<bool>,
