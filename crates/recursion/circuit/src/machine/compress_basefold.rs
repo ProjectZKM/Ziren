@@ -1036,6 +1036,18 @@ where
     }
 }
 
+/// Domain tag hashed first into
+/// [`ZKMCompressBasefoldWitnessValues::shape_key`], the compose program's
+/// cache key.
+///
+/// It keeps a compress key distinct from a core or wrap key even when the
+/// fields hashed after it coincide; those keys open with
+/// `CORE_SHAPE_KEY_DOMAIN` and `WRAP_SHAPE_KEY_DOMAIN`.  The value is
+/// arbitrary and only has to differ from theirs.  Changing it changes every
+/// compress key, including the names of compose programs in the on-disk
+/// program cache.
+const COMPRESS_SHAPE_KEY_DOMAIN: u32 = 0xC0_FE_BA_61;
+
 impl<const P: u8>
     ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
 {
@@ -1124,7 +1136,7 @@ impl<const P: u8>
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        0xC0_FE_BA_61_u32.hash(&mut h);
+        COMPRESS_SHAPE_KEY_DOMAIN.hash(&mut h);
 
         self.vks_and_proofs.len().hash(&mut h);
         for (_vk, sp) in self.vks_and_proofs.iter() {

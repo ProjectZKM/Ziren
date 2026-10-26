@@ -787,6 +787,18 @@ pub fn verify_core_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *recursion_public_values);
 }
 
+/// Domain tag hashed first into
+/// [`ZKMCoreBasefoldWitnessValues::shape_key`], the normalize program's
+/// cache key.
+///
+/// It keeps a core key distinct from a compress or wrap key even when the
+/// fields hashed after it coincide; those keys open with
+/// `COMPRESS_SHAPE_KEY_DOMAIN` and `WRAP_SHAPE_KEY_DOMAIN`.  The value is
+/// arbitrary and only has to differ from theirs.  Changing it changes every
+/// core key, including the names of normalize programs in the on-disk
+/// program cache.
+const CORE_SHAPE_KEY_DOMAIN: u32 = 0xC0_FE_BA_12;
+
 impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy witness for a given recursion shape.
     /// Drives the multi-chip basefold dummy helper for each shard
@@ -914,7 +926,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        0xC0_FE_BA_12_u32.hash(&mut h);
+        CORE_SHAPE_KEY_DOMAIN.hash(&mut h);
 
         self.vk.chip_information.len().hash(&mut h);
         self.vk.chip_ordering.len().hash(&mut h);

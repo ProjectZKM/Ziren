@@ -584,6 +584,17 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let _zero: Felt<_> = builder.eval(C::F::ZERO);
 }
 
+/// Domain tag hashed first into
+/// [`ZKMWrapBasefoldWitnessValues::shape_key`].
+///
+/// It keeps a wrap key distinct from a core or compress key even when the
+/// fields hashed after it coincide; those keys open with
+/// `CORE_SHAPE_KEY_DOMAIN` and `COMPRESS_SHAPE_KEY_DOMAIN`.  The value is
+/// arbitrary and only has to differ from theirs.  Changing it changes every
+/// wrap key, including the names of wrap programs in the on-disk program
+/// cache.
+const WRAP_SHAPE_KEY_DOMAIN: u32 = 0x3A_FE_BA_61;
+
 impl<const P: u8>
     ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
 {
@@ -641,7 +652,7 @@ impl<const P: u8>
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        0x3A_FE_BA_61_u32.hash(&mut h);
+        WRAP_SHAPE_KEY_DOMAIN.hash(&mut h);
 
         self.vks_and_proofs.len().hash(&mut h);
         for (vk, sp) in self.vks_and_proofs.iter() {
