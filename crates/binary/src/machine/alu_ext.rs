@@ -19,7 +19,9 @@ use zkm_recursion_core::{
 };
 
 use super::alu_base::{fill_prep, AluFlags, AluPrep, NUM_ALU_PREP_COLS};
-use super::bits::{cell_tuple, dense, log_height_for, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE};
+use super::bits::{
+    cell_tuple, dense_padded, log_height_for, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+};
 use super::memory::cell_of;
 use crate::ext::{
     eval_ext_add, eval_ext_mul, ext_exprs, fill_ext_add, fill_ext_mul, ExtAddCols, ExtMulCols,
@@ -238,7 +240,7 @@ impl ExtAluAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         let width = self.kind.width();
-        let mut rows = BitRows::new(width, self.log_height);
+        let mut rows = BitRows::padded(width, self.log_height);
         let mut row = vec![0u8; width];
         for r in 0..1usize << self.log_height {
             row.fill(0);
@@ -338,7 +340,7 @@ impl<X: Field> BaseAir<X> for ExtAluAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_ALU_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_ALU_PREP_COLS))
     }
 }
 
@@ -348,7 +350,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ExtAluAir {
         let row: &[AB::Var] = main.current_slice();
         let local: &ExtOperandCols<AB::Var> = row[..NUM_EXT_OPERAND_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: AluPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: AluPrep<AB::Var> = *prep.current_slice()[..NUM_ALU_PREP_COLS].borrow();
 
         for bit in local.in1.iter().chain(local.in2.iter()).chain(local.out.iter()).flatten() {
             builder.assert_bool(*bit);

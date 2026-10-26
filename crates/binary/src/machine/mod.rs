@@ -224,8 +224,9 @@ impl RecursionAir {
 }
 
 impl<X: Field> BaseAir<X> for RecursionAir {
+    /// The table's width padded by [`bits::padded_width`].
     fn width(&self) -> usize {
-        match self {
+        bits::padded_width(match self {
             Self::Ledger(air) => BaseAir::<X>::width(air),
             Self::MemoryConst(air) => BaseAir::<X>::width(air),
             Self::MemoryVar(air) => BaseAir::<X>::width(air),
@@ -240,11 +241,12 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::PublicValues(air) => BaseAir::<X>::width(air),
             Self::Mul(air) => BaseAir::<X>::width(air),
             Self::Mul8(air) => BaseAir::<X>::width(air),
-        }
+        })
     }
 
+    /// The table's preprocessed width padded by [`bits::padded_width`].
     fn preprocessed_width(&self) -> usize {
-        match self {
+        bits::padded_width(match self {
             Self::Ledger(air) => BaseAir::<X>::preprocessed_width(air),
             Self::MemoryConst(air) => BaseAir::<X>::preprocessed_width(air),
             Self::MemoryVar(air) => BaseAir::<X>::preprocessed_width(air),
@@ -259,7 +261,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Mul(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Mul8(air) => BaseAir::<X>::preprocessed_width(air),
-        }
+        })
     }
 
     fn num_public_values(&self) -> usize {
@@ -1125,6 +1127,24 @@ mod tests {
         let mut wrong_split = record;
         wrong_split.ext2felt_events[1].inner.0[3] += KoalaBear::ONE;
         assert!(rejects(&wrong_split), "a changed split must not verify");
+    }
+
+    /// Every table's main and preprocessed width, and the aligned column
+    /// blocks each costs: one per power of two in the width.
+    #[test]
+    fn table_widths() {
+        let program = Arc::new(leaf_ops_program(2));
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        let blocks = |w: usize| w.count_ones();
+        for air in machine.airs() {
+            let (main, prep) = (BaseAir::<F>::width(air), BaseAir::<F>::preprocessed_width(air));
+            println!(
+                "WIDTH {:>12} main {main:>5} ({} blocks) prep {prep:>4} ({} blocks)",
+                air.name(),
+                blocks(main),
+                blocks(prep)
+            );
+        }
     }
 
     /// The extension and select program at the scale `ZIREN_BINARY_SCALE`

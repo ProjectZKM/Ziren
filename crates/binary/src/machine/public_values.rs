@@ -17,7 +17,8 @@ use zkm_derive::AlignedBorrow;
 use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram, DIGEST_SIZE};
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, pack_field, single_block, BitRows, ADDRESS_BITS, MEMORY,
+    cell_tuple, dense_padded, log_height_for, pack_field, single_block, BitRows, ADDRESS_BITS,
+    MEMORY,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, Word, KB_BITS};
@@ -115,7 +116,7 @@ impl PublicValuesAir {
     /// The witness: the digest words.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
-        let mut rows = BitRows::new(NUM_PUBLIC_VALUES_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_PUBLIC_VALUES_COLS, self.log_height);
         for (row, word) in Self::digest(record).into_iter().enumerate() {
             rows.set_row(row, &bits_le::<KB_BITS>(u64::from(word)));
         }
@@ -133,7 +134,7 @@ impl<X: Field> BaseAir<X> for PublicValuesAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_PUBLIC_VALUES_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_PUBLIC_VALUES_PREP_COLS))
     }
 
     fn num_public_values(&self) -> usize {
@@ -144,9 +145,11 @@ impl<X: Field> BaseAir<X> for PublicValuesAir {
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for PublicValuesAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &PublicValuesCols<AB::Var> = main.current_slice().borrow();
+        let local: &PublicValuesCols<AB::Var> =
+            main.current_slice()[..NUM_PUBLIC_VALUES_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: PublicValuesPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: PublicValuesPrep<AB::Var> =
+            *prep.current_slice()[..NUM_PUBLIC_VALUES_PREP_COLS].borrow();
         let public: [AB::Expr; DIGEST_SIZE] =
             core::array::from_fn(|i| builder.public_values()[i].into());
 

@@ -16,7 +16,8 @@ use zkm_recursion_core::runtime::instruction::HintExt2FeltsInstr;
 use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram};
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+    cell_tuple, dense_padded, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY,
+    WRITE,
 };
 use super::memory::cell_of;
 use crate::ext::{ExtWord, EXT_DEGREE};
@@ -126,7 +127,7 @@ impl Ext2FeltsAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.ext2felt_events.len(), self.outputs.len(), "one event per instruction");
-        let mut rows = BitRows::new(NUM_EXT2FELTS_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_EXT2FELTS_COLS, self.log_height);
         let mut row = [0u8; NUM_EXT2FELTS_COLS];
         for (r, event) in record.ext2felt_events.iter().enumerate() {
             let cols: &mut Ext2FeltsCols<u8> = row.as_mut_slice().borrow_mut();
@@ -147,16 +148,17 @@ impl<X: Field> BaseAir<X> for Ext2FeltsAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_EXT2FELTS_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_EXT2FELTS_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Ext2FeltsAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &Ext2FeltsCols<AB::Var> = main.current_slice().borrow();
+        let local: &Ext2FeltsCols<AB::Var> = main.current_slice()[..NUM_EXT2FELTS_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: Ext2FeltsPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: Ext2FeltsPrep<AB::Var> =
+            *prep.current_slice()[..NUM_EXT2FELTS_PREP_COLS].borrow();
 
         for bit in local.value.iter().flatten() {
             builder.assert_bool(*bit);

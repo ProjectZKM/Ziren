@@ -19,8 +19,8 @@ use p3_sumcheck::layout::Table;
 use zkm_derive::AlignedBorrow;
 
 use super::bits::{
-    cell_bits, cell_tuple, dense, log_height_for, BitRows, Cell, ADDRESS_BITS, BLOCK_BITS, MEMORY,
-    WRITE,
+    cell_bits, cell_tuple, dense_padded, log_height_for, padded_width, BitRows, Cell, ADDRESS_BITS,
+    BLOCK_BITS, MEMORY, WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs};
@@ -99,7 +99,7 @@ impl LedgerAir {
     #[must_use]
     pub fn main_table(&self, values: &[Cell]) -> Table<F> {
         assert_eq!(values.len(), self.group_sizes.len(), "one value per write");
-        let mut rows = BitRows::new(NUM_LEDGER_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_LEDGER_COLS, self.log_height);
         let mut row = 0;
         for (value, &size) in values.iter().zip(&self.group_sizes) {
             let bits = cell_bits(value);
@@ -122,12 +122,12 @@ impl<X: Field> BaseAir<X> for LedgerAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_LEDGER_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_LEDGER_PREP_COLS))
     }
 
     /// The value, which each row copies from the row before it.
     fn main_next_row_columns(&self) -> Vec<usize> {
-        (0..NUM_LEDGER_COLS).collect()
+        (0..padded_width(NUM_LEDGER_COLS)).collect()
     }
 
     /// Every preprocessed column, though only the flag that says a row
@@ -135,7 +135,7 @@ impl<X: Field> BaseAir<X> for LedgerAir {
     /// table's openings only when a batch reads every column, and claims
     /// each column on its own otherwise.
     fn preprocessed_next_row_columns(&self) -> Vec<usize> {
-        (0..NUM_LEDGER_PREP_COLS).collect()
+        (0..padded_width(NUM_LEDGER_PREP_COLS)).collect()
     }
 }
 
@@ -144,11 +144,12 @@ impl<X: Field> BaseAir<X> for LedgerAir {
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LedgerAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &LedgerCols<AB::Var> = main.current_slice().borrow();
-        let next: &LedgerCols<AB::Var> = main.next_slice().borrow();
+        let local: &LedgerCols<AB::Var> = main.current_slice()[..NUM_LEDGER_COLS].borrow();
+        let next: &LedgerCols<AB::Var> = main.next_slice()[..NUM_LEDGER_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: LedgerPrep<AB::Var> = *prep.current_slice().borrow();
-        let prep_next: LedgerPrep<AB::Var> = *prep.next_slice().borrow();
+        let prep_local: LedgerPrep<AB::Var> =
+            *prep.current_slice()[..NUM_LEDGER_PREP_COLS].borrow();
+        let prep_next: LedgerPrep<AB::Var> = *prep.next_slice()[..NUM_LEDGER_PREP_COLS].borrow();
 
         for bit in local.value.iter() {
             builder.assert_bool(*bit);

@@ -18,7 +18,8 @@ use zkm_derive::AlignedBorrow;
 use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram, SelectInstr};
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+    cell_tuple, dense_padded, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY,
+    WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, Word, KB_BITS};
@@ -149,7 +150,7 @@ impl SelectAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.select_events.len(), self.outputs.len(), "one event per instruction");
-        let mut rows = BitRows::new(NUM_SELECT_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_SELECT_COLS, self.log_height);
         let mut row = [0u8; NUM_SELECT_COLS];
         for (r, event) in record.select_events.iter().enumerate() {
             let cols: &mut SelectCols<u8> = row.as_mut_slice().borrow_mut();
@@ -175,16 +176,17 @@ impl<X: Field> BaseAir<X> for SelectAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_SELECT_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_SELECT_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for SelectAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &SelectCols<AB::Var> = main.current_slice().borrow();
+        let local: &SelectCols<AB::Var> = main.current_slice()[..NUM_SELECT_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: SelectPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: SelectPrep<AB::Var> =
+            *prep.current_slice()[..NUM_SELECT_PREP_COLS].borrow();
 
         for word in [&local.bit, &local.in1, &local.in2, &local.out1, &local.out2] {
             for bit in word.iter() {

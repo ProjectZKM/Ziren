@@ -30,8 +30,8 @@ use zkm_recursion_core::{
 };
 
 use super::bits::{
-    blake3_tuple, cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS,
-    BLAKE3, BLAKE3_ROUND_BITS, MEMORY, PERMUTATION_ID_BITS, WRITE,
+    blake3_tuple, cell_tuple, dense_padded, log_height_for, single_block, BitRows, Cell,
+    ADDRESS_BITS, BLAKE3, BLAKE3_ROUND_BITS, MEMORY, PERMUTATION_ID_BITS, WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{add_bits, add_carries, bits_le, constant_bits, exprs, widen, KB_BITS};
@@ -520,7 +520,7 @@ impl Blake3IoAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         let filled = self.compressions.fill_all(record);
-        let mut rows = BitRows::new(NUM_BLAKE3_IO_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_BLAKE3_IO_COLS, self.log_height);
         let mut row = vec![0u8; NUM_BLAKE3_IO_COLS];
         for (r, (compression, event)) in
             filled.iter().zip(&record.blake3_compress_events).enumerate()
@@ -546,7 +546,7 @@ impl<X: Field> BaseAir<X> for Blake3IoAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_BLAKE3_IO_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_BLAKE3_IO_PREP_COLS))
     }
 }
 
@@ -563,9 +563,10 @@ fn word_of_limbs<AB: AirBuilder>(
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3IoAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &Blake3IoCols<AB::Var> = main.current_slice().borrow();
+        let local: &Blake3IoCols<AB::Var> = main.current_slice()[..NUM_BLAKE3_IO_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: Blake3IoPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: Blake3IoPrep<AB::Var> =
+            *prep.current_slice()[..NUM_BLAKE3_IO_PREP_COLS].borrow();
 
         for bit in local.cv.iter().chain(local.block.iter()).flatten() {
             builder.assert_bool(*bit);
@@ -697,7 +698,7 @@ impl Blake3RoundAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         let filled = self.compressions.fill_all(record);
-        let mut rows = BitRows::new(NUM_BLAKE3_ROUND_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_BLAKE3_ROUND_COLS, self.log_height);
         for (c, compression) in filled.iter().enumerate() {
             for (round, row) in compression.rounds.iter().enumerate() {
                 rows.set_row(c * ROUNDS + round, row);
@@ -717,16 +718,18 @@ impl<X: Field> BaseAir<X> for Blake3RoundAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_BLAKE3_ROUND_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_BLAKE3_ROUND_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3RoundAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &Blake3RoundCols<AB::Var> = main.current_slice().borrow();
+        let local: &Blake3RoundCols<AB::Var> =
+            main.current_slice()[..NUM_BLAKE3_ROUND_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: Blake3RoundPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: Blake3RoundPrep<AB::Var> =
+            *prep.current_slice()[..NUM_BLAKE3_ROUND_PREP_COLS].borrow();
 
         for bit in local.state.iter().chain(local.words.iter()).flatten() {
             builder.assert_bool(*bit);

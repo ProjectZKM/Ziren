@@ -19,7 +19,8 @@ use zkm_derive::AlignedBorrow;
 use zkm_recursion_core::{ExecutionRecord, FeltLimbsIo, Instruction, RecursionProgram};
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+    cell_tuple, dense_padded, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY,
+    WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, Word, KB_BITS};
@@ -137,7 +138,7 @@ impl LimbsAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.felt_limbs_events.len(), self.outputs.len(), "one event per instruction");
-        let mut rows = BitRows::new(NUM_LIMBS_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_LIMBS_COLS, self.log_height);
         for (r, event) in record.felt_limbs_events.iter().enumerate() {
             let value = event.input.as_canonical_u32();
             let low = event.output[0].as_canonical_u32();
@@ -159,16 +160,16 @@ impl<X: Field> BaseAir<X> for LimbsAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_LIMBS_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_LIMBS_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LimbsAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &LimbsCols<AB::Var> = main.current_slice().borrow();
+        let local: &LimbsCols<AB::Var> = main.current_slice()[..NUM_LIMBS_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: LimbsPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: LimbsPrep<AB::Var> = *prep.current_slice()[..NUM_LIMBS_PREP_COLS].borrow();
 
         for bit in local.input.iter() {
             builder.assert_bool(*bit);

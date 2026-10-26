@@ -105,7 +105,7 @@ impl MulAir {
     #[must_use]
     pub fn main_table(&self, requests: &[(u32, u32)]) -> Table<F> {
         assert!(requests.len() <= 1 << self.log_height, "the table holds every request");
-        let mut rows = BitRows::new(NUM_MUL_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_MUL_COLS, self.log_height);
         let mut row = vec![0u8; NUM_MUL_COLS];
         for r in 0..1usize << self.log_height {
             row.fill(0);
@@ -131,7 +131,7 @@ impl<X: Field> BaseAir<X> for MulAir {
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MulAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &MulRow<AB::Var> = main.current_slice().borrow();
+        let local: &MulRow<AB::Var> = main.current_slice()[..NUM_MUL_COLS].borrow();
 
         builder.assert_bool(local.is_real);
         builder.assert_zero(local.zero);

@@ -15,8 +15,8 @@ use zkm_recursion_core::runtime::instruction::{HintBitsInstr, HintExt2FeltsInstr
 use zkm_recursion_core::{ExecutionRecord, Instruction, MemAccessKind, MemInstr, RecursionProgram};
 
 use super::bits::{
-    cell_bits, cell_tuple, dense, log_height_for, BitRows, Cell, ADDRESS_BITS, BLOCK_BITS, MEMORY,
-    WRITE,
+    cell_bits, cell_tuple, dense_padded, log_height_for, BitRows, Cell, ADDRESS_BITS, BLOCK_BITS,
+    MEMORY, WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs};
@@ -128,7 +128,7 @@ impl MemoryConstAir {
     /// The witness, which is all zero.
     #[must_use]
     pub fn main_table(&self) -> Table<F> {
-        BitRows::new(NUM_MEMORY_CONST_COLS, self.log_height).into_table()
+        BitRows::padded(NUM_MEMORY_CONST_COLS, self.log_height).into_table()
     }
 }
 
@@ -142,16 +142,18 @@ impl<X: Field> BaseAir<X> for MemoryConstAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_MEMORY_CONST_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_MEMORY_CONST_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MemoryConstAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &MemoryConstCols<AB::Var> = main.current_slice().borrow();
+        let local: &MemoryConstCols<AB::Var> =
+            main.current_slice()[..NUM_MEMORY_CONST_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: MemoryConstPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: MemoryConstPrep<AB::Var> =
+            *prep.current_slice()[..NUM_MEMORY_CONST_PREP_COLS].borrow();
 
         builder.assert_zero(local.zero);
         let addr = exprs::<AB, ADDRESS_BITS>(&prep_local.addr);
@@ -266,7 +268,7 @@ impl MemoryVarAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.mem_var_events.len(), self.accesses.len(), "one event per hint cell");
-        let mut rows = BitRows::new(NUM_MEMORY_VAR_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_MEMORY_VAR_COLS, self.log_height);
         for (row, event) in record.mem_var_events.iter().enumerate() {
             rows.set_row(row, &cell_bits(&cell_of(&event.inner)));
         }
@@ -284,16 +286,17 @@ impl<X: Field> BaseAir<X> for MemoryVarAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_MEMORY_VAR_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_MEMORY_VAR_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MemoryVarAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &MemoryVarCols<AB::Var> = main.current_slice().borrow();
+        let local: &MemoryVarCols<AB::Var> = main.current_slice()[..NUM_MEMORY_VAR_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: MemoryVarPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: MemoryVarPrep<AB::Var> =
+            *prep.current_slice()[..NUM_MEMORY_VAR_PREP_COLS].borrow();
 
         for bit in local.value.iter() {
             builder.assert_bool(*bit);

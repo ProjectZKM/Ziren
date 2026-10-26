@@ -22,8 +22,8 @@ use zkm_recursion_core::{
 };
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, request_mul, single_block, BitRows, Cell, ADDRESS_BITS,
-    MEMORY, WRITE,
+    cell_tuple, dense_padded, log_height_for, request_mul, single_block, BitRows, Cell,
+    ADDRESS_BITS, MEMORY, WRITE,
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, eval_add, exprs, fill_add, AddCols, Word, KB_BITS, KB_PRIME};
@@ -239,7 +239,7 @@ impl BaseAluAir {
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.base_alu_events.len(), self.outputs.len(), "one event per instruction");
-        let mut rows = BitRows::new(NUM_BASE_ALU_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_BASE_ALU_COLS, self.log_height);
         let mut row = vec![0u8; NUM_BASE_ALU_COLS];
         for r in 0..1usize << self.log_height {
             row.fill(0);
@@ -287,16 +287,16 @@ impl<X: Field> BaseAir<X> for BaseAluAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_ALU_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_ALU_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for BaseAluAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &BaseAluCols<AB::Var> = main.current_slice().borrow();
+        let local: &BaseAluCols<AB::Var> = main.current_slice()[..NUM_BASE_ALU_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: AluPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: AluPrep<AB::Var> = *prep.current_slice()[..NUM_ALU_PREP_COLS].borrow();
 
         for bit in local.in1.iter().chain(local.in2.iter()).chain(local.out.iter()) {
             builder.assert_bool(*bit);

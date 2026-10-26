@@ -14,7 +14,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_derive::AlignedBorrow;
 
-use super::bits::{dense, BitRows};
+use super::bits::{dense_padded, BitRows};
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, LIMB_BITS, LIMB_PRODUCT_BITS};
 use crate::BinaryBase;
@@ -82,7 +82,7 @@ impl Mul8Air {
     /// The witness, which is all zero.
     #[must_use]
     pub fn main_table(&self) -> Table<F> {
-        BitRows::new(NUM_MUL8_COLS, MUL8_LOG_HEIGHT).into_table()
+        BitRows::padded(NUM_MUL8_COLS, MUL8_LOG_HEIGHT).into_table()
     }
 }
 
@@ -96,14 +96,14 @@ impl<X: Field> BaseAir<X> for Mul8Air {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_MUL8_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_MUL8_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Mul8Air {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &Mul8Cols<AB::Var> = main.current_slice().borrow();
+        let local: &Mul8Cols<AB::Var> = main.current_slice()[..NUM_MUL8_COLS].borrow();
         builder.assert_zero(local.zero);
         builder.provide_table(MUL8, TraceWindow::Preprocessed, (0..LIMB_PRODUCT_BITS).collect());
     }

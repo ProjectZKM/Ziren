@@ -23,7 +23,8 @@ use zkm_recursion_core::{
 };
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+    cell_tuple, dense_padded, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY,
+    WRITE,
 };
 use super::memory::cell_of;
 use crate::ext::{
@@ -264,7 +265,7 @@ impl PrefixSumAir {
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         let events = &record.prefix_sum_checks_events;
         assert_eq!(events.len(), self.outputs.len(), "one event per bit");
-        let mut rows = BitRows::new(NUM_PREFIX_SUM_COLS, self.log_height);
+        let mut rows = BitRows::padded(NUM_PREFIX_SUM_COLS, self.log_height);
         let mut row = vec![0u8; NUM_PREFIX_SUM_COLS];
         let mut requests = Vec::new();
         let padding = padding_event();
@@ -288,16 +289,17 @@ impl<X: Field> BaseAir<X> for PrefixSumAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_PREFIX_SUM_PREP_COLS))
+        Some(dense_padded(&self.preprocessed, NUM_PREFIX_SUM_PREP_COLS))
     }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for PrefixSumAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &PrefixSumCols<AB::Var> = main.current_slice().borrow();
+        let local: &PrefixSumCols<AB::Var> = main.current_slice()[..NUM_PREFIX_SUM_COLS].borrow();
         let prep = builder.preprocessed();
-        let prep_local: PrefixSumPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: PrefixSumPrep<AB::Var> =
+            *prep.current_slice()[..NUM_PREFIX_SUM_PREP_COLS].borrow();
 
         for bit in local
             .x1

@@ -61,6 +61,26 @@ pub fn cell_bits(cell: &Cell) -> [u8; BLOCK_BITS] {
     bits
 }
 
+/// The width a table of `raw` columns is committed at.
+///
+/// A table is opened in one aligned block of columns per power of two in
+/// its width, and the verifier pays for each block at every point it opens
+/// the table, so a width is padded with zero columns to the next power of
+/// two when that adds at most half again, and otherwise to the sum of its
+/// top power of two and the power of two that covers the rest: two blocks.
+#[must_use]
+pub const fn padded_width(raw: usize) -> usize {
+    if raw == 0 {
+        return 0;
+    }
+    let next = raw.next_power_of_two();
+    if next - raw <= raw / 2 {
+        return next;
+    }
+    let top = next / 2;
+    top + (raw - top).next_power_of_two()
+}
+
 /// The log height of a table of `rows` rows, at least [`MIN_LOG_HEIGHT`].
 #[must_use]
 pub fn log_height_for(rows: usize) -> usize {
@@ -84,9 +104,16 @@ impl BitRows {
         Self { width, log_height, words: vec![0; (1 << log_height) / 64 * width] }
     }
 
-    /// Set row `r` to `row`, which must be all zero before.
+    /// An all-zero table of `raw` columns padded to [`padded_width`].
+    #[must_use]
+    pub fn padded(raw: usize, log_height: usize) -> Self {
+        Self::new(padded_width(raw), log_height)
+    }
+
+    /// Set row `r` to `row`, the columns past it zero, which must be all
+    /// zero before.
     pub fn set_row(&mut self, r: usize, row: &[u8]) {
-        assert_eq!(row.len(), self.width);
+        assert!(row.len() <= self.width, "a row fits its table");
         let block = &mut self.words[(r / 64) * self.width..(r / 64 + 1) * self.width];
         for (word, &bit) in block.iter_mut().zip(row) {
             *word |= u64::from(bit) << (r % 64);
@@ -109,6 +136,23 @@ pub fn dense<X: Field>(bits: &[u8], width: usize) -> RowMajorMatrix<X> {
         bits.iter().map(|&bit| if bit == 1 { X::ONE } else { X::ZERO }).collect(),
         width,
     )
+}
+
+/// `bits`, row-major with `raw` columns, as a dense matrix of zeros and
+/// ones padded with zero columns to [`padded_width`].
+#[must_use]
+pub fn dense_padded<X: Field>(bits: &[u8], raw: usize) -> RowMajorMatrix<X> {
+    assert!(!bits.is_empty(), "the preprocessed trace was released once setup committed it");
+    let width = padded_width(raw);
+    let mut values = vec![X::ZERO; bits.len() / raw * width];
+    for (row, out) in bits.chunks_exact(raw).zip(values.chunks_exact_mut(width)) {
+        for (bit, value) in row.iter().zip(out.iter_mut()) {
+            if *bit == 1 {
+                *value = X::ONE;
+            }
+        }
+    }
+    RowMajorMatrix::new(values, width)
 }
 
 /// `bits` as one field element, bit `i` on coordinate `i`.
