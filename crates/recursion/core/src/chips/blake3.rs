@@ -2,14 +2,22 @@
 //! per row on byte limbs, which the Blake3 ring's verifier asks for by the
 //! hash of every Merkle path and transcript step it checks.
 //!
-//! Words are four byte limbs.  XOR is one `XOR` byte lookup per limb.  A
-//! rotation by 16 or 8 bits is a limb permutation and costs nothing; a
-//! rotation by 12 or 7 bits is one `ShrCarry` lookup per limb with the result
-//! recombined linearly.  An addition keeps only the result limbs: the carries
-//! are linear in the operands, constrained boolean for two operands and to
-//! `{0, 1, 2}` for three, and the result limbs are range checked with
-//! `U8Range` lookups two limbs at a time.  The lookups go to the machine's
-//! [`ByteChip`](super::byte::ByteChip).
+//! Words are four byte limbs.  XOR is one `Xor` byte lookup per limb.  A
+//! rotation by 16 or 8 bits is a limb permutation and costs nothing.  The
+//! XOR feeding a 12- or 7-bit rotation is not materialised: one fused
+//! `XorShr4` or `XorShr7` lookup per limb returns the high and low parts of
+//! the XOR of the two operand limbs, which the rotation recombines linearly.
+//! An addition keeps only the result limbs, the carries linear in the
+//! operands and constrained boolean for two operands and to `{0, 1, 2}` for
+//! three.  Every addition result is an operand of a later byte lookup, which
+//! bounds it to a byte, so it needs no range check of its own; the inputs
+//! are range checked with `U8Range` lookups two limbs at a time.  The lookups
+//! go to the machine's [`ByteChip`](super::byte::ByteChip).
+//!
+//! A state word crossing from one G function to the next is re-read from its
+//! columns at each use rather than carried as one expression, so no
+//! expression outlives its G function and the zerocheck evaluation can be
+//! cut at every G boundary.
 //!
 //! Memory holds the inputs and outputs as 16-bit limbs, two per word; a row
 //! exchanges each limb as the linear combination of its two bytes.  The
@@ -28,13 +36,13 @@ use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_executor::{events::ByteLookupEvent, ByteOpcode};
 use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{BaseAirBuilder, ByteAirBuilder, MachineAir};
 use zkm_pcs::Word;
 
 use crate::builder::ZKMRecursionAirBuilder;
+use crate::chips::byte::{ByteLookup, ByteOp};
 use crate::chips::mem::MemoryAccessColsChips;
 use crate::instruction::Instruction;
 use crate::{
@@ -87,7 +95,8 @@ pub fn schedule() -> [[usize; 16]; ROUNDS] {
     s
 }
 
-/// The `ShrCarry` limbs of a 12- or 7-bit rotation.
+/// The limbs of a 12- or 7-bit rotation of an XOR: per limb, the high and
+/// low parts of the XOR split at the rotation's bit offset.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct RotCols<T> {
@@ -102,12 +111,10 @@ pub struct GCols<T> {
     pub a1: Word<T>,
     pub x1: Word<T>,
     pub c1: Word<T>,
-    pub x2: Word<T>,
     pub r2: RotCols<T>,
     pub a2: Word<T>,
     pub x3: Word<T>,
     pub c2: Word<T>,
-    pub x4: Word<T>,
     pub r4: RotCols<T>,
 }
 
@@ -205,42 +212,52 @@ fn word<F: PrimeCharacteristicRing>(x: u32) -> Word<F> {
 }
 
 /// The lookups that range check a word, two bytes at a time.
-fn record_range(x: u32, lookup: &mut impl FnMut(ByteLookupEvent)) {
+fn record_range(x: u32, lookup: &mut impl FnMut(ByteLookup)) {
     let b = x.to_le_bytes();
     for k in 0..2 {
-        lookup(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, b[2 * k], b[2 * k + 1]));
+        lookup(ByteLookup { op: ByteOp::U8Range, b: b[2 * k], c: b[2 * k + 1] });
     }
 }
 
 /// `x ^ y`, with its lookups.
-fn record_xor(x: u32, y: u32, lookup: &mut impl FnMut(ByteLookupEvent)) -> u32 {
-    let (xb, yb, ob) = (x.to_le_bytes(), y.to_le_bytes(), (x ^ y).to_le_bytes());
+fn record_xor(x: u32, y: u32, lookup: &mut impl FnMut(ByteLookup)) -> u32 {
+    let (xb, yb) = (x.to_le_bytes(), y.to_le_bytes());
     for i in 0..4 {
-        lookup(ByteLookupEvent::new(ByteOpcode::XOR, u16::from(ob[i]), 0, xb[i], yb[i]));
+        lookup(ByteLookup { op: ByteOp::Xor, b: xb[i], c: yb[i] });
     }
     x ^ y
 }
 
-/// The witness of a 12- or 7-bit rotation of `x`, with its lookups, and
-/// the rotated word.
-fn fill_rot<F: PrimeCharacteristicRing>(
+/// The fused operation of a rotation by `rotation` bits.
+fn xor_shr_op(rotation: usize) -> ByteOp {
+    match rotation % 8 {
+        4 => ByteOp::XorShr4,
+        7 => ByteOp::XorShr7,
+        _ => unreachable!("Blake3 rotates by 12 or 7 bits through the table"),
+    }
+}
+
+/// The witness of a 12- or 7-bit rotation of `x ^ y`, with its fused
+/// lookups, and the rotated word.
+fn fill_xor_rot<F: PrimeCharacteristicRing>(
     cols: &mut RotCols<F>,
     x: u32,
+    y: u32,
     rotation: usize,
-    lookup: &mut impl FnMut(ByteLookupEvent),
+    lookup: &mut impl FnMut(ByteLookup),
 ) -> u32 {
     let nbytes = rotation / 8;
     let nbits = rotation % 8;
-    let xb = x.to_le_bytes();
+    let (xb, yb) = (x.to_le_bytes(), y.to_le_bytes());
     let mask = (1u8 << nbits) - 1;
     for i in 0..4 {
-        let b = xb[(i + nbytes) % 4];
-        let (shift, carry) = (b >> nbits, b & mask);
-        cols.shift.0[i] = F::from_u8(shift);
-        cols.carry.0[i] = F::from_u8(carry);
-        lookup(ByteLookupEvent::new(ByteOpcode::ShrCarry, u16::from(shift), carry, b, nbits as u8));
+        let k = (i + nbytes) % 4;
+        let z = xb[k] ^ yb[k];
+        cols.shift.0[i] = F::from_u8(z >> nbits);
+        cols.carry.0[i] = F::from_u8(z & mask);
+        lookup(ByteLookup { op: xor_shr_op(rotation), b: xb[k], c: yb[k] });
     }
-    x.rotate_right(rotation as u32)
+    (x ^ y).rotate_right(rotation as u32)
 }
 
 /// Fill one row for `input`, reporting each byte lookup the row makes to
@@ -248,7 +265,7 @@ fn fill_rot<F: PrimeCharacteristicRing>(
 pub fn populate_row<F: PrimeCharacteristicRing>(
     cols: &mut Blake3Cols<F>,
     input: &CompressInput,
-    lookup: &mut impl FnMut(ByteLookupEvent),
+    lookup: &mut impl FnMut(ByteLookup),
 ) -> [u32; 8] {
     cols.is_real = F::ONE;
     for i in 0..8 {
@@ -279,28 +296,20 @@ pub fn populate_row<F: PrimeCharacteristicRing>(
             let g = &mut cols.g[r][j];
             let a1 = v[a].wrapping_add(v[b]).wrapping_add(mx);
             g.a1 = word(a1);
-            record_range(a1, lookup);
             let x1 = record_xor(v[d], a1, lookup);
             g.x1 = word(x1);
             let d1 = x1.rotate_right(16);
             let c1 = v[c].wrapping_add(d1);
             g.c1 = word(c1);
-            record_range(c1, lookup);
-            let x2 = record_xor(v[b], c1, lookup);
-            g.x2 = word(x2);
-            let b1 = fill_rot(&mut g.r2, x2, 12, lookup);
+            let b1 = fill_xor_rot(&mut g.r2, v[b], c1, 12, lookup);
             let a2 = a1.wrapping_add(b1).wrapping_add(my);
             g.a2 = word(a2);
-            record_range(a2, lookup);
             let x3 = record_xor(d1, a2, lookup);
             g.x3 = word(x3);
             let d2 = x3.rotate_right(8);
             let c2 = c1.wrapping_add(d2);
             g.c2 = word(c2);
-            record_range(c2, lookup);
-            let x4 = record_xor(b1, c2, lookup);
-            g.x4 = word(x4);
-            let b2 = fill_rot(&mut g.r4, x4, 7, lookup);
+            let b2 = fill_xor_rot(&mut g.r4, b1, c2, 7, lookup);
             v[a] = a2;
             v[b] = b2;
             v[c] = c2;
@@ -444,7 +453,7 @@ fn value<AB: AirBuilder>(w: &Word<AB::Var>) -> E<AB> {
 fn range_u8<AB: BaseAirBuilder>(builder: &mut AB, w: &WE<AB>, m: &E<AB>) {
     for k in 0..2 {
         builder.send_byte(
-            E::<AB>::from_u8(ByteOpcode::U8Range as u8),
+            E::<AB>::from_u8(ByteOp::U8Range.opcode()),
             E::<AB>::ZERO,
             w[2 * k].clone(),
             w[2 * k + 1].clone(),
@@ -462,7 +471,7 @@ fn xor<AB: BaseAirBuilder>(
 ) -> WE<AB> {
     for i in 0..4 {
         builder.send_byte(
-            E::<AB>::from_u8(ByteOpcode::XOR as u8),
+            E::<AB>::from_u8(ByteOp::Xor.opcode()),
             out.0[i],
             x[i].clone(),
             y[i].clone(),
@@ -476,29 +485,37 @@ fn rot_bytes<AB: AirBuilder>(x: WE<AB>, nbytes: usize) -> WE<AB> {
     core::array::from_fn(|i| x[(i + nbytes) % 4].clone())
 }
 
-fn rot_bits<AB: BaseAirBuilder>(
+/// The word a 12- or 7-bit rotation's limbs recombine to.
+fn rot_value<AB: AirBuilder>(cols: &RotCols<AB::Var>, rotation: usize) -> WE<AB> {
+    let mult = AB::F::from_u32(1 << (8 - rotation % 8));
+    core::array::from_fn(|i| {
+        E::<AB>::from(cols.shift.0[i]) + E::<AB>::from(cols.carry.0[(i + 1) % 4]) * mult.clone()
+    })
+}
+
+/// `(x ^ y)` rotated right by 12 or 7 bits: one fused lookup per limb splits
+/// the limbs' XOR at the bit offset, and the halves recombine linearly.
+fn xor_rot_bits<AB: BaseAirBuilder>(
     builder: &mut AB,
     cols: &RotCols<AB::Var>,
     x: &WE<AB>,
+    y: &WE<AB>,
     rotation: usize,
     m: &E<AB>,
 ) -> WE<AB> {
     let nbytes = rotation / 8;
-    let nbits = rotation % 8;
-    let mult = AB::F::from_u32(1 << (8 - nbits));
+    let op = xor_shr_op(rotation);
     for i in 0..4 {
         builder.send_byte_pair(
-            E::<AB>::from_u8(ByteOpcode::ShrCarry as u8),
+            E::<AB>::from_u8(op.opcode()),
             cols.shift.0[i],
             cols.carry.0[i],
             x[(i + nbytes) % 4].clone(),
-            E::<AB>::from_usize(nbits),
+            y[(i + nbytes) % 4].clone(),
             m.clone(),
         );
     }
-    core::array::from_fn(|i| {
-        E::<AB>::from(cols.shift.0[i]) + E::<AB>::from(cols.carry.0[(i + 1) % 4]) * mult
-    })
+    rot_value::<AB>(cols, rotation)
 }
 
 fn add2<AB: BaseAirBuilder>(
@@ -506,7 +523,6 @@ fn add2<AB: BaseAirBuilder>(
     out: &Word<AB::Var>,
     x: &WE<AB>,
     y: &WE<AB>,
-    m: &E<AB>,
 ) -> WE<AB> {
     let inv = AB::F::from_u32(256).inverse();
     let mut carry = E::<AB>::ZERO;
@@ -514,9 +530,7 @@ fn add2<AB: BaseAirBuilder>(
         carry = (x[i].clone() + y[i].clone() - out.0[i].into() + carry) * inv;
         builder.assert_bool(carry.clone());
     }
-    let w = we::<AB>(out);
-    range_u8(builder, &w, m);
-    w
+    we::<AB>(out)
 }
 
 fn add3<AB: BaseAirBuilder>(
@@ -525,7 +539,6 @@ fn add3<AB: BaseAirBuilder>(
     x: &WE<AB>,
     y: &WE<AB>,
     z: &WE<AB>,
-    m: &E<AB>,
 ) -> WE<AB> {
     let inv = AB::F::from_u32(256).inverse();
     let mut carry = E::<AB>::ZERO;
@@ -535,9 +548,32 @@ fn add3<AB: BaseAirBuilder>(
             carry.clone() * (carry.clone() - E::<AB>::ONE) * (carry.clone() - E::<AB>::from_u8(2)),
         );
     }
-    let w = we::<AB>(out);
-    range_u8(builder, &w, m);
-    w
+    we::<AB>(out)
+}
+
+/// Where a state word lives, so it is re-read from its columns at each use.
+#[derive(Clone, Copy)]
+enum Src<V> {
+    /// A word column.
+    Col(Word<V>),
+    /// A word column rotated by whole bytes.
+    RotBytes(Word<V>, usize),
+    /// A 12- or 7-bit rotation's limbs.
+    RotBits(RotCols<V>, usize),
+    /// `is_real` times a constant word.
+    Const(u32),
+}
+
+fn read<AB: AirBuilder>(src: &Src<AB::Var>, m: &E<AB>) -> WE<AB> {
+    match src {
+        Src::Col(w) => we::<AB>(w),
+        Src::RotBytes(w, n) => rot_bytes::<AB>(we::<AB>(w), *n),
+        Src::RotBits(cols, rotation) => rot_value::<AB>(cols, *rotation),
+        Src::Const(x) => {
+            let b = x.to_le_bytes();
+            core::array::from_fn(|k| m.clone() * AB::F::from_u8(b[k]))
+        }
+    }
 }
 
 impl<AB> Air<AB> for Blake3CompressChip
@@ -587,46 +623,45 @@ where
             );
         }
 
-        let mut v: Vec<WE<AB>> = Vec::with_capacity(16);
-        for i in 0..8 {
-            v.push(we::<AB>(&local.cv[i]));
+        let mut v: [Src<AB::Var>; 16] = [Src::Const(0); 16];
+        for (slot, w) in v.iter_mut().zip(local.cv.iter()) {
+            *slot = Src::Col(*w);
         }
-        for iv in IV.iter().take(4) {
-            let b = iv.to_le_bytes();
-            v.push(core::array::from_fn(|k| m.clone() * AB::F::from_u8(b[k])));
+        for (slot, iv) in v[8..12].iter_mut().zip(IV.iter()) {
+            *slot = Src::Const(*iv);
         }
-        v.push(we::<AB>(&local.counter));
-        v.push(core::array::from_fn(|_| E::<AB>::ZERO));
-        v.push(we::<AB>(&local.block_len));
-        v.push(we::<AB>(&local.flags));
-        let block: Vec<WE<AB>> = local.block.iter().map(|w| we::<AB>(w)).collect();
+        v[12] = Src::Col(local.counter);
+        v[14] = Src::Col(local.block_len);
+        v[15] = Src::Col(local.flags);
         for (r, sr) in schedule().iter().enumerate() {
             for (j, lane) in G_LANES.iter().enumerate() {
                 let [a, b, c, d] = *lane;
                 let g = &local.g[r][j];
-                let mx = &block[sr[2 * j]];
-                let my = &block[sr[2 * j + 1]];
-                let a1 = add3(builder, &g.a1, &v[a], &v[b], mx, &m);
-                let x1 = xor(builder, &g.x1, &v[d], &a1, &m);
+                let mx = we::<AB>(&local.block[sr[2 * j]]);
+                let my = we::<AB>(&local.block[sr[2 * j + 1]]);
+                let va = read::<AB>(&v[a], &m);
+                let vb = read::<AB>(&v[b], &m);
+                let vc = read::<AB>(&v[c], &m);
+                let vd = read::<AB>(&v[d], &m);
+                let a1 = add3(builder, &g.a1, &va, &vb, &mx);
+                let x1 = xor(builder, &g.x1, &vd, &a1, &m);
                 let d1 = rot_bytes::<AB>(x1, 2);
-                let c1 = add2(builder, &g.c1, &v[c], &d1, &m);
-                let x2 = xor(builder, &g.x2, &v[b], &c1, &m);
-                let b1 = rot_bits(builder, &g.r2, &x2, 12, &m);
-                let a2 = add3(builder, &g.a2, &a1, &b1, my, &m);
+                let c1 = add2(builder, &g.c1, &vc, &d1);
+                let b1 = xor_rot_bits(builder, &g.r2, &vb, &c1, 12, &m);
+                let a2 = add3(builder, &g.a2, &a1, &b1, &my);
                 let x3 = xor(builder, &g.x3, &d1, &a2, &m);
                 let d2 = rot_bytes::<AB>(x3, 1);
-                let c2 = add2(builder, &g.c2, &c1, &d2, &m);
-                let x4 = xor(builder, &g.x4, &b1, &c2, &m);
-                let b2 = rot_bits(builder, &g.r4, &x4, 7, &m);
-                v[a] = a2;
-                v[b] = b2;
-                v[c] = c2;
-                v[d] = d2;
+                let c2 = add2(builder, &g.c2, &c1, &d2);
+                xor_rot_bits(builder, &g.r4, &b1, &c2, 7, &m);
+                v[a] = Src::Col(g.a2);
+                v[b] = Src::RotBits(g.r4, 7);
+                v[c] = Src::Col(g.c2);
+                v[d] = Src::RotBytes(g.x3, 1);
             }
         }
         for i in 0..8 {
-            let lo = v[i].clone();
-            let hi = v[i + 8].clone();
+            let lo = read::<AB>(&v[i], &m);
+            let hi = read::<AB>(&v[i + 8], &m);
             xor(builder, &local.out[i], &lo, &hi, &m);
         }
     }

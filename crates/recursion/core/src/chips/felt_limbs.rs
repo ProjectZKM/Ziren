@@ -17,12 +17,12 @@ use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_executor::{events::ByteLookupEvent, ByteOpcode};
 use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{ByteAirBuilder, MachineAir};
 
 use crate::builder::ZKMRecursionAirBuilder;
+use crate::chips::byte::{ByteLookup, ByteOp};
 use crate::chips::mem::MemoryAccessColsChips;
 use crate::instruction::Instruction;
 use crate::{Address, ExecutionRecord, FeltLimbsEvent, RecursionProgram};
@@ -66,20 +66,14 @@ pub fn canonical_bytes<F: PrimeField32>(value: F) -> [u8; 4] {
 
 /// The byte lookups a row makes: two range checks and, unless the top byte
 /// is the maximum, the comparison binding it below the maximum.
-pub fn byte_lookups_of<F: PrimeField32>(event: &FeltLimbsEvent<F>) -> Vec<ByteLookupEvent> {
+pub fn byte_lookups_of<F: PrimeField32>(event: &FeltLimbsEvent<F>) -> Vec<ByteLookup> {
     let bytes = canonical_bytes(event.input);
     let mut lookups = vec![
-        ByteLookupEvent { opcode: ByteOpcode::U8Range, a1: 0, a2: 0, b: bytes[0], c: bytes[1] },
-        ByteLookupEvent { opcode: ByteOpcode::U8Range, a1: 0, a2: 0, b: bytes[2], c: bytes[3] },
+        ByteLookup { op: ByteOp::U8Range, b: bytes[0], c: bytes[1] },
+        ByteLookup { op: ByteOp::U8Range, b: bytes[2], c: bytes[3] },
     ];
     if bytes[3] != TOP_BYTE_MAX {
-        lookups.push(ByteLookupEvent {
-            opcode: ByteOpcode::LTU,
-            a1: 1,
-            a2: 0,
-            b: bytes[3],
-            c: TOP_BYTE_MAX,
-        });
+        lookups.push(ByteLookup { op: ByteOp::Ltu, b: bytes[3], c: TOP_BYTE_MAX });
     }
     lookups
 }
@@ -202,7 +196,7 @@ where
         let value = lo.clone() + hi.clone() * shift(16);
         for k in 0..2 {
             builder.send_byte(
-                AB::Expr::from_u8(ByteOpcode::U8Range as u8),
+                AB::Expr::from_u8(ByteOp::U8Range.opcode()),
                 AB::Expr::ZERO,
                 local.bytes[2 * k],
                 local.bytes[2 * k + 1],
@@ -210,7 +204,7 @@ where
             );
         }
         builder.send_byte(
-            AB::Expr::from_u8(ByteOpcode::LTU as u8),
+            AB::Expr::from_u8(ByteOp::Ltu.opcode()),
             AB::Expr::ONE,
             b3.clone(),
             AB::Expr::from_u8(TOP_BYTE_MAX),
