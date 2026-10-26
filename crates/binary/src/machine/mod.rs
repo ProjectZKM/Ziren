@@ -375,6 +375,8 @@ fn shapes(airs: &[RecursionAir]) -> (Vec<TableShape>, Vec<TableShape>) {
 pub struct ProvedProgram {
     pub program: RecursionProgram<KoalaBear>,
     pub digest: [u32; DIGEST_SIZE],
+    /// The public values the digest is of, as canonical elements.
+    pub public_values: Vec<u32>,
     pub proof: MachineProof,
 }
 

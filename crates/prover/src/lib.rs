@@ -2229,10 +2229,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let (program, record) = self.binary_execute(&input)?;
         let machine = self.binary_machine(&program)?;
         let digest = PublicValuesAir::digest(&record);
+        let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")
             .in_scope(|| machine.prove(&record))
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
-        Ok(BinaryShrinkProof { program, digest, proof })
+        Ok(BinaryShrinkProof { program, digest, public_values, proof })
     }
 
     /// Prove a leaf over bits: the normalize program that verifies `input`'s
@@ -2254,10 +2255,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let record = runtime.record;
         let machine = self.binary_machine(&program)?;
         let digest = PublicValuesAir::digest(&record);
+        let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")
             .in_scope(|| machine.prove(&record))
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
-        Ok(BinaryShrinkProof { program, digest, proof })
+        Ok(BinaryShrinkProof { program, digest, public_values, proof })
     }
 
     /// The binary machine of `program`, with its tables' shapes and the
@@ -3668,31 +3670,43 @@ pub mod tests {
             prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
         let inputs =
             prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
-        let started = std::time::Instant::now();
-        let leaf_proof = prover.leaf_binary(&inputs[0])?;
-        tracing::info!(
-            "binary leaf proof: {} bytes, {:.1} s",
-            bincode::serialize(&leaf_proof.proof).unwrap().len(),
-            started.elapsed().as_secs_f64()
-        );
-        for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&leaf_proof.proof) {
-            tracing::info!("binary leaf proof part {label}: {bytes} bytes");
-        }
-        tracing::info!(
-            "binary leaf program: {} instructions",
-            leaf_proof.program.iter_instructions().count()
-        );
-        let started = std::time::Instant::now();
-        prover.verify_shrink_binary(&leaf_proof)?;
-        tracing::info!("binary leaf verified in {:.3} s", started.elapsed().as_secs_f64());
-        if let Some(path) = std::env::var_os("ZIREN_BINARY_LEAF_DUMP") {
-            let dump = zkm_binary_stark::machine::ProvedProgram {
-                program: (*leaf_proof.program).clone(),
-                digest: leaf_proof.digest,
-                proof: leaf_proof.proof,
-            };
-            std::fs::write(&path, dump.to_bytes().expect("the leaf serializes"))?;
-            tracing::info!("binary leaf written to {}", path.to_string_lossy());
+        let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
+            .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
+        let all = count > 1;
+        tracing::info!("binary leaves: {} core shards, proving {count}", inputs.len());
+        for (i, input) in inputs.iter().enumerate().take(count) {
+            let started = std::time::Instant::now();
+            let leaf_proof = prover.leaf_binary(input)?;
+            tracing::info!(
+                "binary leaf proof: {} bytes, {:.1} s",
+                bincode::serialize(&leaf_proof.proof).unwrap().len(),
+                started.elapsed().as_secs_f64()
+            );
+            for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&leaf_proof.proof) {
+                tracing::info!("binary leaf proof part {label}: {bytes} bytes");
+            }
+            tracing::info!(
+                "binary leaf program: {} instructions",
+                leaf_proof.program.iter_instructions().count()
+            );
+            let started = std::time::Instant::now();
+            prover.verify_shrink_binary(&leaf_proof)?;
+            tracing::info!("binary leaf verified in {:.3} s", started.elapsed().as_secs_f64());
+            if let Some(path) = std::env::var_os("ZIREN_BINARY_LEAF_DUMP") {
+                let path = if all {
+                    format!("{}.{i}", path.to_string_lossy())
+                } else {
+                    path.to_string_lossy().into_owned()
+                };
+                let dump = zkm_binary_stark::machine::ProvedProgram {
+                    program: (*leaf_proof.program).clone(),
+                    digest: leaf_proof.digest,
+                    public_values: leaf_proof.public_values,
+                    proof: leaf_proof.proof,
+                };
+                std::fs::write(&path, dump.to_bytes().expect("the leaf serializes"))?;
+                tracing::info!("binary leaf written to {path}");
+            }
         }
         Ok(())
     }

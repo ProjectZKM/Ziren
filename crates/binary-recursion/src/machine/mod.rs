@@ -20,6 +20,7 @@
 pub mod arith;
 pub mod cells;
 pub mod hash;
+pub mod kb;
 pub mod ledger;
 pub mod program;
 pub mod rewire;
@@ -46,6 +47,7 @@ use zkm_binary_stark::{challenger, BinaryBase, BinarySchedule};
 
 use self::arith::ArithAir;
 use self::hash::HashAir;
+use self::kb::KbAir;
 use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
 use self::rewire::RewireAir;
@@ -59,6 +61,7 @@ pub enum TapeAir {
     Rewire(RewireAir),
     Hash(HashAir),
     Rounds(RoundsAir),
+    Kb(KbAir),
 }
 
 impl TapeAir {
@@ -70,6 +73,7 @@ impl TapeAir {
             Self::Rewire(air) => air.log_height(),
             Self::Hash(air) => air.log_height(),
             Self::Rounds(air) => air.log_height(),
+            Self::Kb(air) => air.log_height(),
         }
     }
 
@@ -81,6 +85,7 @@ impl TapeAir {
             Self::Rewire(_) => "Rewire",
             Self::Hash(_) => "Hash",
             Self::Rounds(_) => "Rounds",
+            Self::Kb(_) => "Kb",
         }
     }
 }
@@ -93,6 +98,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rewire(air) => BaseAir::<X>::width(air),
             Self::Hash(air) => BaseAir::<X>::width(air),
             Self::Rounds(air) => BaseAir::<X>::width(air),
+            Self::Kb(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -103,6 +109,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rewire(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Hash(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Rounds(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Kb(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
@@ -130,6 +137,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rewire(air) => air.preprocessed_trace(),
             Self::Hash(air) => air.preprocessed_trace(),
             Self::Rounds(air) => air.preprocessed_trace(),
+            Self::Kb(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -142,6 +150,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for TapeAir {
             Self::Rewire(air) => air.eval(builder),
             Self::Hash(air) => air.eval(builder),
             Self::Rounds(air) => air.eval(builder),
+            Self::Kb(air) => air.eval(builder),
         }
     }
 }
@@ -172,13 +181,16 @@ impl TapeMachine {
     /// # Errors
     /// Returns an error if the configuration or the keys cannot be built.
     pub fn new(program: Program, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
-        let airs = vec![
+        let mut airs = vec![
             TapeAir::Ledger(LedgerAir::new(&program)),
             TapeAir::Arith(ArithAir::new(&program)),
             TapeAir::Rewire(RewireAir::new(&program)),
             TapeAir::Hash(HashAir::new(&program)),
             TapeAir::Rounds(RoundsAir::new(program.compressions.len())),
         ];
+        if !program.kb.is_empty() {
+            airs.push(TapeAir::Kb(KbAir::new(&program)));
+        }
         let (main, preprocessed) = Self::shapes_of(&airs);
         let config =
             MachineConfig::new(&main, &preprocessed, schedule).map_err(TapeMachineError::Config)?;
@@ -325,6 +337,7 @@ impl TapeMachine {
                 TapeAir::Rewire(a) => a.main_table(&self.program, values),
                 TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
                 TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
+                TapeAir::Kb(a) => a.main_table(&self.program, values),
             })
             .collect()
     }

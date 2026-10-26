@@ -33,10 +33,10 @@ serde = { workspace = true }
 zkm-binary-stark = { workspace = true }
 zkm-derive = { workspace = true }
 zkm-recursion-core = { workspace = true }
+p3-koala-bear = { workspace = true }
+zkm-pcs = { workspace = true }
 
 [dev-dependencies]
 p3-examples = { workspace = true }
-p3-koala-bear = { workspace = true }
-zkm-pcs = { workspace = true }
 blake3 = { workspace = true, features = ["std"] }
 

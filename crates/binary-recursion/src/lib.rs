@@ -12,6 +12,7 @@
 
 pub mod bytes;
 pub mod challenger;
+pub mod compose;
 pub mod config;
 pub mod domain;
 pub mod fields;
@@ -21,5 +22,5 @@ pub mod queries;
 pub mod tape;
 pub mod traced;
 
-pub use tape::{record, Op, Operand, Tape, F};
+pub use tape::{record, KbOp, Op, Operand, Tape, F};
 pub use traced::Traced;

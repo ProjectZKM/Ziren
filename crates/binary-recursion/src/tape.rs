@@ -67,6 +67,45 @@ pub enum Op {
     Transpose(Vec<Operand>),
     /// `b` if the bit `s` is one, `a` if it is zero.
     Select(Operand, Operand, Operand),
+    /// `a op b` in KoalaBear, both read as canonical elements held in the
+    /// low 31 bits of the representation, the result held the same way.
+    Kb(KbOp, Operand, Operand),
+}
+
+/// An operation of KoalaBear arithmetic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum KbOp {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// The KoalaBear modulus.
+pub const KB_PRIME: u32 = 0x7f00_0001;
+
+impl KbOp {
+    /// `a op b` on canonical elements.
+    #[must_use]
+    pub fn apply(self, a: u32, b: u32) -> u32 {
+        let (a, b, p) = (u64::from(a), u64::from(b), u64::from(KB_PRIME));
+        (match self {
+            Self::Add => (a + b) % p,
+            Self::Sub => (a + p - b) % p,
+            Self::Mul => a * b % p,
+        }) as u32
+    }
+}
+
+/// The KoalaBear element a value holds, when it holds a canonical one.
+#[must_use]
+pub fn as_kb(x: F) -> Option<u32> {
+    let repr = x.to_repr();
+    (repr < u128::from(KB_PRIME)).then_some(repr as u32)
+}
+
+/// The value holding the KoalaBear element `x`.
+pub fn kb_value(x: u32) -> F {
+    F::from_repr(u128::from(x))
 }
 
 impl Op {
@@ -85,7 +124,8 @@ impl Op {
             | Self::Square(_)
             | Self::Inv(_)
             | Self::FromBytes(_)
-            | Self::Select(..) => 1,
+            | Self::Select(..)
+            | Self::Kb(..) => 1,
         }
     }
 }
@@ -108,6 +148,7 @@ pub const fn kind_index(op: &Op) -> usize {
         Op::Select(..) => 11,
         Op::MerkleNode { .. } => 12,
         Op::Square(_) => 13,
+        Op::Kb(..) => 14,
     }
 }
 
@@ -128,8 +169,8 @@ pub struct Tape {
 impl Tape {
     /// The number of operations of each kind, by [`Self::KINDS`].
     #[must_use]
-    pub fn census(&self) -> [usize; 14] {
-        let mut counts = [0; 14];
+    pub fn census(&self) -> [usize; 15] {
+        let mut counts = [0; 15];
         for op in &self.ops {
             let k = kind_index(op);
             counts[k] += 1;
@@ -138,7 +179,7 @@ impl Tape {
     }
 
     /// The names of the kinds [`Self::census`] counts.
-    pub const KINDS: [&'static str; 14] = [
+    pub const KINDS: [&'static str; 15] = [
         "input",
         "add",
         "mul",
@@ -153,6 +194,7 @@ impl Tape {
         "select",
         "merkle_node",
         "square",
+        "koalabear",
     ];
 
     /// The AND gates a garbled circuit evaluating the program would hold,
@@ -171,6 +213,8 @@ impl Tape {
                     gates.hashing += AND_PER_COMPRESSION * compressions(*len) as u64;
                 }
                 Op::MerkleNode { .. } => gates.hashing += AND_PER_COMPRESSION,
+                Op::Kb(KbOp::Mul, ..) => gates.other += AND_PER_KB_PRODUCT,
+                Op::Kb(..) => gates.other += AND_PER_KB_SUM,
                 _ => {}
             }
         }
@@ -195,7 +239,7 @@ impl Tape {
     pub fn operands(op: &Op) -> Vec<Operand> {
         match op {
             Op::Input(_) => Vec::new(),
-            Op::Add(a, b) | Op::Mul(a, b) | Op::AssertEq(a, b) => vec![*a, *b],
+            Op::Add(a, b) | Op::Mul(a, b) | Op::AssertEq(a, b) | Op::Kb(_, a, b) => vec![*a, *b],
             Op::Inv(a)
             | Op::AssertNonZero(a)
             | Op::ToBytes(a)
@@ -256,6 +300,8 @@ pub enum RunError {
     NotByte { op: usize },
     /// Operation `op` reads a value as a bit that is not one.
     NotBit { op: usize },
+    /// Operation `op` reads a value as a KoalaBear element that is not one.
+    NotKoalaBear { op: usize },
     /// Operation `op` hashes a message whose last element has bytes past
     /// its length.
     Padding { op: usize },
@@ -272,6 +318,14 @@ pub const AND_PER_INVERSE: u64 = 10 * AND_PER_PRODUCT;
 /// AND gates of a Blake3 compression: its 336 additions of 32-bit words,
 /// 31 each.
 pub const AND_PER_COMPRESSION: u64 = 336 * 31;
+
+/// AND gates of a KoalaBear product: the 31 by 31 partial products, a
+/// full adder each to sum them, and the reduction's additions.
+pub const AND_PER_KB_PRODUCT: u64 = 31 * 31 * 2 + 4 * 64;
+
+/// AND gates of a KoalaBear sum or difference: the carry chain and the
+/// conditional correction by `p`.
+pub const AND_PER_KB_SUM: u64 = 3 * 32;
 
 /// The Blake3 compressions of a message of `len` bytes: a block per 64
 /// bytes of each chunk, and a parent per chunk past the first.
@@ -432,6 +486,11 @@ impl Tape {
                     let rows: Vec<u128> =
                         rows.iter().map(|row| read(&values, row).to_repr()).collect();
                     values.extend(transpose(&rows).map(F::from_repr));
+                }
+                Op::Kb(kind, a, b) => {
+                    let a = as_kb(read(&values, a)).ok_or(RunError::NotKoalaBear { op })?;
+                    let b = as_kb(read(&values, b)).ok_or(RunError::NotKoalaBear { op })?;
+                    values.push(kb_value(kind.apply(a, b)));
                 }
             }
         }

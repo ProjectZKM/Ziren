@@ -100,6 +100,18 @@ impl PublicValuesAir {
         record.commit_pv_hash_events[0].public_values.digest.map(|x| x.as_canonical_u32())
     }
 
+    /// The public values `record` commits to, as canonical elements.
+    #[must_use]
+    pub fn public_values(record: &ExecutionRecord<KoalaBear>) -> Vec<u32> {
+        assert_eq!(record.commit_pv_hash_events.len(), 1, "a program commits exactly once");
+        record.commit_pv_hash_events[0]
+            .public_values
+            .as_array()
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect()
+    }
+
     /// The witness: the digest words.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {

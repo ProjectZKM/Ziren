@@ -33,7 +33,7 @@ use p3_binary_field::TowerLevel;
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_core::runtime::blake3::{compress, CHUNK_END, CHUNK_START, IV, PARENT, ROOT};
 
-use crate::tape::{Op, Operand, Tape, Var, F};
+use crate::tape::{KbOp, Op, Operand, Tape, Var, F};
 
 /// Bits of an address.
 pub const ADDR_BITS: usize = 26;
@@ -102,6 +102,18 @@ pub enum ArithKind {
 pub struct Read {
     pub addr: u32,
     pub cell: Operand,
+}
+
+/// One row of the KoalaBear table.
+#[derive(Clone, Copy, Debug)]
+pub struct KbRow {
+    pub kind: KbOp,
+    pub a: Read,
+    pub b: Read,
+    /// The address the result is written at.
+    pub c: u32,
+    /// Whether the result is read, which [`Program::new`] settles last.
+    pub write_c: bool,
 }
 
 /// One row of the arithmetic table.
@@ -209,6 +221,7 @@ pub struct Program {
     pub arith: Vec<ArithRow>,
     pub rewire: Vec<RewireRow>,
     pub compressions: Vec<Compression>,
+    pub kb: Vec<KbRow>,
     /// How many of the tape's first inputs are public values.
     pub num_public: usize,
 }
@@ -409,6 +422,11 @@ impl Program {
                 Op::AssertEq(a, b) => builder.arith(ArithKind::Eq, &[*a, *b], None),
                 Op::AssertNonZero(a) => builder.arith(ArithKind::Inv, &[*a], None),
                 Op::Select(s, a, b) => builder.arith(ArithKind::Select, &[*s, *a, *b], base),
+                Op::Kb(kind, a, b) => {
+                    let (a, b) = (builder.read(*a), builder.read(*b));
+                    let c = base.expect("a KoalaBear operation has a result");
+                    builder.program.kb.push(KbRow { kind: *kind, a, b, c, write_c: false });
+                }
                 Op::ToBytes(x) | Op::ByteBits(x) => {
                     let read = builder.read(*x);
                     let kind = if matches!(op, Op::ToBytes(_)) {
@@ -501,6 +519,9 @@ impl Program {
         let mut program = builder.program;
         for row in &mut program.arith {
             row.write_c = row.c.is_some_and(is_read);
+        }
+        for row in &mut program.kb {
+            row.write_c = is_read(row.c);
         }
         for row in &mut program.rewire {
             for (i, read) in row.out_reads.iter_mut().enumerate() {
@@ -604,12 +625,13 @@ impl Program {
             })
             .collect();
         format!(
-            "{} cells read {reads} times; arith {} rows ({}); rewire {} rows; {} compressions",
+            "{} cells read {reads} times; arith {} rows ({}); rewire {} rows; {} compressions; {} KoalaBear rows",
             self.groups.len(),
             self.arith.len(),
             arith.join(", "),
             self.rewire.len(),
-            self.compressions.len()
+            self.compressions.len(),
+            self.kb.len()
         )
     }
 }

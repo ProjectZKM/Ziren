@@ -116,3 +116,67 @@ fn proves_every_operation_and_refuses_broken_runs() {
         assert!(refused, "changing {label} must be refused");
     }
 }
+
+/// A tape of KoalaBear arithmetic: products, sums and differences of
+/// inputs, wrapping past the modulus, each result checked against the
+/// host's value.
+fn koalabear_exercise() -> Tape {
+    use zkm_binary_recursion::tape::{kb_value, KB_PRIME};
+    use zkm_binary_recursion::KbOp;
+    let ((), tape) = record(|| {
+        let p = u64::from(KB_PRIME);
+        let raw: [u32; 6] = [3, KB_PRIME - 1, 0x1234_5678, KB_PRIME - 7, 0x7eff_ffff, 1 << 30];
+        let inputs: Vec<Traced> = raw.iter().map(|&v| Traced::input(kb_value(v))).collect();
+        let mut acc = inputs[0];
+        let mut host = u64::from(raw[0]);
+        for (i, (&x, &v)) in inputs.iter().zip(&raw).enumerate().skip(1) {
+            let op = [KbOp::Mul, KbOp::Add, KbOp::Sub][i % 3];
+            acc = acc.kb(op, x);
+            let v = u64::from(v);
+            host = match op {
+                KbOp::Add => (host + v) % p,
+                KbOp::Sub => (host + p - v) % p,
+                KbOp::Mul => host * v % p,
+            };
+            acc.kb(KbOp::Mul, acc).assert_eq(&Traced::constant(kb_value((host * host % p) as u32)));
+        }
+        acc.assert_eq(&Traced::constant(kb_value(host as u32)));
+    });
+    tape
+}
+
+#[test]
+fn proves_koalabear_arithmetic_and_refuses_wrong_results() {
+    let tape = koalabear_exercise();
+    let machine = machine(&tape);
+    let public = machine.public_values(&tape.inputs);
+    let values = tape.run(&tape.inputs).expect("the run");
+    let proof = machine.prove(&tape, &tape.inputs).expect("the run proves");
+    machine.verify(&proof, &public).expect("the run verifies");
+
+    let defined = |nth: usize| -> usize {
+        let i = tape
+            .ops
+            .iter()
+            .enumerate()
+            .filter(|(_, op)| matches!(op, Op::Kb(..)))
+            .nth(nth)
+            .expect("the tape has KoalaBear operations")
+            .0;
+        tape.defined[i].expect("a KoalaBear operation defines a value") as usize
+    };
+    for (label, var, delta) in [
+        ("a product", defined(0), 1u128),
+        ("a sum", defined(2), 1 << 5),
+        ("a difference into the upper bits", defined(4), 1 << 40),
+        ("an input", 1, 2),
+    ] {
+        let mut broken = values.clone();
+        broken[var] += F::from_repr(delta);
+        let refused = match machine.prove_values(&broken, &public) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof, &public).is_err(),
+        };
+        assert!(refused, "changing {label} must be refused");
+    }
+}

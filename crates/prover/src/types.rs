@@ -228,6 +228,8 @@ pub struct BinaryShrinkProof {
     pub program: std::sync::Arc<zkm_recursion_core::RecursionProgram<p3_koala_bear::KoalaBear>>,
     /// The digest the program commits to: the stage's public values.
     pub digest: [u32; zkm_recursion_core::DIGEST_SIZE],
+    /// The public values the digest is of, as canonical elements.
+    pub public_values: Vec<u32>,
     /// The proof.
     pub proof: zkm_binary_stark::config::MachineProof,
 }

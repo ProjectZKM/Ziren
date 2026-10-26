@@ -36,7 +36,7 @@ use p3_field::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bytes;
-use crate::tape::{self, Op, Operand, Var, F};
+use crate::tape::{self, KbOp, Op, Operand, Var, F};
 
 /// The variable of a constant.
 const CONSTANT: Var = Var::MAX;
@@ -116,6 +116,23 @@ impl Traced {
     pub fn assert_eq(&self, other: &Self) {
         if !(self.is_constant() && other.is_constant()) {
             tape::push(Op::AssertEq(self.operand(), other.operand()), &[]);
+        }
+    }
+
+    /// `self op rhs` in KoalaBear, both canonical elements held in the low
+    /// bits.
+    ///
+    /// # Panics
+    /// Panics if either value is not a canonical KoalaBear element.
+    #[must_use]
+    pub fn kb(self, op: KbOp, rhs: Self) -> Self {
+        let a = tape::as_kb(self.value).expect("a KoalaBear operand");
+        let b = tape::as_kb(rhs.value).expect("a KoalaBear operand");
+        let value = tape::kb_value(op.apply(a, b));
+        if self.is_constant() && rhs.is_constant() {
+            Self::constant(value)
+        } else {
+            Self::defined(Op::Kb(op, self.operand(), rhs.operand()), value)
         }
     }
 }

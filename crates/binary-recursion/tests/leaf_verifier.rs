@@ -5,9 +5,11 @@
 
 use p3_multi_stark::verify;
 use zkm_binary_recursion::challenger::TracedChallenger;
-use zkm_binary_recursion::config::{lift_key, reread, TracedConfig, TracedProof};
+use zkm_binary_recursion::config::{
+    lift_key, record_verification, reread, Instance, TracedConfig, TracedProof,
+};
 use zkm_binary_recursion::machine::program::Program;
-use zkm_binary_recursion::machine::TapeMachine;
+use zkm_binary_recursion::machine::{TapeAir, TapeMachine};
 use zkm_binary_recursion::{record, Tape, Traced};
 use zkm_binary_stark::machine::{ProvedProgram, RecursionMachine};
 use zkm_binary_stark::{BinarySchedule, TRANSCRIPT_DOMAIN};
@@ -102,4 +104,40 @@ fn proves_the_verifier_of_a_leaf() {
     for (part, bytes) in zkm_binary_stark::config::proof_breakdown(&proof) {
         println!("    {part:<55} {bytes:>9} B");
     }
+
+    let (main, preprocessed) = tape_machine.shapes();
+    let instances: Vec<Instance<'_, TapeAir>> = tape_machine
+        .airs()
+        .iter()
+        .map(|air| Instance {
+            air,
+            log_height: air.log_height(),
+            public_values: match air {
+                TapeAir::Ledger(_) => &public,
+                _ => &[],
+            },
+        })
+        .collect();
+    let (verdict, own) = record_verification(
+        &instances,
+        &main,
+        &preprocessed,
+        &schedule,
+        tape_machine.verifying_key(),
+        &proof,
+    );
+    verdict.expect("the recorded verifier accepts the compose proof");
+    let counts: Vec<String> = Tape::KINDS
+        .iter()
+        .zip(own.census())
+        .filter(|(_, n)| *n > 0)
+        .map(|(kind, n)| format!("{kind} {n}"))
+        .collect();
+    println!(
+        "compose verifier: {} ops, {} hashed bytes; {}",
+        own.ops.len(),
+        own.hashed_bytes(),
+        counts.join(", ")
+    );
+    println!("  {}", Program::new(&own, 0).census());
 }
