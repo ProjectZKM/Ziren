@@ -23,7 +23,7 @@ fn proves_the_verifier_of_a_leaf() {
         .expect("the leaf deserializes");
     let schedule = BinarySchedule::default();
     let started = std::time::Instant::now();
-    let machine = RecursionMachine::new(&leaf.program, &schedule).expect("the leaf machine");
+    let machine = RecursionMachine::verifier(&leaf.program, &schedule).expect("the leaf machine");
     println!("leaf machine set up in {:.1} s", started.elapsed().as_secs_f64());
     machine.verify(&leaf.proof, &leaf.digest).expect("the leaf verifies natively");
 
@@ -113,7 +113,7 @@ fn proves_the_verifier_of_a_leaf() {
             air,
             log_height: air.log_height(),
             public_values: match air {
-                TapeAir::Ledger(_) => &public,
+                TapeAir::Public(_) => &public,
                 _ => &[],
             },
         })

@@ -341,6 +341,8 @@ pub enum MachineError {
     Prove(ProvingError<PcsProverError<MachineConfig>>),
     /// Verification failed.
     Verify(VerificationError<PcsError<MachineConfig>>),
+    /// The machine was built to verify, and holds no proving key.
+    NoProvingKey,
 }
 
 impl core::fmt::Display for MachineError {
@@ -351,6 +353,7 @@ impl core::fmt::Display for MachineError {
             Self::Setup(error) => write!(f, "machine setup: {error:?}"),
             Self::Prove(error) => write!(f, "machine proving: {error:?}"),
             Self::Verify(error) => write!(f, "machine verification: {error:?}"),
+            Self::NoProvingKey => write!(f, "the machine was built to verify, not to prove"),
         }
     }
 }
@@ -398,11 +401,24 @@ impl ProvedProgram {
 pub struct RecursionMachine {
     airs: Vec<RecursionAir>,
     config: MachineConfig,
-    pk: ProvingKey<MachineConfig>,
+    /// The proving key, which holds the preprocessed commitment's prover
+    /// data; a machine built to verify drops it.
+    pk: Option<ProvingKey<MachineConfig>>,
     vk: VerifyingKey<MachineConfig>,
 }
 
 impl RecursionMachine {
+    /// The machine of `program` under `schedule`, keeping only what a
+    /// verifier reads: the tables, the configuration and the verifying key.
+    pub fn verifier(
+        program: &RecursionProgram<KoalaBear>,
+        schedule: &BinarySchedule,
+    ) -> Result<Self, MachineError> {
+        let mut machine = Self::new(program, schedule)?;
+        machine.pk = None;
+        Ok(machine)
+    }
+
     /// The machine of `program` under `schedule`.
     pub fn new(
         program: &RecursionProgram<KoalaBear>,
@@ -456,7 +472,7 @@ impl RecursionMachine {
         let refs: Vec<&RecursionAir> = airs.iter().collect();
         let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(MachineError::Setup)?;
         airs.iter_mut().for_each(RecursionAir::release_preprocessed);
-        Ok(Self { airs, config, pk, vk })
+        Ok(Self { airs, config, pk: Some(pk), vk })
     }
 
     /// The tables of the machine.
@@ -480,6 +496,7 @@ impl RecursionMachine {
 
     /// Prove `record`, an execution of the machine's program.
     pub fn prove(&self, record: &ExecutionRecord<KoalaBear>) -> Result<MachineProof, MachineError> {
+        let pk = self.pk.as_ref().ok_or(MachineError::NoProvingKey)?;
         let written: Vec<Cell> =
             self.airs.iter().flat_map(|air| air.written_values(record)).collect();
         let requests: Vec<(u32, u32)> =
@@ -492,7 +509,7 @@ impl RecursionMachine {
                     ProverInstance::new(
                         air,
                         air.main_table(record, &written, &requests),
-                        &self.pk,
+                        pk,
                         Self::public_of(air, &public),
                     )
                 })

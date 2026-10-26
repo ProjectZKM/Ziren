@@ -106,7 +106,7 @@ impl Default for BinarySchedule {
     fn default() -> Self {
         Self {
             regime: WhirRegime::UniqueDecoding,
-            log_inv_rate: 5,
+            log_inv_rate: 3,
             folding: 4,
             term_security_bits: 108,
             security_bits: 100,

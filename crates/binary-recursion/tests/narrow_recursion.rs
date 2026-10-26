@@ -99,7 +99,7 @@ fn proves_a_recorded_verification_and_records_its_own() {
             air,
             log_height: air.log_height(),
             public_values: match air {
-                TapeAir::Ledger(_) => &public,
+                TapeAir::Public(_) => &public,
                 _ => &[],
             },
         })

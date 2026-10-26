@@ -2309,7 +2309,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         proof: &BinaryShrinkProof,
     ) -> Result<(), ZKMRecursionProverError> {
-        let machine = RecursionMachine::new(&proof.program, &BinarySchedule::default())
+        let machine = RecursionMachine::verifier(&proof.program, &BinarySchedule::default())
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         machine
             .verify(&proof.proof, &proof.digest)

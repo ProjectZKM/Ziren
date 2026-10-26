@@ -6,9 +6,12 @@
 //! binds every row to one value without a row reading the next: a table
 //! that reads its next row costs its verifier a second view of every
 //! column.  The first row binds the value to its source: it pulls the one
-//! push of a computed cell on [`WRITE`], equals the constant of a constant
-//! cell or the public value of a public one, and is free for a value of
-//! the proof.
+//! push of a computed or public cell on [`WRITE`], equals the constant of a
+//! constant cell, and is free for a value of the proof.  The public values
+//! are pushed by a table of their own, so that every cell of the ledger is
+//! a bit, and a constant is checked bit by bit: either keeps the table on
+//! the zerocheck's bit-plane kernel, where a packed value's basis
+//! constants would not.
 
 use core::borrow::{Borrow, BorrowMut};
 
@@ -49,16 +52,14 @@ pub struct LedgerPrep<T> {
     pub continues: T,
     /// The row hands its value to the next row of its cell.
     pub passes: T,
-    /// The row starts a computed cell, and pulls its write.
+    /// The row starts a computed or public cell, and pulls its write.
     pub from_write: T,
     /// The row starts a constant cell.
     pub is_const: T,
     /// The constant.
     pub constant: [T; VALUE_BITS],
-    /// The row starts the public value of this index.
-    pub public: [T; MAX_PUBLIC],
     /// Zeros, which make the width a power of two.
-    pub pad: [T; 256 - ADDR_BITS - 2 * INDEX_BITS - 5 - VALUE_BITS - MAX_PUBLIC],
+    pub pad: [T; 256 - ADDR_BITS - 2 * INDEX_BITS - 5 - VALUE_BITS],
 }
 
 /// The witness part of a ledger row.
@@ -108,9 +109,8 @@ impl LedgerAir {
                 prep.passes = u8::from(copy + 1 < group.reads);
                 if copy == 0 {
                     match group.source {
-                        Source::Write => prep.from_write = 1,
+                        Source::Write | Source::Public(_) => prep.from_write = 1,
                         Source::Input => {}
-                        Source::Public(i) => prep.public[i] = 1,
                         Source::Const(c) => {
                             prep.is_const = 1;
                             prep.constant = value_bits(c);
@@ -156,10 +156,6 @@ impl<X: Field> BaseAir<X> for LedgerAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
         Some(dense(&self.preprocessed, NUM_LEDGER_PREP_COLS))
     }
-
-    fn num_public_values(&self) -> usize {
-        MAX_PUBLIC
-    }
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LedgerAir {
@@ -168,16 +164,10 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LedgerAir {
         let local: &LedgerCols<AB::Var> = main.current_slice().borrow();
         let prep = builder.preprocessed();
         let prep_local: LedgerPrep<AB::Var> = *prep.current_slice().borrow();
-        let public: [AB::Expr; MAX_PUBLIC] =
-            core::array::from_fn(|i| builder.public_values()[i].into());
-
-        let value = pack::<AB>(&local.value);
-        builder
-            .when(prep_local.is_const)
-            .assert_eq(value.clone(), pack::<AB>(&prep_local.constant));
-        for (selector, public) in prep_local.public.iter().zip(public) {
-            builder.when(*selector).assert_eq(value.clone(), public);
+        for (bit, constant) in local.value.iter().zip(&prep_local.constant) {
+            builder.when(prep_local.is_const).assert_eq(*bit, *constant);
         }
+        let value = pack::<AB>(&local.value);
         builder.declare_bus(
             MEMORY,
             BusDirection::Push,

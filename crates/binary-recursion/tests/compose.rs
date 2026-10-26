@@ -18,6 +18,30 @@ use zkm_recursion_core::DIGEST_SIZE;
 
 const MAX_LOG_SHARDS: usize = 16;
 
+/// With `ZIREN_PHASES`, print `label` with the wall clock, which a memory
+/// sampler's log lines up against, and the prover's phases as they close.
+fn mark(label: &str) {
+    if std::env::var_os("ZIREN_PHASES").is_some() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is past the epoch");
+        println!("MARK {:.3} {label}", now.as_secs_f64());
+    }
+}
+
+fn trace_phases() {
+    if std::env::var_os("ZIREN_PHASES").is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("p3_multi_stark=info"))
+            .with_span_events(
+                tracing_subscriber::fmt::format::FmtSpan::NEW
+                    | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+            )
+            .with_ansi(false)
+            .init();
+    }
+}
+
 fn census(label: &str, tape: &Tape) {
     let counts: Vec<String> = Tape::KINDS
         .iter()
@@ -37,6 +61,8 @@ fn census(label: &str, tape: &Tape) {
 #[test]
 #[ignore]
 fn composes_leaves() {
+    trace_phases();
+    mark("start");
     let paths = std::env::var("ZIREN_BINARY_LEAVES").expect("ZIREN_BINARY_LEAVES names leaves");
     let leaves: Vec<ProvedProgram> = paths
         .split(',')
@@ -45,10 +71,11 @@ fn composes_leaves() {
                 .expect("the leaf deserializes")
         })
         .collect();
+    mark("leaves read");
     let schedule = BinarySchedule::default();
     let machines: Vec<RecursionMachine> = leaves
         .iter()
-        .map(|leaf| RecursionMachine::new(&leaf.program, &schedule).expect("the leaf machine"))
+        .map(|leaf| RecursionMachine::verifier(&leaf.program, &schedule).expect("the leaf machine"))
         .collect();
     let children = |values: &dyn Fn(usize) -> Vec<u32>| -> Vec<Child<'_>> {
         leaves
@@ -58,12 +85,15 @@ fn composes_leaves() {
             .map(|(i, (leaf, machine))| Child::leaf(machine, &leaf.proof, values(i), &schedule))
             .collect()
     };
+    mark("leaf machines built");
     let honest = |i: usize| leaves[i].public_values.clone();
     let node =
         Compose { children: children(&honest), is_complete: false, max_log_shards: MAX_LOG_SHARDS };
 
+    mark("children built");
     let started = std::time::Instant::now();
     let (composed, tape) = record_compose(&node);
+    mark("recorded");
     let composed = composed.expect("the leaves compose");
     census(&format!("compose of {} leaves", leaves.len()), &tape);
     println!("recorded in {:.1} s; digest {:?}", started.elapsed().as_secs_f64(), composed.digest);
@@ -72,6 +102,7 @@ fn composes_leaves() {
     let public: Vec<u32> = tape.inputs[..DIGEST_SIZE].iter().map(|x| x.to_repr() as u32).collect();
     assert_eq!(public, composed.digest.to_vec(), "the public inputs are the node's digest");
 
+    mark("run checked");
     let map = &RECURSION_PUBLIC_VALUES_COL_MAP;
     let last = leaves.len() - 1;
     for (label, child, column) in [
@@ -99,14 +130,21 @@ fn composes_leaves() {
         assert!(refused, "changing {label} of child {child} must be refused");
     }
 
+    mark("tampers refused");
     let program = Program::new(&tape, DIGEST_SIZE);
+    mark("program laid out");
     println!("  {}", program.census());
     if std::env::var_os("ZIREN_COMPOSE_PROVE").is_none() {
         return;
     }
     let started = std::time::Instant::now();
-    let machine = TapeMachine::new(program, &schedule).expect("the tape machine");
+    let node_schedule = std::env::var("ZIREN_NODE_LOG_INV_RATE").map_or(schedule, |rate| {
+        BinarySchedule { log_inv_rate: rate.parse().expect("a rate"), ..schedule }
+    });
+    println!("node commits at rate 2^-{}", node_schedule.log_inv_rate);
+    let machine = TapeMachine::new(program, &node_schedule).expect("the tape machine");
     println!("tape machine set up in {:.1} s", started.elapsed().as_secs_f64());
+    mark("tape machine set up");
     for air in machine.airs() {
         println!(
             "  {:>7}: 2^{} rows x {} + {} prep",
@@ -118,13 +156,16 @@ fn composes_leaves() {
     }
     let public = machine.public_values(&tape.inputs);
     let started = std::time::Instant::now();
+    mark("prove start");
     let proof = machine.prove(&tape, &tape.inputs).expect("the node proves");
+    mark("prove end");
     println!(
         "compose proof: {} bytes in {:.1} s",
         postcard::to_allocvec(&proof).expect("serializes").len(),
         started.elapsed().as_secs_f64()
     );
     machine.verify(&proof, &public).expect("the node verifies");
+    mark("verified");
     let mut wrong = public;
     wrong[0] += F::ONE;
     assert!(machine.verify(&proof, &wrong).is_err(), "another digest is refused");

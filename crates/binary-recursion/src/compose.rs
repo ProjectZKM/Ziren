@@ -106,7 +106,7 @@ impl<'a> Child<'a> {
                         .iter()
                         .map(|air| {
                             let public_values: &[Traced] = match air {
-                                TapeAir::Ledger(_) => public,
+                                TapeAir::Public(_) => public,
                                 _ => &[],
                             };
                             VerifierInstance::new(air, &vk, air.log_height(), public_values)

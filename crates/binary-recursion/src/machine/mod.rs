@@ -23,6 +23,7 @@ pub mod hash;
 pub mod kb;
 pub mod ledger;
 pub mod program;
+pub mod public;
 pub mod rewire;
 pub mod rounds;
 pub mod select;
@@ -51,6 +52,7 @@ use self::hash::HashAir;
 use self::kb::KbAir;
 use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
+use self::public::PublicAir;
 use self::rewire::RewireAir;
 use self::rounds::RoundsAir;
 use self::select::SelectAir;
@@ -65,6 +67,7 @@ pub enum TapeAir {
     Rounds(RoundsAir),
     Kb(KbAir),
     Select(SelectAir),
+    Public(PublicAir),
 }
 
 impl TapeAir {
@@ -78,6 +81,7 @@ impl TapeAir {
             Self::Rounds(air) => air.log_height(),
             Self::Kb(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
+            Self::Public(air) => air.log_height(),
         }
     }
 
@@ -91,6 +95,7 @@ impl TapeAir {
             Self::Rounds(_) => "Rounds",
             Self::Kb(_) => "Kb",
             Self::Select(_) => "Select",
+            Self::Public(_) => "Public",
         }
     }
 }
@@ -105,6 +110,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rounds(air) => BaseAir::<X>::width(air),
             Self::Kb(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
+            Self::Public(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -117,12 +123,13 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rounds(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Kb(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Public(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
     fn num_public_values(&self) -> usize {
         match self {
-            Self::Ledger(air) => BaseAir::<X>::num_public_values(air),
+            Self::Public(air) => BaseAir::<X>::num_public_values(air),
             _ => 0,
         }
     }
@@ -146,6 +153,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Rounds(air) => air.preprocessed_trace(),
             Self::Kb(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
+            Self::Public(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -160,6 +168,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for TapeAir {
             Self::Rounds(air) => air.eval(builder),
             Self::Kb(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
+            Self::Public(air) => air.eval(builder),
         }
     }
 }
@@ -173,6 +182,8 @@ pub enum TapeMachineError {
     Run(RunError),
     Prove(ProvingError<PcsProverError<MachineConfig>>),
     Verify(VerificationError<PcsError<MachineConfig>>),
+    /// The machine was built to verify, and holds no proving key.
+    NoProvingKey,
 }
 
 /// The machine of one tape's program.
@@ -180,7 +191,9 @@ pub struct TapeMachine {
     program: Program,
     airs: Vec<TapeAir>,
     config: MachineConfig,
-    pk: ProvingKey<MachineConfig>,
+    /// The proving key, which holds the preprocessed commitment's prover
+    /// data; a machine built to verify drops it.
+    pk: Option<ProvingKey<MachineConfig>>,
     vk: VerifyingKey<MachineConfig>,
 }
 
@@ -203,12 +216,24 @@ impl TapeMachine {
         if select::selects(&program).next().is_some() {
             airs.push(TapeAir::Select(SelectAir::new(&program)));
         }
+        airs.push(TapeAir::Public(PublicAir::new(&program)));
         let (main, preprocessed) = Self::shapes_of(&airs);
         let config =
             MachineConfig::new(&main, &preprocessed, schedule).map_err(TapeMachineError::Config)?;
         let refs: Vec<&TapeAir> = airs.iter().collect();
         let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(TapeMachineError::Setup)?;
-        Ok(Self { program, airs, config, pk, vk })
+        Ok(Self { program, airs, config, pk: Some(pk), vk })
+    }
+
+    /// The machine of `program` under `schedule`, keeping only what a
+    /// verifier reads.
+    ///
+    /// # Errors
+    /// Returns an error if the configuration or the keys cannot be built.
+    pub fn verifier(program: Program, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
+        let mut machine = Self::new(program, schedule)?;
+        machine.pk = None;
+        Ok(machine)
     }
 
     fn shapes_of(airs: &[TapeAir]) -> (Vec<TableShape>, Vec<TableShape>) {
@@ -263,7 +288,7 @@ impl TapeMachine {
                 .iter()
                 .map(|air| {
                     let public_values: &[C::Val] = match air {
-                        TapeAir::Ledger(_) => public,
+                        TapeAir::Public(_) => public,
                         _ => &[],
                     };
                     VerifierInstance::new(air, vk, air.log_height(), public_values)
@@ -296,17 +321,18 @@ impl TapeMachine {
         values: &[F],
         public: &[F; MAX_PUBLIC],
     ) -> Result<MachineProof, TapeMachineError> {
-        let owned = self.main_tables(values);
+        let pk = self.pk.as_ref().ok_or(TapeMachineError::NoProvingKey)?;
+        let owned = self.main_tables(values, public);
         let instances = ProverInstances::new(
             self.airs
                 .iter()
                 .zip(owned)
                 .map(|(air, table)| {
                     let public_values: &[F] = match air {
-                        TapeAir::Ledger(_) => public,
+                        TapeAir::Public(_) => public,
                         _ => &[],
                     };
-                    ProverInstance::new(air, table, &self.pk, public_values)
+                    ProverInstance::new(air, table, pk, public_values)
                 })
                 .collect(),
         );
@@ -329,7 +355,7 @@ impl TapeMachine {
     }
 
     /// Every table's witness for a run with these values.
-    fn main_tables(&self, values: &[F]) -> Vec<Table<F>> {
+    fn main_tables(&self, values: &[F], public: &[F; MAX_PUBLIC]) -> Vec<Table<F>> {
         let states = self.program.compression_states(values);
         let round_inputs = HashAir::round_inputs(&self.program, &states);
         let (mut rounds_table, finals) = self
@@ -351,6 +377,7 @@ impl TapeMachine {
                 TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
                 TapeAir::Kb(a) => a.main_table(&self.program, values),
                 TapeAir::Select(a) => a.main_table(&self.program, values),
+                TapeAir::Public(a) => a.main_table(public),
             })
             .collect()
     }
@@ -363,7 +390,7 @@ impl TapeMachine {
     /// Panics if the tables do not match their declarations.
     #[must_use]
     pub fn unbalanced(&self, values: &[F], public: &[F; MAX_PUBLIC]) -> String {
-        let mains = self.main_tables(values);
+        let mains = self.main_tables(values, public);
         let preps: Vec<Option<Table<F>>> = self
             .airs
             .iter()
@@ -382,7 +409,7 @@ impl TapeMachine {
             .zip(&profiles)
             .map(|(((air, main), prep), profile)| {
                 let public_values: &[F] = match air {
-                    TapeAir::Ledger(_) => public,
+                    TapeAir::Public(_) => public,
                     _ => &[],
                 };
                 BusDebugInstance::new(main, prep.as_ref(), public_values, profile)
