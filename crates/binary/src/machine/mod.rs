@@ -54,11 +54,94 @@ use crate::config::{MachineConfig, MachineConfigError, MachineProof};
 use crate::machine_builder::MachineBuilder;
 use crate::{challenger, BinaryBase, BinarySchedule, F};
 
-/// The least log height of each leaf table, by name: the largest any
-/// normalize program of the recursion shape set makes, so that every leaf
-/// is a machine of one shape and one node program verifies all of them.
-/// The prover's `binary_leaf_floor` census computes it.
-pub const LEAF_FLOOR: &[(&str, usize)] = &[];
+/// The leaf classes: the least log height of each table, by name, for a
+/// leaf of each class.  A leaf takes the first class whose every floor is at
+/// least its own table's height, so that the leaves of a class are machines
+/// of one shape, which one node program verifies.
+///
+/// The floors come from the binary tables of 2,343 core shards of thirty
+/// mainnet blocks: the first commits `2^33` bits and holds 64% of them, the
+/// second `2^34` and 30%, the third `2^35` and the rest, a mean cost within
+/// a percent of every leaf at its own height.
+pub const LEAF_CLASSES: [&[(&str, usize)]; 3] = [
+    &[
+        ("Ledger", 22),
+        ("MemoryConst", 9),
+        ("MemoryVar", 19),
+        ("BaseAlu", 18),
+        ("ExtAluAdd", 19),
+        ("ExtAluMul", 19),
+        ("Select", 18),
+        ("Ext2Felts", 15),
+        ("PrefixSum", 17),
+        ("Blake3Io", 15),
+        ("Blake3Round", 18),
+        ("Limbs", 18),
+        ("PublicValues", 6),
+        ("Mul", 22),
+        ("Mul8", 16),
+    ],
+    &[
+        ("Ledger", 23),
+        ("MemoryConst", 9),
+        ("MemoryVar", 19),
+        ("BaseAlu", 20),
+        ("ExtAluAdd", 19),
+        ("ExtAluMul", 19),
+        ("Select", 18),
+        ("Ext2Felts", 16),
+        ("PrefixSum", 19),
+        ("Blake3Io", 15),
+        ("Blake3Round", 18),
+        ("Limbs", 19),
+        ("PublicValues", 6),
+        ("Mul", 23),
+        ("Mul8", 16),
+    ],
+    &[
+        ("Ledger", 23),
+        ("MemoryConst", 9),
+        ("MemoryVar", 20),
+        ("BaseAlu", 20),
+        ("ExtAluAdd", 20),
+        ("ExtAluMul", 20),
+        ("Select", 18),
+        ("Ext2Felts", 17),
+        ("PrefixSum", 20),
+        ("Blake3Io", 16),
+        ("Blake3Round", 18),
+        ("Limbs", 19),
+        ("PublicValues", 6),
+        ("Mul", 24),
+        ("Mul8", 16),
+    ],
+];
+
+/// The class of a leaf over `program`: the first of [`LEAF_CLASSES`] whose
+/// floors cover its tables, or `None` past the last.
+///
+/// # Errors
+/// Returns an error if the program has an instruction the machine has no
+/// table for.
+pub fn leaf_class(program: &RecursionProgram<KoalaBear>) -> Result<Option<usize>, MachineError> {
+    let heights = RecursionMachine::table_heights(program)?;
+    Ok(LEAF_CLASSES.iter().position(|floor| {
+        heights.iter().all(|&(name, height)| {
+            floor.iter().find(|(known, _)| *known == name).is_some_and(|&(_, most)| height <= most)
+        })
+    }))
+}
+
+/// The floor of the class of a leaf over `program`.
+///
+/// # Errors
+/// Returns an error if the program has an instruction the machine has no
+/// table for, or if no class covers its tables.
+pub fn leaf_floor(
+    program: &RecursionProgram<KoalaBear>,
+) -> Result<&'static [(&'static str, usize)], MachineError> {
+    leaf_class(program)?.map(|class| LEAF_CLASSES[class]).ok_or(MachineError::NoLeafClass)
+}
 
 /// One table of the machine.
 pub enum RecursionAir {
@@ -379,6 +462,8 @@ pub enum MachineError {
     Verify(VerificationError<PcsError<MachineConfig>>),
     /// The machine was built to verify, and holds no proving key.
     NoProvingKey,
+    /// No leaf class covers the program's tables.
+    NoLeafClass,
 }
 
 impl core::fmt::Display for MachineError {
@@ -390,6 +475,7 @@ impl core::fmt::Display for MachineError {
             Self::Prove(error) => write!(f, "machine proving: {error:?}"),
             Self::Verify(error) => write!(f, "machine verification: {error:?}"),
             Self::NoProvingKey => write!(f, "the machine was built to verify, not to prove"),
+            Self::NoLeafClass => write!(f, "no leaf class covers the program's tables"),
         }
     }
 }

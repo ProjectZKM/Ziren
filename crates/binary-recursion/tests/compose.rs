@@ -13,7 +13,7 @@ use zkm_binary_recursion::compose::{
 use zkm_binary_recursion::machine::program::Program;
 use zkm_binary_recursion::machine::TapeMachine;
 use zkm_binary_recursion::{Tape, F};
-use zkm_binary_stark::machine::{ProvedProgram, RecursionMachine, LEAF_FLOOR};
+use zkm_binary_stark::machine::{leaf_floor, ProvedProgram, RecursionMachine};
 use zkm_binary_stark::BinarySchedule;
 use zkm_recursion_core::air::RECURSION_PUBLIC_VALUES_COL_MAP;
 use zkm_recursion_core::DIGEST_SIZE;
@@ -133,8 +133,12 @@ fn composes_leaves() {
     let machines: Vec<RecursionMachine> = leaves
         .iter()
         .map(|leaf| {
-            RecursionMachine::verifier_with_floor(&leaf.program, &schedule, LEAF_FLOOR)
-                .expect("the leaf machine")
+            RecursionMachine::verifier_with_floor(
+                &leaf.program,
+                &schedule,
+                leaf_floor(&leaf.program).expect("a leaf class"),
+            )
+            .expect("the leaf machine")
         })
         .collect();
     let children = |values: &dyn Fn(usize) -> Vec<u32>| -> Vec<Child<'_>> {
@@ -279,8 +283,12 @@ fn composes_nodes() {
     let machines: Vec<RecursionMachine> = leaves
         .iter()
         .map(|leaf| {
-            RecursionMachine::verifier_with_floor(&leaf.program, &schedule, LEAF_FLOOR)
-                .expect("the leaf machine")
+            RecursionMachine::verifier_with_floor(
+                &leaf.program,
+                &schedule,
+                leaf_floor(&leaf.program).expect("a leaf class"),
+            )
+            .expect("the leaf machine")
         })
         .collect();
     let leaf_children = |range: core::ops::Range<usize>| -> Vec<Child<'_>> {
@@ -408,8 +416,12 @@ fn binary_key_digests() {
     let machines: Vec<RecursionMachine> = leaves
         .iter()
         .map(|leaf| {
-            RecursionMachine::verifier_with_floor(&leaf.program, &schedule, LEAF_FLOOR)
-                .expect("the leaf machine")
+            RecursionMachine::verifier_with_floor(
+                &leaf.program,
+                &schedule,
+                leaf_floor(&leaf.program).expect("a leaf class"),
+            )
+            .expect("the leaf machine")
         })
         .collect();
     let mut digests: Vec<[u8; 32]> = machines

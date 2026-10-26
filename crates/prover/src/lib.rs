@@ -2253,7 +2253,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.witness_stream = witness_stream.into();
         runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         let record = runtime.record;
-        let machine = self.binary_machine(&program, zkm_binary_stark::machine::LEAF_FLOOR)?;
+        let floor = zkm_binary_stark::machine::leaf_floor(&program)
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        let machine = self.binary_machine(&program, floor)?;
         let digest = PublicValuesAir::digest(&record);
         let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")
@@ -2321,15 +2323,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Verify a leaf over bits against the program it names, its tables at
-    /// the leaf floor.
+    /// its class's floor.
     pub fn verify_leaf_binary(
         &self,
         proof: &BinaryShrinkProof,
     ) -> Result<(), ZKMRecursionProverError> {
+        let floor = zkm_binary_stark::machine::leaf_floor(&proof.program)
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         let machine = RecursionMachine::verifier_with_floor(
             &proof.program,
             &BinarySchedule::default(),
-            zkm_binary_stark::machine::LEAF_FLOOR,
+            floor,
         )
         .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         machine
@@ -3724,7 +3728,7 @@ pub mod tests {
 
     /// The least log height of each binary table over every normalize program
     /// of the recursion shape set: the leaf floor, printed as the constant
-    /// `zkm_binary_stark::machine::LEAF_FLOOR` holds.
+    /// `zkm_binary_stark::machine::LEAF_CLASSES` holds.
     #[test]
     #[ignore]
     fn binary_leaf_floor() {
@@ -3857,39 +3861,52 @@ pub mod tests {
             let (shard, shape) = line.split_once(' ').unwrap_or(("0", ""));
             *counts.entry((shard == "1", shape.to_string())).or_default() += 1;
         }
-        let mut classes: BTreeMap<u32, usize> = BTreeMap::new();
-        let mut failed = 0usize;
-        for ((first, shape), count) in &counts {
-            let rows: Vec<(String, usize)> = shape
-                .split(',')
-                .filter_map(|entry| entry.split_once(':'))
-                .map(|(name, rows)| (name.to_string(), rows.parse().expect("a row count")))
-                .collect();
-            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(
-                    prover.core_prover.machine(),
-                    &rows,
-                    false,
-                );
-                input.is_first_shard = *first;
-                prover.recursion_program_basefold(&input).0
-            }));
-            let Ok(program) = built else {
-                failed += count;
-                tracing::warn!("shape x{count} failed to build: {shape}");
-                continue;
-            };
-            let tables = RecursionMachine::table_shapes(&program).expect("a binary machine");
-            let bits: u64 = tables.iter().map(|&(_, h, w)| (w as u64) << h).sum();
-            let class = 64 - (bits - 1).leading_zeros();
-            *classes.entry(class).or_default() += count;
-            tracing::info!(
-                "shape x{count}: {} instructions, {:.2} Gbit, 2^{class}, heights {:?}",
-                program.iter_instructions().count(),
-                bits as f64 / f64::from(1u32 << 30),
-                tables.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
-            );
-        }
+        let shapes: Vec<(&(bool, String), &usize)> = counts.iter().collect();
+        let classes = std::sync::Mutex::new(BTreeMap::<u32, usize>::new());
+        let failed = std::sync::atomic::AtomicUsize::new(0);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let workers: usize =
+            std::env::var("ZIREN_CENSUS_THREADS").map_or(6, |n| n.parse().expect("a count"));
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&((first, shape), &count)) = shapes.get(index) else { break };
+                    let rows: Vec<(String, usize)> = shape
+                        .split(',')
+                        .filter_map(|entry| entry.split_once(':'))
+                        .map(|(name, rows)| (name.to_string(), rows.parse().expect("a row count")))
+                        .collect();
+                    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(
+                            prover.core_prover.machine(),
+                            &rows,
+                            false,
+                        );
+                        input.is_first_shard = *first;
+                        prover.recursion_program_basefold(&input).0
+                    }));
+                    let Ok(program) = built else {
+                        failed.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+                        tracing::warn!("shape x{count} failed to build: {shape}");
+                        continue;
+                    };
+                    let tables =
+                        RecursionMachine::table_shapes(&program).expect("a binary machine");
+                    let bits: u64 = tables.iter().map(|&(_, h, w)| (w as u64) << h).sum();
+                    let class = 64 - (bits - 1).leading_zeros();
+                    *classes.lock().unwrap().entry(class).or_default() += count;
+                    tracing::info!(
+                        "shape x{count}: {} instructions, {:.3} Gbit, 2^{class}, heights {:?}",
+                        program.iter_instructions().count(),
+                        bits as f64 / f64::from(1u32 << 30),
+                        tables.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
+                    );
+                });
+            }
+        });
+        let classes = classes.into_inner().unwrap();
+        let failed = failed.into_inner();
         tracing::info!(
             "binary leaf classes over {} shards, {failed} failed to build: {classes:?}",
             counts.values().sum::<usize>()
