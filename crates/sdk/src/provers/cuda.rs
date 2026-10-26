@@ -48,7 +48,7 @@ impl CudaProver {
         let proof = self.cuda_prover.prove_core_stateless_retaining(
             pk,
             stdin,
-            kind != ZKMProofKind::Core,
+            kind != ZKMProofKind::Core && kind != ZKMProofKind::Binary,
         )?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
@@ -58,6 +58,25 @@ impl CudaProver {
                 zkm_version: self.version().to_string(),
             };
             return Ok((proof_with_pv, cycles));
+        }
+
+        if kind == ZKMProofKind::Binary {
+            if !stdin.proofs.is_empty() {
+                anyhow::bail!("the binary compress mode takes no deferred proofs");
+            }
+            let binary = self.cpu_prover.compress_binary(
+                &pk.vk,
+                &proof,
+                &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
+            )?;
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Binary(Box::new(binary)),
+                    public_values: proof.public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
         }
 
         let deferred_proofs =

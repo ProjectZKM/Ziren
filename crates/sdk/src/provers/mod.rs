@@ -60,6 +60,8 @@ pub enum ZKMVerificationError {
     Plonk(anyhow::Error),
     #[error("Groth16 verification error: {0}")]
     Groth16(anyhow::Error),
+    #[error("Binary verification error: {0}")]
+    Binary(zkm_prover::ZKMRecursionProverError),
     /// `ZKMProof` is public and deserializable, so a structurally impossible
     /// value (an empty `Core` shard vector) is reachable input, not a bug.
     #[error("Malformed proof")]
@@ -205,6 +207,29 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                 self.zkm_prover()
                     .verify_compressed(proof, vkey)
                     .map_err(ZKMVerificationError::Recursion)
+            }
+            ZKMProof::Binary(proof) => {
+                let values = &proof.root.public_values;
+                if values.len() < zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
+                    return Err(ZKMVerificationError::MalformedProof);
+                }
+                let public_values: &zkm_recursion_core::air::RecursionPublicValues<u32> =
+                    values.as_slice().borrow();
+                let committed_value_digest_bytes = public_values
+                    .committed_value_digest
+                    .iter()
+                    .flat_map(|w| w.0.iter().map(|&x| x as u8))
+                    .collect_vec();
+                for (a, b) in
+                    committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
+                {
+                    if *a != b {
+                        return Err(ZKMVerificationError::InvalidPublicValues);
+                    }
+                }
+                self.zkm_prover()
+                    .verify_binary_compressed(proof, vkey, None)
+                    .map_err(ZKMVerificationError::Binary)
             }
             ZKMProof::Plonk(proof) => self
                 .zkm_prover()

@@ -121,6 +121,25 @@ impl Prover<DefaultProverComponents> for CpuProver {
             ));
         }
 
+        if kind == ZKMProofKind::Binary {
+            if !stdin.proofs.is_empty() {
+                anyhow::bail!("the binary compress mode takes no deferred proofs");
+            }
+            let binary = self.prover.compress_binary(
+                &pk.vk,
+                &proof,
+                &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
+            )?;
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Binary(Box::new(binary)),
+                    public_values: proof.public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
+        }
+
         let deferred_proofs =
             stdin.proofs.iter().map(|(reduce_proof, _)| reduce_proof.clone()).collect();
         let public_values = proof.public_values.clone();

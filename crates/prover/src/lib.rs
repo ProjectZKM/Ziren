@@ -11,6 +11,7 @@
 #![allow(clippy::new_without_default)]
 #![allow(clippy::collapsible_else_if)]
 
+pub mod binary_tree;
 pub mod build;
 pub mod components;
 pub mod compress_tree;
@@ -2243,7 +2244,31 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> Result<BinaryShrinkProof, ZKMRecursionProverError> {
+        self.leaf_binary_with_machine(input).map(|(_, proof)| proof)
+    }
+
+    /// [`Self::leaf_binary`], with the machine that verifies the leaf.
+    pub fn leaf_binary_with_machine(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+    ) -> Result<(RecursionMachine, BinaryShrinkProof), ZKMRecursionProverError> {
         let program = self.recursion_program_basefold(input).0;
+        let floor = zkm_binary_stark::machine::leaf_floor(&program)
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        let mut machine = self.binary_machine(&program, floor)?;
+        let proof = self.leaf_binary_on(&machine, program, input)?;
+        machine.drop_proving_key();
+        Ok((machine, proof))
+    }
+
+    /// Prove a leaf of `program`, the normalize program of `input`, with a
+    /// machine already set up for it at its class's floor.
+    pub fn leaf_binary_on(
+        &self,
+        machine: &RecursionMachine,
+        program: Arc<RecursionProgram<KoalaBear>>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+    ) -> Result<BinaryShrinkProof, ZKMRecursionProverError> {
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
             zkm_pcs::inner_perm(),
@@ -2253,9 +2278,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.witness_stream = witness_stream.into();
         runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         let record = runtime.record;
-        let floor = zkm_binary_stark::machine::leaf_floor(&program)
-            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
-        let machine = self.binary_machine(&program, floor)?;
         let digest = PublicValuesAir::digest(&record);
         let public_values = PublicValuesAir::public_values(&record);
         let proof = tracing::debug_span!("binary machine prove")

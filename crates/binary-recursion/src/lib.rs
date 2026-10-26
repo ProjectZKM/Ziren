@@ -18,6 +18,7 @@ pub mod domain;
 pub mod fields;
 pub mod machine;
 pub mod mmcs;
+pub mod node;
 pub mod queries;
 pub mod tape;
 pub mod traced;

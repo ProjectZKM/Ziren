@@ -35,7 +35,7 @@ use p3_bus::BusSymbolicBuilder;
 use p3_bus::{BusDebugInstance, BusDebugReport};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_multi_stark::config::{MultiStarkConfig, PcsError, PcsProverError};
+use p3_multi_stark::config::{Commitment, MultiStarkConfig, PcsError, PcsProverError};
 use p3_multi_stark::{
     prove_with_backend, setup, verify, ProverInstance, ProverInstances, ProvingError, ProvingKey,
     ReprBackend, SubfieldBackend, VerificationError, VerifierInstance, VerifierInstances,
@@ -120,6 +120,24 @@ impl TapeAir {
             Self::Select(air) => air.log_height(),
             Self::Public(air) => air.log_height(),
         }
+    }
+
+    /// The table named `name` at `2^log_height` rows with no program: what a
+    /// verifier needs, which reads only the table's shape and constraints.
+    fn shell(name: &str, log_height: usize) -> Option<Self> {
+        let preprocessed = Vec::new();
+        Some(match name {
+            "Ledger" => Self::Ledger(LedgerAir { log_height, preprocessed }),
+            "Arith" => Self::Arith(ArithAir { log_height, preprocessed }),
+            "Rewire" => Self::Rewire(RewireAir { log_height, preprocessed }),
+            "Gather" => Self::Gather(RewireAir { log_height, preprocessed }),
+            "Hash" => Self::Hash(HashAir { log_height, preprocessed }),
+            "Rounds" => Self::Rounds(RoundsAir { log_height, preprocessed }),
+            "Kb" => Self::Kb(KbAir { log_height, preprocessed }),
+            "Select" => Self::Select(SelectAir { log_height, preprocessed }),
+            "Public" => Self::Public(PublicAir { log_height, preprocessed }),
+            _ => return None,
+        })
     }
 
     /// Pad the table with zero rows up to `2^log_height`, when it is lower:
@@ -249,6 +267,16 @@ pub enum TapeMachineError {
     Verify(VerificationError<PcsError<MachineConfig>>),
     /// The machine was built to verify, and holds no proving key.
     NoProvingKey,
+    /// A key names a table the machine has none of.
+    UnknownTable(String),
+}
+
+/// What a verifier rebuilds a tape machine from: its tables' names and log
+/// heights, in order, and its preprocessed commitment.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct NodeKey {
+    pub heights: Vec<(String, usize)>,
+    pub commitment: Commitment<MachineConfig>,
 }
 
 /// The machine of one tape's program.
@@ -294,6 +322,56 @@ impl TapeMachine {
         let refs: Vec<&TapeAir> = airs.iter().collect();
         let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(TapeMachineError::Setup)?;
         Ok(Self { program, airs, config, pk: Some(pk), vk })
+    }
+
+    /// The machine a verifier rebuilds from a key's parts: each table's name
+    /// and log height, in the machine's order, and the preprocessed
+    /// commitment setup made.  It holds no program, so it only verifies.
+    ///
+    /// # Errors
+    /// Returns an error if a table is unknown or the configuration cannot be
+    /// built for these shapes.
+    pub fn from_key(key: &NodeKey, schedule: &BinarySchedule) -> Result<Self, TapeMachineError> {
+        let airs = key
+            .heights
+            .iter()
+            .map(|(name, log_height)| {
+                TapeAir::shell(name, *log_height)
+                    .ok_or_else(|| TapeMachineError::UnknownTable(name.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (main, preprocessed) = Self::shapes_of(&airs);
+        let config =
+            MachineConfig::new(&main, &preprocessed, schedule).map_err(TapeMachineError::Config)?;
+        let preprocessed_log_heights = preprocessed.iter().map(TableShape::num_variables).collect();
+        let refs: Vec<&TapeAir> = airs.iter().collect();
+        let vk = VerifyingKey::from_commitment(
+            &refs,
+            Some(key.commitment.clone()),
+            preprocessed_log_heights,
+        );
+        Ok(Self { program: Program::default(), airs, config, pk: None, vk })
+    }
+
+    /// The parts of the machine's key a verifier rebuilds it from.
+    ///
+    /// # Panics
+    /// Panics if the machine has no preprocessed commitment, which every
+    /// tape machine has.
+    #[must_use]
+    pub fn key(&self) -> NodeKey {
+        NodeKey {
+            heights: self
+                .airs
+                .iter()
+                .map(|air| (air.name().to_string(), air.log_height()))
+                .collect(),
+            commitment: self
+                .vk
+                .preprocessed_commitment()
+                .expect("a tape machine commits its program")
+                .clone(),
+        }
     }
 
     /// The log height and width of each table of `program`'s machine, by

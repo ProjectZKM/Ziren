@@ -27,6 +27,7 @@ use p3_binary_field::{BinaryField2, Ghash128};
 use p3_field::Field;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::*;
 use p3_multi_stark::config::{MultiStarkConfig, PcsError, PcsProverError};
 use p3_multi_stark::{
     prove_with_backend, setup, verify, ProverInstance, ProverInstances, ProvingError, ProvingKey,
@@ -550,6 +551,11 @@ impl RecursionMachine {
         Ok(machine)
     }
 
+    /// Drop the proving key, keeping what a verifier reads.
+    pub fn drop_proving_key(&mut self) {
+        self.pk = None;
+    }
+
     /// The machine of `program` under `schedule`.
     pub fn new(
         program: &RecursionProgram<KoalaBear>,
@@ -668,21 +674,33 @@ impl RecursionMachine {
     /// Prove `record`, an execution of the machine's program.
     pub fn prove(&self, record: &ExecutionRecord<KoalaBear>) -> Result<MachineProof, MachineError> {
         let pk = self.pk.as_ref().ok_or(MachineError::NoProvingKey)?;
-        let written: Vec<Cell> =
-            self.airs.iter().flat_map(|air| air.written_values(record)).collect();
-        let requests: Vec<(u32, u32)> =
-            self.airs.iter().flat_map(|air| air.mul_requests(record)).collect();
+        let started = std::time::Instant::now();
+        let (written, requests): (Vec<Cell>, Vec<(u32, u32)>) = join(
+            || self.airs.par_iter().flat_map_iter(|air| air.written_values(record)).collect(),
+            || self.airs.par_iter().flat_map_iter(|air| air.mul_requests(record)).collect(),
+        );
         let public = Self::public_values(&PublicValuesAir::digest(record));
+        let tables: Vec<Table<F>> = self
+            .airs
+            .par_iter()
+            .map(|air| {
+                let started = std::time::Instant::now();
+                let table = air.main_table(record, &written, &requests);
+                tracing::debug!(
+                    "binary main table {}: {:.2} s",
+                    air.name(),
+                    started.elapsed().as_secs_f64()
+                );
+                table
+            })
+            .collect();
+        tracing::info!("binary main tables in {:.1} s", started.elapsed().as_secs_f64());
         let instances = ProverInstances::new(
             self.airs
                 .iter()
-                .map(|air| {
-                    ProverInstance::new(
-                        air,
-                        air.main_table(record, &written, &requests),
-                        pk,
-                        Self::public_of(air, &public),
-                    )
+                .zip(tables)
+                .map(|(air, table)| {
+                    ProverInstance::new(air, table, pk, Self::public_of(air, &public))
                 })
                 .collect(),
         );

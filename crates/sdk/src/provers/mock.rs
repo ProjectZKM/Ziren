@@ -152,6 +152,9 @@ impl Prover<DefaultProverComponents> for MockProver {
                 ))
             }
             ZKMProofKind::CompressToGroth16 => unreachable!(),
+            ZKMProofKind::Binary => {
+                Err(anyhow::anyhow!("the mock prover has no binary compress mode"))
+            }
         }
     }
 

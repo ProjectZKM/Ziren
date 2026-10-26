@@ -330,6 +330,21 @@ fn hashed(values: &[Traced]) -> [Traced; 32] {
     digest_bytes(blake3(&pieces))
 }
 
+/// The digest a node's public values hash to, computed outside a recording
+/// as the recorded verification computes it: the Blake3 hash of the hashed
+/// prefix's little-endian bytes, each word cut to its low 30 bits.
+#[must_use]
+pub fn public_values_digest(values: &[u32]) -> [u32; DIGEST_SIZE] {
+    let bytes: Vec<u8> =
+        values[..NUM_PV_ELMS_TO_HASH].iter().flat_map(|value| value.to_le_bytes()).collect();
+    let hash = ::blake3::hash(&bytes);
+    let hash = hash.as_bytes();
+    core::array::from_fn(|w| {
+        u32::from_le_bytes([hash[4 * w], hash[4 * w + 1], hash[4 * w + 2], hash[4 * w + 3]])
+            & ((1 << 30) - 1)
+    })
+}
+
 /// Word `w` of a digest, its low 30 bits, as an element.
 fn digest_word(digest: &[Traced; 32], w: usize) -> u32 {
     let bytes: [u8; 4] =

@@ -10,6 +10,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
+blake3 = { workspace = true, features = ["std"] }
 p3-air = { workspace = true }
 p3-binary-dft = { workspace = true }
 p3-binary-field = { workspace = true }
@@ -38,6 +39,5 @@ zkm-pcs = { workspace = true }
 
 [dev-dependencies]
 p3-examples = { workspace = true }
-blake3 = { workspace = true, features = ["std"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
