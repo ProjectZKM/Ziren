@@ -127,6 +127,15 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
+/// The wrap prover's `(pk, vk)`, as [`ZKMProver::wrap_keys`] keeps them.
+pub type WrapKeys<C> = (
+    <<C as ZKMProverComponents>::WrapProver as MachineProver<
+        OuterSC,
+        WrapAir<KoalaBear>,
+    >>::DeviceProvingKey,
+    StarkVerifyingKey<OuterSC>,
+);
+
 /// Fixed height of the allowed-vk Merkle tree (capacity 2^14 = 16,384 vks).
 ///
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
@@ -274,6 +283,15 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
+
+    /// The wrap's `(pk, vk)`, with the setup digest of the program they were
+    /// built from.
+    ///
+    /// The outer circuit pins the wrap verifying key, so every wrap builds
+    /// the same program and one entry serves the whole process: a long-lived
+    /// prover (the server, a multi-block run) pays the wrap setup once rather
+    /// than per proof.  A program with another digest replaces the entry.
+    pub wrap_keys_cache: Mutex<Option<([u8; 32], Arc<WrapKeys<C>>)>>,
 
     /// Whether to verify verification keys.
     pub vk_verification: bool,
@@ -701,6 +719,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
+            wrap_keys_cache: Mutex::new(None),
             normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
@@ -2111,8 +2130,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.print_stats();
         tracing::debug!("wrap_bn254 basefold program executed successfully");
 
-        let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bn254 basefold")
-            .in_scope(|| self.wrap_prover.setup(&program));
+        let wrap_keys =
+            tracing::debug_span!("setup wrap_bn254 basefold").in_scope(|| self.wrap_keys(&program));
+        let (wrap_pk, wrap_vk) = &*wrap_keys;
         if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
             tracing::debug!("wrap verifier key set (basefold)");
         }
@@ -2136,15 +2156,35 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let time = std::time::Instant::now();
         let mut wrap_proof = self
             .wrap_prover
-            .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
+            .prove(wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
             .unwrap();
         let elapsed = time.elapsed();
         tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
         let mut wrap_challenger = self.wrap_prover.machine().config().challenger();
-        self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
+        self.wrap_prover.machine().verify(wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
         tracing::info!("wrapping (basefold) successful");
 
-        Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
+        Ok(ZKMReduceProof { vk: wrap_vk.clone(), proof: wrap_proof.shard_proofs.pop().unwrap() })
+    }
+
+    /// The wrap `(pk, vk)` for `program`, set up on the first wrap and reused
+    /// while the program's setup digest stays the same; see
+    /// [`Self::wrap_keys_cache`].  The lock is held across a setup, so a
+    /// concurrent wrap waits for the key instead of building it again.
+    pub fn wrap_keys(&self, program: &RecursionProgram<KoalaBear>) -> Arc<WrapKeys<C>> {
+        let digest = zkm_recursion_core::setup_digest(program);
+        let mut cache = self.wrap_keys_cache.lock().unwrap();
+        if let Some((cached, keys)) = cache.as_ref() {
+            if *cached == digest {
+                tracing::debug!("wrap keys cache hit");
+                return Arc::clone(keys);
+            }
+        }
+        // Release another program's key before building, so both are never held.
+        *cache = None;
+        let keys = Arc::new(self.wrap_prover.setup(program));
+        *cache = Some((digest, Arc::clone(&keys)));
+        keys
     }
 
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.
