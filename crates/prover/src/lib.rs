@@ -3812,6 +3812,91 @@ pub mod tests {
         Ok(())
     }
 
+    /// Execute a cached block and write every core shard's chip heights to
+    /// `ZIREN_CORE_SHAPE_DUMP`, proving none: run with
+    /// `ZIREN_CORE_SHARD_LIMIT=0`.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn dump_block_shapes() -> Result<()> {
+        setup_logger();
+        let elf = std::fs::read(std::env::var("ZIREN_BLOCK_ELF")?)?;
+        let input = std::fs::read(std::env::var("ZIREN_BLOCK_INPUT")?)?;
+        let mut stdin = ZKMStdin::new();
+        stdin.write_vec(input);
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, _) = prover.setup(&elf);
+        let started = std::time::Instant::now();
+        let core_proof = prover.prove_core(
+            &pk_d,
+            program,
+            &stdin,
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        tracing::info!(
+            "block shapes written in {:.1} s, {} shards proved",
+            started.elapsed().as_secs_f64(),
+            core_proof.proof.0.len()
+        );
+        Ok(())
+    }
+
+    /// The binary leaf classes of the shard shapes in `ZIREN_CORE_SHAPES`,
+    /// lines as `dump_block_shapes` writes them: each distinct shape's
+    /// normalize program is built from a dummy proof of that shape, and its
+    /// binary tables' heights, widths and total bits are reported.
+    #[test]
+    #[ignore]
+    fn binary_shape_census() -> Result<()> {
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let text = std::fs::read_to_string(std::env::var("ZIREN_CORE_SHAPES")?)?;
+        let mut counts: BTreeMap<(bool, String), usize> = BTreeMap::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let (shard, shape) = line.split_once(' ').unwrap_or(("0", ""));
+            *counts.entry((shard == "1", shape.to_string())).or_default() += 1;
+        }
+        let mut classes: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut failed = 0usize;
+        for ((first, shape), count) in &counts {
+            let rows: Vec<(String, usize)> = shape
+                .split(',')
+                .filter_map(|entry| entry.split_once(':'))
+                .map(|(name, rows)| (name.to_string(), rows.parse().expect("a row count")))
+                .collect();
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(
+                    prover.core_prover.machine(),
+                    &rows,
+                    false,
+                );
+                input.is_first_shard = *first;
+                prover.recursion_program_basefold(&input).0
+            }));
+            let Ok(program) = built else {
+                failed += count;
+                tracing::warn!("shape x{count} failed to build: {shape}");
+                continue;
+            };
+            let tables = RecursionMachine::table_shapes(&program).expect("a binary machine");
+            let bits: u64 = tables.iter().map(|&(_, h, w)| (w as u64) << h).sum();
+            let class = 64 - (bits - 1).leading_zeros();
+            *classes.entry(class).or_default() += count;
+            tracing::info!(
+                "shape x{count}: {} instructions, {:.2} Gbit, 2^{class}, heights {:?}",
+                program.iter_instructions().count(),
+                bits as f64 / f64::from(1u32 << 30),
+                tables.iter().map(|(name, h, _)| format!("{name}:{h}")).collect::<Vec<_>>()
+            );
+        }
+        tracing::info!(
+            "binary leaf classes over {} shards, {failed} failed to build: {classes:?}",
+            counts.values().sum::<usize>()
+        );
+        Ok(())
+    }
+
     /// The leaves of a cached block's first core shards proved over bits: the
     /// guest at `ZIREN_BLOCK_ELF` on the input at `ZIREN_BLOCK_INPUT`, its
     /// core proved on the host up to `ZIREN_CORE_SHARD_LIMIT` shards, and a

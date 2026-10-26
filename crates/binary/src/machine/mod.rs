@@ -472,6 +472,17 @@ impl RecursionMachine {
         Self::new_with_floor(program, schedule, &[])
     }
 
+    /// The log height and committed width of each table of `program`'s
+    /// machine, by name, with no key built.
+    pub fn table_shapes(
+        program: &RecursionProgram<KoalaBear>,
+    ) -> Result<Vec<(&'static str, usize, usize)>, MachineError> {
+        Ok(Self::tables(program)?
+            .iter()
+            .map(|air| (air.name(), air.log_height(), BaseAir::<F>::width(air)))
+            .collect())
+    }
+
     /// The log height of each table of `program`'s machine, by name, with no
     /// key built.
     pub fn table_heights(
