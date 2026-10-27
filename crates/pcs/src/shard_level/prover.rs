@@ -29,15 +29,15 @@ pub fn commit_traces<SC>(
     pin: Option<crate::jagged::AreaPin>,
 ) -> (
     [Val<SC>; 8],
-    crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
+    crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::WhirRing>::WhirMmcs>,
 )
 where
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
 {
-    use crate::{BasefoldRing, InnerChallenge, InnerVal};
+    use crate::{InnerChallenge, InnerVal, WhirRing};
     use core::any::TypeId;
 
     assert!(
@@ -65,18 +65,18 @@ where
     let (main_commitment, precomputed_generic): (
         [Val<SC>; 8],
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
+            <SC as crate::WhirRing>::WhirMmcs,
         >,
     ) = if is_inner {
         let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
             let any: Box<dyn core::any::Any> =
-                Box::new(<SC as BasefoldRing>::commit_multilinears(&named_inner, pin));
+                Box::new(<SC as WhirRing>::commit_multilinears(&named_inner, pin));
             *any.downcast().unwrap_or_else(|_| {
                 panic!("commit_traces: the inner ring's precompute is a JaggedMmcs precompute")
             })
         };
         let raw_root_inner: [InnerVal; 8] =
-            crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+            crate::jagged_pcs::whir_commit_digest(&precomputed.commit);
 
         let digest_inner: [InnerVal; 8] = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
@@ -86,21 +86,21 @@ where
             unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
 
         let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
+            <SC as crate::WhirRing>::WhirMmcs,
         > = {
             let any: Box<dyn core::any::Any> = Box::new(precomputed);
             *any.downcast().unwrap_or_else(|_| {
                 panic!(
                     "commit_traces: inner build path produces a \
-                     JaggedMmcs precompute == SC::BfMmcs"
+                     JaggedMmcs precompute == SC::WhirMmcs"
                 )
             })
         };
         (main_commitment, precomputed_generic)
     } else {
-        let precomputed_generic = <SC as BasefoldRing>::commit_multilinears(&named_inner, pin);
+        let precomputed_generic = <SC as WhirRing>::commit_multilinears(&named_inner, pin);
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
-            <SC as BasefoldRing>::digest_felts(&precomputed_generic.commit.original_commitment);
+            <SC as WhirRing>::digest_felts(&precomputed_generic.commit.original_commitment);
         let main_commitment: [Val<SC>; 8] = unsafe {
             core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(&digest_jv)
         };
@@ -134,8 +134,8 @@ pub fn prove_shard_with_data<SC, A>(
     challenger: &mut SC::Challenger,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
-    SC: StarkGenericConfig + crate::BasefoldRing,
-    A: MachineAir<Val<SC>> + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
+    SC: StarkGenericConfig + crate::WhirRing,
+    A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger:
@@ -143,7 +143,7 @@ where
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<
-                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
                     crate::jagged_pcs::JaggedVal,
                 >>::Commitment,
             >,
@@ -589,7 +589,7 @@ where
                 if let Some(m) = remat {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
+                    let mle = std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(m));
                     return crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h);
                 }
                 return pm.clone();
@@ -763,7 +763,7 @@ where
 }
 
 /// Per-chip (local, global) cumulative sums.  `local` is ZERO
-/// (the basefold path doesn't materialize the permutation trace); `global`
+/// (the whir path doesn't materialize the permutation trace); `global`
 /// reads the RAW per-chip cells at their raw heights (device chips use the
 /// early-captured provider TAIL, `chip_cum_tails`).
 pub fn build_chip_cumulative_sums<SC, A>(
@@ -812,7 +812,7 @@ where
 
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
-/// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
+/// WHIR root (`jagged_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
@@ -847,7 +847,7 @@ where
 
     let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
-            let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+            let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
         }
         _ => main_commitment,
@@ -860,7 +860,7 @@ where
                     && bundle.packing.round_counts.len() >= 2 =>
             {
                 let raw_inner =
-                    crate::jagged_pcs::basefold_commit_digest_felts(&bundle.preceding_commits[0]);
+                    crate::jagged_pcs::whir_commit_digest_felts(&bundle.preceding_commits[0]);
                 let raw = unsafe {
                     core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
                 };
@@ -927,7 +927,7 @@ where
 /// * `heights[i]`: `h_i` of a chip whose commit trace is empty; a missing entry
 ///   means `h_i = 1`.
 ///
-/// The ring-specific open is [`crate::BasefoldRing::prove_jagged_open`]; both
+/// The ring-specific open is [`crate::WhirRing::prove_jagged_open`]; both
 /// rings open the claims above.
 ///
 /// # Panics
@@ -940,19 +940,19 @@ pub fn prove_trusted_evaluations<SC, A>(
     preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
     preprocessed_claims: Vec<Vec<Challenge<SC>>>,
     preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-        <SC as crate::BasefoldRing>::BfMmcs,
+        <SC as crate::WhirRing>::WhirMmcs,
     >,
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-        <SC as crate::BasefoldRing>::BfMmcs,
+        <SC as crate::WhirRing>::WhirMmcs,
     >,
     pre_y_per_chip: Vec<Vec<Challenge<SC>>>,
     heights: &[Option<usize>],
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
@@ -961,12 +961,12 @@ where
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<
-                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
                     crate::jagged_pcs::JaggedVal,
                 >>::Commitment,
             >,
 {
-    use crate::{BasefoldRing, InnerChallenge, InnerVal};
+    use crate::{InnerChallenge, InnerVal, WhirRing};
     use core::any::TypeId;
 
     assert!(
@@ -1079,5 +1079,5 @@ where
         claims: pre_y_inner,
         precomputed: &precomputed_commit,
     });
-    <SC as BasefoldRing>::prove_jagged_open(z_row, rounds, challenger)
+    <SC as WhirRing>::prove_jagged_open(z_row, rounds, challenger)
 }

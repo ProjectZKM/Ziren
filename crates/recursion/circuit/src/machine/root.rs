@@ -5,8 +5,8 @@
 //! `ZKMCompressWithVKeyVerifier::verify` that asserted
 //! `is_complete == ONE` and then re-entered the FRI compose body.
 //! Both have been retired together with the rest of the FRI compose
-//! chain — the basefold root behaviour is folded into the existing
-//! [`super::compress_basefold::verify_compress_basefold`] entry point
+//! chain — the whir root behaviour is folded into the existing
+//! [`super::compress_jagged::verify_compress_jagged`] entry point
 //! by passing [`super::PublicValuesOutputDigest::Root`].
 //!
 //! The module is kept (rather than removed from `mod.rs`) so existing

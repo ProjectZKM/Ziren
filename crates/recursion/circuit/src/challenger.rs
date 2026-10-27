@@ -64,8 +64,8 @@ pub trait FieldChallengerVariable<C: Config, Bit>:
     /// `grinding_bits_lookup = 16` on every circuit, so the accounting would
     /// describe a transcript the protocol did not execute. Such an override
     /// existed here on the wrap ring, on the premise that the outer challenger
-    /// could not grind — a premise the wrap BaseFold open disproves by grinding
-    /// `pow_bits = 22` through the same trait.
+    /// could not grind — a premise the wrap WHIR open disproves by grinding
+    /// its query, folding and batching challenges through the same trait.
     fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
         self.check_witness(builder, nb_bits, witness);
     }

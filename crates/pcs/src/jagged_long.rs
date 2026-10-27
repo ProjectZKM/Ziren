@@ -25,8 +25,8 @@ use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, Field};
 
-use crate::basefold::mle::{Message, Mle};
 use crate::tensor::CpuBackend;
+use crate::whir::mle::{Message, Mle};
 
 /// A multilinear polynomial stored as its component MLEs plus the number of
 /// variables each component carries (`log_stacking_height`).
@@ -130,8 +130,8 @@ impl<F: Field> LongMle<F> {
     /// Fix the stride-1 (LSB) variable of every component to `alpha`.
     ///
     /// Uses the LAGRANGE fold (`(1-alpha)·lo + alpha·hi`) via
-    /// [`Mle::fix_last_variable`] — NOT `Mle::fold`, which is the BaseFold rule
-    /// and would silently change the polynomial being proved.
+    /// [`Mle::fix_last_variable`] — NOT `Mle::fold` (the monomial rule
+    /// `lo + alpha·hi`), which would silently change the polynomial being proved.
     ///
     /// A re-interleave at `log_stacking_height <= 2` (restacking the components
     /// into one before folding) only changes anything when there is more than
@@ -683,7 +683,7 @@ where
 ///
 /// `base` is the trace side: the per-chip component MLEs restacked into the
 /// single component the sumcheck requires, via
-/// [`crate::basefold::stacked::interleave_multilinears_with_fixed_rate`]
+/// [`crate::whir::stripes::interleave_multilinears_with_fixed_rate`]
 /// (measured: zero calls on the GPU prove path — currently never exercised
 /// there).
 ///
@@ -708,7 +708,7 @@ pub fn jagged_hadamard_poly(
         .total_values()
         .next_power_of_two()
         .ilog2();
-    let restacked = crate::basefold::stacked::interleave_multilinears_with_fixed_rate(
+    let restacked = crate::whir::stripes::interleave_multilinears_with_fixed_rate(
         1,
         trace_components,
         total_num_variables,

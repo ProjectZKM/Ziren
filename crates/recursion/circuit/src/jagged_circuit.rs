@@ -1,13 +1,13 @@
 //! In-circuit jagged-PCS proof types and verifier scaffolding.
 //!
 //! The jagged PCS layers a per-chip-evaluation reduction on top of
-//! the stacked-BaseFold PCS.  This module hosts the in-circuit
+//! the stacked-WHIR PCS.  This module hosts the in-circuit
 //! data carriers and verifier-shape definitions for the jagged
 //! protocol.
 //!
 //! This module defines the proof-data type hierarchy:
 //!   - [`RecursiveStackedPcsProof`]: thin wrapper around the
-//!     underlying BaseFold proof + per-round batch evaluations
+//!     underlying WHIR proof + per-round batch evaluations
 //!   - [`JaggedSumcheckEvalProof`]: carrier for the jagged-eval
 //!     sumcheck reduction
 //!   - [`JaggedPcsProofVariable`]: top-level proof carrier
@@ -20,7 +20,6 @@
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Ext, Felt};
 
-use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::partial_sumcheck::PartialSumcheckProof;
 
 /// In-circuit jagged-eval sumcheck reduction proof.
@@ -34,12 +33,12 @@ pub struct JaggedSumcheckEvalProof<F> {
     pub partial_sumcheck_proof: PartialSumcheckProof<F>,
 }
 
-/// In-circuit stacked-PCS proof: the underlying BaseFold proof
+/// In-circuit stacked-PCS proof: the underlying WHIR proof
 /// plus the per-round batch evaluations the jagged sumcheck
 /// reduces to.
 ///
 /// `Pcs` is the underlying PCS proof type (typically a
-/// [`crate::basefold_verifier::RecursiveBasefoldProof`]).  `F` is
+/// [`crate::whir_circuit::RecursiveStackedWhirProof`]).  `F` is
 /// the base field, `EF` the extension.
 pub struct RecursiveStackedPcsProof<Pcs, F, EF> {
     /// Per-round per-stripe evaluations at the stack-portion of
@@ -83,7 +82,7 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// implied by the prefix sums.
     pub jagged_eval_proof: JaggedSumcheckEvalProof<Ext<F, EF>>,
     /// The underlying stacked PCS opening proof (wraps a
-    /// BaseFold proof + batch evaluations).
+    /// WHIR proof + batch evaluations).
     pub pcs_proof: RecursiveStackedPcsProof<Pcs, F, EF>,
     /// Per-round per-chip column-count list.
     pub column_counts: Vec<Vec<usize>>,
@@ -109,8 +108,8 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// only.  The prefix-sum walk splices it back in at the round boundary.
     pub padding_row_heights: Vec<Vec<Felt<F>>>,
     /// Per-round original commitment digests (before any
-    /// chip-info-hash mix-in).  The BaseFold opening binds against THESE
-    /// (the RAW BaseFold roots).
+    /// chip-info-hash mix-in).  The WHIR opening binds against THESE
+    /// (the RAW WHIR roots).
     pub original_commitments: Vec<Digest>,
     /// Per-round MODIFIED commitment digests — the FS-observed
     /// `compress([original_commitment, hash(once(len) ++ row_counts ++
@@ -120,14 +119,9 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// hash-bind-off path these equal `original_commitments`.
     pub modified_commitments: Vec<Digest>,
     /// Expected evaluation claim — the value the jagged sumcheck
-    /// reduces to and the BaseFold opener verifies.
+    /// reduces to and the WHIR opener verifies.
     pub expected_eval: Ext<F, EF>,
 }
-
-/// Type alias bringing together the standard Ziren BaseFold
-/// recursion-circuit configuration (KoalaBear, 8-element digests).
-pub type DefaultJaggedPcsProof<F, EF> =
-    JaggedPcsProofVariable<RecursiveBasefoldProof<F, EF>, [Felt<F>; 8], F, EF>;
 
 #[cfg(test)]
 mod tests {

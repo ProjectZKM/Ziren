@@ -143,7 +143,7 @@ If the reduction point has fewer than $\ell+b$ coordinates, the prover appends F
   =\widetilde{(e_{0,0},\ldots,e_{0,S_0-1},e_{1,0},\ldots,e_{R-1,S_{R-1}-1})}
      (\bm z_{\mathrm{batch}}).
 \end{equation}
-One stacked \WHIR{} or \BaseFold{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while each input round retains its own Merkle root. All rounds must share the stacking height and PCS mode; a mixed transcript is rejected. The implementation also offers BaseFold as the opening; every configuration in this paper uses \WHIR{}.
+One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while each input round retains its own Merkle root. All rounds must share the stacking height.
 
 \begin{figure}[t]
 \centering
@@ -168,7 +168,7 @@ One stacked \WHIR{} or \BaseFold{} proof then authenticates every $e_{r,s}$ agai
 3. & Run the jagged assist at $\operatorname{rev}(\bm z^*)$ ($2(m+1)$ rounds, Theorem~\ref{thm:jagged-assist}). & $\xrightarrow{\ \text{rounds}\ }$ & Obtain $v_W = \widetilde W(\bm z^*)$; check \mbox{$T_{\mathrm{final}} = v_Q\, v_W$~\eqref{eq:jagged-closing}}. \\\addlinespace[4pt]
 4. & & $\xleftarrow{\ \bm z_{\mathrm{ext}}\ }$ & Sample the point-extension coordinates, if any. \\\addlinespace[4pt]
 5. & Send the stripe evaluations $(e_{r,s})_{r,s}$. & $\xrightarrow{\ (e_{r,s})\ }$ & Check \eqref{eq:stacking-bind}. \\\addlinespace[4pt]
-6. & Open every stripe at the common stack point in one batched stacked \WHIR{} or \BaseFold{} proof. & $\xleftrightarrow{\ \text{opening}\ }$ & Accept if and only if the opening verifies against $C_0, \ldots, C_{R-1}$. \\
+6. & Open every stripe at the common stack point in one batched stacked \WHIR{} proof. & $\xleftrightarrow{\ \text{opening}\ }$ & Accept if and only if the opening verifies against $C_0, \ldots, C_{R-1}$. \\
 \bottomrule
 \end{tabular}
 \end{protocol}

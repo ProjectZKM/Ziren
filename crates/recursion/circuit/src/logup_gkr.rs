@@ -28,9 +28,9 @@ use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineChip;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
-use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
-use crate::basefold_constraint_folder::ShardConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
+use crate::chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::constraint_folder::ShardConstraintFolder;
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
@@ -110,7 +110,7 @@ pub fn observe_length_prefixed_ext_slice<C, FC>(
 /// vertex `i`.
 ///
 /// Uses the LSB-first hypercube indexing convention (matches
-/// [`zkm_pcs::basefold::mle::Mle::eval_at`]): `point[0]`
+/// [`zkm_pcs::whir::mle::Mle::eval_at`]): `point[0]`
 /// controls the LSB of the index, `point[n-1]` the MSB.
 ///
 /// Mirrors the upstream `evaluate_mle_ext`

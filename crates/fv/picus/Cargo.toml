@@ -20,7 +20,7 @@ clap = { version = "4.5.7", features = ["derive", "env"] }
 tracing = { workspace = true }
 
 [lints.clippy]
-# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# The jagged/WHIR generics (`Challenger` x `Mmcs` x `Dft` over two rings)
 # make the honest signatures wide; factoring them behind aliases hides which
 # ring a function is instantiated for, which is exactly what the soundness
 # review needs to read off the signature.

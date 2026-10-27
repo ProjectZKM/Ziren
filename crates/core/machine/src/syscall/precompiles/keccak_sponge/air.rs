@@ -4,8 +4,8 @@
 //! keccak-f permutation constraints (θ/ρ/π via `c`/`c'`/`a'`, χ via `a''`, ι via
 //! `a'''[0][0]`) are evaluated **within one row** over the `p3_keccak`
 //! `KeccakCols`, and the round-to-round state hand-off — which `p3_keccak`'s
-//! multi-row SubAir does with a `when_transition` window the single-row BaseFold
-//! folder cannot evaluate — is carried on the `PrecompileChain` bus instead:
+//! multi-row SubAir does with a `when_transition` window the single-row jagged
+//! zerocheck folder cannot evaluate — is carried on the `PrecompileChain` bus instead:
 //! each row RECEIVEs the round input `a` and SENDs the round output `a'''`.  The
 //! [`super::control`] chip seeds round 0 (the absorbed block state) and drains
 //! round 24 (the permuted state).

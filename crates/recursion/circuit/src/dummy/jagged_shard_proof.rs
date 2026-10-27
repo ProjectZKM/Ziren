@@ -120,7 +120,7 @@ where
 }
 
 /// A zero-filled [`JaggedShardProof`] with the shape a real proof of `chips`
-/// has, for [`crate::stark::dummy_basefold_vk_and_shard_proof`]: a program
+/// has, for [`crate::stark::dummy_vk_and_shard_proof`]: a program
 /// build reads only the shape.
 ///
 /// # Inputs
@@ -248,7 +248,7 @@ where
                 Some((w, rows))
             })
             .collect();
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_basefold_bundle(
+        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_bundle(
             &prep_dims,
             &chip_dims,
             max_log_row_count,
@@ -335,15 +335,14 @@ where
 /// `chip_dims` = per-chip `(main_width, rows)` in the SAME order the
 /// jagged packing uses (name-sorted — matches the lift's `column_counts_by_round`
 /// AND the lift's `bundle.commit.chip_dims` row-count derivation).
-/// `max_log_row_count` = M (the BaseFold stacking height / verifier num_variables).
+/// `max_log_row_count` = M (the WHIR stacking height / verifier num_variables).
 ///
 /// Field LENGTHS (all derived from the shape; see
 /// `ref_p2c_witness_the_bundle_plan` for the full law derivation):
 /// * packing via [`pack_traces_jagged`] on zero matrices → offsets,
 ///   total_values, log_dense_size (L), column_counts.
-/// * basefold proof: M rounds (uni_poly `[EF;2]` + 1-cap root); M query rounds
-///   × Q (= `lb_fri_config().num_queries`) leaves × (sibling `[lo,hi]` +
-///   `(M-r)`-digest path); batch_evaluations = one vec of `2^(L-M)`.
+/// * whir proof: [`dummy_stacked_whir_proof`] under the child's WHIR
+///   schedule `profile`, one batch-evaluation vector per round.
 /// * reduction: L rounds (`evals=[EF;3]`), eval_point len L.
 /// * jagged_eval: `n = 2*(log_m+1)` rounds (`log_m =
 ///   trailing_zeros(np2(total_values-1))`), each poly 3 coeffs (degree-2).
@@ -356,7 +355,7 @@ where
 /// reduction dimension, every one a witness length and so a different
 /// program. `pins` are the child's machine pins (`None` = natural areas): the
 /// preprocessed round takes `pins.prep`, the main round `pins.main`.
-pub fn dummy_jagged_basefold_bundle(
+pub fn dummy_jagged_bundle(
     prep_dims: &[(usize, usize)],
     chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
@@ -365,19 +364,16 @@ pub fn dummy_jagged_basefold_bundle(
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
-    use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
-    use zkm_pcs::basefold::stacked::StackedBasefoldProof;
     use zkm_pcs::jagged::pack_traces_jagged;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
     use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProof, PackingMeta};
-    use zkm_pcs::jagged_pcs::{lb_fri_config, pick_log_stacking_height, JaggedCommit, JaggedMmcs};
+    use zkm_pcs::jagged_pcs::{pick_log_stacking_height, JaggedCommit};
     use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
     use zkm_pcs::{InnerChallenge, InnerVal};
 
     type F = InnerVal;
     type EF = InnerChallenge;
-    const D: usize = 4;
 
     let round_dims: Vec<&[(usize, usize)]> =
         if prep_dims.is_empty() { vec![chip_dims] } else { vec![prep_dims, chip_dims] };
@@ -472,10 +468,6 @@ pub fn dummy_jagged_basefold_bundle(
 
     let l = log_dense_size;
     let round_stripes: Vec<usize> = areas.iter().map(|a| a >> log_stacking).collect();
-    let inner_fri = lb_fri_config();
-    let num_queries = inner_fri.num_queries;
-    let inner_log_blowup = inner_fri.log_blowup();
-    let inner_log_folding_arity = inner_fri.log_folding_arity();
     let log_m = {
         {
             if total_values <= 1 {
@@ -488,81 +480,7 @@ pub fn dummy_jagged_basefold_bundle(
     let jagged_n = 2 * (log_m + 1);
 
     let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
-
-    let round_arities: Vec<usize> = {
-        let k = inner_log_folding_arity.max(1);
-        let mut out = Vec::new();
-        let mut v = 0usize;
-        while v < log_stacking {
-            let g = core::cmp::min(k, log_stacking - v);
-            out.push(g);
-            v += g;
-        }
-        out
-    };
-    let univariate_messages: Vec<[EF; 2]> = vec![[EF::ZERO; 2]; log_stacking];
-    let fri_commitments: Vec<_> = round_arities.iter().map(|_| zero_cap()).collect();
-    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = {
-        let mut consumed = 0usize;
-        round_arities
-            .iter()
-            .map(|&arity| {
-                consumed += arity;
-                let path_len = log_stacking + inner_log_blowup - consumed;
-                let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
-                    .map(|_| LeafOpening {
-                        values: vec![vec![F::ZERO; (1usize << arity) * D]],
-                        proof: vec![[F::ZERO; 8]; path_len],
-                    })
-                    .collect();
-                MerkleOpening { leaves }
-            })
-            .collect()
-    };
-    let component_openings_dummy: Vec<MerkleOpening<F, JaggedMmcs>> = round_stripes
-        .iter()
-        .map(|stripes| MerkleOpening {
-            leaves: (0..num_queries)
-                .map(|_| LeafOpening {
-                    values: vec![vec![F::ZERO; *stripes]],
-                    proof: vec![[F::ZERO; 8]; log_stacking + inner_log_blowup],
-                })
-                .collect(),
-        })
-        .collect();
-    let bf_proof = BasefoldProof::<F, EF, JaggedMmcs> {
-        univariate_messages,
-        fri_commitments,
-        component_polynomials_query_openings_and_proofs: component_openings_dummy,
-        query_phase_openings_and_proofs,
-        final_poly: EF::ZERO,
-        pow_witness: F::ZERO,
-        batch_grinding_witness: F::ZERO,
-    };
-    let stacked = StackedBasefoldProof::<F, EF, JaggedMmcs> {
-        basefold_proof: bf_proof,
-        batch_evaluations: round_stripes.iter().map(|stripes| vec![EF::ZERO; *stripes]).collect(),
-    };
-
-    let whir_mode =
-        <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::BasefoldRing>::WHIR_INNER_PCS;
-    let (stacked, whir_proof) = if whir_mode {
-        let empty = StackedBasefoldProof::<F, EF, JaggedMmcs> {
-            basefold_proof: BasefoldProof::<F, EF, JaggedMmcs> {
-                univariate_messages: Vec::new(),
-                fri_commitments: Vec::new(),
-                component_polynomials_query_openings_and_proofs: Vec::new(),
-                query_phase_openings_and_proofs: Vec::new(),
-                final_poly: EF::ZERO,
-                pow_witness: F::ZERO,
-                batch_grinding_witness: F::ZERO,
-            },
-            batch_evaluations: Vec::new(),
-        };
-        (empty, Some(dummy_stacked_whir_proof(log_stacking, &round_stripes, profile)))
-    } else {
-        (stacked, None)
-    };
+    let whir_proof = dummy_stacked_whir_proof(log_stacking, &round_stripes, profile);
 
     let reduction = JaggedReductionProof::<EF> {
         rounds: vec![JaggedReductionRound { evals: [EF::ZERO; 3] }; l.max(1)],
@@ -583,7 +501,6 @@ pub fn dummy_jagged_basefold_bundle(
 
     JaggedPcsProof {
         reduction,
-        basefold_proof: stacked,
         whir_proof,
         y_per_chip: column_counts.iter().map(|c| vec![EF::ZERO; *c]).collect(),
         commit: JaggedCommit {
@@ -595,12 +512,6 @@ pub fn dummy_jagged_basefold_bundle(
         packing: packing_meta,
         jagged_eval,
         preceding_commits: (0..round_stripes.len().saturating_sub(1)).map(|_| zero_cap()).collect(),
-        extra_reduction: Vec::new(),
-        extra_basefold_proof: Vec::new(),
-        extra_commit: Vec::new(),
-        extra_packing: Vec::new(),
-        extra_jagged_eval: Vec::new(),
-        groups: Vec::new(),
     }
 }
 
@@ -642,8 +553,8 @@ fn dummy_stacked_whir_proof(
     zkm_pcs::jagged_pcs::JaggedMmcs,
 > {
     use p3_symmetric::MerkleCap;
-    use zkm_pcs::basefold::proof::{LeafOpening, MerkleOpening};
     use zkm_pcs::jagged_pcs::JaggedMmcs;
+    use zkm_pcs::whir::merkle::{LeafOpening, MerkleOpening};
     use zkm_pcs::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
     use zkm_pcs::whir::stacked::StackedWhirProof;
     use zkm_pcs::{InnerChallenge, InnerVal};
@@ -814,7 +725,7 @@ mod tests {
 
         let max_log_row_count = 8usize;
 
-        let dummy_bundle = dummy_jagged_basefold_bundle(
+        let dummy_bundle = dummy_jagged_bundle(
             &[],
             chip_dims,
             max_log_row_count,

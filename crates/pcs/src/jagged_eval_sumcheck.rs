@@ -528,7 +528,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
 // Dedicated rayon pool for the jagged-eval structural sumcheck.  The jagged-eval
-// runs INSIDE the single-thread basefold worker pool, so a bare `par_iter` there
+// runs INSIDE the single-thread jagged worker pool, so a bare `par_iter` there
 // stays sequential; installing on this pool routes the per-column inner loops to
 // all host cores while the GPU is idle.  Byte-neutral: field addition is
 // associative/commutative, so the tree-reduce equals the sequential fold

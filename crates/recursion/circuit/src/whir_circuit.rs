@@ -1,6 +1,6 @@
 //! In-circuit verifier for the stacked-WHIR inner PCS.
 //!
-//! The WHIR sibling of [`crate::basefold_verifier`]: verifies a
+//! Verifies a
 //! [`zkm_pcs::whir::stacked::StackedWhirProof`] inside the recursion circuit,
 //! replaying the EXACT transcript of the host
 //! `StackedWhirVerifier::verify_trusted_evaluation`
@@ -9,7 +9,7 @@
 //! opening, and close with the terminal identity over the mixed
 //! Lagrange/monomial constraint set.
 //!
-//! Shape philosophy matches the BaseFold circuit verifier: everything
+//! Shape philosophy: everything
 //! structural (round count, folding factor, stripe counts, domain sizes, PoW
 //! bit budgets, path depths) is COMPILE-TIME from the `WhirConfig` + the
 //! round stripe counts, so the emitted program is value-independent; only
@@ -28,7 +28,7 @@ use crate::witness::{WitnessWriter, Witnessable};
 use crate::CircuitConfig;
 
 /// One opened Merkle leaf: the per-matrix opened rows plus the sibling path.
-/// Mirror of the host [`zkm_pcs::basefold::proof::LeafOpening`].
+/// Mirror of the host [`zkm_pcs::whir::merkle::LeafOpening`].
 #[derive(Clone)]
 pub struct RecursiveWhirLeafOpening<F, EF, Dig> {
     /// Round-0 stripe rows: one inner vec per committed stripe matrix at
@@ -37,15 +37,14 @@ pub struct RecursiveWhirLeafOpening<F, EF, Dig> {
     /// Later-round leaf: the `2^ff` EF codeword values (the host commits
     /// their base limbs; the circuit re-derives the limbs via `ext2felt`
     /// for the leaf hash — `CircuitFelts2Ext` is gnark-only, so the EF
-    /// values are witnessed directly, exactly like the BaseFold
-    /// commit-phase openings).  Empty for round-0 leaves.
+    /// values are witnessed directly).  Empty for round-0 leaves.
     pub ef_values: Vec<EF>,
     /// Sibling digests, leaf-to-root.
     pub path: Vec<Dig>,
 }
 
 /// One round's query openings (final queries ride in the last entry).
-/// Mirror of the host [`zkm_pcs::basefold::proof::MerkleOpening`].
+/// Mirror of the host [`zkm_pcs::whir::merkle::MerkleOpening`].
 #[derive(Clone)]
 pub struct RecursiveWhirMerkleOpening<F, EF, Dig> {
     pub leaves: Vec<RecursiveWhirLeafOpening<F, EF, Dig>>,
@@ -297,10 +296,9 @@ pub fn write_stacked_whir_to_stream<C, Dig>(
 }
 
 /// In-circuit verifier for a stacked-WHIR batched opening.  Generic over
-/// the Merkle hasher `HV` exactly like
-/// [`crate::basefold_verifier::RecursiveBasefoldVerifier`]; defaults to the
-/// inner KoalaBear Poseidon2 ring (the only ring that verifies WHIR core
-/// proofs — recursion shards stay BaseFold).
+/// the Merkle hasher `HV`; defaults to the
+/// inner KoalaBear Poseidon2 ring, the ring the core proofs are committed
+/// under.
 pub struct RecursiveStackedWhirVerifier<HV = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     pub config: WhirConfig,
     pub log_stacking_height: u32,
@@ -773,9 +771,9 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
-    use zkm_pcs::basefold::mle::Mle;
     use zkm_pcs::jagged_pcs::JaggedMmcs;
     use zkm_pcs::whir::jagged::whir_config_for_stack;
+    use zkm_pcs::whir::mle::Mle;
     use zkm_pcs::whir::stacked::{StackedWhirProver, StackedWhirVerifier};
     use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_pcs::{InnerChallenger, InnerCompress, InnerHash, InnerPerm};

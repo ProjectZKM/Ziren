@@ -1,7 +1,7 @@
 //! WHIR prover: the OOD commitment.
 //!
 //! `commit_with_ood` is WHIR's commit: RS-encode the MLE and Merkle-commit it
-//! exactly as BaseFold does (reusing [`DftEncoder`] + the `Mmcs`), then draw
+//! (with [`DftEncoder`] + the `Mmcs`), then draw
 //! `starting_ood_samples` out-of-domain points from the transcript and evaluate
 //! the committed polynomial at them.  The (points, answers) go into the
 //! transcript; the folding sumcheck later constrains them.  The folding prover
@@ -15,14 +15,13 @@ use p3_commit::Mmcs;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 
-use crate::basefold::config::FriConfig;
-use crate::basefold::encoder::DftEncoder;
-use crate::basefold::mle::Mle;
 use crate::whir::config::WhirConfig;
+use crate::whir::encoder::DftEncoder;
+use crate::whir::mle::Mle;
 use crate::whir::proof::ParsedCommitment;
 
-/// A WHIR prover.  Holds the same primitives BaseFold's does (an RS encoder
-/// over a DFT, and a Merkle `Mmcs`) plus the WHIR schedule.
+/// A WHIR prover: an RS encoder over a DFT, a Merkle `Mmcs`, and the WHIR
+/// schedule.
 pub struct WhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
     pub encoder: DftEncoder<F, D>,
     pub mmcs: MT,
@@ -45,8 +44,8 @@ where
     D: TwoAdicSubgroupDft<F>,
 {
     pub fn new(dft: Arc<D>, mmcs: MT, config: WhirConfig) -> Self {
-        let fri = FriConfig::new(config.starting_log_inv_rate, 0, 0);
-        Self { encoder: DftEncoder::new(fri, dft), mmcs, config, _ef: core::marker::PhantomData }
+        let encoder = DftEncoder::new(config.starting_log_inv_rate, dft);
+        Self { encoder, mmcs, config, _ef: core::marker::PhantomData }
     }
 
     /// WHIR commit: encode + Merkle-commit the MLE, then draw and answer the

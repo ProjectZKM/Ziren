@@ -1,17 +1,16 @@
-//! Jagged-WHIR wiring — the WHIR siblings of `jagged_pcs`'s commit / open /
-//! verify entry points, sharing the jagged layer's dense-packing, stacking
-//! interleave, and claim-binding conventions so the shard prover can swap the
-//! inner PCS without touching the jagged reduction above it.
+//! Jagged-WHIR wiring — the commit / open / verify entry points the jagged
+//! layer (`jagged_pcs`) calls, under its dense-packing, stacking interleave
+//! and claim-binding conventions.
 //!
-//! Contract parity with the BaseFold path:
-//!   * commit consumes the same `chip_traces` (in production a single width-1
-//!     dense polynomial), runs the same `chips_to_mles_owned` +
+//! Contract with the jagged layer:
+//!   * commit consumes the `chip_traces` (in production a single width-1
+//!     dense polynomial), runs `chips_to_mles_owned` +
 //!     `interleave_multilinears_with_fixed_rate` stacking, and reports the
-//!     same `(chip_dims, area, log_stacking_height)` metadata;
+//!     `(chip_dims, area, log_stacking_height)` metadata;
 //!   * the interleaved stripes (width `DEFAULT_BATCH_SIZE`) are split into
 //!     width-1 polynomials, so a round's polynomial count is exactly
 //!     `area >> log_stacking_height` — the count the stacked verifier derives
-//!     from `round_areas`, and the order matches BaseFold's flat
+//!     from `round_areas`, in the order of the proof's flat
 //!     `batch_evaluations` (stripe-major, then column);
 //!   * verify first checks `evaluation_claim == interpolation of the echoed
 //!     evaluations at the batch coordinates` (the `StackingMismatch` bind),
@@ -27,17 +26,17 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::basefold::mle::Mle;
-use crate::basefold::stacked::interleave_multilinears_with_fixed_rate;
 use crate::jagged_pcs::{
     chips_to_mles_owned, pick_log_stacking_height, JaggedChallenge, JaggedCommitGeneric, JaggedVal,
     DEFAULT_BATCH_SIZE,
 };
 use crate::whir::config::{RoundConfig, WhirConfig};
 use crate::whir::error::WhirVerifierError;
+use crate::whir::mle::Mle;
 use crate::whir::stacked::{
     StackedWhirProof, StackedWhirProver, StackedWhirProverData, StackedWhirVerifier,
 };
+use crate::whir::stripes::interleave_multilinears_with_fixed_rate;
 
 /// Prover-side state kept after a jagged-WHIR commit.
 pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {
@@ -262,7 +261,7 @@ pub fn min_queries(log_inv_rate: usize, pow: usize) -> usize {
 /// Which schedule a ring proves and verifies under.
 ///
 /// The profile is a property of a stage's ring type
-/// (`BasefoldRing::WHIR_PROFILE`), never of a proof: prover and verifier both
+/// (`WhirRing::WHIR_PROFILE`), never of a proof: prover and verifier both
 /// derive the schedule from their own ring and the committed stacking height,
 /// so a proof cannot name a weaker schedule than the stage it claims to be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -546,8 +545,8 @@ pub fn size_tuned_whir_config(lsh: usize, params: SizeTunedParams) -> WhirConfig
 }
 
 /// Split the stacking interleave's width-`batch` stripes into width-1
-/// polynomials, in the SAME flat order BaseFold's `round_batch_evaluations`
-/// reports (stripe-major, then column: `eval_at` returns per-column evals).
+/// polynomials, in the SAME flat order as `StackedWhirProof::batch_evaluations`
+/// (stripe-major, then column: `eval_at` returns per-column evals).
 ///
 /// One gather per column, the columns of an interleave in parallel: the
 /// width-1 form is the one the round-0 engine and the device upload read
@@ -606,8 +605,8 @@ where
 /// Commit an already stacked dense polynomial under jagged-WHIR: `stripes`
 /// are its width-`DEFAULT_BATCH_SIZE` interleaves (column `c` of interleave
 /// `i` is stripe `i · DEFAULT_BATCH_SIZE + c`), exactly what
-/// `interleave_multilinears_with_fixed_rate` produces and what a BaseFold
-/// stacking of the same dense keeps as its `interleaved_mles`.  A caller that
+/// `interleave_multilinears_with_fixed_rate` produces and what the jagged
+/// commit keeps as `JaggedProverDataGeneric::interleaved_mles`.  A caller that
 /// keeps the interleaves for the jagged reduction therefore stacks once and
 /// commits once; the commitment and prover data are those of
 /// [`commit_jagged_whir_generic`] over the same cells.

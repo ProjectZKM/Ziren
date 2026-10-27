@@ -1014,12 +1014,13 @@ pub mod tests {
         let result = crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
         for sp in &result.unwrap().shard_proofs {
             let bsp = sp.jagged_shard_proof.as_ref();
-            match &bsp.evaluation_proof {
-                zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
-                    assert!(b.whir_proof.is_some(), "shard was proven under BaseFold");
-                }
-                _ => panic!("expected a Bundle evaluation proof"),
-            }
+            assert!(
+                matches!(
+                    &bsp.evaluation_proof,
+                    zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(_)
+                ),
+                "expected a Bundle evaluation proof"
+            );
         }
     }
 
@@ -1469,12 +1470,12 @@ pub mod tests {
         );
 
         let mut forged = proof.clone();
-        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
 
-        let nchips = bf.opened_values.chips.len();
+        let nchips = jagged.opened_values.chips.len();
         assert!(nchips >= 2, "need >=2 chips to forge area-preserving heights");
 
-        let bit_len = bf.opened_values.chips[0].quotient[0].len();
+        let bit_len = jagged.opened_values.chips[0].quotient[0].len();
         let one = <KoalaBear as p3_field::PrimeCharacteristicRing>::ONE;
         let zero = <KoalaBear as p3_field::PrimeCharacteristicRing>::ZERO;
         let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
@@ -1486,7 +1487,7 @@ pub mod tests {
             let mut r = None;
             let mut l = None;
             for c in 0..nchips {
-                let v = bf.opened_values.chips[c].quotient[0][bit];
+                let v = jagged.opened_values.chips[c].quotient[0][bit];
                 if v == zero_ef && r.is_none() {
                     r = Some(c);
                 } else if v == one_ef && l.is_none() {
@@ -1507,8 +1508,8 @@ pub mod tests {
             "area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
              lower chip[{lc}] bit {lb} (1->0); bit_len={bit_len}"
         );
-        bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
-        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
+        jagged.opened_values.chips[rc].quotient[0][rb] = one_ef;
+        jagged.opened_values.chips[lc].quotient[0][lb] = zero_ef;
 
         let forged_res = verify(&forged);
         tracing::info!("forged verify => {forged_res}");
@@ -1578,12 +1579,12 @@ pub mod tests {
     fn apply_height_forgery(
         forged: &mut zkm_pcs::MachineProof<KoalaBearPoseidon2>,
     ) -> Option<String> {
-        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-        let nchips = bf.opened_values.chips.len();
+        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let nchips = jagged.opened_values.chips.len();
         if nchips < 2 {
             return None;
         }
-        let bit_len = bf.opened_values.chips[0].quotient[0].len();
+        let bit_len = jagged.opened_values.chips[0].quotient[0].len();
         let one = <KoalaBear as p3_field::PrimeCharacteristicRing>::ONE;
         let zero = <KoalaBear as p3_field::PrimeCharacteristicRing>::ZERO;
         let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
@@ -1595,7 +1596,7 @@ pub mod tests {
             let mut r = None;
             let mut l = None;
             for c in 0..nchips {
-                let v = bf.opened_values.chips[c].quotient[0][bit];
+                let v = jagged.opened_values.chips[c].quotient[0][bit];
                 if v == zero_ef && r.is_none() {
                     r = Some(c);
                 } else if v == one_ef && l.is_none() {
@@ -1612,8 +1613,8 @@ pub mod tests {
         }
         let (rc, rb) = raise?;
         let (lc, lb) = lower?;
-        bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
-        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
+        jagged.opened_values.chips[rc].quotient[0][rb] = one_ef;
+        jagged.opened_values.chips[lc].quotient[0][lb] = zero_ef;
         Some(format!(
             "area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
              lower chip[{lc}] bit {lb} (1->0); nchips={nchips} bit_len={bit_len}"
@@ -1675,12 +1676,12 @@ pub mod tests {
     ) -> Option<String> {
         use p3_field::PrimeCharacteristicRing;
         let desc = {
-            let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-            let nchips = bf.opened_values.chips.len();
+            let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+            let nchips = jagged.opened_values.chips.len();
             if nchips < 2 {
                 return None;
             }
-            let bit_len = bf.opened_values.chips[0].quotient[0].len();
+            let bit_len = jagged.opened_values.chips[0].quotient[0].len();
             type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
             let one_ef = EF::from(KoalaBear::ONE);
             let zero_ef = EF::from(KoalaBear::ZERO);
@@ -1690,7 +1691,7 @@ pub mod tests {
                 let mut r = None;
                 let mut l = None;
                 for c in 0..nchips {
-                    let v = bf.opened_values.chips[c].quotient[0][bit];
+                    let v = jagged.opened_values.chips[c].quotient[0][bit];
                     if v == zero_ef && r.is_none() {
                         r = Some(c);
                     } else if v == one_ef && l.is_none() {
@@ -1707,17 +1708,17 @@ pub mod tests {
             }
             let (rc, rb) = raise?;
             let (lc, lb) = lower?;
-            bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
-            bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
+            jagged.opened_values.chips[rc].quotient[0][rb] = one_ef;
+            jagged.opened_values.chips[lc].quotient[0][lb] = zero_ef;
             (rc, rb, lc, lb, nchips, bit_len)
         };
         let (rc, rb, lc, lb, nchips, bit_len) = desc;
 
-        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(2));
         let mut touched = 0usize;
-        for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
+        for ce in jagged.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 for v in mf.iter_mut() {
                     *v *= scale;
@@ -1848,9 +1849,9 @@ pub mod tests {
         let mut forged = proof.clone();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(3));
-        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         let mut touched = 0usize;
-        for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
+        for ce in jagged.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 if let Some(v) = mf.first_mut() {
                     *v *= scale;
@@ -1879,15 +1880,15 @@ pub mod tests {
         let zero_ef = EF::from(KoalaBear::ZERO);
 
         let mut forged = proof.clone();
-        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-        let nchips = bf.opened_values.chips.len();
-        let bit_len = bf.opened_values.chips[0].quotient[0].len();
+        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let nchips = jagged.opened_values.chips.len();
+        let bit_len = jagged.opened_values.chips[0].quotient[0].len();
         let mut raise: Option<(usize, usize)> = None;
         let mut lower: Option<(usize, usize)> = None;
         'outer: for bit in (1..bit_len).rev() {
             let (mut r, mut l) = (None, None);
             for c in 0..nchips {
-                let v = bf.opened_values.chips[c].quotient[0][bit];
+                let v = jagged.opened_values.chips[c].quotient[0][bit];
                 if v == zero_ef && r.is_none() {
                     r = Some(c);
                 } else if v == one_ef && l.is_none() {
@@ -1904,8 +1905,8 @@ pub mod tests {
         }
         let (rc, rb) = raise.expect("fib hosts a degree forgery");
         let (lc, lb) = lower.unwrap();
-        bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
-        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
+        jagged.opened_values.chips[rc].quotient[0][rb] = one_ef;
+        jagged.opened_values.chips[lc].quotient[0][lb] = zero_ef;
         tracing::info!("forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}");
 
         let forged_on = verify_to_string(&machine, &vk, &forged);

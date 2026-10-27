@@ -1,4 +1,4 @@
-//! Reed-Solomon encoder for the Basefold protocol.
+//! Reed-Solomon encoder for the WHIR protocol.
 //!
 //! # Encoding choice
 //!
@@ -10,9 +10,7 @@
 //!   2. zero-pads to the larger length
 //!   3. coset-DFTs to evaluation form on `shift * H_large`
 //!
-//! Output is in bit-reversed order, which is exactly what
-//! [`p3_fri::fold_even_odd`] consumes in
-//! [`super::fri::commit_phase_round`].
+//! Output is in bit-reversed order.
 
 use alloc::sync::Arc;
 use core::marker::PhantomData;
@@ -24,7 +22,6 @@ use p3_matrix::util::reverse_matrix_index_bits;
 use p3_matrix::Matrix;
 
 use super::code::RsCodeWord;
-use super::config::FriConfig;
 use super::mle::{Message, Mle};
 
 /// CPU-resident DFT-based RS encoder.
@@ -32,7 +29,8 @@ use super::mle::{Message, Mle};
 /// Generic over the DFT impl `D` (typically `Radix2DitParallel<F>`).
 #[derive(Debug, Clone)]
 pub struct DftEncoder<F: Field, D> {
-    pub config: FriConfig<F>,
+    /// `log2` of the blowup: a codeword is `2^log_blowup` times its message.
+    pub log_blowup: usize,
     pub dft: Arc<D>,
     _marker: PhantomData<F>,
 }
@@ -42,28 +40,20 @@ where
     F: TwoAdicField,
     D: TwoAdicSubgroupDft<F>,
 {
-    pub const fn new(config: FriConfig<F>, dft: Arc<D>) -> Self {
-        Self { config, dft, _marker: PhantomData }
-    }
-
-    pub fn config(&self) -> &FriConfig<F> {
-        &self.config
+    pub const fn new(log_blowup: usize, dft: Arc<D>) -> Self {
+        Self { log_blowup, dft, _marker: PhantomData }
     }
 
     /// Encode a stream of MLEs into RS codewords.  Each MLE is
     /// encoded independently — no cross-MLE materialization, which
-    /// is the structural OOM win over WHIR's dense-vec commit path.
+    /// is the structural OOM win over a dense-vec commit path.
     ///
     /// MLE values are interpreted as the **coefficients** of the
     /// underlying degree-`(2^k - 1)` polynomial.  We
-    /// zero-pad coefficients to length `N << log_blowup`, then DFT
-    /// directly — `dft_batch` returns bit-reversed evaluations,
-    /// which is exactly what `fold_even_odd_ext` expects.  Using the
-    /// coefficient interpretation is what lets the FRI commit-phase
-    /// fold and the multilinear-extension fold collapse to the same
-    /// constant (the BaseFold key insight).
+    /// zero-pad coefficients to length `N << log_blowup`, DFT
+    /// directly, then bit-reverse the evaluation rows.
     pub fn encode_batch(&self, data: Message<Mle<F>>) -> Message<RsCodeWord<F>> {
-        let log_blowup = self.config.log_blowup();
+        let log_blowup = self.log_blowup;
         data.into_iter()
             .map(|mle| {
                 let width = mle.num_polynomials();

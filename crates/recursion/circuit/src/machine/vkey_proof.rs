@@ -1,16 +1,16 @@
 //! VK-merkle-proof verifier + vkey **data-type carriers**.
 //!
-//! The vkey check runs at the head of each basefold compose verifier
-//! (`verify_compress_basefold`, `verify_deferred_basefold`,
-//! `verify_wrap_basefold`), which call [`ZKMMerkleProofVerifier::verify`].
+//! The vkey check runs at the head of each whir compose verifier
+//! (`verify_compress_jagged`, `verify_deferred_jagged`,
+//! `verify_wrap_jagged`), which call [`ZKMMerkleProofVerifier::verify`].
 //!
 //! - [`ZKMMerkleProofVerifier`] — the vkey Merkle-membership verifier.
 //! - [`ZKMMerkleProofWitnessValues`] / [`ZKMMerkleProofWitnessVariable`] —
 //!   the witness carriers for the merkle proof, consumed by
-//!   `compress_basefold::ZKMCompressBasefoldWitnessValues::vk_merkle_data`
-//!   and the deferred/wrap basefold variants.
+//!   `compress_jagged::ZKMCompressWitnessValues::vk_merkle_data`
+//!   and the deferred/wrap whir variants.
 //! - [`ZKMCompressWithVkeyShape`] — the shape-enumeration carrier consumed
-//!   by the prover's shape/vk-map tooling and the basefold dummies.
+//!   by the prover's shape/vk-map tooling and the whir dummies.
 
 use std::marker::PhantomData;
 
@@ -94,7 +94,7 @@ impl<SC: FieldHasher<KoalaBear>> ZKMMerkleProofWitnessValues<SC>
 where
     SC::Digest: Copy + Default,
 {
-    // #H (BaseFold-over-BN254 wrap port): generic over SC so the gnark wrap
+    // #H (WHIR-over-BN254 wrap port): generic over SC so the gnark wrap
     // layer (OuterSC, Digest = [Bn254;1]) can build a dummy merkle witness
     // (the gnark verifier skips merkle, so only the shape must read/write).
     // `map` (not vec![;]) avoids requiring MerkleProof: Clone.

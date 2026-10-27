@@ -330,12 +330,12 @@ pub mod koala_bear_poseidon2 {
         ) -> Self::PrepPrecomputed {
             let views =
                 crate::jagged_pcs::jagged::views_over_traces(named_preprocessed_traces.to_vec());
-            <Self as crate::config::BasefoldRing>::commit_multilinears(&views, pin)
+            <Self as crate::config::WhirRing>::commit_multilinears(&views, pin)
         }
     }
 
     /// PREPROCESSED-trace setup commit for the inner
-    /// (`KoalaBearPoseidon2`) core/compress/shrink config: stacked BaseFold
+    /// (`KoalaBearPoseidon2`) core/compress/shrink config: stacked WHIR
     /// over the Poseidon2-KoalaBear `JaggedMmcs` (no two-adic coset LDE, so no
     /// `2^(TWO_ADICITY - log_blowup)` ceiling).  Mirrors `outer_prep_commit`
     /// (recursion-core, BN254 ring).  Returns the
@@ -345,7 +345,7 @@ pub mod koala_bear_poseidon2 {
     impl<const P: u8> crate::config::PrepCommitRoot<KoalaBearPoseidon2Ring<P>>
         for crate::jagged_pcs::jagged::PrecomputedJaggedCommit
     {
-        /// The HASH-BOUND commitment: the raw BaseFold root with the committed
+        /// The HASH-BOUND commitment: the raw WHIR root with the committed
         /// GEOMETRY folded in,
         /// `compress([root, hash(row_counts ++ column_counts)])` — the same
         /// binding the MAIN round uses.
@@ -356,7 +356,7 @@ pub mod koala_bear_poseidon2 {
         /// counts against this digest.  The raw root travels in the PROOF,
         /// and the verifier re-derives the digest from it.
         fn commit_root(&self) -> Com<KoalaBearPoseidon2Ring<P>> {
-            let raw = crate::jagged_pcs::basefold_commit_digest(&self.commit);
+            let raw = crate::jagged_pcs::whir_commit_digest(&self.commit);
             let modified =
                 crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(raw, &self.packing);
             Com::<KoalaBearPoseidon2Ring<P>>::new(alloc::vec![modified])
@@ -372,7 +372,7 @@ pub mod koala_bear_poseidon2 {
         >>::commit_root(&inner_prep_precompute(chip_traces, pin))
     }
 
-    /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data
+    /// Same commit as [`inner_prep_commit`], keeping the WHIR prover data
     /// and jagged packing so the preprocessed round can be OPENED, not just
     /// observed.  See `StarkGenericConfig::PrepPrecomputed`.
     pub fn inner_prep_precompute(
@@ -389,10 +389,7 @@ pub mod koala_bear_poseidon2 {
         pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         let chip_trace_views = crate::jagged_pcs::jagged::views_over_traces(chip_traces);
-        <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &chip_trace_views,
-            pin,
-        )
+        <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&chip_trace_views, pin)
     }
 
     impl<const P: u8> ZeroCommitment<KoalaBearPoseidon2Ring<P>> for Pcs {
@@ -401,15 +398,13 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    // BaseFold-over-BN254 wrap port: the inner (default core / compress /
-    // shrink) config proves via the BaseFold jagged-PCS over the
-    // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `bf_mmcs()` reproduces
+    // WHIR-over-BN254 wrap port: the inner (default core / compress /
+    // shrink) config proves via the WHIR jagged-PCS over the
+    // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `whir_mmcs()` reproduces
     // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
     // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
-    // generic BaseFold cores can be driven through this trait.
-    impl<const P: u8> crate::config::BasefoldRing for KoalaBearPoseidon2Ring<P> {
-        const WHIR_INNER_PCS: bool = true;
-
+    // generic WHIR cores can be driven through this trait.
+    impl<const P: u8> crate::config::WhirRing for KoalaBearPoseidon2Ring<P> {
         const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
             crate::whir::jagged::WhirProfile::Compress
         } else if P == WHIR_PROFILE_SHRINK {
@@ -420,13 +415,13 @@ pub mod koala_bear_poseidon2 {
 
         fn prep_open_data(
             prep: &Self::PrepPrecomputed,
-        ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
             prep
         }
 
-        type BfMmcs = crate::jagged_pcs::JaggedMmcs;
+        type WhirMmcs = crate::jagged_pcs::JaggedMmcs;
 
-        fn bf_mmcs() -> Self::BfMmcs {
+        fn whir_mmcs() -> Self::WhirMmcs {
             let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
             let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
             let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
@@ -434,31 +429,20 @@ pub mod koala_bear_poseidon2 {
         }
 
         fn digest_felts(
-            commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+            commit: &<Self::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
         ) -> [crate::jagged_pcs::JaggedVal; 8] {
-            crate::jagged_pcs::basefold_commit_digest_felts(commit)
-        }
-
-        fn whir_committed_bf_prover_data(
-            commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-        ) -> Option<
-            <Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
-                p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-            >,
-        > {
-            let root = crate::jagged_pcs::basefold_commit_digest_felts(commit);
-            Some(p3_merkle_tree::MerkleTree::from_parts(Vec::new(), vec![vec![root]], Vec::new()))
+            crate::jagged_pcs::whir_commit_digest_felts(commit)
         }
 
         // `commit_multilinears` — the ring commit — is the trait DEFAULT
-        // (this ring's `bf_mmcs()` / `fri_config()` are what it reads).
+        // (this ring's `whir_mmcs()` and `WHIR_PROFILE` are what it reads).
 
-        /// Ring-native jagged BaseFold open.  `Self::BfMmcs == JaggedMmcs` and
+        /// Ring-native jagged WHIR open.  `Self::WhirMmcs == JaggedMmcs` and
         /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
         /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
         fn prove_jagged_open(
             z_row: &[crate::InnerChallenge],
-            rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+            rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
             let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds_with_profile(

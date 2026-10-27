@@ -2,7 +2,7 @@
 //!
 //! Every field of the dummy is zero-filled via allocator
 //! helpers — no real prove call.  Used by the recursion-circuit
-//! `dummy_basefold_vk_and_shard_proof` to replace the previous slow
+//! `dummy_vk_and_shard_proof` to replace the previous slow
 //! path that drove `prove_shard_with_data` against zero traces.
 //!
 //! The slow path cost ~61.3s per compose-program pre-warm
@@ -26,8 +26,8 @@
 //!
 //! # Reference
 //!
-//! - Ziren callee replaced: [`crate::stark::dummy_basefold_vk_and_shard_proof`]
-//! - Shape-parity guard: `crate::stark::tests::dummy_basefold_vk_and_shard_proof_shape_stable`
+//! - Ziren callee replaced: [`crate::stark::dummy_vk_and_shard_proof`]
+//! - Shape-parity guard: `crate::stark::tests::dummy_vk_and_shard_proof_shape_stable`
 
 pub mod jagged_shard_proof;
 

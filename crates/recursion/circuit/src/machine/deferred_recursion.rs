@@ -1,15 +1,15 @@
-//! Deferred recursion-side basefold verifier program.
+//! Deferred recursion-side whir verifier program.
 //!
-//! Counterpart to [`super::deferred_basefold`] that targets the
+//! Counterpart to [`super::deferred_jagged`] that targets the
 //! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
 //! [`zkm_core_machine::mips::MipsAir`]. It mirrors the MIPS-path builder
-//! [`super::basefold_programs::build_deferred_basefold_program`] and reuses
-//! [`super::deferred_basefold::verify_deferred_basefold`] as its verifier
-//! body; see [`super::compress_basefold_recursion`] for the parallel compress
+//! [`super::programs::build_deferred_program`] and reuses
+//! [`super::deferred_jagged::verify_deferred_jagged`] as its verifier
+//! body; see [`super::compress_recursion`] for the parallel compress
 //! program.
 //!
 //! The builder accepts a `StarkMachine<KoalaBearPoseidon2Compress,
-//! RecursionAir<KoalaBear, DEGREE>>` and a [`ZKMDeferredBasefoldWitnessValues`]
+//! RecursionAir<KoalaBear, DEGREE>>` and a [`ZKMDeferredWitnessValues`]
 //! whose embedded `JaggedShardProof` was produced over recursion-AIR traces;
 //! `RecursionAir<F, DEGREE>` satisfies `Air<ShardConstraintFolder>` via the
 //! standard `MachineAir` derive.
@@ -26,30 +26,28 @@ use zkm_recursion_core::RecursionProgram;
 
 use crate::witness::Witnessable;
 
-use super::deferred_basefold::{verify_deferred_basefold, ZKMDeferredBasefoldWitnessValues};
+use super::deferred_jagged::{verify_deferred_jagged, ZKMDeferredWitnessValues};
 
-/// Build the recursion-side deferred basefold program.
+/// Build the recursion-side deferred whir program.
 ///
-/// Direct analog of [`super::basefold_programs::build_deferred_basefold_program`]
+/// Direct analog of [`super::programs::build_deferred_program`]
 /// expected to be invoked with `A = RecursionAir<KoalaBear, DEGREE>`.
 /// The verifier body is shared with the MIPS path — see the parallel
 /// scaffold module for the architectural rationale.
-pub fn build_deferred_basefold_recursion_program<A>(
+pub fn build_deferred_recursion_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
-    input: &ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
+    input: &ZKMDeferredWitnessValues<KoalaBearPoseidon2Compress>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
-        >,
+        + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();
+    let builder_span = tracing::debug_span!("build deferred-whir-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
-    verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2Compress, A>(
+    verify_deferred_jagged::<InnerConfig, KoalaBearPoseidon2Compress, A>(
         &mut builder,
         input_var,
         machine,
@@ -59,8 +57,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span =
-        tracing::debug_span!("compile deferred-basefold-recursion program").entered();
+    let compiler_span = tracing::debug_span!("compile deferred-whir-recursion program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -77,7 +74,7 @@ mod tests {
     /// drift across upstream refactors.
     #[test]
     fn shares_verifier_body_with_mips_path() {
-        let _ = verify_deferred_basefold::<
+        let _ = verify_deferred_jagged::<
             InnerConfig,
             KoalaBearPoseidon2Compress,
             RecursionAir<KoalaBear, 9>,

@@ -317,14 +317,14 @@ pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
     LOGUP_DEVICE_EQ_ROW_POINT.with(|c| c.borrow_mut().take())
 }
 
-// BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify
+// WHIR-over-BN254 wrap port: OUTER-ring jagged WHIR open/verify
 //
-// The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
+// The OUTER (wrap) ring proves/verifies the jagged WHIR open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
 // types live in recursion-core, which depends on zkm-pcs, so zkm-pcs cannot
 // name them.  The shard prover (`prove_trusted_evaluations`) and host
 // verifier (`verify_jagged_pcs_host`) reach them STATICALLY via the
-// `BasefoldRing` associated types
+// `WhirRing` associated types
 // (`prove_jagged_rounds_generic` /
 // `build_jagged_verify_inputs` + `verify_jagged_inner_generic`);
 // the setup commit is the typed `StarkGenericConfig::prep_commit` method,

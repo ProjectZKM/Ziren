@@ -80,8 +80,8 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;
 
-    /// The BaseFold preprocessed-commit for this config, if it has one.  Commits
-    /// the preprocessed traces via the jagged BaseFold path (no two-adic coset
+    /// The WHIR preprocessed-commit for this config, if it has one.  Commits
+    /// the preprocessed traces via the jagged WHIR path (no two-adic coset
     /// LDE) and returns the commitment directly.  `StarkMachine::setup` uses it
     /// whenever it is defined -- there is no height threshold and no opt-in
     /// flag.
@@ -97,7 +97,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     ) -> Com<Self>;
 
     /// The PRECOMPUTED preprocessed commit: the commitment together with the
-    /// BaseFold prover data (codeword + Merkle tree) and the jagged packing.
+    /// WHIR prover data (codeword + Merkle tree) and the jagged packing.
     ///
     /// [`prep_commit`](Self::prep_commit) throws all of that away and keeps only
     /// the root, which is enough to OBSERVE the preprocessed commitment but not
@@ -137,9 +137,9 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
     fn zero_commitment(&self) -> Com<SC>;
 }
 
-/// **#H (BaseFold-over-BN254 wrap port)** — selects the BaseFold jagged-PCS
-/// MMCS (and hence the commitment-hash family) for a given STARK config, and
-/// whether that config proves via the BaseFold path at all.
+/// **#H (WHIR-over-BN254 wrap port)** — selects the WHIR jagged-PCS
+/// MMCS (and hence the commitment-hash family) and the WHIR schedule for a
+/// given STARK config.
 ///
 /// `Val<Self>`/`Challenge<Self>` stay KoalaBear / KoalaBear⁴ for *both* the
 /// inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254) paths
@@ -148,48 +148,32 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// `TypeId` gates in `prover.rs` / `shard_level/*`).
 ///
 /// * Inner (`KoalaBearPoseidon2`, the default core/compress/shrink config):
-///   `BfMmcs = JaggedMmcs` (Poseidon2-KoalaBear Merkle).
-/// * Wrap (`KoalaBearPoseidon2Outer`): `BfMmcs = OuterValMmcs`
+///   `WhirMmcs = JaggedMmcs` (Poseidon2-KoalaBear Merkle).
+/// * Wrap (`KoalaBearPoseidon2Outer`): `WhirMmcs = OuterValMmcs`
 ///   (Poseidon2-BN254 Merkle, `Commitment = Hash<KoalaBear, Bn254, 1>`).
-///   `bf_mmcs()` builds that MMCS so the generic BaseFold cores
-///   (`commit/open/verify_jagged_pcs_generic`) can run over it.  See the impl
+///   `whir_mmcs()` builds that MMCS so the generic jagged-WHIR cores
+///   (`commit_jagged_whir_generic` / `open_jagged_whir_rounds_generic` /
+///   `verify_jagged_whir_rounds`) run over it.  See the impl
 ///   in `crates/recursion/core/src/stark/config.rs` (zkm-pcs cannot import
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
 /// Both rings run jagged-WHIR.  The higher-level jagged bundle / 8-felt digest
 /// stack (`JaggedPcsProof`, `prove_shard_with_data`'s
 /// `main_commitment: [Val; 8]`) is still concrete rather than generic over
-/// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
+/// `WhirMmcs::Commitment`; genericizing it is what would let `whir_mmcs()` be
 /// consumed directly.
-pub trait BasefoldRing: StarkGenericConfig {
+pub trait WhirRing: StarkGenericConfig {
     /// Borrow this config's [`PrepPrecomputed`](StarkGenericConfig::PrepPrecomputed)
-    /// as the concrete jagged commit the BaseFold prove path opens.
+    /// as the concrete jagged commit the WHIR prove path opens.
     ///
     /// `PrepPrecomputed` has to stay opaque on `StarkGenericConfig`, because
-    /// `setup` is generic over configs that know nothing about BaseFold — but
-    /// every implementor IS a `PrecomputedJaggedCommitGeneric<Self::BfMmcs>`,
-    /// and the shard prover (which is `BasefoldRing`-bounded) needs it as
+    /// `setup` is generic over configs that know nothing about WHIR — but
+    /// every implementor IS a `PrecomputedJaggedCommitGeneric<Self::WhirMmcs>`,
+    /// and the shard prover (which is `WhirRing`-bounded) needs it as
     /// exactly that to open the preprocessed round against the vk's commitment.
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
-    ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
-
-    /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
-    /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
-    /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
-    ///
-    /// `Commitment`/`Proof` carry `Serialize + Deserialize` so the
-    /// generic bundle's `to_bytes()` is callable directly from the shard prover
-    /// (the wrap `EvaluationProof::Bytes` path).  These are associated-type
-    /// bounds (implied at every `SC: BasefoldRing` site).  The `SC::Challenger`
-    /// capability bounds the generic BaseFold prover needs are NOT expressible
-    /// as implied bounds, so they live on the shard-prover call chain instead
-    /// (see `prove_trusted_evaluations`).
-    /// Whether this ring's machines commit under the jagged-WHIR PCS.  Both
-    /// rings do — the core machine, every recursion stage and the wrap — so
-    /// ONE PCS family runs down the whole proof tree; the wrap differs only
-    /// in its Merkle hash (BN254) and its schedule.
-    const WHIR_INNER_PCS: bool;
+    ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs>;
 
     /// The WHIR schedule this ring commits, opens and verifies under
     /// ([`crate::whir::jagged::WhirProfile`]).  A stage's ring type fixes it,
@@ -201,7 +185,18 @@ pub trait BasefoldRing: StarkGenericConfig {
         crate::whir::jagged::whir_config_for_profile(Self::WHIR_PROFILE, log_stacking_height)
     }
 
-    type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
+    /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
+    /// the WHIR jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
+    /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
+    ///
+    /// `Commitment`/`Proof` carry `Serialize + Deserialize` so the
+    /// generic bundle's `to_bytes()` is callable directly from the shard prover
+    /// (the wrap `EvaluationProof::Bytes` path).  These are associated-type
+    /// bounds (implied at every `SC: WhirRing` site).  The `SC::Challenger`
+    /// capability bounds the generic WHIR prover needs are NOT expressible
+    /// as implied bounds, so they live on the shard-prover call chain instead
+    /// (see `prove_trusted_evaluations`).
+    type WhirMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
         + p3_commit::Mmcs<
             crate::jagged_pcs::JaggedVal,
             Commitment: Clone
@@ -216,48 +211,14 @@ pub trait BasefoldRing: StarkGenericConfig {
                                                                                             + 'static,
         > + Clone
         // `'static` so the DEFAULT `commit_multilinears` body (which hands the
-        // MMCS to the generic BaseFold commit) typechecks at the trait level;
+        // MMCS to the generic WHIR commit) typechecks at the trait level;
         // both rings are concrete `'static` types, so this is a no-op.
         + 'static;
 
-    /// Construct the BaseFold MMCS for this config (perm + hash + compress).
-    fn bf_mmcs() -> Self::BfMmcs;
+    /// Construct the WHIR MMCS for this config (perm + hash + compress).
+    fn whir_mmcs() -> Self::WhirMmcs;
 
-    /// The BaseFold prover data standing in for a round committed under WHIR:
-    /// a leafless tree carrying the WHIR root alone.  Of that data only the
-    /// interleaved MLEs beside it are ever read (the jagged reduction rebuilds
-    /// the dense polynomial from them); no BaseFold opening walks the tree,
-    /// exactly as for a device-committed round.  `None` for a ring that never
-    /// commits under WHIR.
-    fn whir_committed_bf_prover_data(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-    ) -> Option<
-        <Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
-            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-        >,
-    > {
-        let _ = commit;
-        None
-    }
-
-    /// Per-stage BaseFold FRI config (rate / query count / grinding).
-    ///
-    /// The default returns the
-    /// inner / env-overridable config (`FriConfig::from_env_or_default()` =
-    /// `(log_blowup=1, num_queries=94, pow_bits=16)`), which is used by
-    /// core/compress/shrink.  The **wrap** ring (`KoalaBearPoseidon2Outer`)
-    /// overrides this to `FriConfig::wrap_fri_config()` = `(3, 94,
-    /// wrap_query_grinding_bits())` so the
-    /// on-chain wrap proof hits the full 100-bit query-phase soundness target
-    /// (the inner default at the wrap is only ~55-bit — see
-    /// `FriConfig::wrap_fri_config`).  Carried as a single source of truth from
-    /// commit through open/verify so the prover and verifier always agree on
-    /// the codeword rate.
-    fn fri_config() -> crate::basefold::config::FriConfig<crate::jagged_pcs::JaggedVal> {
-        crate::basefold::config::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default()
-    }
-
-    /// Does the verifying key's commitment EQUAL the raw root the BaseFold open
+    /// Does the verifying key's commitment EQUAL the raw root the WHIR open
     /// authenticates a preceding round against?
     ///
     /// The two rings store different things under `vk.commit`, so the question
@@ -277,20 +238,20 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// each implementor knows concretely and no caller can establish.
     fn vk_commit_is_preceding_root(
         _vk_commit: &crate::Com<Self>,
-        _raw: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+        _raw: &<Self::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> Option<bool> {
         None
     }
 
-    /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
+    /// #H: per-ring projection of the WHIR commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap
     /// root[0]; outer = deterministic projection of the BN254 commit.
     fn digest_felts(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+        commit: &<Self::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 
-    /// Ring-native jagged BaseFold commit: build the BaseFold commit over
-    /// this ring's [`Self::BfMmcs`] — no free-fn indirection.
+    /// Ring-native jagged WHIR commit: build the WHIR commit over
+    /// this ring's [`Self::WhirMmcs`] — no free-fn indirection.
     /// Inner (`KoalaBearPoseidon2`) commits over the Poseidon2-KoalaBear
     /// `JaggedMmcs`; the wrap ring over the Poseidon2-BN254 `OuterValMmcs`
     /// so the commitment is the BN254 root.  The DFT is over KoalaBear for
@@ -299,22 +260,19 @@ pub trait BasefoldRing: StarkGenericConfig {
     ///
     /// DEFAULT body, and the ONLY body: no ring overrides this method (checked
     /// across both repos), so the per-ring variation is entirely in the associated
-    /// `BfMmcs` / `bf_mmcs()` / `fri_config()` / `WHIR_INNER_PCS`. In particular
-    /// there is no `StarkGpuProver` override of it -- the device path commits
-    /// through its own separate hook.
+    /// `WhirMmcs` / `whir_mmcs()` / `WHIR_PROFILE`. In particular there is no
+    /// `StarkGpuProver` override of it -- the device path commits through its
+    /// own separate hook.
     ///
-    /// INVARIANT the caller inherits: when `WHIR_INNER_PCS`, the returned `commit`
-    /// is the WHIR root while `prover_data` remains the BaseFold one (whose Merkle
-    /// tree is then dead, kept only for the interleaved MLEs the step-4 reduction
-    /// reads), and `whir_data` is `Some`. Those three move together here, but
-    /// `PrecomputedJaggedCommitGeneric` can represent them disagreeing.  The
+    /// The returned `commit` is the WHIR root, `whir_data` the WHIR tree, and
+    /// `prover_data` keeps the interleaved MLEs the step-4 reduction reads.  The
     /// AREA PIN (`Some(target_log)` on a compress commit pins
     /// `log_dense_size` to `max(natural, target_log)`; `None` = NATURAL
     /// own-area packing).
     fn commit_multilinears(
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         pin: Option<crate::jagged::AreaPin>,
-    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
         use p3_matrix::dense::RowMajorMatrix;
 
         let mut packing =
@@ -339,55 +297,34 @@ pub trait BasefoldRing: StarkGenericConfig {
         )];
         let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
 
-        let (commit, prover_data, whir_data) = if Self::WHIR_INNER_PCS {
-            let (mles, chip_dims) = crate::jagged_pcs::chips_to_mles_owned(dense_traces);
-            let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
-            let log_stacking_height = crate::jagged_pcs::pick_log_stacking_height(total_entries);
-            let area = total_entries.next_multiple_of(1usize << log_stacking_height);
-            let interleaved_mles =
-                crate::basefold::stacked::interleave_multilinears_with_fixed_rate(
-                    crate::jagged_pcs::DEFAULT_BATCH_SIZE,
-                    mles,
-                    log_stacking_height,
-                );
-            let cfg = Self::whir_config(log_stacking_height as usize);
-            let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
-                Self::BfMmcs,
-                crate::jagged_pcs::JaggedDft,
-            >(
-                &interleaved_mles,
-                chip_dims.clone(),
-                area,
-                log_stacking_height,
-                Self::bf_mmcs(),
-                dft,
-                cfg,
-            );
-            let tree = Self::whir_committed_bf_prover_data(&wcommit.original_commitment)
-                .expect("a ring committing under WHIR supplies its leafless BaseFold prover data");
-            let pcs_batch_data = crate::basefold::BasefoldProverData {
-                prover_data: tree,
-                encoded_codewords: Vec::new(),
-                digest_layers: Vec::new(),
-            };
-            let prover_data = crate::jagged_pcs::JaggedProverDataGeneric::<Self::BfMmcs> {
-                stacked_data: crate::basefold::stacked::StackedBasefoldProverData {
-                    pcs_batch_data,
-                    interleaved_mles,
-                },
-                chip_dims,
-                area,
-                log_stacking_height,
-            };
-            (wcommit, prover_data, Some(wdata))
-        } else {
-            let (commit, prover_data) =
-                crate::jagged_pcs::commit_jagged_pcs_generic::<
-                    Self::BfMmcs,
-                    crate::jagged_pcs::JaggedDft,
-                >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config());
-            (commit, prover_data, None)
-        };
+        let (mles, chip_dims) = crate::jagged_pcs::chips_to_mles_owned(dense_traces);
+        let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
+        let log_stacking_height = crate::jagged_pcs::pick_log_stacking_height(total_entries);
+        let area = total_entries.next_multiple_of(1usize << log_stacking_height);
+        let interleaved_mles = crate::whir::stripes::interleave_multilinears_with_fixed_rate(
+            crate::jagged_pcs::DEFAULT_BATCH_SIZE,
+            mles,
+            log_stacking_height,
+        );
+        let cfg = Self::whir_config(log_stacking_height as usize);
+        let (commit, whir_data) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
+            Self::WhirMmcs,
+            crate::jagged_pcs::JaggedDft,
+        >(
+            &interleaved_mles,
+            chip_dims.clone(),
+            area,
+            log_stacking_height,
+            Self::whir_mmcs(),
+            dft,
+            cfg,
+        );
+        let prover_data = crate::jagged_pcs::JaggedProverDataGeneric::<Self::WhirMmcs>::new(
+            interleaved_mles,
+            chip_dims,
+            area,
+            log_stacking_height,
+        );
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
             packing,
             commit,
@@ -397,12 +334,12 @@ pub trait BasefoldRing: StarkGenericConfig {
         }
     }
 
-    /// Ring-native jagged BaseFold OPEN — the prove-side counterpart of
+    /// Ring-native jagged WHIR OPEN — the prove-side counterpart of
     /// [`Self::commit_multilinears`], and the reason
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] needs no
     /// runtime type test to pick a jagged open.
     ///
-    /// The open must run over the ring's OWN `Self::BfMmcs` and
+    /// The open must run over the ring's OWN `Self::WhirMmcs` and
     /// `Self::Challenger`, and it must produce the matching
     /// [`crate::shard_level::shard_proof::EvaluationProof`] shape: the inner
     /// (KoalaBear/Poseidon2) rings emit a concrete `Bundle`, the wrap ring
@@ -412,13 +349,13 @@ pub trait BasefoldRing: StarkGenericConfig {
     ///
     /// Unlike `commit_multilinears` this is a required method, NOT a
     /// default, so the `Self::Challenger` capability bounds the generic
-    /// BaseFold prover needs (`FieldChallenger` / `GrindingChallenger` /
-    /// `CanObserve<BfCommitment<Self>>`) are discharged INSIDE each concrete
+    /// WHIR prover needs (`FieldChallenger` / `GrindingChallenger` /
+    /// `CanObserve<WhirRingCommitment<Self>>`) are discharged INSIDE each concrete
     /// impl instead of propagating up the whole shard-prover call chain.
     ///
     /// Every round's `precomputed` commit is built by `commit_traces` before
     /// the open and handed over — the open itself must NOT observe the
-    /// BaseFold commit in-band: the verifier uses
+    /// WHIR commit in-band: the verifier uses
     /// `verify_jagged_no_observe`, so an in-band observe here is a
     /// transcript desync no green test suite can see.
     ///
@@ -427,18 +364,18 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// round is a main-only proof; two are `[preprocessed, main]`.
     fn prove_jagged_open(
         z_row: &[crate::InnerChallenge],
-        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
 
-/// The BaseFold jagged-PCS commitment type for a `BasefoldRing`
-/// config — `<SC::BfMmcs as Mmcs<JaggedVal>>::Commitment`.  Exposed so
+/// The WHIR jagged-PCS commitment type for a `WhirRing`
+/// config — `<SC::WhirMmcs as Mmcs<JaggedVal>>::Commitment`.  Exposed so
 /// downstream crates (e.g. `zkm-core-machine`, which does not depend on
-/// `p3-commit`) can name the `CanObserve<..>` bound the static outer BaseFold
+/// `p3-commit`) can name the `CanObserve<..>` bound the static outer WHIR
 /// open threads through the shard-prover call chain.
-pub type BfCommitment<SC> =
-    <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment;
+pub type WhirRingCommitment<SC> =
+    <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment;
 
 #[derive(Clone)]
 pub struct UniConfig<SC>(pub SC);

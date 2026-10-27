@@ -1,8 +1,8 @@
-//! Per-chip opening data for the BaseFold-pipeline shard verifier.
+//! Per-chip opening data for the jagged-pipeline shard verifier.
 //!
 //! Unlike [`zkm_pcs::ChipOpenedValues`] (the 4-batch FRI shape:
 //! preprocessed + main + permutation + quotient, each with `local` +
-//! `next` rows), the BaseFold pipeline:
+//! `next` rows), the jagged pipeline:
 //!
 //!   - reduces every chip's polynomial to a single hypercube point
 //!     (no `next`-row concept),
@@ -14,7 +14,7 @@
 //!     coordinates of chip height) used by the zerocheck verifier's
 //!     padded-row mask.
 //!
-//! This module hosts the BaseFold-shape opening type that bundles
+//! This module hosts the jagged-shape opening type that bundles
 //! exactly those fields per chip, instead of parallel slices
 //! (`chip_degrees`, `cumulative_sums`, `global_cumulative_sums`).
 //!
@@ -27,9 +27,9 @@ use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Ext, Felt};
 
 /// Single-row variant of [`zkm_pcs::AirOpenedValues`] for the
-/// BaseFold pipeline.
+/// jagged pipeline.
 ///
-/// Holds only `local` because the BaseFold reduction collapses
+/// Holds only `local` because the jagged reduction collapses
 /// every chip's polynomial to a single hypercube point — there is
 /// no `next` row to expose to constraint folding.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -40,7 +40,7 @@ pub struct JaggedAirOpenedValues<T> {
     pub local: Vec<T>,
 }
 
-/// Per-chip opening bundle for the BaseFold pipeline.
+/// Per-chip opening bundle for the jagged pipeline.
 ///
 /// The in-circuit verifier's counterpart of [`zkm_pcs::ChipOpenedValues`],
 /// which serves the 4-batch FRI verifier path.

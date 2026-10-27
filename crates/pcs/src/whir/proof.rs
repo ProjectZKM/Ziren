@@ -8,7 +8,7 @@ use p3_commit::Mmcs;
 use p3_field::{ExtensionField, Field};
 use serde::{Deserialize, Serialize};
 
-use crate::basefold::proof::MerkleOpening;
+use crate::whir::merkle::MerkleOpening;
 
 /// A degree-`d` univariate polynomial's coefficients — one sumcheck round
 /// message.  Mirrors `slop_whir::SumcheckPoly`.
@@ -23,8 +23,8 @@ pub struct ProofOfWork<F>(pub F);
 /// The parsed commitment: the Merkle root(s) plus the OOD points and the
 /// prover-supplied answers at them.  Mirrors `slop_whir::ParsedCommitment`.
 ///
-/// This is the WHIR-specific commit output — BaseFold's commit is just the
-/// root.  The OOD answers are drawn into the transcript and later constrained
+/// Beyond the Merkle root, WHIR's commit output carries the OOD points and
+/// answers.  The OOD answers are drawn into the transcript and later constrained
 /// by the folding sumcheck, which is how WHIR trades in-domain queries for OOD
 /// evaluations.
 #[derive(Clone, Serialize, Deserialize)]

@@ -46,14 +46,15 @@
 //!
 //! "By construction" means something specific and checkable here: every
 //! configuration is read through an EXHAUSTIVE destructure with no `..` rest
-//! pattern, so adding a field to `WhirConfig`, `RoundConfig` or `FriConfig`
-//! does not compile until this file accounts for it. Field-by-field access
+//! pattern, so adding a field to `WhirConfig` or `RoundConfig` does not
+//! compile until this file accounts for it. Field-by-field access
 //! would not do that — `cfg.a; cfg.b;` keeps compiling as the struct grows,
 //! which is how a list silently falls behind the thing it describes.
 //!
-//! The BaseFold inner configuration is read through `from_env_or_default`, so
-//! an environment that overrides the query count moves the digest. That is the
-//! intended behaviour: it is a different transcript.
+//! Every schedule — core, compress, shrink and wrap — is read through the
+//! constructor its prover calls, so an environment that overrides one of its
+//! knobs moves the digest. That is the intended behaviour: it is a different
+//! transcript.
 //!
 //! The `profile_digest_is_pinned` test fails on any change, so every move is a
 //! reviewed one.
@@ -80,7 +81,6 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
     alloc::vec![
         // Parameters.
         ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
-        ("basefold.batch_grinding_bits", crate::basefold::config::batch_grinding_bits() as u64),
         ("whir.batch_grinding_bits", crate::whir::jagged::whir_batch_grinding_bits() as u64),
         ("logup_gkr.grinding_bits", crate::logup_gkr::gkr_grinding_bits() as u64),
         // Added when these became overridable: a deployment that lowers one of
@@ -88,10 +88,6 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         // without any consumer noticing.
         ("whir.query_grinding_bits", crate::whir::jagged::query_grinding_bits() as u64),
         ("whir.per_component_target_bits", crate::whir::jagged::per_component_target_bits() as u64),
-        (
-            "basefold.wrap_query_grinding_bits",
-            crate::basefold::config::wrap_query_grinding_bits() as u64
-        ),
         // Which recursion proofs the compress schedule applies to: 1 = the
         // root only (the closing compose), every other node on the core
         // schedule.  The same two schedules applied to a different set of
@@ -99,11 +95,11 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         ("recursion.compress_schedule_scope", 1),
         // Event orders.
         //
-        // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding
+        // rev 1: WHIR absorbs the per-stripe claim vector before batch grinding
         //        and before the batching point. With the point drawn first, the
         //        batching Lagrange vector is known to a prover that has not yet
         //        chosen the claims, and the two linear equations are solvable.
-        ("basefold.claims_before_batching_point", 1),
+        ("whir.claims_before_batching_point", 1),
         // rev 1: the shard prologue absorbs public values, the main commitment, the
         //        chip count, then each chip's raw height and name.
         ("shard.prologue_order", 1),
@@ -155,8 +151,14 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
         &crate::whir::jagged::compress_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
     );
     felts.push(JaggedVal::from_canonical_usize(crate::jagged::RecursionPins::ROOT_CLASS));
-    absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::from_env_or_default());
-    absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config());
+    absorb_whir_config(
+        &mut felts,
+        &crate::whir::jagged::shrink_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
+    );
+    absorb_whir_config(
+        &mut felts,
+        &crate::whir::jagged::wrap_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
+    );
 
     hasher.hash_iter(felts)
 }
@@ -238,13 +240,6 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
     push_u64(felts, *batch_pow_bits as u64);
 }
 
-/// Every field of a BaseFold/FRI configuration that the transcript depends on.
-fn absorb_fri_config(felts: &mut Vec<JaggedVal>, cfg: &crate::basefold::FriConfig<JaggedVal>) {
-    for value in cfg.transcript_parameters() {
-        push_u64(felts, value as u64);
-    }
-}
-
 /// The profile digest as a lowercase hex string, for logs, deployment metadata
 /// and cross-process comparison.
 #[must_use]
@@ -317,7 +312,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "289ec12435dea7e2707a901a486c2af07d01ed832506f03b0736dcd35eb0586b",
+            "5d87a7341fd94e3c5387812b649cacb112dbb4b867fc44d6496fef870aaf8794",
             "the transcript profile changed -- see this test's documentation",
         );
     }
@@ -458,29 +453,6 @@ mod tests {
                 "changing {name} left the profile digest unmoved, so that parameter is \
                  outside the digest that claims to cover the transcript"
             );
-        }
-    }
-
-    /// The same for the BaseFold configuration.
-    #[test]
-    fn every_fri_parameter_moves_the_digest() {
-        let base = crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config();
-        let absorbed = |cfg: &crate::basefold::FriConfig<JaggedVal>| -> Vec<JaggedVal> {
-            let mut f = Vec::new();
-            absorb_fri_config(&mut f, cfg);
-            f
-        };
-        let honest = absorbed(&base);
-        let mutations: Vec<(&str, fn(&mut crate::basefold::FriConfig<JaggedVal>))> = alloc::vec![
-            ("log_blowup", |c| c.log_blowup += 1),
-            ("num_queries", |c| c.num_queries += 1),
-            ("proof_of_work_bits", |c| c.proof_of_work_bits += 1),
-            ("log_folding_arity", |c| c.log_folding_arity += 1),
-        ];
-        for (name, mutate) in mutations {
-            let mut cfg = base.clone();
-            mutate(&mut cfg);
-            assert_ne!(absorbed(&cfg), honest, "changing {name} left the digest unmoved");
         }
     }
 

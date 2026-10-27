@@ -39,25 +39,26 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
             + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+                crate::shard_level::constraint_folder::ShardConstraintFolder<
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
-        SC: crate::BasefoldRing,
-        SC::Challenger: 'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+        SC: crate::WhirRing,
+        SC::Challenger:
+            'static
+                + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+                + p3_challenger::CanObserve<
+                    <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
+                        crate::jagged_pcs::JaggedVal,
+                    >>::Commitment,
+                >,
     {
-        let basefold_proof = &proof.jagged_shard_proof;
-        if proof.public_values.as_slice() != basefold_proof.public_values.as_slice() {
+        let jagged_whir_proof = &proof.jagged_shard_proof;
+        if proof.public_values.as_slice() != jagged_whir_proof.public_values.as_slice() {
             return Err(VerificationError::JaggedShardVerifier(
                 "public values mismatch: the shard's machine-level public values differ from \
                  the ones its constraints were evaluated against"
@@ -72,7 +73,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 vk,
                 chips,
                 prep_chip_dims,
-                basefold_proof.as_ref(),
+                jagged_whir_proof.as_ref(),
                 challenger,
                 num_pv_elts,
                 pinned,
@@ -117,11 +118,11 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     /// claim mismatch).
     LogUpGkrFailed,
     /// Jagged jagged-PCS bundle verification failed (sumcheck reduction
-    /// mismatch or BaseFold open rejection).
+    /// mismatch or WHIR open rejection).
     JaggedLateBindingFailed,
     /// Zerocheck proofs attached but number does not match number of chips.
     InvalidProofShape,
-    /// Shard-level BaseFold verifier (the task path) rejected the proof.
+    /// Shard-level WHIR verifier (the task path) rejected the proof.
     /// The message carries the inner JaggedShardVerifyError's display.
     JaggedShardVerifier(String),
 }

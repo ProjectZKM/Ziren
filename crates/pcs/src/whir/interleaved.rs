@@ -39,8 +39,8 @@ use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
-use crate::basefold::mle::Mle;
-use crate::basefold::proof::{LeafOpening, MerkleOpening};
+use crate::whir::merkle::{LeafOpening, MerkleOpening};
+use crate::whir::mle::Mle;
 use crate::whir::monomial::{map_to_pow_lsb, mono_eval_lsb};
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::prover::WhirProver;
@@ -276,7 +276,7 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
-            folding_pow.push(ProofOfWork(crate::basefold::prover::accelerated_grind(
+            folding_pow.push(ProofOfWork(crate::whir::grind::accelerated_grind(
                 challenger,
                 round_cfg.queries_pow_bits,
             )));
@@ -320,7 +320,7 @@ where
         for c in final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
-        let final_pow = ProofOfWork(crate::basefold::prover::accelerated_grind(
+        let final_pow = ProofOfWork(crate::whir::grind::accelerated_grind(
             challenger,
             self.config.final_pow_bits,
         ));

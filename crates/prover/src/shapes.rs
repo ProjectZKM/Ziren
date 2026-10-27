@@ -19,9 +19,8 @@ use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
 use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 use zkm_recursion_circuit::machine::{
-    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape, ZKMCoreBasefoldWitnessValues,
-    ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape, ZKMRecursionShape,
-    ZKMWrapBasefoldWitnessValues,
+    ZKMCompressWithVkeyShape, ZKMCompressWitnessValues, ZKMCoreWitnessValues, ZKMDeferredShape,
+    ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMWrapWitnessValues,
 };
 use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
@@ -35,8 +34,8 @@ pub enum ZKMProofShape {
     /// A single-shard normalize/recursion shape.  Carries exactly ONE
     /// per-shard shape: the production normalize is arity-1 (`compress` →
     /// `get_first_layer_inputs` with first_layer_batch_size=1 →
-    /// `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
-    /// `ZKMCoreBasefoldWitnessValues`, hard-asserted
+    /// `get_recursion_core_inputs` chunks(1) → one core shard per
+    /// `ZKMCoreWitnessValues`, hard-asserted
     /// there).  Arity≥2 Recursion shapes would be a PHANTOM
     /// VK class no real proof produces; cross-shard aggregation lives in
     /// COMPRESS.  The `Vec` is retained for wire-format/serde stability but
@@ -45,7 +44,7 @@ pub enum ZKMProofShape {
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
     /// Deferred proofs are batched `REDUCE_BATCH_SIZE` at a time
-    /// (`get_recursion_deferred_inputs_basefold` chunks by the reduce batch
+    /// (`get_recursion_deferred_inputs` chunks by the reduce batch
     /// size), so the deferred program — and its VK — is a function of the
     /// BATCH ARITY exactly like `Compress`.  Enumerating only arity 1 left
     /// every multi-proof deferred node out of the allowlist ("vk not allowed"
@@ -702,52 +701,50 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let _ = shrink_shape;
-        self.program_from_shape_basefold(shape)
+        self.program_from_shape_jagged(shape)
     }
 
-    /// Basefold companion to [`Self::program_from_shape`]. Builds a
-    /// recursion program from a cached shape using the basefold-pipeline
-    /// program builders (`recursion_program_basefold`,
-    /// `compose_program_basefold`, etc.).
+    /// WHIR companion to [`Self::program_from_shape`]. Builds a
+    /// recursion program from a cached shape using the jagged-pipeline
+    /// program builders (`recursion_program_jagged`,
+    /// `compose_program_jagged`, etc.).
     ///
     /// Used by `build_compress_vks` to regenerate `vk_map.bin` against the
-    /// basefold compress programs.
-    pub fn program_from_shape_basefold(
+    /// whir compress programs.
+    pub fn program_from_shape_jagged(
         &self,
         shape: ZKMCompressProgramShape,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
-                let input = ZKMCoreBasefoldWitnessValues::dummy(self.core_prover.machine(), &shape);
-                self.recursion_program_basefold(&input).0
+                let input = ZKMCoreWitnessValues::dummy(self.core_prover.machine(), &shape);
+                self.recursion_program_jagged(&input).0
             }
             ZKMCompressProgramShape::Deferred(shape) => {
-                let input =
-                    ZKMDeferredBasefoldWitnessValues::dummy(self.root_prover.machine(), &shape);
-                self.deferred_program_basefold(&input)
+                let input = ZKMDeferredWitnessValues::dummy(self.root_prover.machine(), &shape);
+                self.deferred_program_jagged(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
-                let input =
-                    ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.compose_program_basefold(&input).0
+                let input = ZKMCompressWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                self.compose_program_jagged(&input).0
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                let input = ZKMWrapBasefoldWitnessValues::dummy(self.root_prover.machine(), &shape);
-                self.shrink_program_basefold(&input)
+                let input = ZKMWrapWitnessValues::dummy(self.root_prover.machine(), &shape);
+                self.shrink_program_jagged(&input)
             }
             ZKMCompressProgramShape::CompressRoot(shape) => {
                 let mut input =
-                    ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                    ZKMCompressWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 input.is_complete = true;
-                self.compose_program_basefold(&input).0
+                self.compose_program_jagged(&input).0
             }
             ZKMCompressProgramShape::Normalize(shape) => {
-                let input = ZKMCoreBasefoldWitnessValues::dummy_rows(
+                let input = ZKMCoreWitnessValues::dummy_rows(
                     self.core_prover.machine(),
                     &shape.rows,
                     false,
                 );
-                self.recursion_program_basefold(&input).0
+                self.recursion_program_jagged(&input).0
             }
         }
     }
@@ -821,9 +818,9 @@ mod tests {
         use p3_air::BaseAir;
         use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::{
-            build_compose_basefold_recursion_program, build_deferred_basefold_recursion_program,
-            PublicValuesOutputDigest, ZKMCompressBasefoldWitnessValues, ZKMCompressShape,
-            ZKMCompressWithVkeyShape, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape,
+            build_compose_recursion_program, build_deferred_recursion_program,
+            PublicValuesOutputDigest, ZKMCompressShape, ZKMCompressWithVkeyShape,
+            ZKMCompressWitnessValues, ZKMDeferredShape, ZKMDeferredWitnessValues,
         };
         use zkm_recursion_core::shape::RecursionShapeConfig;
 
@@ -870,11 +867,11 @@ mod tests {
                     compress_shape: compress_shape.clone(),
                     merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
                 };
-                let mut witness = ZKMCompressBasefoldWitnessValues::<
+                let mut witness = ZKMCompressWitnessValues::<
                     zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >::dummy(machine, &shape);
                 witness.is_complete = is_complete;
-                let program = build_compose_basefold_recursion_program(
+                let program = build_compose_recursion_program(
                     machine,
                     &witness,
                     max_log_row_count,
@@ -887,10 +884,10 @@ mod tests {
             }
             let dshape =
                 ZKMDeferredShape::new(compress_shape.clone(), crate::VK_MERKLE_TREE_HEIGHT);
-            let witness = ZKMDeferredBasefoldWitnessValues::<
+            let witness = ZKMDeferredWitnessValues::<
                 zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
             >::dummy(prover.root_prover.machine(), &dshape);
-            let program = build_deferred_basefold_recursion_program(
+            let program = build_deferred_recursion_program(
                 prover.root_prover.machine(),
                 &witness,
                 max_log_row_count,
@@ -957,11 +954,11 @@ mod tests {
                 compress_shape,
                 merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
             };
-            let input = zkm_recursion_circuit::machine::ZKMCompressBasefoldWitnessValues::dummy(
+            let input = zkm_recursion_circuit::machine::ZKMCompressWitnessValues::dummy(
                 prover.compress_prover.machine(),
                 &shape,
             );
-            let program = prover.compose_program_basefold(&input);
+            let program = prover.compose_program_jagged(&input);
             let (_pk, vk) = prover.compress_prover.setup(&program.0);
             format!("{:?}", vk.hash_koalabear())
         };
@@ -1062,7 +1059,7 @@ mod tests {
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::shard_level::shard_proof::EvaluationProof;
         use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
@@ -1111,7 +1108,7 @@ mod tests {
                     is_complete: false,
                 };
                 let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+                    let dummy = ZKMCoreWitnessValues::dummy(machine, &shape);
                     match &dummy.shard_proofs[0].evaluation_proof {
                         EvaluationProof::Bundle(b) => b.packing.log_dense_size,
                         _ => 0usize,
@@ -1194,7 +1191,7 @@ mod tests {
         use std::collections::{BTreeMap, BTreeSet};
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use zkm_recursion_circuit::machine::{ZKMCoreBasefoldWitnessValues, ZKMRecursionShape};
+        use zkm_recursion_circuit::machine::{ZKMCoreWitnessValues, ZKMRecursionShape};
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
@@ -1282,8 +1279,8 @@ mod tests {
 
         let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let d = ZKMCoreBasefoldWitnessValues::dummy(machine, shape);
-                let p = prover.recursion_program_basefold(&d);
+                let d = ZKMCoreWitnessValues::dummy(machine, shape);
+                let p = prover.recursion_program_jagged(&d);
                 prover.compress_prover.setup(&p.0).1.hash_koalabear()
             }))
             .ok()
@@ -1480,9 +1477,9 @@ mod normalize_enumeration_tests {
         assert!(ZKMProofShape::generate_normalize(machine)
             .iter()
             .any(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)) == class));
-        let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &rows, false);
+        let mut input = ZKMCoreWitnessValues::dummy_rows(machine, &rows, false);
         input.is_first_shard = false;
-        let (program, _) = prover.recursion_program_basefold(&input);
+        let (program, _) = prover.recursion_program_jagged(&input);
         let (_, vk) = prover.compress_prover.setup(&program);
         assert!(
             prover.recursion_vk_map.contains_key(&vk.hash_koalabear()),
@@ -1546,15 +1543,14 @@ mod normalize_enumeration_tests {
                 s.spawn(|| loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some((leaf, rep)) = jobs.get(i) else { break };
-                    let mut real =
-                        ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &leaf.rows, false);
+                    let mut real = ZKMCoreWitnessValues::dummy_rows(machine, &leaf.rows, false);
                     real.is_first_shard = leaf.first;
-                    let (_, real_digest) = prover.recursion_program_basefold(&real);
+                    let (_, real_digest) = prover.recursion_program_jagged(&real);
                     real.is_first_shard = !leaf.first;
-                    let (_, flipped_digest) = prover.recursion_program_basefold(&real);
+                    let (_, flipped_digest) = prover.recursion_program_jagged(&real);
                     let rep_input =
-                        ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &shape_rows(rep), false);
-                    let (_, rep_digest) = prover.recursion_program_basefold(&rep_input);
+                        ZKMCoreWitnessValues::dummy_rows(machine, &shape_rows(rep), false);
+                    let (_, rep_digest) = prover.recursion_program_jagged(&rep_input);
                     if real_digest != rep_digest {
                         mismatched.fetch_add(1, Ordering::Relaxed);
                         tracing::error!(

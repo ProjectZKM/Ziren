@@ -1,4 +1,4 @@
-//! `Witnessable` trait implementations for BaseFold-pipeline proof
+//! `Witnessable` trait implementations for jagged-pipeline proof
 //! types.
 //!
 //! Bridges the host-side proof types (which carry raw base-field
@@ -6,7 +6,7 @@
 //! types (which carry [`Felt`] / [`Ext`] cells wired into the
 //! recursion compiler's witness stream).
 //!
-//! Every type in the BaseFold proof hierarchy gets a matching
+//! Every type in the jagged shard-proof hierarchy gets a matching
 //! impl, composed so a single `shard_proof.read(builder)` cascades
 //! through every nested field:
 //!
@@ -17,9 +17,6 @@
 //!     [`JaggedShardOpenedValues`]
 //!   - [`JaggedDimensionMetadata`] / [`JaggedSumcheckEvalProof`] /
 //!     [`RecursiveStackedPcsProof`] / [`JaggedPcsProofVariable`]
-//!   - [`RecursiveBasefoldRound`] / [`RecursiveBasefoldOpening`] /
-//!     [`RecursiveBasefoldComponentOpening`] /
-//!     [`RecursiveBasefoldProof`]
 //!
 //! Each impl reads the type's fields in declaration
 //! order through the builder's witness stream, and `write` mirrors
@@ -30,12 +27,8 @@ use std::collections::BTreeMap;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
-use crate::basefold_chip_opened_values::{
+use crate::chip_opened_values::{
     JaggedAirOpenedValues, JaggedChipOpenedValues, JaggedShardOpenedValues,
-};
-use crate::basefold_verifier::{
-    RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
-    RecursiveBasefoldRound,
 };
 use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof};
 use crate::logup_proof::{
@@ -207,7 +200,7 @@ where
     }
 }
 
-// BaseFold opening types
+// Opened-value types
 
 impl<C> Witnessable<C> for JaggedAirOpenedValues<InnerChallenge>
 where
@@ -283,8 +276,8 @@ where
 }
 
 // No per-chip zerocheck or LogUp-GKR Witnessable impls exist here: the
-// shard proof carries no per-chip `basefold_logup_gkr_proofs` /
-// `basefold_zerocheck_proofs` fields, and there are no matching per-chip
+// shard proof carries no per-chip `jagged_logup_gkr_proofs` /
+// `jagged_zerocheck_proofs` fields, and there are no matching per-chip
 // recursion verifiers.
 
 // Jagged-PCS proof types
@@ -328,79 +321,13 @@ where
 // structs whose fields use raw `EF` / `F` and map through to the
 // variable versions, which are not defined here.
 
-// Recursive BaseFold proof types
+// Top-level jagged shard proof
 
-impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldRound<InnerVal, InnerChallenge, Dig>
+impl<C> Witnessable<C> for crate::shard::JaggedShardProof<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    // The variable carries `Ext` circuit variables for `uni_poly`
-    // (const-promotion happens here rather than in the verifier body).
-    // `commitment` stays the raw `Dig` (digest witnessing happens at the
-    // stream read/write pair below).  The stream-based variant swaps
-    // `builder.constant` for `.read(builder)` + a real `write`.
-    type WitnessVariable = RecursiveBasefoldRound<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        RecursiveBasefoldRound {
-            uni_poly: [builder.constant(self.uni_poly[0]), builder.constant(self.uni_poly[1])],
-            commitment: self.commitment.clone(),
-            _phantom_f: core::marker::PhantomData,
-        }
-    }
-
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
-}
-
-impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldOpening<InnerVal, InnerChallenge, Dig>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = RecursiveBasefoldOpening<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        RecursiveBasefoldOpening {
-            position: self.position,
-            block: self.block.iter().map(|v| builder.constant(*v)).collect(),
-            merkle_path_bytes: self.merkle_path_bytes.clone(),
-            merkle_path_digests: self.merkle_path_digests.clone(),
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
-}
-
-impl<C, Dig: Clone> Witnessable<C>
-    for RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, Dig>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = RecursiveBasefoldComponentOpening<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        RecursiveBasefoldComponentOpening {
-            leaf_values: self
-                .leaf_values
-                .iter()
-                .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
-                .collect(),
-            merkle_path_bytes: self.merkle_path_bytes.clone(),
-            merkle_path_digests: self.merkle_path_digests.clone(),
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
-}
-
-// Top-level BaseFold shard proof
-
-impl<C> Witnessable<C> for crate::shard_basefold::JaggedShardProof<InnerVal, InnerChallenge>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = crate::shard_basefold::JaggedShardProof<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = crate::shard::JaggedShardProof<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment: [Felt<C::F>; 8] =
@@ -410,7 +337,7 @@ where
             .iter()
             .map(|(name, bits)| (name.clone(), bits.read(builder)))
             .collect();
-        crate::shard_basefold::JaggedShardProof {
+        crate::shard::JaggedShardProof {
             main_commitment,
             chip_height_bits,
             public_values: self.public_values.read(builder),
@@ -429,168 +356,6 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
-    }
-}
-
-impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldProof<InnerVal, InnerChallenge, Dig>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        RecursiveBasefoldProof {
-            rounds: self.rounds.read(builder),
-            final_poly: builder.constant(self.final_poly),
-            pow_witness: builder.constant(self.pow_witness),
-            batch_grinding_witness: builder.constant(self.batch_grinding_witness),
-            component_openings: Vec::new(),
-            query_phase_openings: self.query_phase_openings.read(builder),
-            batch_evaluations: self
-                .batch_evaluations
-                .iter()
-                .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
-                .collect(),
-        }
-    }
-
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
-}
-
-// Value-independent (witness-stream) basefold proof.
-//
-// The `Witnessable::read` above CONST-builds the proof (used by the
-// OUTER wrap lift, which never writes the bundle to the felt stream).  For
-// the INNER recursion path we instead read the felt/ext values FROM the
-// witness stream so the recursion program is value-INDEPENDENT (the program
-// emits `read` ops, not value-specific `const` ops).  These two free fns are
-// the read/write pair — they MUST emit/consume the stream in the SAME field
-// order.  Digests (`commitment`, `merkle_path_digests`) stay raw here and are
-// witnessed as 8 felts each.  `component_openings` are dropped (verifier discards).
-pub fn read_basefold_proof_from_stream<C>(
-    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
-    builder: &mut Builder<C>,
-) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    let rounds = host
-        .rounds
-        .iter()
-        .map(|r| RecursiveBasefoldRound {
-            uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
-            commitment: core::array::from_fn(|i| r.commitment[i].read(builder)),
-            _phantom_f: core::marker::PhantomData,
-        })
-        .collect();
-    let final_poly = host.final_poly.read(builder);
-    let pow_witness = host.pow_witness.read(builder);
-    let batch_grinding_witness = host.batch_grinding_witness.read(builder);
-    let component_openings = host
-        .component_openings
-        .iter()
-        .map(|round| {
-            round
-                .iter()
-                .map(|c| crate::basefold_verifier::RecursiveBasefoldComponentOpening {
-                    leaf_values: c
-                        .leaf_values
-                        .iter()
-                        .map(|row| row.iter().map(|v| v.read(builder)).collect())
-                        .collect(),
-                    merkle_path_bytes: c.merkle_path_bytes.clone(),
-                    merkle_path_digests: c
-                        .merkle_path_digests
-                        .iter()
-                        .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-                        .collect(),
-                    _phantom: core::marker::PhantomData,
-                })
-                .collect()
-        })
-        .collect();
-    let query_phase_openings = host
-        .query_phase_openings
-        .iter()
-        .map(|round| {
-            round
-                .iter()
-                .map(|op| RecursiveBasefoldOpening {
-                    position: op.position,
-                    block: op.block.iter().map(|v| v.read(builder)).collect(),
-                    merkle_path_bytes: op.merkle_path_bytes.clone(),
-                    merkle_path_digests: op
-                        .merkle_path_digests
-                        .iter()
-                        .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-                        .collect(),
-                    _phantom: core::marker::PhantomData,
-                })
-                .collect()
-        })
-        .collect();
-    let batch_evaluations = host
-        .batch_evaluations
-        .iter()
-        .map(|row| row.iter().map(|v| v.read(builder)).collect())
-        .collect();
-    RecursiveBasefoldProof {
-        rounds,
-        final_poly,
-        pow_witness,
-        batch_grinding_witness,
-        component_openings,
-        query_phase_openings,
-        batch_evaluations,
-    }
-}
-
-pub fn write_basefold_proof_to_stream<C>(
-    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
-    witness: &mut impl WitnessWriter<C>,
-) where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    for r in host.rounds.iter() {
-        r.uni_poly[0].write(witness);
-        r.uni_poly[1].write(witness);
-        for f in r.commitment.iter() {
-            f.write(witness);
-        }
-    }
-    host.final_poly.write(witness);
-    host.pow_witness.write(witness);
-    host.batch_grinding_witness.write(witness);
-    for round in host.component_openings.iter() {
-        for c in round.iter() {
-            for row in c.leaf_values.iter() {
-                for v in row.iter() {
-                    v.write(witness);
-                }
-            }
-            for d in c.merkle_path_digests.iter() {
-                for f in d.iter() {
-                    f.write(witness);
-                }
-            }
-        }
-    }
-    for round in host.query_phase_openings.iter() {
-        for op in round.iter() {
-            for v in op.block.iter() {
-                v.write(witness);
-            }
-            for d in op.merkle_path_digests.iter() {
-                for f in d.iter() {
-                    f.write(witness);
-                }
-            }
-        }
-    }
-    for row in host.batch_evaluations.iter() {
-        for v in row.iter() {
-            v.write(witness);
-        }
     }
 }
 
@@ -618,7 +383,7 @@ mod tests {
     /// Construction smoke test: read a JaggedAirOpenedValues
     /// from a host-side value.
     #[test]
-    fn basefold_air_opened_values_witnessable_reads() {
+    fn air_opened_values_witnessable_reads() {
         let mut builder = AsmBuilder::<F, EF>::default();
         let host_opening = JaggedAirOpenedValues::<EF> { local: vec![EF::ZERO; 3] };
         let var: JaggedAirOpenedValues<Ext<F, EF>> =

@@ -1,6 +1,6 @@
-//! Compress (Compose) basefold verifier program over the recursion chip set.
+//! Compress (Compose) whir verifier program over the recursion chip set.
 //!
-//! [`super::compress_basefold::verify_compress_basefold`] is generic over
+//! [`super::compress_jagged::verify_compress_jagged`] is generic over
 //! `A: MachineAir + Air<ShardConstraintFolder>`; this module instantiates it
 //! with `A = RecursionAir<KoalaBear, DEGREE>` (BaseAlu / ExtAlu / Poseidon2 /
 //! FriFold / ... traces) instead of `MipsAir`.
@@ -12,12 +12,12 @@
 //! `ShardConstraintFolder` implements via its `EmptyMessageBuilder` and
 //! `AirBuilder` impls.  `DEGREE` stays generic.
 //!
-//! The basefold folder evaluates `is_first_row`, `is_last_row` and
+//! The whir folder evaluates `is_first_row`, `is_last_row` and
 //! `is_transition_window` as `0`, so constraints gated by them are not
 //! enforced for recursion chips on this path.
 //!
 //! Same trait surface as
-//! [`super::basefold_programs::build_compose_basefold_program`].
+//! [`super::programs::build_compose_program`].
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
@@ -31,42 +31,40 @@ use zkm_recursion_core::RecursionProgram;
 
 use crate::witness::Witnessable;
 
-use super::compress_basefold::{verify_compress_basefold, ZKMCompressBasefoldWitnessValues};
+use super::compress_jagged::{verify_compress_jagged, ZKMCompressWitnessValues};
 
-/// Build the recursion-side compress (Compose) basefold program.
+/// Build the recursion-side compress (Compose) whir program.
 ///
-/// Analog of [`super::basefold_programs::build_compose_basefold_program`]
+/// Analog of [`super::programs::build_compose_program`]
 /// for `A = RecursionAir<KoalaBear, DEGREE>`; call sites choose the chip set
 /// through `machine`'s type.
 ///
 /// # Wiring
 ///
 /// 1. Reads the witness via the [`Witnessable`] impl on
-///    [`ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>`].
-/// 2. Invokes [`verify_compress_basefold`] with the recursion
+///    [`ZKMCompressWitnessValues<KoalaBearPoseidon2>`].
+/// 2. Invokes [`verify_compress_jagged`] with the recursion
 ///    machine's chip set — this is the same verifier body used by
 ///    MIPS; the only difference is the `A` type parameter, which
 ///    flows through to chip resolution + `Air<ShardConstraintFolder>`
 ///    dispatch.
 /// 3. Compiles the operations via [`AsmCompiler`] into a
 ///    [`RecursionProgram`].
-pub fn build_compose_basefold_recursion_program<A>(
+pub fn build_compose_recursion_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    input: &ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>,
+    input: &ZKMCompressWitnessValues<KoalaBearPoseidon2>,
     max_log_row_count: usize,
     value_assertions: bool,
     kind: super::compress::PublicValuesOutputDigest,
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
-        >,
+        + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build compose-basefold-recursion program").entered();
+    let builder_span = tracing::debug_span!("build compose-whir-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Compress);
     let input_var = input.read(&mut builder);
-    verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
+    verify_compress_jagged::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
@@ -77,8 +75,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span =
-        tracing::debug_span!("compile compose-basefold-recursion program").entered();
+    let compiler_span = tracing::debug_span!("compile compose-whir-recursion program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -94,10 +91,10 @@ mod tests {
     /// exists in the recursion module + the verifier delegate is
     /// the same body used by the MIPS path.  Compile-only — catches
     /// generic-bound drift after upstream changes to either the
-    /// chip set or `verify_compress_basefold` itself.
+    /// chip set or `verify_compress_jagged` itself.
     #[test]
     fn shares_verifier_body_with_mips_path() {
         let _ =
-            verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, RecursionAir<KoalaBear, 9>>;
+            verify_compress_jagged::<InnerConfig, KoalaBearPoseidon2, RecursionAir<KoalaBear, 9>>;
     }
 }
