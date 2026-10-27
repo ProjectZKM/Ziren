@@ -61,17 +61,16 @@ pub type JaggedCommit = JaggedCommitGeneric<JaggedMmcs>;
 /// What the jagged reduction needs of a committed round besides its WHIR
 /// data: the interleaved MLEs it rebuilds the dense polynomial from, and the
 /// round's geometry.
-pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+pub struct JaggedProverData {
     /// The stacked stripes the commit interleaved, in commit order.  Empty on
     /// a device-built commit, whose dense polynomial stays on the device.
     pub interleaved_mles: Vec<Arc<Mle<JaggedVal>>>,
     pub chip_dims: Vec<(usize, u32)>,
     pub area: usize,
     pub log_stacking_height: u32,
-    _mmcs: core::marker::PhantomData<fn() -> MT>,
 }
 
-impl<MT: p3_commit::Mmcs<JaggedVal>> JaggedProverDataGeneric<MT> {
+impl JaggedProverData {
     #[must_use]
     pub fn new(
         interleaved_mles: Vec<Arc<Mle<JaggedVal>>>,
@@ -79,18 +78,9 @@ impl<MT: p3_commit::Mmcs<JaggedVal>> JaggedProverDataGeneric<MT> {
         area: usize,
         log_stacking_height: u32,
     ) -> Self {
-        Self {
-            interleaved_mles,
-            chip_dims,
-            area,
-            log_stacking_height,
-            _mmcs: core::marker::PhantomData,
-        }
+        Self { interleaved_mles, chip_dims, area, log_stacking_height }
     }
 }
-
-/// Concrete inner prover-data alias (`MT = JaggedMmcs`).
-pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 
 /// Stacking height of the stacked PCS: `2^21` rows per stripe, never clamped for
 /// small commits -- an area-dependent height would make the VK area-dependent.
@@ -618,7 +608,7 @@ pub mod jagged {
     pub struct PrecomputedJaggedCommitGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
-        pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
+        pub prover_data: crate::jagged_pcs::JaggedProverData,
         /// The WHIR-committed data the open runs over; `prover_data` carries
         /// the SAME width-1 polynomials as `interleaved_mles` (the reduction
         /// reads them).
@@ -2121,7 +2111,7 @@ mod test {
             let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
             assert!(
                 verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
-                "jagged-jagged pipeline should accept honest proof"
+                "jagged-WHIR pipeline should accept honest proof"
             );
         }
     }

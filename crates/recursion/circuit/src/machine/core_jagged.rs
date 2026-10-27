@@ -14,7 +14,6 @@
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
 };
 
 use itertools::Itertools;
@@ -56,11 +55,6 @@ pub struct ZKMCoreWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub is_complete: bool,
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCoreVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
 }
 
 /// In-circuit variable form — the `shard_proof_tuples` field carries

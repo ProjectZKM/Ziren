@@ -616,15 +616,17 @@ fn outer_cap_root(
 /// `CircuitConfig::read_outer_eval_bundle` (OuterConfig override).  Returns the
 /// witnessed `LiftedEvalProof::OuterBundle` when `host` is an
 /// `EvaluationProof::Bytes` that deserializes as an outer bundle; otherwise
-/// `None` (Empty / inner Bundle / malformed → fall back to the bytes path).
+/// `None`. The caller handles an inner `Bundle` separately and rejects
+/// `Empty` or undecodable `Bytes` with a panic.
 ///
 /// The witnessed values (read order MUST match
 /// [`write_outer_eval_bundle_impl`]): the stacked-WHIR proof (sumcheck
 /// messages, OOD answers, BN254 round commitments, query openings with their
 /// BN254 Merkle paths, final polynomial, grinding witnesses, batch
 /// evaluations), the reduction sumcheck, the jagged-eval sub-sumcheck,
-/// expected_eval (q_at_z), and the BN254 commit cap roots.  Shape metadata (packing, column counts) stays in `host` and is read by
-/// the lift as compile-time constants (shape-derived, value-independent).
+/// expected_eval (q_at_z), and the BN254 commit cap roots. Shape metadata
+/// (packing, column counts) stays in `host` and is read by the lift as
+/// compile-time constants (shape-derived, value-independent).
 pub fn read_outer_eval_bundle_impl<C>(
     builder: &mut Builder<C>,
     host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
@@ -680,8 +682,8 @@ where
 
 /// Prover-side counterpart of [`read_outer_eval_bundle_impl`]: WRITE the outer
 /// bundle's proof-specific values to the witness stream in the SAME order the
-/// read consumes them.  Returns `true` when handled (outer bundle bytes), so
-/// `JaggedShardProof::write` skips its default Bytes/Bundle write.
+/// read consumes them. Returns `true` when the outer bundle bytes were
+/// decoded and written, or `false` when the input is not a valid outer bundle.
 pub fn write_outer_eval_bundle_impl<C, W>(
     host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
     witness: &mut W,

@@ -9,7 +9,7 @@
 //! (the root of the recursion tree), asserts its root public values
 //! are valid, and commits them to the output stream.
 
-use std::{borrow::Borrow, marker::PhantomData};
+use std::borrow::Borrow;
 
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
@@ -84,11 +84,6 @@ pub struct ZKMWrapWitnessVariable<
     /// vk-merkle witness — in-circuit cousin of
     /// [`ZKMWrapWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMWrapVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
 }
 
 /// Verify the single-proof input at the wrap (terminal) stage.

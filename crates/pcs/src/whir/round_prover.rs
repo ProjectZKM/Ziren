@@ -41,14 +41,14 @@ use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
 /// One committed round of the tower: its parsed commitment (Merkle root + OOD)
 /// alongside the prover-side Merkle data, retained for the query openings.
 pub struct RoundCommitment<F: p3_field::Field, EF, MT: Mmcs<F>> {
-    pub parsed: ParsedCommitment<F, EF, MT::Commitment>,
+    pub parsed: ParsedCommitment<EF, MT::Commitment>,
     pub prover_data: MT::ProverData<RowMajorMatrix<F>>,
 }
 
 /// The output of the folding tower.
 pub struct RoundedProof<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// The starting commitment + its OOD.
-    pub starting: ParsedCommitment<F, EF, MT::Commitment>,
+    pub starting: ParsedCommitment<EF, MT::Commitment>,
     /// The starting codeword's Merkle data, for the first round's query opening.
     pub starting_prover_data: MT::ProverData<RowMajorMatrix<F>>,
     /// The intermediate round commitments (re-encoded folded codewords + OOD).
@@ -157,7 +157,6 @@ where
                     commitment: alloc::vec![commitment],
                     ood_points,
                     ood_answers,
-                    _f: core::marker::PhantomData,
                 },
                 prover_data,
             });

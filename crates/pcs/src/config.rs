@@ -319,7 +319,7 @@ pub trait WhirRing: StarkGenericConfig {
             dft,
             cfg,
         );
-        let prover_data = crate::jagged_pcs::JaggedProverDataGeneric::<Self::WhirMmcs>::new(
+        let prover_data = crate::jagged_pcs::JaggedProverData::new(
             interleaved_mles,
             chip_dims,
             area,

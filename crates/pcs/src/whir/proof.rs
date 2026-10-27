@@ -32,15 +32,13 @@ pub struct ProofOfWork<F>(pub F);
     serialize = "EF: Serialize, C: Serialize",
     deserialize = "EF: Deserialize<'de>, C: Deserialize<'de>"
 ))]
-pub struct ParsedCommitment<F, EF, C> {
+pub struct ParsedCommitment<EF, C> {
     /// One Merkle root per committed round.
     pub commitment: Vec<C>,
     /// The OOD sample points (each a full evaluation point in `EF`).
     pub ood_points: Vec<Vec<EF>>,
     /// The claimed MLE evaluations at `ood_points`.
     pub ood_answers: Vec<EF>,
-    #[serde(skip)]
-    pub _f: core::marker::PhantomData<F>,
 }
 
 /// The full WHIR opening proof.  Mirrors `slop_whir::WhirProof`.

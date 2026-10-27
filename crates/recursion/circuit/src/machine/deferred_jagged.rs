@@ -17,7 +17,6 @@
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
 };
 
 use p3_field::PrimeCharacteristicRing;
@@ -115,11 +114,6 @@ pub struct ZKMDeferredWitnessVariable<
     pub init_addr_bits: [Felt<C::F>; 32],
     pub finalize_addr_bits: [Felt<C::F>; 32],
     pub is_complete: Felt<C::F>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMDeferredVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
 }
 
 /// Verify a batch of deferred recursive proofs.

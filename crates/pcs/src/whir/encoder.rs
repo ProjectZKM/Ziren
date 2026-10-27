@@ -2,15 +2,11 @@
 //!
 //! # Encoding choice
 //!
-//! The protocol receives an MLE as `2^n` evaluations on the Boolean
-//! hypercube and needs the corresponding RS-encoded codeword on a
-//! coset of size `2^(n + log_blowup)`.  We use Plonky3's
-//! [`TwoAdicSubgroupDft::coset_lde_batch`] which:
-//!   1. iDFTs to recover polynomial coefficients
-//!   2. zero-pads to the larger length
-//!   3. coset-DFTs to evaluation form on `shift * H_large`
-//!
-//! Output is in bit-reversed order.
+//! Each column of the input MLE contains `2^n` Boolean-hypercube values.
+//! The encoder treats those values as univariate polynomial coefficients,
+//! zero-pads them to `2^(n + log_blowup)`, and evaluates them on the two-adic
+//! subgroup with [`TwoAdicSubgroupDft::dft_batch`]. It then bit-reverses the
+//! evaluation rows. No inverse DFT or coset shift is applied.
 
 use alloc::sync::Arc;
 use core::marker::PhantomData;

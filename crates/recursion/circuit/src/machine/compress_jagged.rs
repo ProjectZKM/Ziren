@@ -14,7 +14,6 @@
 //!      accumulator.
 
 use std::array;
-use std::marker::PhantomData;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
@@ -115,11 +114,6 @@ pub struct ZKMCompressWitnessVariable<
 }
 
 /// Compress verifier over whir shard proofs.
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCompressVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
 /// Verify a batch of shard-level recursive proofs.
 ///
 /// Per (vk, proof) in `vks_and_proofs`: assemble the

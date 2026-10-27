@@ -558,7 +558,6 @@ mod tests {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
         use crate::jagged_eval_primitives::{emit_branching_program_eval, emit_prefix_sum_check};
         let _evaluator: RecursiveJaggedEvalSumcheckConfig<
-            (),
             fn(
                 &mut Builder<C>,
                 &[SymbolicExt<C::F, C::EF>],

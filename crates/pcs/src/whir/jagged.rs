@@ -149,6 +149,8 @@ fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
     config
 }
 
+const DEFAULT_PER_COMPONENT_TARGET_BITS: f64 = 106.0;
+
 /// Bits each transcript component is solved for.
 ///
 /// The schedule used to target 100 bits per component, which is the
@@ -158,7 +160,7 @@ fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
 /// target is therefore the union goal plus the log of the component count,
 /// `100 + log2(24) = 104.6`, rounded up for margin.
 pub fn per_component_target_bits() -> f64 {
-    crate::params::env_f64("ZIREN_SOUNDNESS_TARGET_BITS", 106.0)
+    crate::params::env_f64("ZIREN_SOUNDNESS_TARGET_BITS", DEFAULT_PER_COMPONENT_TARGET_BITS)
 }
 
 /// Query-phase grinding, in bits.
@@ -363,9 +365,13 @@ pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
 /// under the Johnson bound at multiplicity `m` (unique decoding at `m = 0`)
 /// with `pow` bits of grinding.
 pub fn min_queries_johnson(log_inv_rate: usize, pow: usize, m: usize) -> usize {
+    min_queries_johnson_for_target(log_inv_rate, pow, m, per_component_target_bits())
+}
+
+fn min_queries_johnson_for_target(log_inv_rate: usize, pow: usize, m: usize, target: f64) -> usize {
     let bits =
         if m == 0 { bits_per_query(log_inv_rate) } else { bits_per_query_johnson(log_inv_rate, m) };
-    ((per_component_target_bits() - pow as f64) / bits).ceil() as usize
+    ((target - pow as f64) / bits).ceil() as usize
 }
 
 /// Bits of soundness of one folding step without grinding: the step folds a
@@ -404,8 +410,17 @@ pub fn fold_soundness_bits(log_inv_rate: usize, log_dim: usize, m: usize) -> f64
 /// the target less the step's soundness in whole bits, rounded down as a
 /// soundness report states it, so the report reads the target on every step.
 pub fn fold_grinding_bits(log_inv_rate: usize, log_dim: usize, m: usize) -> usize {
+    fold_grinding_bits_for_target(log_inv_rate, log_dim, m, per_component_target_bits())
+}
+
+fn fold_grinding_bits_for_target(
+    log_inv_rate: usize,
+    log_dim: usize,
+    m: usize,
+    target: f64,
+) -> usize {
     let bits = fold_soundness_bits(log_inv_rate, log_dim, m).floor();
-    (per_component_target_bits() - bits).ceil().max(0.0) as usize
+    (target - bits).ceil().max(0.0) as usize
 }
 
 /// The knobs of a size-tuned schedule: [`compress_whir_config`] and
@@ -441,7 +456,7 @@ impl SizeTunedParams {
         }
     }
 
-    /// The wrap schedule's knobs.
+    /// The wrap schedule's defaults, before environment overrides.
     ///
     /// The wrap's verifier is the gnark circuit, whose size is set by the
     /// queries, and its prover grinds over the BN254 challenger, whose
@@ -456,17 +471,31 @@ impl SizeTunedParams {
     /// prover's FFTs and outweighs the grinding the smaller list saves.  The
     /// batching grind closes the batch of the wrap's pinned geometry, 24
     /// stripes, at that list size.
+    pub const fn wrap_defaults() -> Self {
+        Self {
+            log_inv_rate: 3,
+            round0_folding: 2,
+            johnson_m: 3,
+            query_pow: 24,
+            fold_pow: None,
+            batch_pow: 24,
+        }
+    }
+
+    /// The wrap schedule's knobs, with `ZIREN_WRAP_*` environment overrides.
     pub fn wrap() -> Self {
         let env = crate::params::env_usize;
+        let defaults = Self::wrap_defaults();
         Self {
-            log_inv_rate: env("ZIREN_WRAP_LOG_INV_RATE", 3),
-            round0_folding: env("ZIREN_WRAP_ROUND0_FOLDING", 2),
-            johnson_m: env("ZIREN_WRAP_JOHNSON_M", 3),
-            query_pow: env("ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS", 24),
+            log_inv_rate: env("ZIREN_WRAP_LOG_INV_RATE", defaults.log_inv_rate),
+            round0_folding: env("ZIREN_WRAP_ROUND0_FOLDING", defaults.round0_folding),
+            johnson_m: env("ZIREN_WRAP_JOHNSON_M", defaults.johnson_m),
+            query_pow: env("ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS", defaults.query_pow),
             fold_pow: std::env::var("ZIREN_WRAP_FOLD_GRINDING_BITS")
                 .ok()
-                .and_then(|v| v.parse().ok()),
-            batch_pow: env("ZIREN_WRAP_BATCH_GRINDING_BITS", 24),
+                .and_then(|v| v.parse().ok())
+                .or(defaults.fold_pow),
+            batch_pow: env("ZIREN_WRAP_BATCH_GRINDING_BITS", defaults.batch_pow),
         }
     }
 }
@@ -506,6 +535,15 @@ pub fn wrap_whir_config(lsh: usize) -> WhirConfig {
 /// folding step ground the fixed `fold_pow` or, without one, what that step
 /// needs ([`fold_grinding_bits`]).
 pub fn size_tuned_whir_config(lsh: usize, params: SizeTunedParams) -> WhirConfig {
+    size_tuned_whir_config_for_target(lsh, params, per_component_target_bits())
+}
+
+/// Build a schedule from explicit parameters without reading the environment.
+fn size_tuned_whir_config_for_target(
+    lsh: usize,
+    params: SizeTunedParams,
+    target: f64,
+) -> WhirConfig {
     let rate = params.log_inv_rate;
     assert!(
         lsh + rate <= <JaggedVal as p3_field::TwoAdicField>::TWO_ADICITY,
@@ -528,17 +566,20 @@ pub fn size_tuned_whir_config(lsh: usize, params: SizeTunedParams) -> WhirConfig
     let mut log_dim = lsh;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = rate + 3 * (r + 1);
-        rp.num_queries = min_queries_johnson(rate + 3 * r, pow, m);
+        rp.num_queries = min_queries_johnson_for_target(rate + 3 * r, pow, m, target);
         rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
         rp.pow_bits = (1..=rp.folding_factor)
             .map(|s| {
-                params.fold_pow.unwrap_or_else(|| fold_grinding_bits(rate + 3 * r, log_dim - s, m))
+                params.fold_pow.unwrap_or_else(|| {
+                    fold_grinding_bits_for_target(rate + 3 * r, log_dim - s, m, target)
+                })
             })
             .collect();
         log_dim -= rp.folding_factor;
     }
-    config.final_queries = min_queries_johnson(rate + 3 * (num_rounds - 1), pow, m);
+    config.final_queries =
+        min_queries_johnson_for_target(rate + 3 * (num_rounds - 1), pow, m, target);
     config.final_pow_bits = pow;
     config.batch_pow_bits = params.batch_pow;
     config
@@ -606,7 +647,7 @@ where
 /// are its width-`DEFAULT_BATCH_SIZE` interleaves (column `c` of interleave
 /// `i` is stripe `i · DEFAULT_BATCH_SIZE + c`), exactly what
 /// `interleave_multilinears_with_fixed_rate` produces and what the jagged
-/// commit keeps as `JaggedProverDataGeneric::interleaved_mles`.  A caller that
+/// commit keeps as `JaggedProverData::interleaved_mles`. A caller that
 /// keeps the interleaves for the jagged reduction therefore stacks once and
 /// commits once; the commitment and prover data are those of
 /// [`commit_jagged_whir_generic`] over the same cells.
@@ -774,7 +815,8 @@ mod tests {
     use super::{
         bits_per_query, bits_per_query_johnson, compress_johnson_m, compress_whir_config,
         core_whir_config, min_queries, min_queries_compress, min_queries_johnson,
-        per_component_target_bits, wrap_whir_config, SizeTunedParams,
+        per_component_target_bits, size_tuned_whir_config_for_target, wrap_whir_config,
+        SizeTunedParams, DEFAULT_PER_COMPONENT_TARGET_BITS,
     };
     use crate::whir::config::WhirConfig;
 
@@ -875,10 +917,11 @@ mod tests {
     /// defaults, so a change to them shows here as well as in the vk.
     #[test]
     fn wrap_schedule_at_lsh_21_is_pinned() {
-        if std::env::vars().any(|(k, _)| k.starts_with("ZIREN_WRAP_")) {
-            return;
-        }
-        let cfg = wrap_whir_config(21);
+        let cfg = size_tuned_whir_config_for_target(
+            21,
+            SizeTunedParams::wrap_defaults(),
+            DEFAULT_PER_COMPONENT_TARGET_BITS,
+        );
         let queries: Vec<usize> = cfg.round_parameters.iter().map(|rp| rp.num_queries).collect();
         assert_eq!((queries, cfg.final_queries), (vec![65, 30, 20], 20));
         let folds: Vec<Vec<usize>> =

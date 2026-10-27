@@ -114,10 +114,8 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// Inner (KoalaBear): `[KoalaBear;8]` -> `[Felt<KoalaBear>;8]`.
     /// Outer (BN254): `[Bn254;1]` -> `[Var<Bn254>;1]`.
     ///
-    /// #H (WHIR-over-BN254 wrap port): the lift paths carry the
-    /// host WHIR bundle's digests as raw field constants (not
-    /// witness-stream reads), so this bridges raw -> variable in a
-    /// digest-type-generic way.
+    /// Use this for compile-time digests. Proof-specific digests in the
+    /// jagged-WHIR bundle are read from the witness stream instead.
     fn const_digest(
         builder: &mut Builder<C>,
         digest: <Self as FieldHasher<C::F>>::Digest,
@@ -564,10 +562,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         <Self as FieldHasher<KoalaBear>>::Digest::default()
     }
 
-    /// The OUTER ring never carries a `LiftedEvalProof::Bundle`
-    /// (its wrap shard proof is `Bytes`/BN254), so this arm is dead — build a
-    /// structural `[Var<Bn254>;1]` placeholder so the SC-generic
-    /// `verify_wrap_jagged_core` type-checks for the outer instantiation.
     /// The OUTER ring never carries a `LiftedEvalProof::WhirBundle` (its
     /// wrap shard proof is `Bytes`/BN254), so this arm is dead code for the
     /// outer instantiation — present only for type-checking.

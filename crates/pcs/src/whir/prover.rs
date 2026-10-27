@@ -32,7 +32,7 @@ pub struct WhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
 /// What `commit_with_ood` retains prover-side to continue the protocol: the
 /// committed Merkle data and the codeword, alongside the parsed commitment.
 pub struct WhirCommitment<F: p3_field::Field, EF, MT: Mmcs<F>> {
-    pub parsed: ParsedCommitment<F, EF, MT::Commitment>,
+    pub parsed: ParsedCommitment<EF, MT::Commitment>,
     pub prover_data: MT::ProverData<p3_matrix::dense::RowMajorMatrix<F>>,
 }
 
@@ -84,7 +84,6 @@ where
                 commitment: alloc::vec![commitment],
                 ood_points,
                 ood_answers,
-                _f: core::marker::PhantomData,
             },
             prover_data,
         }

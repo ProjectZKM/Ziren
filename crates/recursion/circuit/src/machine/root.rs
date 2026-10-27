@@ -1,8 +1,7 @@
 //! ## FRI root-verifier deletion (May 19 2026)
 //!
 //! `ZKMCompressRootVerifier` and `ZKMCompressRootVerifierWithVKey` were
-//! thin wrappers around `ZKMCompressVerifier::verify` /
-//! `ZKMCompressWithVKeyVerifier::verify` that asserted
+//! thin wrappers around the FRI compose verifiers that asserted
 //! `is_complete == ONE` and then re-entered the FRI compose body.
 //! Both have been retired together with the rest of the FRI compose
 //! chain — the whir root behaviour is folded into the existing
