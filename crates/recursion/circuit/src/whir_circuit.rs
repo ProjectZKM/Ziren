@@ -92,6 +92,22 @@ pub fn host_stacked_whir_to_recursive(
         zkm_pcs::jagged_pcs::JaggedMmcs,
     >,
 ) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]> {
+    host_stacked_whir_to_recursive_generic(proof)
+}
+
+/// [`host_stacked_whir_to_recursive`] over any Merkle tree MMCS: the inner
+/// ring's eight-felt digests or the wrap ring's single BN254 element.
+pub fn host_stacked_whir_to_recursive_generic<MT, Dig>(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
+) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>
+where
+    MT: p3_commit::Mmcs<
+        InnerVal,
+        Commitment = p3_symmetric::MerkleCap<InnerVal, Dig>,
+        Proof = Vec<Dig>,
+    >,
+    Dig: Copy,
+{
     let whir = &proof.whir_proof;
     let conv_msgs = |msgs: &[zkm_pcs::whir::proof::SumcheckPoly<InnerChallenge>]| {
         msgs.iter()
@@ -163,12 +179,15 @@ pub fn host_stacked_whir_to_recursive(
 
 /// Witness the host mirror into circuit variables, element by element, in
 /// declaration order.  [`write_stacked_whir_to_stream`] mirrors the order.
-pub fn read_stacked_whir_from_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+/// `Dig` is the host digest: eight felts on the inner ring, one BN254 element
+/// on the wrap ring.
+pub fn read_stacked_whir_from_stream<C, Dig>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>,
     builder: &mut Builder<C>,
-) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>
+) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, Dig::WitnessVariable>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    Dig: Witnessable<C>,
 {
     RecursiveStackedWhirProof {
         round_sumcheck_polys: host
@@ -181,11 +200,7 @@ where
             .iter()
             .map(|r| r.iter().map(|a| a.read(builder)).collect())
             .collect(),
-        round_commitments: host
-            .round_commitments
-            .iter()
-            .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-            .collect(),
+        round_commitments: host.round_commitments.iter().map(|d| d.read(builder)).collect(),
         round_query_openings: host
             .round_query_openings
             .iter()
@@ -200,11 +215,7 @@ where
                             .map(|row| row.iter().map(|v| v.read(builder)).collect())
                             .collect(),
                         ef_values: l.ef_values.iter().map(|v| v.read(builder)).collect(),
-                        path: l
-                            .path
-                            .iter()
-                            .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-                            .collect(),
+                        path: l.path.iter().map(|d| d.read(builder)).collect(),
                     })
                     .collect(),
             })
@@ -228,11 +239,12 @@ where
 
 /// Stream-write the host mirror; MUST match [`read_stacked_whir_from_stream`]
 /// element order exactly.
-pub fn write_stacked_whir_to_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+pub fn write_stacked_whir_to_stream<C, Dig>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>,
     witness: &mut impl WitnessWriter<C>,
 ) where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    Dig: Witnessable<C>,
 {
     for r in &host.round_sumcheck_polys {
         for m in r {
@@ -247,9 +259,7 @@ pub fn write_stacked_whir_to_stream<C>(
         }
     }
     for d in &host.round_commitments {
-        for f in d {
-            f.write(witness);
-        }
+        d.write(witness);
     }
     for op in &host.round_query_openings {
         for l in &op.leaves {
@@ -262,9 +272,7 @@ pub fn write_stacked_whir_to_stream<C>(
                 v.write(witness);
             }
             for d in &l.path {
-                for f in d {
-                    f.write(witness);
-                }
+                d.write(witness);
             }
         }
     }
@@ -900,7 +908,7 @@ mod tests {
         for x in &stack_point {
             Witnessable::<InnerConfig>::write(x, &mut witness_stream);
         }
-        write_stacked_whir_to_stream::<InnerConfig>(&host_mirror, &mut witness_stream);
+        write_stacked_whir_to_stream::<InnerConfig, _>(&host_mirror, &mut witness_stream);
 
         run_test_recursion(builder.into_operations(), witness_stream);
     }

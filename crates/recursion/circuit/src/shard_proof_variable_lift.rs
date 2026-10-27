@@ -217,26 +217,6 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     )
 }
 
-/// WRAP-stage in-circuit verifier: `wrap_default`
-/// (log_blowup=3, num_queries=94, pow_bits=wrap_query_grinding_bits()) so the
-/// gnark OUTER circuit
-/// reads the wrap codeword at the same rate the wrap prover committed
-/// (100-bit query-phase soundness; the inner default would be ~55-bit).
-/// See `BasefoldVerifierParams::wrap_default`.
-pub fn build_basefold_shard_verifier_wrap<HV>(
-    max_log_row_count: usize,
-    log_stacking_height: u32,
-    num_variables: usize,
-) -> crate::shard_basefold::JaggedShardVerifier<
-    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
-> {
-    build_basefold_shard_verifier_with_params::<HV>(
-        max_log_row_count,
-        log_stacking_height,
-        crate::basefold_verifier::BasefoldVerifierParams::wrap_default(num_variables),
-    )
-}
-
 /// Lowest-level builder: explicit `BasefoldVerifierParams` (rate / queries
 /// / grinding).  All stage builders funnel through here so the FRI rate is
 /// a single source of truth per stage.

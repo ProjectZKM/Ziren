@@ -65,7 +65,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// The OUTER BN254 (gnark wrap) ring's commitment IS the raw wrap root —
     /// there are NO jagged counts to hash-bind for the wrap proof, so its lift
     /// carries `modified == original` (a documented placeholder, see
-    /// `lift_jagged_basefold_bundle_outer`).  Running the rebind there would
+    /// `lift_jagged_bundle_outer`).  Running the rebind there would
     /// assert `compress([original, hash(counts)]) == original`, which is FALSE
     /// (a BN254 Poseidon2 digest can never equal one of its preimages) — so the
     /// outer impl overrides this to `false`.
@@ -77,7 +77,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// that has one.
     ///
     /// The preceding-root bind needs the key's preprocessed root inside
-    /// `lift_jagged_basefold_bundle_outer`, to pin the proof-supplied
+    /// `lift_jagged_bundle_outer`, to pin the proof-supplied
     /// `preceding_commits[0]` against. `Self::DigestVariable` already IS that
     /// 1-cap on the outer ring, but `verify_wrap_basefold_core` is SC-generic,
     /// so the concrete `[Var<C::N>; 1]` cannot be named at the call site — hence
@@ -146,7 +146,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// `JaggedPcsProofGeneric<OuterValMmcs>` carrying REAL BN254
     /// commitments — the override deserializes the outer bundle and lifts its
     /// BN254 round commitments via
-    /// [`crate::shard_level_witness::lift_jagged_basefold_bundle_outer`], so
+    /// [`crate::shard_level_witness::lift_jagged_bundle_outer`], so
     /// the in-circuit challenger observes the same BN254 digests the host
     /// outer verifier absorbs (the all-zero placeholder for those
     /// commitments was the residual gnark constraint failure).
@@ -269,25 +269,24 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized;
 
-    /// P2c-for-outer (value-independent gnark wrap): lift a WITNESSED OUTER
-    /// (BN254) jagged BaseFold proof into the in-circuit
+    /// Value-independent gnark wrap: lift a WITNESSED OUTER (BN254)
+    /// jagged-WHIR proof into the in-circuit
     /// [`crate::jagged_circuit::JaggedPcsProofVariable`].
     ///
     /// The OUTER ring (`KoalaBearPoseidon2Outer`) routes to
-    /// [`crate::shard_level_witness::lift_jagged_basefold_bundle_outer`] with the
+    /// [`crate::shard_level_witness::lift_jagged_bundle_outer`] with the
     /// witnessed proof values (no const-bake → the gnark R1CS is
     /// value-independent).  The INNER ring never produces a
-    /// `LiftedEvalProof::OuterBundle`, so its impl is a dead structural
-    /// placeholder — the escape hatch that lets the SC-generic
-    /// `verify_wrap_basefold_core` compile for both rings (mirrors
-    /// `lift_bundle_dispatch`).
+    /// `LiftedEvalProof::OuterBundle`, so its impl is unreachable — present
+    /// only so the SC-generic `verify_wrap_basefold_core` compiles for both
+    /// rings.
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,
         host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
-        basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             [zkm_recursion_compiler::ir::Var<C::N>; 1],
@@ -302,7 +301,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         row_counts_by_round: Option<&[Vec<usize>]>,
         vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
-        crate::basefold_verifier::RecursiveBasefoldProof<
+        crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             Self::DigestVariable,
@@ -569,17 +568,16 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
         )
     }
 
-    /// The inner ring never carries a `LiftedEvalProof::Outer
-    /// Bundle` (it's an inner KoalaBear bundle, lifted via `lift_bundle_dispatch`).
-    /// This arm is dead — build a structural `[Felt;8]` placeholder so the
-    /// SC-generic `verify_wrap_basefold_core` type-checks for the inner ring.
+    /// The inner ring never carries a `LiftedEvalProof::OuterBundle`, so this
+    /// arm is dead — present only so the SC-generic `verify_wrap_basefold_core`
+    /// type-checks for the inner ring.
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
-        builder: &mut Builder<C>,
+        _builder: &mut Builder<C>,
         _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
-        _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+        _whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             [zkm_recursion_compiler::ir::Var<C::N>; 1],
@@ -589,12 +587,12 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
         _expected_eval: Ext<C::F, C::EF>,
         _commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
         _preread_preceding_roots: &[[zkm_recursion_compiler::ir::Var<C::N>; 1]],
-        max_log_row_count: usize,
-        column_counts_by_round: &[Vec<usize>],
+        _max_log_row_count: usize,
+        _column_counts_by_round: &[Vec<usize>],
         _row_counts_by_round: Option<&[Vec<usize>]>,
         _vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
-        crate::basefold_verifier::RecursiveBasefoldProof<
+        crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             Self::DigestVariable,
@@ -607,11 +605,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized,
     {
-        crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
-            builder,
-            max_log_row_count,
-            column_counts_by_round,
-        )
+        unreachable!("the INNER ring never carries an outer jagged-WHIR bundle")
     }
 
     fn chip_height_bits_dispatch(
@@ -853,16 +847,16 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         )
     }
 
-    /// P2c-for-outer: lift the WITNESSED outer BN254 bundle (value-independent
-    /// gnark wrap).  Routes to `lift_jagged_basefold_bundle_outer` with the
-    /// witnessed proof values pre-read from the gnark stream.
+    /// Lift the WITNESSED outer BN254 jagged-WHIR bundle (value-independent
+    /// gnark wrap).  Routes to `lift_jagged_bundle_outer` with the witnessed
+    /// proof values pre-read from the gnark stream.
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,
         host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
-        basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             [zkm_recursion_compiler::ir::Var<C::N>; 1],
@@ -877,7 +871,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         row_counts_by_round: Option<&[Vec<usize>]>,
         vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
-        crate::basefold_verifier::RecursiveBasefoldProof<
+        crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             Self::DigestVariable,
@@ -890,10 +884,12 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized,
     {
-        crate::shard_level_witness::lift_jagged_basefold_bundle_outer::<C>(
+        let batch_evaluations = whir_proof.batch_evaluations.clone();
+        crate::shard_level_witness::lift_jagged_bundle_outer::<C, _>(
             builder,
             host,
-            basefold_proof,
+            whir_proof,
+            batch_evaluations,
             sumcheck,
             jagged_eval,
             expected_eval,

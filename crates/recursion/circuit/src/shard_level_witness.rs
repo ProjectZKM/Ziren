@@ -294,7 +294,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     // The gnark wrap path.  The host carries the outer bundle
     // (`JaggedPcsProofGeneric<OuterValMmcs>`, BN254 commitments) as
     // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
-    // `lift_jagged_basefold_bundle_outer` (which would make the
+    // `lift_jagged_bundle_outer` (which would make the
     // gnark R1CS proof-specific → a fresh proof trips `assertIsEqual`), we
     // WITNESS them from the gnark stream here.  Digests are BN254 1-caps
     // (`[Var<C::N>; 1]`, N = Bn254 in the outer config).  This variant is only
@@ -305,7 +305,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         host: zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
-        basefold_proof: RecursiveBasefoldProof<
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
             [zkm_recursion_compiler::ir::Var<C::N>; 1],
@@ -422,7 +422,7 @@ where
                     let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(
                         bundle.whir_proof.as_ref().unwrap(),
                     );
-                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C>(
+                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
                         &whir_host, builder,
                     );
                     let sumcheck = read_sumcheck_from_stream::<C>(
@@ -509,7 +509,7 @@ where
         {
             if let Some(whir) = &bundle.whir_proof {
                 let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(whir);
-                crate::whir_circuit::write_stacked_whir_to_stream::<C>(&whir_host, witness);
+                crate::whir_circuit::write_stacked_whir_to_stream::<C, _>(&whir_host, witness);
             } else {
                 let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
                 crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
@@ -882,7 +882,7 @@ pub fn host_stacked_basefold_to_recursive(
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
-// BaseFold-over-BN254 wrap: OUTER-ring bundle lift.
+// Jagged-WHIR-over-BN254 wrap: OUTER-ring bundle lift.
 //
 // The OUTER wrap proof's `EvaluationProof::Bytes` carries a
 // `JaggedPcsProofGeneric<OuterValMmcs>` whose commitments are
@@ -914,135 +914,9 @@ fn outer_cap_root(
     roots[0]
 }
 
-/// Outer analog of [`host_component_opening_to_recursive`] over `OuterValMmcs`.
-fn host_component_opening_to_recursive_outer(
-    opening: &MerkleOpening<InnerVal, OuterValMmcs>,
-) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, OuterDigestRaw>> {
-    opening
-        .leaves
-        .iter()
-        .map(|leaf| RecursiveBasefoldComponentOpening {
-            leaf_values: leaf.values.clone(),
-            merkle_path_bytes: Vec::new(),
-            merkle_path_digests: leaf.proof.clone(),
-            _phantom: core::marker::PhantomData,
-        })
-        .collect()
-}
-
-/// Outer analog of [`host_query_opening_to_recursive`] over `OuterValMmcs`.
-/// `leaf.proof` is `OuterValMmcs::Proof = Vec<[Bn254; 1]>` — the real BN254
-/// Merkle siblings, threaded into `merkle_path_digests` for binding.
-fn host_query_opening_to_recursive_outer(
-    opening: &MerkleOpening<InnerVal, OuterValMmcs>,
-) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, OuterDigestRaw>> {
-    use p3_field::BasedVectorSpace;
-    const D: usize = 4;
-    opening
-        .leaves
-        .iter()
-        .map(|leaf| {
-            assert_eq!(
-                leaf.values.len(),
-                1,
-                "commit-phase leaf must have exactly one inner matrix",
-            );
-            let row = &leaf.values[0];
-            assert!(
-                row.len() % D == 0 && !row.is_empty(),
-                "commit-phase leaf row must be a whole number of EF elements \
-                 (a multiple of EF::DIMENSION = {}), got {}",
-                D,
-                row.len(),
-            );
-            let block: Vec<InnerChallenge> = row
-                .as_chunks::<D>()
-                .0
-                .iter()
-                .map(|c| {
-                    <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-                        c.iter().copied(),
-                    )
-                    .expect("EF parse from D base elements")
-                })
-                .collect();
-            RecursiveBasefoldOpening {
-                position: 0,
-                block,
-                merkle_path_bytes: Vec::new(),
-                merkle_path_digests: leaf.proof.clone(),
-                _phantom: core::marker::PhantomData,
-            }
-        })
-        .collect()
-}
-
-/// Outer analog of [`host_basefold_proof_to_recursive`] — reads the BN254
-/// 1-cap roots from `fri_commitments` and the BN254 Merkle siblings from the
-/// per-query openings, producing a `RecursiveBasefoldProof` whose `Dig` is
-/// the outer BN254 digest type `[Bn254; 1]`.
-fn host_basefold_proof_to_recursive_outer(
-    proof: &BasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
-    batch_evaluations: Vec<Vec<InnerChallenge>>,
-) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
-    let k =
-        zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
-            .log_folding_arity()
-            .max(1);
-    let commit_for_var: Vec<usize> = (0..proof.univariate_messages.len())
-        .map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1)))
-        .collect();
-    assert_eq!(
-        proof.fri_commitments.len(),
-        proof.univariate_messages.len().div_ceil(k),
-        "BasefoldProof (wrap): fri_commitments.len() != ceil(univariate_messages.len() / wrap arity {k})",
-    );
-
-    let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, OuterDigestRaw>> = proof
-        .univariate_messages
-        .iter()
-        .enumerate()
-        .map(|(v, uni)| RecursiveBasefoldRound {
-            uni_poly: *uni,
-            commitment: outer_cap_root(&proof.fri_commitments[commit_for_var[v]]),
-            _phantom_f: core::marker::PhantomData,
-        })
-        .collect();
-
-    let component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<_, _, OuterDigestRaw>>> =
-        proof
-            .component_polynomials_query_openings_and_proofs
-            .iter()
-            .map(host_component_opening_to_recursive_outer)
-            .collect();
-
-    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _, OuterDigestRaw>>> = proof
-        .query_phase_openings_and_proofs
-        .iter()
-        .map(host_query_opening_to_recursive_outer)
-        .collect();
-
-    RecursiveBasefoldProof {
-        rounds,
-        final_poly: proof.final_poly,
-        pow_witness: proof.pow_witness,
-        batch_grinding_witness: proof.batch_grinding_witness,
-        component_openings,
-        query_phase_openings,
-        batch_evaluations,
-    }
-}
-
-/// Outer analog of [`host_stacked_basefold_to_recursive`] over `OuterValMmcs`.
-fn host_stacked_basefold_to_recursive_outer(
-    proof: &StackedBasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
-) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
-    host_basefold_proof_to_recursive_outer(&proof.basefold_proof, proof.batch_evaluations.clone())
-}
-
-/// WITNESS the OUTER (BN254) jagged-basefold bundle's
+/// WITNESS the OUTER (BN254) jagged-WHIR bundle's
 /// proof-specific values from the gnark witness stream (the value-independent
-/// replacement for the const-baking in `lift_jagged_basefold_bundle_outer`).
+/// replacement for const-baking them in `lift_jagged_bundle_outer`).
 ///
 /// Called from `JaggedShardProof::read` via
 /// `CircuitConfig::read_outer_eval_bundle` (OuterConfig override).  Returns the
@@ -1051,11 +925,11 @@ fn host_stacked_basefold_to_recursive_outer(
 /// `None` (Empty / inner Bundle / malformed → fall back to the bytes path).
 ///
 /// The witnessed values (read order MUST match
-/// [`write_outer_eval_bundle_impl`]): the BaseFold proof (uni_polys, BN254 round
-/// commitments, final_poly, pow/grind witnesses, per-query sibling pairs + BN254
-/// merkle path digests, batch_evaluations), the reduction sumcheck, the
-/// jagged-eval sub-sumcheck, expected_eval (q_at_z), and the BN254 commit cap
-/// root.  Shape metadata (packing, column counts) stays in `host` and is read by
+/// [`write_outer_eval_bundle_impl`]): the stacked-WHIR proof (sumcheck
+/// messages, OOD answers, BN254 round commitments, query openings with their
+/// BN254 Merkle paths, final polynomial, grinding witnesses, batch
+/// evaluations), the reduction sumcheck, the jagged-eval sub-sumcheck,
+/// expected_eval (q_at_z), and the BN254 commit cap roots.  Shape metadata (packing, column counts) stays in `host` and is read by
 /// the lift as compile-time constants (shape-derived, value-independent).
 pub fn read_outer_eval_bundle_impl<C>(
     builder: &mut Builder<C>,
@@ -1072,12 +946,14 @@ where
     let bundle =
         zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<OuterValMmcs>::from_bytes(bytes)?;
 
-    assert!(bundle.whir_proof.is_none(), "WHIR proof in an OUTER-lift bundle: the outer circuit lifts recursion (BaseFold) proofs only — a core proof leaked past the leaf");
-    let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
-    let basefold_proof = crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
-        &host_basefold_outer,
-        builder,
+    let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_generic::<
+        OuterValMmcs,
+        OuterDigestRaw,
+    >(
+        bundle.whir_proof.as_ref().expect("the outer bundle carries a WHIR opening")
     );
+    let whir_proof =
+        crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(&whir_host, builder);
     let sumcheck = read_sumcheck_from_stream::<C>(
         &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
         builder,
@@ -1101,7 +977,7 @@ where
 
     Some(LiftedEvalProof::OuterBundle {
         host: bundle,
-        basefold_proof,
+        whir_proof,
         sumcheck,
         jagged_eval,
         expected_eval,
@@ -1133,12 +1009,13 @@ where
             Some(b) => b,
             None => return false,
         };
-    assert!(bundle.whir_proof.is_none(), "WHIR proof in an OUTER-lift bundle: the outer circuit lifts recursion (BaseFold) proofs only — a core proof leaked past the leaf");
-    let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
-    crate::basefold_witness::write_basefold_proof_outer_to_stream::<C>(
-        &host_basefold_outer,
-        witness,
+    let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_generic::<
+        OuterValMmcs,
+        OuterDigestRaw,
+    >(
+        bundle.whir_proof.as_ref().expect("the outer bundle carries a WHIR opening")
     );
+    crate::whir_circuit::write_stacked_whir_to_stream::<C, _>(&whir_host, witness);
     write_sumcheck_to_stream::<C>(
         &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
         witness,
@@ -1161,45 +1038,35 @@ where
     true
 }
 
-/// Lift the OUTER-ring jagged BaseFold
-/// bundle into the in-circuit `JaggedPcsProofVariable`.
+/// Lift the OUTER-ring jagged-WHIR bundle into the in-circuit
+/// `JaggedPcsProofVariable`.
 ///
-/// Structural mirror of [`lift_jagged_basefold_bundle`] but:
-///   * `original_commitments[0]` ← the REAL BN254 `bundle.commit.original_commitment`
-///     1-cap root, lifted to `[Var<Bn254>; 1]` via
-///     `KoalaBearPoseidon2Outer::const_digest`.  This is the digest the
-///     in-circuit `RecursiveBasefoldVerifier::verify_untrusted_evaluations`
-///     step (1) observes, matching the host's
-///     `challenger.observe(bundle.commit.original_commitment)`.
-///   * the inner BaseFold proof's per-round `commitment` + per-query
-///     `merkle_path_digests` carry the real BN254 digests (read via
-///     `host_stacked_basefold_to_recursive_outer`), so the commit-phase
-///     transcript replay (step (4)) observes the same BN254 digests the
-///     host basefold verifier absorbs.
+/// Structural mirror of [`lift_jagged_bundle_generic`] but:
+///   * `original_commitments` are the REAL BN254 1-cap roots
+///     (`[Var<Bn254>; 1]`), preceding rounds first and the main round last;
+///     these are the digests the in-circuit WHIR verifier Merkle-binds the
+///     round-0 openings against.
+///   * there is no hash-bind: the outer ring's commitment IS the raw root,
+///     so `modified_commitments == original_commitments`.
 ///
-/// `HV` is pinned to `KoalaBearPoseidon2Outer` (the only outer hasher); the
-/// generic param keeps the output type aligned with the dispatch call site.
-///
-/// Value-independence: the proof-specific values (`preread_basefold_proof`,
-/// `preread_sumcheck`, `preread_jagged_eval`, `preread_expected_eval`,
-/// `preread_commit_root`, `preread_preceding_roots`) are read from the gnark
-/// witness stream ahead of time (`read_outer_eval_bundle_impl`, via
-/// `JaggedShardProof::read`), because the stream is positional and this
-/// function runs long after the reader. Witnessed rather than baked, so the
-/// R1CS verifies any wrap proof of the shape. Only the shape metadata
-/// (`bundle.packing`, column and row counts) is read here as constants.
+/// Value-independence: the proof-specific values (`pcs_proof`,
+/// `batch_evaluations`, `preread_sumcheck`, `preread_jagged_eval`,
+/// `preread_expected_eval`, `preread_commit_root`, `preread_preceding_roots`)
+/// are read from the gnark witness stream ahead of time
+/// (`read_outer_eval_bundle_impl`, via `JaggedShardProof::read`), because the
+/// stream is positional and this function runs long after the reader.
+/// Witnessed rather than baked, so the R1CS verifies any wrap proof of the
+/// shape. Only the shape metadata (`bundle.packing`, column and row counts) is
+/// read here as constants.
 ///
 /// `vk_preprocessed_cap` is the verifying key's preprocessed commitment; the
 /// preceding round's root is asserted equal to it (see the bind below).
 #[allow(clippy::too_many_arguments)]
-pub fn lift_jagged_basefold_bundle_outer<C>(
+pub fn lift_jagged_bundle_outer<C, P>(
     builder: &mut Builder<C>,
     bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<OuterValMmcs>,
-    preread_basefold_proof: RecursiveBasefoldProof<
-        Felt<C::F>,
-        Ext<C::F, C::EF>,
-        [zkm_recursion_compiler::ir::Var<C::N>; 1],
-    >,
+    pcs_proof: P,
+    batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>>,
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
@@ -1210,11 +1077,7 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     row_counts_by_round: Option<&[Vec<usize>]>,
     vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<
-        Felt<C::F>,
-        Ext<C::F, C::EF>,
-        <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
-    >,
+    P,
     <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
     C::F,
     C::EF,
@@ -1271,30 +1134,15 @@ where
 
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
-    let basefold_proof_var = preread_basefold_proof;
-
     assert_eq!(
-        basefold_proof_var.component_openings.len(),
+        batch_evaluations.len(),
         num_rounds,
-        "outer lift: {} rounds of component openings for {num_rounds} opened rounds",
-        basefold_proof_var.component_openings.len(),
+        "outer lift: {} rounds of batch evaluations for {num_rounds} opened rounds",
+        batch_evaluations.len(),
     );
 
-    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> =
-        basefold_proof_var.batch_evaluations.iter().map(|round| round.to_vec()).collect();
-
-    let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-            <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
-        >,
-        C::F,
-        C::EF,
-    > {
-        batch_evaluations: batch_evaluations_ext,
-        pcs_proof: basefold_proof_var,
-    };
+    let stacked_pcs_proof =
+        RecursiveStackedPcsProof::<P, C::F, C::EF> { batch_evaluations, pcs_proof };
 
     assert_eq!(
         preread_preceding_roots.len(),

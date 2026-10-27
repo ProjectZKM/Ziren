@@ -280,6 +280,10 @@ pub enum WhirProfile {
     /// The core schedule at the starting rate `2^-2`, for the shrink proof,
     /// whose verifier is the wrap program ([`shrink_whir_config`]).
     Shrink,
+    /// The schedule of the wrap proof, whose verifier is the gnark circuit:
+    /// the compress schedule's shape, tuned for the circuit's size, with its
+    /// own knobs ([`wrap_whir_config`]).
+    Wrap,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -288,6 +292,7 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
         WhirProfile::Core => core_whir_config(lsh),
         WhirProfile::Compress => compress_whir_config(lsh),
         WhirProfile::Shrink => shrink_whir_config(lsh),
+        WhirProfile::Wrap => wrap_whir_config(lsh),
     }
 }
 
@@ -352,10 +357,119 @@ pub fn bits_per_query_johnson(log_inv_rate: usize, m: usize) -> f64 {
 /// The least query count reaching [`per_component_target_bits`] at this rate
 /// under the compress schedule's accounting with `pow` bits of grinding.
 pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
-    let m = compress_johnson_m();
+    min_queries_johnson(log_inv_rate, pow, compress_johnson_m())
+}
+
+/// The least query count reaching [`per_component_target_bits`] at this rate
+/// under the Johnson bound at multiplicity `m` (unique decoding at `m = 0`)
+/// with `pow` bits of grinding.
+pub fn min_queries_johnson(log_inv_rate: usize, pow: usize, m: usize) -> usize {
     let bits =
         if m == 0 { bits_per_query(log_inv_rate) } else { bits_per_query_johnson(log_inv_rate, m) };
     ((per_component_target_bits() - pow as f64) / bits).ceil() as usize
+}
+
+/// Bits of soundness of one folding step without grinding: the step folds a
+/// codeword of rate `2^-log_inv_rate` into one of dimension `2^log_dim`, under
+/// the Johnson bound at multiplicity `m` (unique decoding at `m = 0`).
+///
+/// WHIR's folding error (Theorem 5.2) is `d · L / |F|` for the list `L` of the
+/// code before the fold, `d = 3`, plus the proximity-gap error of the folded
+/// code over two functions.  The latter is BCHKS25 Theorem 4.2,
+/// `((2m'^5 + 3m' · gamma · rho) · n / (3 rho^(3/2)) + m' / sqrt(rho)) / |F|`
+/// with `m' = m + 1/2`, `n = 2^log_dim / rho` and the proximity
+/// `gamma = 1 - sqrt(rho) - sqrt(rho) / (2m)`, and its list is
+/// `L = m' / sqrt(rho)`; under unique decoding it is Theorem 1.3,
+/// `(gamma · n + 1) / |F|` with `gamma = (1 - rho) / 2` and `L = 1`.  The
+/// error halves with each variable folded and grows with the fifth power of
+/// the multiplicity, which is what sets the multiplicity of a schedule whose
+/// grinding is expensive.
+pub fn fold_soundness_bits(log_inv_rate: usize, log_dim: usize, m: usize) -> f64 {
+    let rho = 2f64.powi(-(log_inv_rate as i32));
+    let sqrt_rho = rho.sqrt();
+    let n = 2f64.powi(log_dim as i32) / rho;
+    let (list, prox_gap) = if m == 0 {
+        (1.0, (1.0 - rho) / 2.0 * n + 1.0)
+    } else {
+        let mp = m as f64 + 0.5;
+        let gamma = 1.0 - sqrt_rho - sqrt_rho / (2.0 * m as f64);
+        let gap = (2.0 * mp.powi(5) + 3.0 * mp * gamma * rho) * n / (3.0 * rho * sqrt_rho)
+            + mp / sqrt_rho;
+        (mp / sqrt_rho, gap)
+    };
+    let log_field = 4.0 * (<JaggedVal as p3_field::PrimeField64>::ORDER_U64 as f64).log2();
+    log_field - (3.0 * list + prox_gap).log2()
+}
+
+/// The grinding a folding step needs to reach [`per_component_target_bits`]:
+/// the target less the step's soundness in whole bits, rounded down as a
+/// soundness report states it, so the report reads the target on every step.
+pub fn fold_grinding_bits(log_inv_rate: usize, log_dim: usize, m: usize) -> usize {
+    let bits = fold_soundness_bits(log_inv_rate, log_dim, m).floor();
+    (per_component_target_bits() - bits).ceil().max(0.0) as usize
+}
+
+/// The knobs of a size-tuned schedule: [`compress_whir_config`] and
+/// [`wrap_whir_config`] differ only in where these come from.
+#[derive(Clone, Copy, Debug)]
+pub struct SizeTunedParams {
+    /// `log2(1/rho)` of the first committed oracle.
+    pub log_inv_rate: usize,
+    /// The first folding factor; later rounds fold 6.
+    pub round0_folding: usize,
+    /// The Johnson-bound multiplicity the queries are counted with; 0 is
+    /// unique decoding.
+    pub johnson_m: usize,
+    /// Grinding on every query phase, in bits.
+    pub query_pow: usize,
+    /// Grinding on every folding challenge, in bits; `None` grinds each step
+    /// what its own folding error needs ([`fold_grinding_bits`]).
+    pub fold_pow: Option<usize>,
+    /// Grinding on the stripe batching, in bits.
+    pub batch_pow: usize,
+}
+
+impl SizeTunedParams {
+    /// The compress schedule's knobs.
+    pub fn compress() -> Self {
+        Self {
+            log_inv_rate: compress_log_inv_rate(),
+            round0_folding: compress_round0_folding(),
+            johnson_m: compress_johnson_m(),
+            query_pow: compress_query_grinding_bits(),
+            fold_pow: Some(compress_fold_grinding_bits()),
+            batch_pow: compress_batch_grinding_bits(),
+        }
+    }
+
+    /// The wrap schedule's knobs.
+    ///
+    /// The wrap's verifier is the gnark circuit, whose size is set by the
+    /// queries, and its prover grinds over the BN254 challenger, whose
+    /// permutation costs far more than the KoalaBear one.  The compress
+    /// schedule's multiplicity buys its few queries with folding grinds the
+    /// BN254 challenger cannot afford, so the wrap keeps its shape (first rate
+    /// `2^-3`, folds `[2, 6, 6]`) at a smaller list, and each folding step
+    /// grinds only what its own error needs, the error growing with the fifth
+    /// power of the multiplicity.  `m = 3` is the least multiplicity whose
+    /// circuit stays inside the `2^25` constraints of the Groth16 setup: one
+    /// below it, the circuit crosses into a `2^26` domain, which doubles the
+    /// prover's FFTs and outweighs the grinding the smaller list saves.  The
+    /// batching grind closes the batch of the wrap's pinned geometry, 24
+    /// stripes, at that list size.
+    pub fn wrap() -> Self {
+        let env = crate::params::env_usize;
+        Self {
+            log_inv_rate: env("ZIREN_WRAP_LOG_INV_RATE", 3),
+            round0_folding: env("ZIREN_WRAP_ROUND0_FOLDING", 2),
+            johnson_m: env("ZIREN_WRAP_JOHNSON_M", 3),
+            query_pow: env("ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS", 24),
+            fold_pow: std::env::var("ZIREN_WRAP_FOLD_GRINDING_BITS")
+                .ok()
+                .and_then(|v| v.parse().ok()),
+            batch_pow: env("ZIREN_WRAP_BATCH_GRINDING_BITS", 24),
+        }
+    }
 }
 
 /// The size-tuned schedule of the recursion stages at stacking height `lsh`,
@@ -377,13 +491,29 @@ pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
 /// against `[203, 93]` and 85 under the core schedule.
 /// Folds are `[2, 6, 6]` with seven final variables.
 pub fn compress_whir_config(lsh: usize) -> WhirConfig {
-    let rate = compress_log_inv_rate();
+    size_tuned_whir_config(lsh, SizeTunedParams::compress())
+}
+
+/// The schedule of the wrap proof at stacking height `lsh`: the compress
+/// schedule's shape under [`SizeTunedParams::wrap`].
+pub fn wrap_whir_config(lsh: usize) -> WhirConfig {
+    size_tuned_whir_config(lsh, SizeTunedParams::wrap())
+}
+
+/// The size-tuned schedule at stacking height `lsh` under `params`: folds
+/// `[k0, 6, 6, …]` with at most seven final variables, round `r` committing
+/// at `2^-(rate + 3(r + 1))`, every query phase the least count reaching
+/// [`per_component_target_bits`] under the Johnson bound at `m`, and every
+/// folding step ground the fixed `fold_pow` or, without one, what that step
+/// needs ([`fold_grinding_bits`]).
+pub fn size_tuned_whir_config(lsh: usize, params: SizeTunedParams) -> WhirConfig {
+    let rate = params.log_inv_rate;
     assert!(
         lsh + rate <= <JaggedVal as p3_field::TwoAdicField>::TWO_ADICITY,
-        "compress schedule: the first oracle at stacking height {lsh} and rate 2^-{rate} \
+        "size-tuned schedule: the first oracle at stacking height {lsh} and rate 2^-{rate} \
          exceeds the field's two-adic subgroup",
     );
-    let k0 = compress_round0_folding();
+    let k0 = params.round0_folding;
     let mut rem =
         lsh.checked_sub(k0).expect("stacking height must exceed the round-0 folding factor");
     let mut folds = alloc::vec![k0];
@@ -394,18 +524,24 @@ pub fn compress_whir_config(lsh: usize) -> WhirConfig {
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
     config.starting_log_inv_rate = rate;
     let num_rounds = config.round_parameters.len();
-    let pow = compress_query_grinding_bits();
-    let fold_pow = compress_fold_grinding_bits();
+    let pow = params.query_pow;
+    let m = params.johnson_m;
+    let mut log_dim = lsh;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = rate + 3 * (r + 1);
-        rp.num_queries = min_queries_compress(rate + 3 * r, pow);
+        rp.num_queries = min_queries_johnson(rate + 3 * r, pow, m);
         rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
-        rp.pow_bits = alloc::vec![fold_pow; rp.folding_factor];
+        rp.pow_bits = (1..=rp.folding_factor)
+            .map(|s| {
+                params.fold_pow.unwrap_or_else(|| fold_grinding_bits(rate + 3 * r, log_dim - s, m))
+            })
+            .collect();
+        log_dim -= rp.folding_factor;
     }
-    config.final_queries = min_queries_compress(rate + 3 * (num_rounds - 1), pow);
+    config.final_queries = min_queries_johnson(rate + 3 * (num_rounds - 1), pow, m);
     config.final_pow_bits = pow;
-    config.batch_pow_bits = compress_batch_grinding_bits();
+    config.batch_pow_bits = params.batch_pow;
     config
 }
 
@@ -638,7 +774,8 @@ where
 mod tests {
     use super::{
         bits_per_query, bits_per_query_johnson, compress_johnson_m, compress_whir_config,
-        core_whir_config, min_queries, min_queries_compress, per_component_target_bits,
+        core_whir_config, min_queries, min_queries_compress, min_queries_johnson,
+        per_component_target_bits, wrap_whir_config, SizeTunedParams,
     };
     use crate::whir::config::WhirConfig;
 
@@ -710,5 +847,47 @@ mod tests {
                 min_queries_compress,
             );
         }
+    }
+
+    /// The same for the wrap schedule, under its own multiplicity.
+    #[test]
+    fn wrap_query_counts_are_the_johnson_minimum() {
+        let m = SizeTunedParams::wrap().johnson_m;
+        let bits = |rate: usize| {
+            if m == 0 {
+                bits_per_query(rate)
+            } else {
+                bits_per_query_johnson(rate, m)
+            }
+        };
+        for lsh in [16usize, 19, 21] {
+            check_query_counts(
+                &format!("wrap lsh {lsh}"),
+                &wrap_whir_config(lsh),
+                bits,
+                |rate, pow| min_queries_johnson(rate, pow, m),
+            );
+        }
+    }
+
+    /// The wrap schedule at the wrap's stacking height, as soundcalc's WHIR
+    /// model (`soundcalc/pcs/whir.py`, Johnson regime at `explicit_m = 3`)
+    /// scores it: every folding step and query phase at the target.  Pins the
+    /// defaults, so a change to them shows here as well as in the vk.
+    #[test]
+    fn wrap_schedule_at_lsh_21_is_pinned() {
+        if std::env::vars().any(|(k, _)| k.starts_with("ZIREN_WRAP_")) {
+            return;
+        }
+        let cfg = wrap_whir_config(21);
+        let queries: Vec<usize> = cfg.round_parameters.iter().map(|rp| rp.num_queries).collect();
+        assert_eq!((queries, cfg.final_queries), (vec![65, 30, 20], 20));
+        let folds: Vec<Vec<usize>> =
+            cfg.round_parameters.iter().map(|rp| rp.pow_bits.clone()).collect();
+        assert_eq!(
+            folds,
+            vec![vec![18, 17], vec![24, 23, 22, 21, 20, 19], vec![25, 24, 23, 22, 21, 20],]
+        );
+        assert_eq!(cfg.batch_pow_bits, 24);
     }
 }

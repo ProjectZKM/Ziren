@@ -192,14 +192,16 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // higher-level jagged bundle + 8-felt-digest stack is genericized over
 // `BfMmcs::Commitment`.
 //
-// The digest tunnel + the outer jagged open/verify dispatch are wired, so the
-// wrap STARK proves and host-verifies over the BN254 BaseFold jagged-PCS
-// (OuterValMmcs + OuterChallenger): the outer commit builds the BN254 commit
-// via the `BasefoldRing::commit_multilinears` default (over `OuterValMmcs`), and
-// `prove_trusted_evaluations` / `verify_jagged_pcs_host` dispatch statically
-// through this impl.
+// The wrap STARK proves and host-verifies over jagged-WHIR with BN254
+// Merkle trees (OuterValMmcs + OuterChallenger): the outer commit builds the
+// BN254 WHIR commit via the `BasefoldRing::commit_multilinears` default (over
+// `OuterValMmcs`), and `prove_trusted_evaluations` / `verify_jagged_pcs_host`
+// dispatch statically through this impl.
 impl BasefoldRing for KoalaBearPoseidon2Outer {
-    const WHIR_INNER_PCS: bool = false;
+    const WHIR_INNER_PCS: bool = true;
+
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
+        zkm_pcs::whir::jagged::WhirProfile::Wrap;
 
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
@@ -218,6 +220,18 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
 
     fn fri_config() -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
         zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
+    }
+
+    fn whir_committed_bf_prover_data(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> Option<
+        <Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::ProverData<
+            p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>,
+        >,
+    > {
+        let roots = commit.roots();
+        assert_eq!(roots.len(), 1, "a WHIR commitment is a height-0 cap");
+        Some(p3_merkle_tree::MerkleTree::from_parts(Vec::new(), vec![vec![roots[0]]], Vec::new()))
     }
 
     /// `Com<KoalaBearPoseidon2Outer>` is `OuterPcs::Commitment` =
@@ -244,10 +258,9 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         out
     }
 
-    // `commit_multilinears` — the wrap ring's BN254 jagged BaseFold
-    // precompute — is the trait DEFAULT (this ring's `bf_mmcs()` /
-    // `fri_config()` are what it reads): EXACTLY the commit the retired
-    // outer BaseFold commit path produced for OuterSC.
+    // `commit_multilinears` — the wrap ring's BN254 jagged-WHIR precompute —
+    // is the trait DEFAULT (this ring's `bf_mmcs()` / `WHIR_PROFILE` are what
+    // it reads).
 
     fn prove_jagged_open(
         z_row: &[zkm_pcs::InnerChallenge],
@@ -258,7 +271,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
             Self::Challenger,
             Self::BfMmcs,
             zkm_pcs::jagged_pcs::JaggedDft,
-            zkm_pcs::jagged_pcs::jagged::BasefoldDenseOpen,
+            zkm_pcs::jagged_pcs::jagged::WhirDenseOpen,
         >(
             &rounds,
             z_row,
@@ -462,6 +475,20 @@ mod basefold_over_bn254_roundtrip_test {
         OuterChallenger::new(outer_perm()).unwrap()
     }
 
+    /// Drop the wrap schedule's grinding so a CPU test does not spend minutes
+    /// in BN254 proof-of-work.  The query counts are solved from the grinding,
+    /// so they rise to keep each phase at the target; every test that sets
+    /// this sets the same values, so the process-wide variables agree.
+    fn cheap_wrap_grinding() {
+        for var in [
+            "ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS",
+            "ZIREN_WRAP_FOLD_GRINDING_BITS",
+            "ZIREN_WRAP_BATCH_GRINDING_BITS",
+        ] {
+            std::env::set_var(var, "0");
+        }
+    }
+
     #[test]
     fn test_basefold_jagged_pcs_roundtrip_bn254() {
         let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
@@ -573,11 +600,12 @@ mod basefold_over_bn254_roundtrip_test {
     }
 
     #[test]
-    fn test_jagged_basefold_bundle_roundtrip_bn254() {
+    fn test_jagged_whir_bundle_roundtrip_bn254() {
+        cheap_wrap_grinding();
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            BasefoldDenseOpen, JaggedOpenRound,
+            WhirDenseOpen, JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -628,6 +656,9 @@ mod basefold_over_bn254_roundtrip_test {
             .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
+        let whir = <KoalaBearPoseidon2Outer as BasefoldRing>::whir_config(
+            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
         let precompute =
             <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&trace_views, None);
         let commitment = precompute.commit.original_commitment.clone();
@@ -663,7 +694,7 @@ mod basefold_over_bn254_roundtrip_test {
             OuterChallenger,
             OuterValMmcs,
             OuterDft,
-            BasefoldDenseOpen,
+            WhirDenseOpen,
         >(
             &rounds,
             &z_row,
@@ -671,7 +702,7 @@ mod basefold_over_bn254_roundtrip_test {
             mmcs.clone(),
             dft,
             fri.clone(),
-            zkm_pcs::whir::jagged::WhirProfile::Core,
+            zkm_pcs::whir::jagged::WhirProfile::Wrap,
         );
 
         let chip_widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
@@ -687,13 +718,13 @@ mod basefold_over_bn254_roundtrip_test {
             &mut v_chal,
             mmcs,
             true,
-            fri,
+            whir.clone(),
             &[],
             &bundle.y_per_chip.clone(),
         );
         assert!(
             ok,
-            "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
+            "jagged-WHIR full bundle pipeline should accept the honest proof over BN254"
         );
 
         let honest: Vec<Vec<JaggedChallenge>> = bundle.y_per_chip.clone();
@@ -708,7 +739,7 @@ mod basefold_over_bn254_roundtrip_test {
                 &mut v_chal,
                 <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
                 true,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                whir.clone(),
                 &[],
                 &honest,
             ),
@@ -728,7 +759,7 @@ mod basefold_over_bn254_roundtrip_test {
                 &mut v_chal,
                 <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
                 true,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                whir.clone(),
                 &[],
                 &tampered,
             ),
@@ -740,7 +771,7 @@ mod basefold_over_bn254_roundtrip_test {
 
     /// **Commitment order on the ring that feeds gnark.**
     ///
-    /// The outer BaseFold bundle is the artifact the Groth16 circuit verifies,
+    /// The outer jagged bundle is the artifact the Groth16 circuit verifies,
     /// and its roots must be witnessed in opening order `[preceding.., main]`.
     /// The single-round fixture above cannot reach that: with no preceding
     /// round the root vector has one entry, so every ordering of it is correct.
@@ -751,10 +782,11 @@ mod basefold_over_bn254_roundtrip_test {
     /// must verify first, or the rejections below prove nothing.
     #[test]
     fn outer_two_round_rejects_substituted_roots() {
+        cheap_wrap_grinding();
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            BasefoldDenseOpen, JaggedOpenRound,
+            WhirDenseOpen, JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -797,6 +829,9 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
+        let whir = <KoalaBearPoseidon2Outer as BasefoldRing>::whir_config(
+            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
         let prep =
             <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&prep_views, None);
         let main =
@@ -864,7 +899,7 @@ mod basefold_over_bn254_roundtrip_test {
             OuterChallenger,
             OuterValMmcs,
             OuterDft,
-            BasefoldDenseOpen,
+            WhirDenseOpen,
         >(
             &rounds,
             &z_row,
@@ -872,7 +907,7 @@ mod basefold_over_bn254_roundtrip_test {
             mmcs.clone(),
             dft,
             fri.clone(),
-            zkm_pcs::whir::jagged::WhirProfile::Core,
+            zkm_pcs::whir::jagged::WhirProfile::Wrap,
         );
 
         assert_eq!(bundle.preceding_commits.len(), 1);
@@ -898,7 +933,7 @@ mod basefold_over_bn254_roundtrip_test {
                 &mut v_chal,
                 mmcs.clone(),
                 true,
-                fri.clone(),
+                whir.clone(),
                 &[(preceding_root.clone(), prep.prover_data.area)],
                 &b.y_per_chip.clone(),
             )
@@ -923,6 +958,7 @@ mod basefold_over_bn254_roundtrip_test {
     /// the thing to test.
     #[test]
     fn outer_vk_commit_bind_is_not_vacuous() {
+        cheap_wrap_grinding();
         type R = KoalaBearPoseidon2Outer;
         let traces = vec![("Cpu".to_string(), {
             let v: Vec<JaggedVal> = (0..64)

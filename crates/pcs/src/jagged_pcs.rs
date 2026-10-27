@@ -793,8 +793,6 @@ pub mod jagged {
     /// the caller re-wraps.
     pub type ChipTraceView = (alloc::string::String, crate::multilinear::PaddedMle<InnerVal>);
 
-    use super::FriConfig;
-
     /// Wire-format jagged metadata: the per-bundle quantities the verifier needs
     /// to reconstruct the same `JaggedPacking` from chip_infos it receives
     /// separately.
@@ -2356,8 +2354,8 @@ pub mod jagged {
 
     /// Verifier counterpart of `prove_jagged_rounds_generic`, generic over the
     /// challenger and the MMCS. The outer (wrap) ring runs it with
-    /// `OuterChallenger` and `OuterValMmcs`; the inner ring uses
-    /// `verify_jagged_inner`.
+    /// `OuterChallenger` and `OuterValMmcs` under its own WHIR schedule
+    /// `config`; the inner ring uses `verify_jagged_inner`.
     ///
     /// `preceding_rounds` are the rounds before the main one, as
     /// (commitment, area): the preprocessed round, whose commitment the key
@@ -2374,7 +2372,7 @@ pub mod jagged {
         challenger: &mut Challenger,
         mmcs: MT,
         skip_commit_observe: bool,
-        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
+        config: crate::whir::config::WhirConfig,
         preceding_rounds: &[(
             <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
             usize,
@@ -2385,16 +2383,21 @@ pub mod jagged {
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
     {
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
-            tracing::info!("[basefold verify] {why}");
+            tracing::info!("[whir verify outer] {why}");
             return false;
         }
 
         if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
+        let Some(whir_proof) = bundle.whir_proof.as_ref() else {
+            tracing::warn!("[whir verify outer] the bundle carries no WHIR opening");
+            return false;
+        };
         debug_assert_eq!(bundle.num_groups(), 1, "wrap verify expects a single-GROUP bundle",);
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
@@ -2411,7 +2414,7 @@ pub mod jagged {
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
         if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
-            tracing::warn!("[basefold verify outer] CROSS-BIND FAILED — {why}");
+            tracing::warn!("[whir verify outer] CROSS-BIND FAILED — {why}");
             return false;
         }
         let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
@@ -2424,7 +2427,7 @@ pub mod jagged {
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            tracing::warn!("[basefold verify outer] jagged sumcheck reduction REJECTED");
+            tracing::warn!("[whir verify outer] jagged sumcheck reduction REJECTED");
             return false;
         };
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
@@ -2454,19 +2457,19 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
-        let res = crate::jagged_pcs::verify_jagged_pcs_rounds_generic::<Challenger, MT>(
+        let res = crate::whir::jagged::verify_jagged_whir_rounds::<Challenger, MT>(
+            mmcs,
+            config,
+            bundle.commit.log_stacking_height,
             &commitments,
             &areas,
-            bundle.commit.log_stacking_height,
             &extended_z_star,
+            whir_proof,
             q_at_z_adj,
-            &bundle.basefold_proof,
             challenger,
-            mmcs,
-            fri,
         );
         if let Err(e) = &res {
-            tracing::warn!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
+            tracing::warn!("[whir verify outer] whir opening REJECTED: {:?}", e);
         }
         res.is_ok()
     }

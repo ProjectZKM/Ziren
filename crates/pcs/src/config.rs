@@ -156,7 +156,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///   in `crates/recursion/core/src/stark/config.rs` (zkm-pcs cannot import
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
-/// Both rings run BaseFold.  The higher-level jagged bundle / 8-felt digest
+/// Both rings run jagged-WHIR.  The higher-level jagged bundle / 8-felt digest
 /// stack (`JaggedPcsProof`, `prove_shard_with_data`'s
 /// `main_commitment: [Val; 8]`) is still concrete rather than generic over
 /// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
@@ -185,13 +185,10 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// capability bounds the generic BaseFold prover needs are NOT expressible
     /// as implied bounds, so they live on the shard-prover call chain instead
     /// (see `prove_trusted_evaluations`).
-    /// Whether this ring's machines commit under the jagged-WHIR inner
-    /// PCS.  The INNER ring (the core machine and every recursion stage
-    /// below wrap: normalize/compose/shrink) is WHIR — ONE PCS family down
-    /// the whole proof tree; the OUTER/wrap ring stays BaseFold, because its
-    /// proof is consumed by the gnark circuit, which has no WHIR verifier.
-    /// The verifier needs no flag: it dispatches per proof on
-    /// `bundle.whir_proof`.
+    /// Whether this ring's machines commit under the jagged-WHIR PCS.  Both
+    /// rings do — the core machine, every recursion stage and the wrap — so
+    /// ONE PCS family runs down the whole proof tree; the wrap differs only
+    /// in its Merkle hash (BN254) and its schedule.
     const WHIR_INNER_PCS: bool;
 
     /// The WHIR schedule this ring commits, opens and verifies under

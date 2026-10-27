@@ -471,7 +471,7 @@ where
             EvaluationProof::Bytes(b) => b,
             EvaluationProof::Bundle(_) => {
                 return Err(JaggedShardVerifyError::JaggedPcs(
-                    "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle".into(),
+                    "outer ring expects a serialized (Bytes) jagged bundle, got Bundle".into(),
                 ));
             }
         };
@@ -480,7 +480,7 @@ where
                 Some(b) => b,
                 None => {
                     return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                        "outer BaseFold bundle deserialize failed ({} bytes)",
+                        "outer jagged bundle deserialize failed ({} bytes)",
                         bytes.len()
                     )));
                 }
@@ -639,7 +639,8 @@ where
         }
 
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
-        let fri = <SC as crate::BasefoldRing>::fri_config();
+        let config =
+            <SC as crate::BasefoldRing>::whir_config(bundle.commit.log_stacking_height as usize);
         let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::BasefoldRing>::BfMmcs>(
             &chip_infos,
             &r_row_per_chip,
@@ -648,7 +649,7 @@ where
             challenger,
             mmcs,
             true,
-            fri,
+            config,
             &bundle
                 .preceding_commits
                 .iter()
@@ -670,7 +671,7 @@ where
         return if ok {
             Ok(())
         } else {
-            Err(JaggedShardVerifyError::JaggedPcs("outer BaseFold bundle rejected".into()))
+            Err(JaggedShardVerifyError::JaggedPcs("outer jagged bundle rejected".into()))
         };
     }
 

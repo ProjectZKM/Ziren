@@ -284,7 +284,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         }
         LiftedEvalProof::OuterBundle {
             host,
-            basefold_proof,
+            whir_proof,
             sumcheck,
             jagged_eval,
             expected_eval,
@@ -302,20 +302,22 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 host.packing.offsets.len().saturating_sub(1),
                 host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
             ));
-            Some(<SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
-                builder,
-                host,
-                basefold_proof.clone(),
-                sumcheck.clone(),
-                jagged_eval.clone(),
-                *expected_eval,
-                *commit_root,
-                preceding_roots,
-                max_log_row_count,
-                &column_counts_by_round,
-                None,
-                <SC as FieldHasherVariable<C>>::vk_outer_cap(vk_legacy.commitment),
-            ))
+            whir_evaluation_proof_var =
+                Some(<SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
+                    builder,
+                    host,
+                    whir_proof.clone(),
+                    sumcheck.clone(),
+                    jagged_eval.clone(),
+                    *expected_eval,
+                    *commit_root,
+                    preceding_roots,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                    None,
+                    <SC as FieldHasherVariable<C>>::vk_outer_cap(vk_legacy.commitment),
+                ));
+            None
         }
         LiftedEvalProof::Bundle {
             host,
@@ -441,7 +443,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     if let Some(whir_pv) = &whir_shard_proof_variable {
         let lsh = match &evaluation_proof {
             LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
-            _ => unreachable!("whir proof variable implies a WhirBundle"),
+            LiftedEvalProof::OuterBundle { host, .. } => host.commit.log_stacking_height,
+            _ => unreachable!("whir proof variable implies a WHIR bundle"),
         };
         let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
             crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
@@ -488,34 +491,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                         host.commit.log_stacking_height as usize,
                     );
                 &per_proof_verifier
-            }
-            LiftedEvalProof::OuterBundle { host, .. } => {
-                let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
-                per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
-                        max_log_row_count,
-                        host.commit.log_stacking_height,
-                        bundle_num_vars,
-                    );
-                &per_proof_verifier
-            }
-            LiftedEvalProof::Bytes(bytes) => {
-                if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<
-                    zkm_recursion_core::stark::OuterValMmcs,
-                >::from_bytes(bytes)
-                {
-                    let bundle_num_vars =
-                        outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
-                    per_proof_verifier =
-                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
-                            max_log_row_count,
-                            outer_bundle.commit.log_stacking_height,
-                            bundle_num_vars,
-                        );
-                    &per_proof_verifier
-                } else {
-                    &basefold_shard_verifier
-                }
             }
             _ => &basefold_shard_verifier,
         };

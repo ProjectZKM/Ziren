@@ -84,8 +84,11 @@ where
 /// grind alone and every WHIR grind stays on the host, where one grinding bit
 /// doubles a search that runs inside an already-saturated thread pool.
 ///
-/// With no accelerator this is exactly `challenger.grind(bits)`, so the CPU
-/// prover is unchanged.
+/// With no accelerator the inner ring's challenger runs its own `grind`, a
+/// SIMD scan over growing windows, so the CPU prover is unchanged there.  Every
+/// other challenger runs [`windowed_host_grind`]: the BN254 wrap challenger's
+/// own `grind` hands the whole field to one `find_first`, which scans it
+/// effectively serially.  Both return the smallest passing witness.
 pub(crate) fn accelerated_grind<C>(challenger: &mut C, bits: usize) -> C::Witness
 where
     C: GrindingChallenger + 'static,
@@ -93,7 +96,12 @@ where
     if let Some(accelerated) = grind_accelerator_for::<C>() {
         return accelerated(challenger, bits);
     }
-    challenger.grind(bits)
+    if core::any::TypeId::of::<C>()
+        == core::any::TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
+    {
+        return challenger.grind(bits);
+    }
+    windowed_host_grind(challenger, bits)
 }
 
 /// The registered accelerator for `C`, if one was registered for exactly `C`.
@@ -121,8 +129,7 @@ where
 /// on every run, machine and thread-pool size.
 ///
 /// The search is a parallel `find_first`: its left-of-match cancellation
-/// returns the smallest index independent of scheduling. The unchecked
-/// conversion is sound because `i < F::ORDER_U64` is canonical.
+/// returns the smallest index independent of scheduling.
 ///
 /// It runs over GROWING WINDOWS, `2^bits` wide and then doubling, rather than
 /// over `[0, p)` at once. The smallest witness inside the first non-empty
@@ -134,34 +141,47 @@ where
 /// witness, so it usually ends there.
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
-    F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
+    F: p3_field::PrimeField64 + Send + Sync,
     C: GrindingChallenger<Witness = F> + 'static,
 {
-    use p3_maybe_rayon::prelude::*;
     if bits == 0 {
         return F::ZERO;
     }
     if let Some(accelerated) = grind_accelerator_for::<C>() {
         return accelerated(challenger, bits);
     }
-    let order = F::ORDER_U64;
+    windowed_host_grind(challenger, bits)
+}
+
+/// The host search of [`deterministic_grind`]: the smallest witness index that
+/// passes `check_witness(bits, ·)`, scanned in parallel over growing windows,
+/// with the challenger then advanced by that one check.
+///
+/// Indices map to witnesses by `from_u64`, which is the identity below the
+/// field order; every challenger here grinds a 32-bit field, so the scan is
+/// bounded there.
+fn windowed_host_grind<C>(challenger: &mut C, bits: usize) -> C::Witness
+where
+    C: GrindingChallenger,
+{
+    use p3_field::PrimeCharacteristicRing;
+    use p3_maybe_rayon::prelude::*;
+    if bits == 0 {
+        return C::Witness::ZERO;
+    }
+    let end = 1u64 << 32;
     let mut lo = 0u64;
-    let mut span = 1u64 << bits.min(63);
+    let mut span = 1u64 << bits.min(32);
     let witness = loop {
-        let hi = core::cmp::min(order, lo.saturating_add(span));
-        let found = (lo..hi)
-            .into_par_iter()
-            .map(|i| unsafe {
-                <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i)
-            })
-            .find_first(|&w| {
-                let mut probe = challenger.clone();
-                probe.check_witness(bits, w)
-            });
+        let hi = core::cmp::min(end, lo.saturating_add(span));
+        let found = (lo..hi).into_par_iter().map(C::Witness::from_u64).find_first(|&w| {
+            let mut probe = challenger.clone();
+            probe.check_witness(bits, w)
+        });
         if let Some(w) = found {
             break w;
         }
-        assert!(hi < order, "deterministic_grind: failed to find a PoW witness");
+        assert!(hi < end, "windowed_host_grind: failed to find a PoW witness");
         lo = hi;
         span = span.saturating_mul(2);
     };
