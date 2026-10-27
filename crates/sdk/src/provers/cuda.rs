@@ -64,11 +64,15 @@ impl CudaProver {
             if !stdin.proofs.is_empty() {
                 anyhow::bail!("the binary compress mode takes no deferred proofs");
             }
-            let binary = self.cpu_prover.compress_binary(
-                &pk.vk,
-                &proof,
-                &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
-            )?;
+            let binary = if std::env::var_os("ZIREN_BINARY_ON_HOST").is_some() {
+                self.cpu_prover.compress_binary(
+                    &pk.vk,
+                    &proof,
+                    &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
+                )?
+            } else {
+                self.cuda_prover.compress_binary(&pk.vk, proof.clone())?
+            };
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Binary(Box::new(binary)),

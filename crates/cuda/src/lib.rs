@@ -122,6 +122,17 @@ pub struct CompressRequestPayload {
     pub deferred_proofs: Vec<ZKMReduceProof<CompressedSC>>,
 }
 
+/// The payload for the [zkm_prover::ZKMProver::compress_binary] method.
+///
+/// This object is used to serialize and deserialize the payloads for the GPU server.
+#[derive(Serialize, Deserialize)]
+pub struct CompressBinaryRequestPayload {
+    /// The verifying key.
+    pub vk: ZKMVerifyingKey,
+    /// The core proof, every shard proof included.
+    pub proof: ZKMCoreProof,
+}
+
 /// The payload for the [zkm_prover::ZKMProver::shrink] method.
 ///
 /// This object is used to serialize and deserialize the payloads for the GPU server.
@@ -477,6 +488,24 @@ impl ZKMCudaProver {
         let proof: ZKMReduceProof<CompressedSC> = bincode::deserialize(&response.result)
             .map_err(|e| rec_codec("compress", "decode the response", e))?;
         Ok(proof)
+    }
+
+    /// Executes the [zkm_prover::ZKMProver::compress_binary] method inside the container, with
+    /// the server's own binary key store.
+    pub fn compress_binary(
+        &self,
+        vk: &ZKMVerifyingKey,
+        proof: ZKMCoreProof,
+    ) -> Result<zkm_prover::binary_tree::BinaryCompressedProof, ZKMRecursionProverError> {
+        let payload = CompressBinaryRequestPayload { vk: vk.clone(), proof };
+        let data = bincode::serialize(&payload)
+            .map_err(|e| rec_codec("compress_binary", "encode the request", e))?;
+        let request = crate::api::CompressRequest { data };
+        let response = block_on(async { self.client.compress_binary(request).await })
+            .map_err(|e| rec_transport("compress_binary", e))?;
+        self.record_server_prove_ms(response.prove_ms);
+        bincode::deserialize(&response.result)
+            .map_err(|e| rec_codec("compress_binary", "decode the response", e))
     }
 
     /// Executes the [zkm_prover::ZKMProver::shrink] method inside the container.
