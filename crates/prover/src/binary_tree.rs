@@ -392,8 +392,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         for input in &mut inputs {
             input.vk_root = keys.root_felts();
         }
-        let mut leaves = Vec::with_capacity(inputs.len());
-        for (shard, (input, digest)) in inputs.iter().zip(&of_shard).enumerate() {
+        let mut order: Vec<usize> = (0..inputs.len()).collect();
+        order.sort_by_key(|&shard| (of_shard[shard], shard));
+        let mut proved: Vec<Option<ProvedLeaf>> = (0..inputs.len()).map(|_| None).collect();
+        for shard in order {
+            let (input, digest) = (&inputs[shard], &of_shard[shard]);
             let started = std::time::Instant::now();
             let entry = programs.get_mut(digest).expect("every shard's program is known");
             if entry.machine.is_none() {
@@ -410,8 +413,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 entry.class,
                 started.elapsed().as_secs_f64()
             );
-            leaves.push(ProvedLeaf { program: *digest, proof });
+            proved[shard] = Some(ProvedLeaf { program: *digest, proof });
         }
+        let leaves: Vec<ProvedLeaf> =
+            proved.into_iter().map(|leaf| leaf.expect("every shard is proved")).collect();
 
         let root = self.binary_levels(&leaves, &programs, &families, &keys, &schedule)?;
         let digest = root.key_digest();
