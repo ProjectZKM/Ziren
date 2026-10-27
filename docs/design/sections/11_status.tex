@@ -1,0 +1,28 @@
+\section{Status, evaluation plan and conclusion}\label{sec:status}
+
+\subsection{What is built}
+
+\begin{itemize}
+  \item The \Blake{} ring of the core stage, its GPU prover and the measurements of \S\ref{sec:core-measurements}.
+  \item The prototype compress stage: a multi-STARK over $\Ft$ with Boolean \WHIR{} under \Blake{}, proving leaves that verify core shard proofs and nodes that verify its own proofs, end to end on a mainnet block (\S\ref{sec:cost-baseline}).
+  \item The node program recorder, which turns the compress stage's verifier into a straight-line program over $\Ft$.
+  \item The GPU additive NTT and its use for every commitment of the compress stage (\S\ref{sec:gpu}).
+\end{itemize}
+
+\subsection{What is proposed}
+
+The compiler of \S\ref{sec:compiler} and the protocol of \S\ref{sec:protocol}: the three table classes, the lowering rules, the wiring argument and its preprocessed permutation, and the GPU prover for all of them.
+
+\subsection{Measurements that decide the design}
+
+\begin{enumerate}
+  \item \textbf{One word table in the prototype.} Replace the prototype's \KB{} multiplication table by a word table with \MUL{} constraints, leaving everything else unchanged, and measure the committed bits and prove time of one real leaf. This isolates the largest projected gain (\S\ref{sec:cost}); if it does not materialise, no change of constraint format will rescue a binary-field leaf over \KB{} proofs.
+  \item \textbf{The compiled leaf.} Compile one leaf program completely and compare committed bits, prove time and peak memory with Table~\ref{tab:baseline} and Table~\ref{tab:leaf-estimate}.
+  \item \textbf{The matrix work in the node.} Measure the node circuit with the base matrices opened as preprocessed polynomials and with \Flock{}'s deferred folding, and keep the cheaper.
+  \item \textbf{The root's Boolean size.} Count the \AND{} gates of the compiled root verifier, the figure that a garbled verifier pays.
+  \item \textbf{The end-to-end block.} Prove the block of \S\ref{sec:cost-baseline} with the compiled compress stage on GPUs, leaves in parallel and overlapped with the core stage.
+\end{enumerate}
+
+\subsection{Conclusion}
+
+A pipeline whose verifier is a Boolean circuit needs a hash that is cheap in \AND{} gates and a field in which addition is free. Keeping the core stage over \KB{} and switching its hash to \Blake{} costs nothing in constraint work and, today, about $30\%$ in warm core time, all of it in commitment kernels. The compress stage is where the design is decided. Executing the verifier in an emulating machine works but pays twice: once for a memory argument over a dataflow that is fixed, and once for \KB{} multiplication at two thousand \AND{}s apiece. A compiler that transposes each fixed verifier into uniform tables, wires them with a permutation, and gives \KB{} arithmetic a word multiplication proved in the exponent removes both costs on paper. The measurements above decide whether it does so in practice.

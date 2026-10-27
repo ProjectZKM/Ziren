@@ -1,0 +1,29 @@
+\section{Introduction}\label{sec:intro}
+
+\Ziren{} proves MIPS32 execution in two stages. A \emph{core} stage splits an execution into shards and proves each shard with a lookup argument, a zerocheck and a jagged commitment opened through \WHIR{}~\citep{whir,jagged-pcs}; a \emph{compress} stage verifies the shard proofs recursively until one proof remains. In the deployed configuration both stages work over \KB{} and hash with \Poseidon{}~\citep{poseidon2}, an arithmetisation-friendly permutation whose cost inside a prime-field circuit is small.
+
+This paper designs the pipeline for a different consumer: a verifier that runs as a Boolean circuit. Garbled-circuit verification~\citep{yao86,free-xor,half-gates}, as used by recent \textsc{Bitcoin} bridge designs~\citep{bitvm,bitvm3,glock}, charges for every \AND{} gate of the verifier and nothing for \XOR{}. Under that cost model an algebraic hash is the wrong choice: a \Poseidon{} permutation over a 31-bit prime expands into hundreds of thousands of Boolean constraints, while a \Blake{} compression~\citep{blake3} costs about ten thousand. Prime-field arithmetic is the wrong choice for the same reason. The verifier we want hashes with \Blake{} and computes in a binary field, where addition is \XOR{}.
+
+\paragraph{Target.} The design fixes two choices.
+\begin{enumerate}
+  \item \textbf{Core: \KB{} with \Blake{}.} The core stage keeps \Ziren{}'s arithmetisation over \KB{}, unchanged, and replaces \Poseidon{} by \Blake{} in its Merkle trees and its transcript. The shard prover remains a GPU prover over a 31-bit field (\S\ref{sec:core}).
+  \item \textbf{Compress: $\Ft$ with \Blake{}, in the style of \Flock{}.} Every proof of the compress tree lives over $\Ft$, commits with \Blake{} Merkle trees and opens with \WHIR{}~\citep{whir} over $\Ft$. Its circuits are produced by a compiler from the recursion verifier programs (\S\ref{sec:compiler}, \S\ref{sec:protocol}).
+\end{enumerate}
+Both stages therefore use one commitment family, \WHIR{} with \Blake{} Merkle trees, over two fields.
+
+\paragraph{Where the cost is.} The leaves of the compress tree verify \KB{} proofs, so their circuits must perform \KB{} arithmetic in a field of characteristic two. A first prototype does this with a multi-STARK over $\Ft$ whose tables emulate \KB{} multiplication bit by bit. It works end to end on a real block, and it is slow: $2$\,h\,$58$\,min for a block whose core proof takes $15$\,s (\S\ref{sec:cost}). The cost is concentrated in one place. An emulated \KB{} base-field multiplication costs about $2{,}000$ \AND{} constraints and a degree-four extension multiplication $20$--$31$ thousand; extension multiplications are half of a leaf verifier's operations, and the multiplication table holds about two thirds of a leaf's committed bits.
+
+\paragraph{Approach.} Two recent systems prove large computations over binary fields efficiently, and each solves half of our problem.
+\Flock{}~\citep{flock} proves batches of identical Boolean circuits written in rank-one form over $\GFtwo$, with a zerocheck, a lincheck that exploits the batch structure, and a product-GKR wiring argument that connects heterogeneous gate tables into one circuit. It has no integer or prime-field arithmetic.
+\Binius{}~\citep{binius64} proves constraint systems over 64-bit words whose only nonlinear constraints are a word-wide \AND{} and a 64-bit unsigned multiplication; the multiplication is checked in the exponent of the multiplicative group of $\Ft$ by a short GKR~\citep{gkr-cmt}.
+Our compiler takes the table-and-wiring structure of \Flock{} and adds the word multiplication of \Binius{} for exactly the operations that need it.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item A measured baseline for both stages on an Ethereum mainnet block, with the core compared against the deployed \Poseidon{} configuration on the same guest program and the same two GPUs (\S\ref{sec:core-measurements}), and a decomposition of the prototype compress stage's cost (\S\ref{sec:cost-baseline}).
+  \item The design of a compress compiler that lowers recursion verifier programs to three classes of uniform gate tables and a static copy-constraint argument, with explicit lowering rules for every verifier operation (\S\ref{sec:compiler}, Appendix~\ref{app:lowering}).
+  \item The protocol stack that proves the compiled circuits under \WHIR{} over $\Ft$ with \Blake{} Merkle trees, and the shape of the recursion tree (\S\ref{sec:protocol}).
+  \item A comparison with \Flock{} and \Binius{} (\S\ref{sec:comparison}), a cost estimate from measured operation counts (\S\ref{sec:cost}), a GPU design with measured kernels (\S\ref{sec:gpu}), and the soundness obligations the design introduces (\S\ref{sec:soundness}).
+\end{itemize}
+
+\paragraph{Status.} Everything in \S\ref{sec:core} and the baseline of \S\ref{sec:cost-baseline} is implemented and measured. The compiler, its table classes and its protocol are a design; \S\ref{sec:status} separates what is built from what is proposed and states the measurements that decide the design.

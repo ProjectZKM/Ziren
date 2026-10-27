@@ -1,0 +1,17 @@
+\section{Preliminaries}\label{sec:prelim}
+
+\paragraph{Fields.} \KB{} is the prime field $\Fp$ with $p = 2^{31} - 2^{24} + 1$. The core stage draws challenges from the binomial extension $\EF = \Fp[X]/(X^4 - 3)$. A product of two canonical \KB{} representatives is below $2^{62}$, and a sum of four such products is below $2^{64}$.
+
+$\Ft$ is the binary field of $2^{128}$ elements. Addition is bitwise \XOR{}. We use two bases: the tower basis, in which the stage's subfield structure is visible, and the polynomial basis $\GFtwo[x]/(x^{128}+x^7+x^2+x+1)$, in which a multiplication is a carry-less product followed by a reduction. The change between them is $\GFtwo$-linear. $\Ft^{*}$ is cyclic of order $2^{128}-1$; we fix a generator $g$.
+
+\paragraph{Multilinear polynomials.} A vector $v \in \F^{2^\ell}$ is identified with its multilinear extension $\tilde v$ on $\F^\ell$. For $r \in \F^\ell$, $\eqf(r, x) = \prod_i (r_i x_i + (1-r_i)(1-x_i))$, so that $\tilde v(r) = \sum_{x \in \{0,1\}^\ell} \eqf(r,x)\,v(x)$.
+
+\paragraph{Sumcheck, zerocheck and GKR.} The sumcheck protocol~\citep{lund1992algebraic} reduces a claim about $\sum_x f(x)$ to one evaluation of $f$. A zerocheck proves that a polynomial constraint vanishes on the Boolean hypercube by a sumcheck of the constraint against $\eqf(r,\cdot)$ at a random $r$. The GKR protocol~\citep{gkr-cmt} proves the output of a layered circuit by one sumcheck per layer; a \emph{product GKR} proves a grand product $\prod_x v(x)$ by a binary tree of multiplications.
+
+\paragraph{Rank-one constraint systems.} An R1CS over a field $\F$ with matrices $A,B,C$ is satisfied by $z$ when $(Az)\circ(Bz) = Cz$. We use the identity-output form $C = I$, in which every constraint defines one witness entry: $(Az)_i \cdot (Bz)_i = z_i$. A \emph{batched} R1CS repeats one base block $A_0, B_0 \in \F^{k\times k}$ over $2^n$ instances, $A = I_{2^n} \otimes A_0$, so that its matrices have the description size of one block.
+
+\paragraph{Customizable constraint systems.} CCS~\citep{ccs} writes a constraint system as $\sum_i c_i \bigcirc_{j\in S_i} M_j z = 0$. An AIR over consecutive rows is the special case with one identity matrix and one shift matrix, and introduces no auxiliary variables; R1CS is the case of three matrices and products of degree two. We use CCS only as a vocabulary: every table of the compiler is an R1CS or an AIR, and both are CCS.
+
+\paragraph{WHIR.} \WHIR{}~\citep{whir} is a Reed--Solomon proximity test that doubles as a multilinear polynomial commitment: the prover commits a codeword with a Merkle tree, and each round folds the polynomial by a factor $2^{\kappa}$, commits the folded codeword at a lower rate, and answers queries with Merkle paths. Over $\Ft$ the code is an additive Reed--Solomon code evaluated on an $\GFtwo$-affine subspace, and encoding is an additive NTT~\citep{binius,fri-binius}.
+
+\paragraph{Boolean cost model.} We count the cost of a verifier circuit in \AND{} gates. \XOR{} and \textsf{NOT} are free, as in free-\XOR{} garbling~\citep{free-xor}. A \Blake{} compression costs $10{,}298$ \AND{} constraints in \Flock{}'s circuit~\citep{flock} and $10{,}416$ in ours.

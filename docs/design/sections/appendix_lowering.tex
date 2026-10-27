@@ -1,0 +1,32 @@
+\section{Lowering rules}\label{app:lowering}
+
+Table~\ref{tab:lowering} lists every operation of a recursion verifier program with the table class it lowers to and its cost in that class. ``Words'' are committed 64-bit words; \AND{} and \MUL{} are word constraints; ``bits'' are committed bits of a Boolean table; ``elements'' are committed $\Ft$ elements.
+
+\begin{table}[h]
+\centering\small
+\caption{Lowering of verifier operations.}
+\label{tab:lowering}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{3.6cm}l>{\raggedright\arraybackslash}X}
+\toprule
+operation & class & cost \\
+\midrule
+\KB{} addition, subtraction & word & 2 words, 2 \AND{} (carry, conditional subtraction of $p$) \\
+\KB{} multiplication & word & 5 words, 2 \MUL{}, 2 \AND{} \\
+\KB{} inversion, division & word & a supplied inverse and one multiplication \\
+\KB{} range check $c<p$ & word & 1 \AND{} (no carry in $c + 2^{64}-p$) \\
+$\EF$ addition, subtraction & word & 8 words, 8 \AND{} \\
+$\EF$ multiplication & word & $\approx 52$ words, 20 \MUL{} (13 with Karatsuba), $\approx 30$ \AND{} \\
+$\EF$ division & word & a supplied quotient and one multiplication \\
+$\EF \leftrightarrow \KB^4$ conversion & wiring & free \\
+bit decomposition of a \KB{} element & word & free (a word's bits are committed); 1 \AND{} for the zero high bits \\
+selection by a bit & word & 1 word, 1 \AND{} ($c = b \oplus (s \mathbin{\&} (a\oplus b))$, $s$ broadcast by an arithmetic shift) \\
+equality assertion & wiring & free (same wire) \\
+\Blake{} compression & Boolean & $\approx 10^4$ \AND{}, $2^{14}$ bits \\
+digest to 30-bit limbs & wiring & free (bit slices of the digest's words) \\
+$\Ft$ addition & element & free (linear in $A_0$, $B_0$) \\
+$\Ft$ multiplication & element & 1 constraint, 1 element \\
+$\Ft$ inversion & element & a supplied inverse, 1 constraint \\
+constant & public / matrix & free \\
+\bottomrule
+\end{tabularx}
+\end{table}

@@ -1,0 +1,42 @@
+\section{Proving a compiled circuit}\label{sec:protocol}
+
+A compiled circuit is proved by one argument per table class, one argument for the wiring, and one batched \WHIR{} opening that discharges every evaluation claim. All arguments run over $\Ft$ under one \Blake{} transcript.
+
+\subsection{Commitment}
+
+The prover commits once. Bits of Boolean tables, words of word tables and elements of element tables are packed into $\Ft$ elements, $128$ bits per element, and the packed columns of all tables are stacked into one jagged polynomial. Claims about individual bits are reduced to claims about packed elements by ring switching~\citep{fri-binius}, which \Flock{} merges with the jagged commitment so that its cost is proportional to the number of committed words rather than to a padded rectangle. The packed polynomial is encoded with an additive Reed--Solomon code over an $\GFtwo$-affine subspace of $\Ft$ and committed with a \Blake{} Merkle tree.
+
+\paragraph{Opening.} Every argument below ends in evaluation claims on the committed polynomial. They are batched by random linear combination into one claim and opened with \WHIR{} over $\Ft$. In the prototype's configuration the first codeword has rate $1/8$ and each \WHIR{} round folds by $2^4$ while lowering the rate by $2^3$. Merkle leaves are rows of $\Ft$ elements hashed with \Blake{}.
+
+\subsection{Gate tables}\label{sec:protocol-tables}
+
+\paragraph{Boolean and element tables.} For a table with base block $(A_0, B_0)$ and $2^n$ rows, the prover shows $(A z)\circ(B z) = z$ with $A = I_{2^n}\otimes A_0$. Following \Flock{}, a zerocheck reduces the constraint to claims on $\widetilde{Az}$, $\widetilde{Bz}$ and $\tilde z$ at one point, and a \emph{lincheck} reduces the claims on $\widetilde{Az}$ and $\widetilde{Bz}$ to claims on $\tilde z$. The lincheck exploits the block structure: the prover sends one vector of length $k$ (the block width) and the verifier checks two bilinear forms against $A_0$ and $B_0$, at a cost proportional to their number of nonzeros and independent of $n$. As in \Flock{}, the first rounds of the zerocheck use a univariate skip over a small subspace, so that the prover's first, most expensive rounds work on short univariate polynomials instead of multilinear halvings.
+
+\paragraph{Matrix evaluations.} The verifier's bilinear forms read the base blocks. For a \Blake{} block they have about $2\times 10^7$ nonzeros, most of \Flock{}'s verification time. A recursion verifier cannot afford that work in its circuit. \Flock{} defers the matrix work as claims and folds it across levels. We instead commit the multilinear extensions of each table's base matrices once, as preprocessed polynomials of the registry, and open them in the same batched \WHIR{} opening; the verifier's matrix work then becomes one opening shared by every table. Which of the two is cheaper inside our node circuit is one of the open measurements of \S\ref{sec:status}.
+
+\paragraph{Word tables.} \AND{} constraints are proved by a zerocheck over the bit columns of their operands, as for a Boolean table whose block is one constraint replicated over 64 bit positions. Shifts are handled by a \emph{shift reduction}, a sumcheck that turns claims on shifted words into claims on the committed words~\citep{binius64}.
+\MUL{} constraints are proved in the exponent of $\Ft^{*}$, as in \Binius{}. For each row,
+\[
+\big(g^{p}\big)^{q} \;=\; \big(g^{2^{64}}\big)^{h}\cdot g^{\ell}
+\]
+is equivalent to $p q \equiv 2^{64} h + \ell \pmod{2^{128}-1}$. A power with a 64-bit exponent $z$ is the product $\prod_{i<64} (V^{2^i})^{z_i}$, each factor either $1$ or $V^{2^i}$ according to bit $z_i$; a product GKR of height six evaluates it, and a final sumcheck using the Frobenius map batches the 64 leaf claims into one claim on the base and one claim on the 64 bit columns of the exponent. Because our exponents are committed bit columns, those claims land directly on the committed polynomial.
+
+\paragraph{Wraparound.} Over the integers $p q \le (2^{64}-1)^2 < 2^{128}-1$, so the left side never wraps. The right side reaches $2^{128}-1$ only when $h = \ell = 2^{64}-1$; there the prover could set $p = 0$. \Binius{} closes this case with a parity check on the least significant bits, $p_0 \wedge q_0 = \ell_0$, which costs a few \AND{} constraints per row. Our \KB{} rows never come near the boundary ($h \le 3$ in every row), but the parity check is kept so that the table's soundness does not depend on how it is used.
+
+\subsection{Wiring}
+
+The wiring argument proves that every wire's cells hold one value: that the committed cell values $w$ satisfy the multiset identity
+\[
+\{\,(w_x,\ x)\,\} \;=\; \{\,(w_x,\ \sigma(x))\,\}
+\]
+over the cell space. For random $\alpha,\beta$ this is the grand-product equality $\prod_x(\alpha + w_x + \beta x) = \prod_x(\alpha + w_x + \beta\sigma(x))$, proved by a product GKR with no committed intermediate oracle. It ends in claims on the cell values, which are gathered from the tables' committed words, and on $\tilde\sigma$, which is a preprocessed polynomial of the verifying key. Both go into the batched opening.
+
+\paragraph{Characteristic two.} A logarithmic-derivative lookup argument sums fractions and needs the field's characteristic to exceed the multiplicities involved; in characteristic two it fails. The design uses no lookups. Range checks are \AND{} constraints, the dataflow is a permutation, and the only multiset argument is the grand product above, which is sound in any field.
+
+\subsection{The recursion tree}
+
+\paragraph{Leaves.} A leaf compiles the core verifier for one shard shape: \KB{} and $\EF$ arithmetic in word tables, \Blake{} in Boolean tables, the transcript's digest slicing in Boolean tables, and the wiring that ties them together. Its public table holds the shard's public values and the verifying-key digest that the allowlist check compares.
+
+\paragraph{Nodes.} A node compiles the compress stage's own verifier, twice, plus the chaining of public values. Its arithmetic is $\Ft$ arithmetic in element tables, and its hashing is \Blake{} in Boolean tables. The node's statement does not depend on the leaves' shapes, only on the registry of the level below; in a tree whose levels share a registry, node programs repeat, and one compiled node circuit serves a level.
+
+\paragraph{Root.} The root is the last node. Its verifier, the program that a garbled verifier evaluates, consists of \Blake{} compressions over the root proof's Merkle paths and transcript, and the $\Ft$ arithmetic of its sumchecks, lincheck and \WHIR{} queries. Section~\ref{sec:cost} estimates its size.

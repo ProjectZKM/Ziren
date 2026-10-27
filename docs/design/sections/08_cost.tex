@@ -1,0 +1,78 @@
+\section{Cost}\label{sec:cost}
+
+\subsection{Measured baseline}\label{sec:cost-baseline}
+
+We proved block $26{,}206{,}588$ end to end with the prototype: the \Blake{} core on two RTX~5090 GPUs, then the compress tree of $34$ leaves, $17$ first-level nodes and $20$ upper nodes in one process. The compress stage ran on $48$ CPU threads, with the Reed--Solomon encoding of its commitments on one GPU (\S\ref{sec:gpu}). The final proof verified. Table~\ref{tab:baseline} gives the times.
+
+\begin{table}[t]
+\centering\small
+\caption{Prototype compress stage on block $26{,}206{,}588$.}
+\label{tab:baseline}
+\begin{tabular}{lrrr}
+\toprule
+stage & proofs & time each & total \\
+\midrule
+leaves & $34$ & $90$--$190$\,s ($442$\,s for the largest) & $70$\,min \\
+first-level nodes & $17$ & $230$--$350$\,s & $74$\,min \\
+upper nodes & $20$ & $90$--$120$\,s & $34$\,min \\
+\midrule
+compress stage & & & $2$\,h\,$58$\,min \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With the encoding on the CPU the same stage took $3$\,h\,$14$\,min in an earlier run, under different background load, so moving the encoding saved about $8\%$. Leaves are proved one after another, grouped by program so that one program's proving key is resident at a time; peak memory was $137$--$180$\,GB, against $426$\,GB when leaves of different programs were interleaved.
+
+\paragraph{Where a leaf's cost is.} A leaf program has $1.18$--$1.25$ million instructions and commits $6.5$--$7.4$\,Gbit, padded to $2^{33}$. The two tallest tables are the instruction ledger and the \KB{} multiplication table, $2^{22}$ rows each. A multiplication row is $1{,}109$ bits, so the multiplication table alone commits about $4.6$\Gbit{}, roughly two thirds of the leaf.
+
+\subsection{Operation counts}
+
+The leaf programs' operation mix was measured on the \Poseidon{} configuration's recursion programs for a mainnet block, whose field arithmetic is that of our leaves and whose hashing differs; Table~\ref{tab:opmix} gives the median leaf. Extension multiplications are half of all operations. In a Boolean circuit the costs are about $2{,}000$ \AND{} constraints for a \KB{} multiplication, $20$--$31$ thousand for an $\EF$ multiplication and $320$ for an $\EF$ addition. Under that model a leaf costs $1.7$--$2.5\times 10^{10}$ \AND{} constraints: $65\%$ in extension multiplications, $31\%$ in the products of the prefix-sum checks, and $2\%$ in hashing.
+
+\begin{table}[t]
+\centering\small
+\caption{Operations of the median leaf program.}
+\label{tab:opmix}
+\begin{tabular}{lr}
+\toprule
+operation & count \\
+\midrule
+$\EF$ multiplication & $528{,}511$ \\
+$\EF$ addition and subtraction & $510{,}196$ \\
+$\EF$ division & $4{,}702$ \\
+\KB{} multiplication and division & $86{,}806$ \\
+\KB{} addition and subtraction & $66{,}795$ \\
+selection & $82{,}456$ \\
+bit decomposition & $103{,}205$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Estimate for the compiled leaf}
+
+Under the lowering of \S\ref{sec:compiler}, an $\EF$ multiplication becomes twenty \MUL{} constraints and about thirty \AND{} constraints and commits about $52$ words: sixteen products, four accumulators of two words, four quotients, four reduction products of two words, the four reduced coordinates and about twelve carry words. That is about $3{,}300$ bits, against about $7{,}800$ in the prototype, where an extension multiplication occupies about seven rows of $1{,}109$ bits. The larger change is in the constraint work: the prototype's zerocheck runs over the $20$--$31$ thousand \AND{}s per multiplication, while the compiled circuit runs twenty instances of a height-six product GKR and a zerocheck over thirty word \AND{}s.
+
+Table~\ref{tab:leaf-estimate} applies the per-operation costs to the median leaf. The hashing line uses the cost model's $2\%$ share, $32$--$49$ thousand compressions, at $2^{14}$ committed bits each. The estimate is about $2.7$\Gbit{} of committed witness against $6.5$--$7.4$\Gbit{}, with no ledger or memory tables. It is a projection from operation counts, not a measurement.
+
+\begin{table}[t]
+\centering\small
+\caption{Committed bits of the median leaf, compiled (estimate).}
+\label{tab:leaf-estimate}
+\begin{tabular}{lrrr}
+\toprule
+operation & count & bits each & total \\
+\midrule
+$\EF$ multiplication & $528{,}511$ & $\approx 3{,}300$ & $1.76$\Gbit \\
+$\EF$ addition and subtraction & $510{,}196$ & $512$ & $0.26$\Gbit \\
+\KB{} multiplication & $86{,}806$ & $320$ & $0.03$\Gbit \\
+\Blake{} compression & $32$--$49$k & $16{,}384$ & $0.5$--$0.8$\Gbit \\
+selection, bit decomposition & $185{,}661$ & $64$ & $0.01$\Gbit \\
+\midrule
+leaf & & & $\approx 2.6$--$2.9$\Gbit \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Nodes and root.} A second-level node program has $2.4\times 10^5$ $\Ft$ multiplications, each one element-table constraint and $128$ committed bits, about $31$\Mbit{}, and $19{,}857$ \Blake{} compressions, about $325$\Mbit{}. Nodes are an order of magnitude smaller than leaves, and hashing dominates them; the root's verifier, whose size is the garbled verifier's cost, is the size of a node program: about $2\times 10^4$ compressions, or $2\times 10^8$ \AND{} gates, plus $2.4\times 10^5$ $\Ft$ multiplications at about $2{,}187$ \AND{} gates each, or $5\times 10^8$; about $7\times 10^8$ in total.
+
+\paragraph{What the estimate leaves out.} Committed bits are a proxy. The prover's time also depends on the \MUL{} GKR's field work, about $126$ $\Ft$ multiplications per \MUL{} instance for the leaf powers and the tree, and on the wiring argument's grand product over every cell. Section~\ref{sec:status} lists the measurements that replace this estimate.
