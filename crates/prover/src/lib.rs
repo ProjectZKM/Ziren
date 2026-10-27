@@ -3743,6 +3743,26 @@ pub mod tests {
         Ok(())
     }
 
+    /// [`test_circuit_groth16_only`] over a wrap proof proved elsewhere: the
+    /// `(vk, wrap proof)` pair at `ZIREN_WRAP_DUMP`, as the GPU harness writes
+    /// it under `ZIREN_WRAP_VK_OUT`.  The circuit is built from the wrap
+    /// schedule this process reads, so the `ZIREN_WRAP_*` knobs must be the
+    /// ones the proof was made with.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_circuit_groth16_from_dump() -> Result<()> {
+        setup_logger();
+        let path = std::env::var("ZIREN_WRAP_DUMP").expect("set ZIREN_WRAP_DUMP");
+        let bytes = std::fs::read(&path)?;
+        let (_, wrapped): (ZKMVerifyingKey, ZKMReduceProof<OuterSC>) =
+            bincode::deserialize(&bytes)?;
+        let (constraints, witness) = build_constraints_and_witness(&wrapped.vk, &wrapped.proof);
+        Groth16Bn254Prover::test(constraints, witness);
+        tracing::info!("Circuit GROTH16 test succeeded");
+        Ok(())
+    }
+
     /// VALUE-INDEPENDENCE GATE: build the gnark outer circuit (R1CS
     /// constraints) from wrap proof A, then SOLVE it with the witness built
     /// from a DIFFERENT fresh wrap proof B.  If the outer lift BAKED proof-A's
