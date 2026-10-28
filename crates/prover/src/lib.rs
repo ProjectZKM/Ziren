@@ -2190,14 +2190,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// The wrap program for `input` and its setup digest, through
-    /// [`Self::wrap_programs_cache`].
+    /// [`Self::wrap_programs_cache`], keyed like the other program caches
+    /// (see [`Self::verification_keyed`]).
     fn wrap_program_cached(
         &self,
         input: &ZKMWrapWitnessValues<ShrinkSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        self.cached_program(&self.wrap_programs_cache, input.shape_key(), "wrap", || {
-            self.wrap_program(input)
-        })
+        self.cached_program(
+            &self.wrap_programs_cache,
+            self.verification_keyed(input.shape_key()),
+            "wrap",
+            || self.wrap_program(input),
+        )
     }
 
     /// Return cached wrap keys, running setup if the program's digest differs.
