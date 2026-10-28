@@ -27,6 +27,7 @@ members = [
     "crates/recursion/compiler",
     "crates/recursion/core",
     "crates/recursion/derive",
+    "crates/recursion/r1cs",
     "crates/recursion/gnark-ffi",
     "crates/sdk",
     "crates/pcs",
@@ -89,6 +90,8 @@ p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d897
 p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
 p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", package = "p3-bn254" }
 p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-word = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-word-backend = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
 
 # p3-air = { path = "../patch/Plonky3/air" }
 # p3-field = { path = "../patch/Plonky3/field" }
@@ -126,6 +129,7 @@ anyhow = "1.0.75"
 zkm-recursion-derive = { path = "crates/recursion/derive", default-features = false }
 zkm-recursion-circuit = { path = "crates/recursion/circuit", default-features = false }
 zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-features = false }
+zkm-recursion-r1cs = { path = "crates/recursion/r1cs", default-features = false }
 zkm-recursion-compiler = { path = "crates/recursion/compiler" }
 zkm-binary-stark = { path = "crates/binary" }
 zkm-binary-recursion = { path = "crates/binary-recursion" }

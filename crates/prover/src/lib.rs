@@ -972,6 +972,36 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(BinaryLeafProof { program, digest, public_values, proof })
     }
 
+    /// The leaf of `input` compiled to word relations: its normalize program
+    /// run, then lowered with the runtime's memory, which fills the witness
+    /// and checks every value the relations compute.
+    pub fn leaf_word(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+    ) -> Result<zkm_recursion_r1cs::Lowered, ZKMRecursionProverError> {
+        let program = self.recursion_program_basefold(input).0;
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program.clone(),
+            zkm_pcs::inner_perm(),
+        );
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(input, &mut witness_stream);
+        runtime.witness_stream = witness_stream.into();
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+        let memory: Vec<_> = (0..program.total_memory)
+            .map(|addr| {
+                runtime
+                    .memory
+                    .mr(zkm_recursion_core::Address(
+                        <KoalaBear as p3_field::PrimeCharacteristicRing>::from_usize(addr),
+                    ))
+                    .val
+            })
+            .collect();
+        zkm_recursion_r1cs::lower(&program, Some(&memory))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))
+    }
+
     /// The binary machine of `program`, every table at least as tall as
     /// `floor` names, with its tables' shapes and the program's instruction
     /// mix reported.
@@ -1767,6 +1797,49 @@ pub mod tests {
                 tracing::info!("binary block leaf written to {path}");
             }
         }
+        Ok(())
+    }
+
+    /// The leaf of a fibonacci proof's first core shard compiled to word
+    /// relations, the relations checked on the host and their cost reported
+    /// per instruction kind.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_leaf_word_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = prover.prove_core(
+            &pk_d,
+            program,
+            &fib_stdin(10),
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        let inputs =
+            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+        let started = std::time::Instant::now();
+        let lowered = prover.leaf_word(&inputs[0])?;
+        tracing::info!("word leaf lowered in {:.1} s", started.elapsed().as_secs_f64());
+        let mut total = zkm_recursion_r1cs::Cost::default();
+        for (kind, (count, cost)) in &lowered.census {
+            tracing::info!("word leaf {kind}: {count} instructions, {cost:?}");
+            total += *cost;
+        }
+        tracing::info!(
+            "word leaf total: {total:?}, {} public words, digest {:?}",
+            lowered.built.public.len(),
+            lowered.digest
+        );
+        let started = std::time::Instant::now();
+        let built = &lowered.built;
+        built.system.verify(&built.public, &built.witness).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        tracing::info!(
+            "word leaf relations hold, checked in {:.1} s",
+            started.elapsed().as_secs_f64()
+        );
         Ok(())
     }
 

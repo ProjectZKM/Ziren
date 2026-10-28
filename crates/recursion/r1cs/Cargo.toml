@@ -1,0 +1,20 @@
+[package]
+name = "zkm-recursion-r1cs"
+description = "Compiles recursion programs into word-level constraint systems over binary fields"
+readme = "../../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-field = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-word = { workspace = true }
+thiserror = "1.0.60"
+zkm-recursion-core = { workspace = true }
+
+[dev-dependencies]
+rand = "0.8.5"
