@@ -262,7 +262,7 @@ impl WhirRing for KoalaBearPoseidon2Outer {
     }
 }
 
-// OUTER-ring jagged WHIR setup commit.
+// Outer-ring jagged WHIR setup commit.
 //
 // `outer_prep_commit` is the wrap ring's `StarkGenericConfig::prep_commit` body.
 // It exists because `StarkMachine::setup` is generic over `SC` and so cannot name

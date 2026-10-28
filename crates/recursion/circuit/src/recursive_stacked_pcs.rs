@@ -54,7 +54,7 @@ where
         challenger: &mut FC,
     );
 
-    /// #H (WHIR-over-BN254 wrap port): observe a single commitment
+    /// Observe a single commitment
     /// digest into the transcript.  The jagged layer calls this to absorb
     /// the main PCS commitment BEFORE sampling z_col (mirror of host
     /// verify_jagged_inner_generic's leading

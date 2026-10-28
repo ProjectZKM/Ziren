@@ -85,26 +85,18 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
 ///
 /// Tail is zero-padded to the next multiple of the stacking row-count.
 ///
-/// NOT ON THE GPU PROVE PATH — MEASURED, do not re-derive this.  A full
-/// 281-shard reth core proof on the GPU prover calls this function ZERO
-/// times: `StarkGpuProver`'s `MachineProver::commit_multilinears` override
-/// commits the shard's jagged dense device-side (ziren-gpu
-/// `jagged-whir/src/commit_dense.rs`, which does its own per-stripe device
-/// transpose), and the host commit in `crate::config` is the CPU-prover /
-/// unit-test path.  Anything spent here converts to GPU throughput at 0:1.
+/// The CPU prover and the unit tests commit through here; a device prover
+/// that overrides `MachineProver::commit_multilinears` commits its jagged
+/// dense without calling this.
 ///
-/// WIDTH-1 BORROW: the per-MLE "transpose-in" below rewrites a
-/// `[height, width]` row-major buffer as `[width, height]` column-major.
-/// For `width == 1` that mapping is the IDENTITY (`dst[row] = src[row]`),
-/// so the whole `data` buffer is a verbatim copy of `mle.guts()` — and
-/// `data` is only ever READ afterwards (sliced into stripes and appended
-/// to `overflow`).  Worse, `par_chunks_mut(height)` with `height ==
-/// mle_vals.len()` yields exactly ONE chunk, so the copy is single
-/// threaded, with both the source and the destination live.  The jagged
-/// dense IS a single width-1 MLE, so on the host commit path this is one
-/// serial full-size memcpy plus its zero-fill.  Borrowing the source
-/// directly is byte-identical and removes the allocation, the zero-fill and
-/// the copy.
+/// A width-1 MLE is borrowed rather than copied: the per-MLE transpose-in
+/// below rewrites a `[height, width]` row-major buffer as `[width, height]`
+/// column-major, which for `width == 1` is the identity, and the result is
+/// only read afterwards (sliced into stripes and appended to `overflow`).
+/// `par_chunks_mut(height)` would also yield a single chunk there, so the copy
+/// would run serially with both buffers live.  The jagged dense is a single
+/// width-1 MLE, so the borrow removes one full-size allocation, zero-fill and
+/// copy from the host commit.
 pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     batch_size: usize,
     multilinears: Vec<Arc<Mle<F>>>,

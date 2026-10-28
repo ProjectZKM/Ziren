@@ -260,10 +260,8 @@ mod open_timing {
     pub static FOPEN: AtomicUsize = AtomicUsize::new(0);
     pub static CENGINE: AtomicUsize = AtomicUsize::new(0);
     pub static CHOST: AtomicUsize = AtomicUsize::new(0);
-    // The PROLOGUE — everything before the round loop, previously untimed.
-    // The seven umbrellas above summed to 18.0 s against a census-measured
-    // 28.4 s of host time in `whir_open`, so the largest single slice of
-    // the open was the part no timer covered.
+    // The prologue: everything before the round loop.  Without these, the
+    // umbrellas above leave a large share of `whir_open` uncovered.
     pub static PEVALS: AtomicUsize = AtomicUsize::new(0);
     pub static PINIT: AtomicUsize = AtomicUsize::new(0);
     pub static OPENS: AtomicUsize = AtomicUsize::new(0);

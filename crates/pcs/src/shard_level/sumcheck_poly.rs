@@ -317,7 +317,7 @@ pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
     LOGUP_DEVICE_EQ_ROW_POINT.with(|c| c.borrow_mut().take())
 }
 
-// WHIR-over-BN254 wrap port: OUTER-ring jagged WHIR open/verify
+// Outer-ring jagged WHIR open/verify
 //
 // The OUTER (wrap) ring proves/verifies the jagged WHIR open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those

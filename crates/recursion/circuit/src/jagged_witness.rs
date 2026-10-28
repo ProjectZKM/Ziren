@@ -6,17 +6,19 @@
 //! types (which carry [`Felt`] / [`Ext`] cells wired into the
 //! recursion compiler's witness stream).
 //!
-//! Every type in the jagged shard-proof hierarchy gets a matching
-//! impl, composed so a single `shard_proof.read(builder)` cascades
-//! through every nested field:
+//! The host types of the jagged shard proof get matching impls,
+//! composed so a single `shard_proof.read(builder)` cascades through
+//! every nested field:
 //!
 //!   - [`UnivariatePolynomial`] / [`PartialSumcheckProof`]
 //!   - [`LogUpGkrOutput`] / [`LogupGkrRoundProof`] /
 //!     [`LogupGkrProof`] / [`ChipEvaluation`] / [`LogUpEvaluations`]
 //!   - [`JaggedAirOpenedValues`] / [`JaggedChipOpenedValues`] /
 //!     [`JaggedShardOpenedValues`]
-//!   - [`JaggedDimensionMetadata`] / [`JaggedSumcheckEvalProof`] /
-//!     [`RecursiveStackedPcsProof`] / [`JaggedPcsProofVariable`]
+//!   - [`JaggedDimensionMetadata`] / [`JaggedSumcheckEvalProof`]
+//!
+//! `RecursiveStackedPcsProof` and `JaggedPcsProofVariable` are in-circuit
+//! variable types already, so they have no impl here.
 //!
 //! Each impl reads the type's fields in declaration
 //! order through the builder's witness stream, and `write` mirrors
@@ -313,13 +315,6 @@ where
         self.partial_sumcheck_proof.write(witness);
     }
 }
-
-// Note: `RecursiveStackedPcsProof` and `JaggedPcsProofVariable`
-// are defined with fields that already use `Ext<F, EF>` / `Felt<F>`
-// internally — they are in-circuit variable types, not host types.
-// Witnessable impls would require defining parallel host-side
-// structs whose fields use raw `EF` / `F` and map through to the
-// variable versions, which are not defined here.
 
 // Top-level jagged shard proof
 

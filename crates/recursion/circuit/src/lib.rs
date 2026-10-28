@@ -126,7 +126,7 @@ pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
         pc_start: Felt<<C as Config>::F>,
     );
 
-    /// #H (WHIR-over-BN254 wrap port): project this ring's vk preprocessed
+    /// Project this ring's vk preprocessed
     /// commitment digest to 8 KoalaBear felts — the in-circuit twin of host
     /// `WhirRing::digest_felts`. Inner = identity ([Felt;8]); outer = split_32
     /// of the BN254 commit. Lets the jagged shard verifier's preprocessed_commit

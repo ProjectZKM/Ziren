@@ -94,7 +94,7 @@ impl<SC: FieldHasher<KoalaBear>> ZKMMerkleProofWitnessValues<SC>
 where
     SC::Digest: Copy + Default,
 {
-    // #H (WHIR-over-BN254 wrap port): generic over SC so the gnark wrap
+    // Generic over SC so the gnark wrap
     // layer (OuterSC, Digest = [Bn254;1]) can build a dummy merkle witness
     // (the gnark verifier skips merkle, so only the shape must read/write).
     // `map` (not vec![;]) avoids requiring MerkleProof: Clone.

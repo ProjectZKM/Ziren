@@ -578,7 +578,7 @@ where
         .collect()
 }
 
-// Jagged-WHIR-over-BN254 wrap: OUTER-ring bundle lift.
+// Outer-ring (BN254 wrap) jagged-WHIR bundle lift.
 //
 // The OUTER wrap proof's `EvaluationProof::Bytes` carries a
 // `JaggedPcsProofGeneric<OuterValMmcs>` whose commitments are
@@ -732,7 +732,7 @@ where
     true
 }
 
-/// Lift the OUTER-ring jagged-WHIR bundle into the in-circuit
+/// Lift the outer-ring jagged-WHIR bundle into the in-circuit
 /// `JaggedPcsProofVariable`.
 ///
 /// Structural mirror of [`lift_jagged_bundle_generic`] but:

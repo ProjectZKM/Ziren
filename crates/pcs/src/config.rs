@@ -137,7 +137,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
     fn zero_commitment(&self) -> Com<SC>;
 }
 
-/// **#H (WHIR-over-BN254 wrap port)** — selects the WHIR jagged-PCS
+/// Selects the WHIR jagged-PCS
 /// MMCS (and hence the commitment-hash family) and the WHIR schedule for a
 /// given STARK config.
 ///
@@ -243,7 +243,7 @@ pub trait WhirRing: StarkGenericConfig {
         None
     }
 
-    /// #H: per-ring projection of the WHIR commitment to 8 KoalaBear felts
+    /// Per-ring projection of the WHIR commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap
     /// root[0]; outer = deterministic projection of the BN254 commit.
     fn digest_felts(

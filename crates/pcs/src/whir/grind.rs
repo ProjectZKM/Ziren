@@ -26,7 +26,7 @@ struct GrindAccelerator<C: GrindingChallenger>(fn(&mut C, usize) -> C::Witness);
 /// silently evict the first.  Written once per challenger at prover
 /// construction and read (never written) from the proving threads, so the
 /// lock is uncontended; the guard is dropped BEFORE the accelerator runs,
-/// because the accelerator is a seconds-long device call.
+/// because the accelerator is a device call.
 static GRIND_ACCELERATORS: std::sync::RwLock<
     alloc::vec::Vec<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
 > = std::sync::RwLock::new(alloc::vec::Vec::new());
@@ -91,28 +91,16 @@ where
         .map(|a| a.0)
 }
 
-/// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`:
-/// returns the smallest `w ∈ [0, p)` that passes `check_witness(bits, w)`.
+/// Proof of work for challenger `C` that returns the smallest `w ∈ [0, p)`
+/// passing `check_witness(bits, w)`, through the registered accelerator when
+/// there is one and [`windowed_host_grind`] otherwise.
 ///
-/// plonky3's [`p3_challenger::DuplexChallenger::grind`] uses
-/// `find_map_any`, so its witness depends on rayon scheduling. The witness is
+/// The witness must not depend on the machine or the thread-pool size. It is
 /// msgpack-encoded (variable length) into the `evaluation_proof_bytes` the
 /// next layer reads, so its size moves the witness-read instruction count,
 /// the `RecursionShapeConfig::fix_shape` selection, and hence
 /// `compressed_proof.vk.hash_koalabear()`. The smallest witness is the same
 /// on every run, machine and thread-pool size.
-///
-/// The search is a parallel `find_first`: its left-of-match cancellation
-/// returns the smallest index independent of scheduling.
-///
-/// It runs over GROWING WINDOWS, `2^bits` wide and then doubling, rather than
-/// over `[0, p)` at once. The smallest witness inside the first non-empty
-/// window is the smallest witness overall, so the result is identical, but a
-/// `find_first` handed the whole prime field builds its task tree over two
-/// billion indices and cancels only at chunk boundaries — with one witness
-/// expected every `2^bits` indices that cost the prover far more than the
-/// search it was asked for. The first window is the expected distance to a
-/// witness, so it usually ends there.
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + Send + Sync,
@@ -130,6 +118,15 @@ where
 /// The host search of [`deterministic_grind`]: the smallest witness index that
 /// passes `check_witness(bits, ·)`, scanned in parallel over growing windows,
 /// with the challenger then advanced by that one check.
+///
+/// Each window is a parallel `find_first`, whose left-of-match cancellation
+/// returns the smallest index independent of scheduling.  The windows start
+/// `2^bits` wide and double, rather than covering `[0, p)` at once.  The
+/// smallest witness inside the first non-empty window is the smallest overall,
+/// so the result is identical, but a `find_first` handed the whole field builds
+/// its task tree over billions of indices and cancels only at chunk
+/// boundaries, which costs far more than the search itself.  The first window
+/// is the expected distance to a witness, so the search usually ends there.
 ///
 /// Indices map to witnesses by `from_u64`, which is the identity below the
 /// field order; every challenger here grinds a 32-bit field, so the scan is
@@ -161,6 +158,5 @@ where
     };
     let ok = challenger.check_witness(bits, witness);
     debug_assert!(ok);
-    let _ = ok;
     witness
 }
