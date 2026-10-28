@@ -1,12 +1,11 @@
-//! Compose-stage **shape carriers** shared by the whir compose pipeline.
+//! Compose-stage **shape carriers** shared by the jagged compose pipeline.
 //!
 //! The compose verifier is [`super::compress_jagged::verify_compress_jagged`],
-//! with the recursion-AIR variant in [`super::compress_recursion`];
-//! both consume the whir-shaped witness layouts from those modules.
+//! built into a program by [`super::programs::build_compose_program`].
 //!
-//! - [`PublicValuesOutputDigest`] — imported by all whir compose
-//!   builders (`compress_jagged.rs`, `compress_recursion.rs`,
-//!   `programs.rs`) to select between
+//! - [`PublicValuesOutputDigest`] — imported by the compose verifier and
+//!   its program builder (`compress_jagged.rs`, `programs.rs`) to select
+//!   between
 //!   [`super::recursion_public_values_digest`] and
 //!   [`super::root_public_values_digest`] in the public-values output stream.
 //! - [`ZKMCompressShape`] — the shape-enumeration carrier embedded in

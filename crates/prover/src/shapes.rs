@@ -706,8 +706,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// WHIR companion to [`Self::program_from_shape`]. Builds a
     /// recursion program from a cached shape using the jagged-pipeline
-    /// program builders (`recursion_program_jagged`,
-    /// `compose_program_jagged`, etc.).
+    /// program builders (`recursion_program`,
+    /// `compose_program`, etc.).
     ///
     /// Used by `build_compress_vks` to regenerate `vk_map.bin` against the
     /// whir compress programs.
@@ -718,25 +718,25 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
                 let input = ZKMCoreWitnessValues::dummy(self.core_prover.machine(), &shape);
-                self.recursion_program_jagged(&input).0
+                self.recursion_program(&input).0
             }
             ZKMCompressProgramShape::Deferred(shape) => {
                 let input = ZKMDeferredWitnessValues::dummy(self.root_prover.machine(), &shape);
-                self.deferred_program_jagged(&input)
+                self.deferred_program(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
                 let input = ZKMCompressWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.compose_program_jagged(&input).0
+                self.compose_program(&input).0
             }
             ZKMCompressProgramShape::Shrink(shape) => {
                 let input = ZKMWrapWitnessValues::dummy(self.root_prover.machine(), &shape);
-                self.shrink_program_jagged(&input)
+                self.shrink_program(&input)
             }
             ZKMCompressProgramShape::CompressRoot(shape) => {
                 let mut input =
                     ZKMCompressWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 input.is_complete = true;
-                self.compose_program_jagged(&input).0
+                self.compose_program(&input).0
             }
             ZKMCompressProgramShape::Normalize(shape) => {
                 let input = ZKMCoreWitnessValues::dummy_rows(
@@ -744,7 +744,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     &shape.rows,
                     false,
                 );
-                self.recursion_program_jagged(&input).0
+                self.recursion_program(&input).0
             }
         }
     }
@@ -818,7 +818,7 @@ mod tests {
         use p3_air::BaseAir;
         use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::{
-            build_compose_recursion_program, build_deferred_recursion_program,
+            programs::{build_compose_program, build_deferred_program},
             PublicValuesOutputDigest, ZKMCompressShape, ZKMCompressWithVkeyShape,
             ZKMCompressWitnessValues, ZKMDeferredShape, ZKMDeferredWitnessValues,
         };
@@ -871,7 +871,7 @@ mod tests {
                     zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >::dummy(machine, &shape);
                 witness.is_complete = is_complete;
-                let program = build_compose_recursion_program(
+                let program = build_compose_program(
                     machine,
                     &witness,
                     max_log_row_count,
@@ -887,7 +887,7 @@ mod tests {
             let witness = ZKMDeferredWitnessValues::<
                 zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
             >::dummy(prover.root_prover.machine(), &dshape);
-            let program = build_deferred_recursion_program(
+            let program = build_deferred_program(
                 prover.root_prover.machine(),
                 &witness,
                 max_log_row_count,
@@ -958,7 +958,7 @@ mod tests {
                 prover.compress_prover.machine(),
                 &shape,
             );
-            let program = prover.compose_program_jagged(&input);
+            let program = prover.compose_program(&input);
             let (_pk, vk) = prover.compress_prover.setup(&program.0);
             format!("{:?}", vk.hash_koalabear())
         };
@@ -1280,7 +1280,7 @@ mod tests {
         let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let d = ZKMCoreWitnessValues::dummy(machine, shape);
-                let p = prover.recursion_program_jagged(&d);
+                let p = prover.recursion_program(&d);
                 prover.compress_prover.setup(&p.0).1.hash_koalabear()
             }))
             .ok()
@@ -1479,7 +1479,7 @@ mod normalize_enumeration_tests {
             .any(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)) == class));
         let mut input = ZKMCoreWitnessValues::dummy_rows(machine, &rows, false);
         input.is_first_shard = false;
-        let (program, _) = prover.recursion_program_jagged(&input);
+        let (program, _) = prover.recursion_program(&input);
         let (_, vk) = prover.compress_prover.setup(&program);
         assert!(
             prover.recursion_vk_map.contains_key(&vk.hash_koalabear()),
@@ -1545,12 +1545,12 @@ mod normalize_enumeration_tests {
                     let Some((leaf, rep)) = jobs.get(i) else { break };
                     let mut real = ZKMCoreWitnessValues::dummy_rows(machine, &leaf.rows, false);
                     real.is_first_shard = leaf.first;
-                    let (_, real_digest) = prover.recursion_program_jagged(&real);
+                    let (_, real_digest) = prover.recursion_program(&real);
                     real.is_first_shard = !leaf.first;
-                    let (_, flipped_digest) = prover.recursion_program_jagged(&real);
+                    let (_, flipped_digest) = prover.recursion_program(&real);
                     let rep_input =
                         ZKMCoreWitnessValues::dummy_rows(machine, &shape_rows(rep), false);
-                    let (_, rep_digest) = prover.recursion_program_jagged(&rep_input);
+                    let (_, rep_digest) = prover.recursion_program(&rep_input);
                     if real_digest != rep_digest {
                         mismatched.fetch_add(1, Ordering::Relaxed);
                         tracing::error!(

@@ -1,18 +1,18 @@
-//! Program constructors for the multi-stage whir recursion.
+//! Program constructors for the multi-stage jagged recursion.
 //!
-//! Each function builds + compiles one of the four recursion programs
-//! (Normalize / Compose / Deferred / Wrap) that consume the
-//! shard-level whir proof shape.  They follow the
-//! [`zkm_prover::compress_program_from_input`] pattern: read the
-//! witness, invoke the verifier body, compile the operations into a
-//! [`RecursionProgram`].
+//! Each function builds and compiles one of the four recursion programs
+//! (Normalize / Compose / Deferred / Wrap) that verify jagged shard proofs:
+//! read the witness, invoke the verifier body, compile the operations into a
+//! [`RecursionProgram`].  Each is generic over the verified machine's chip
+//! set `A`, so the same constructor serves the MIPS and the recursion
+//! machines.
 //!
-//! | Ziren constructor                     | Verifier body               |
-//! |---------------------------------------|-----------------------------|
-//! | `build_normalize_program`    | `verify_core_jagged`      |
-//! | `build_compose_program`      | `verify_compress_jagged`  |
-//! | `build_deferred_program`     | `verify_deferred_jagged`  |
-//! | `build_wrap_program`         | `verify_wrap_jagged`      |
+//! | Constructor               | Verifier body            |
+//! |---------------------------|--------------------------|
+//! | `build_normalize_program` | `verify_core_jagged`     |
+//! | `build_compose_program`   | `verify_compress_jagged` |
+//! | `build_deferred_program`  | `verify_deferred_jagged` |
+//! | `build_wrap_program`      | `verify_wrap_jagged`     |
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
@@ -33,9 +33,6 @@ use super::wrap::{verify_wrap_jagged, ZKMWrapWitnessValues};
 
 /// Build the Normalize program.  Verifies a batch of leaf core shard
 /// proofs and emits the aggregated [`RecursionPublicValues`].
-///
-/// Direct analog of [`zkm_prover::ZKMProver::recursion_program_jagged`] but
-/// consuming the shard-level whir proof shape.
 pub fn build_normalize_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMCoreWitnessValues<KoalaBearPoseidon2>,
@@ -45,7 +42,7 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build normalize-whir program").entered();
+    let builder_span = tracing::debug_span!("build normalize program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);
     let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
@@ -60,7 +57,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span = tracing::debug_span!("compile normalize-whir program").entered();
+    let compiler_span = tracing::debug_span!("compile normalize program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -77,6 +74,12 @@ where
 /// so the program's VK is stable across vk_map regen.  `value_assertions`
 /// controls whether the merkle membership proofs are enforced (true) or
 /// only witnessed (false).
+///
+/// The prover instantiates it with `A = RecursionAir<KoalaBear, DEGREE>`:
+/// `RecursionAir` implements `Air<ShardConstraintFolder>` through the
+/// `MachineAir` derive.  The shard folder evaluates `is_first_row`,
+/// `is_last_row` and `is_transition_window` as `0`, so constraints gated by
+/// them are not enforced for recursion chips on this path.
 pub fn build_compose_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMCompressWitnessValues<KoalaBearPoseidon2>,
@@ -88,7 +91,7 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build compose-whir program").entered();
+    let builder_span = tracing::debug_span!("build compose program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Compress);
     let input_var = input.read(&mut builder);
     verify_compress_jagged::<InnerConfig, KoalaBearPoseidon2, A>(
@@ -102,7 +105,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span = tracing::debug_span!("compile compose-whir program").entered();
+    let compiler_span = tracing::debug_span!("compile compose program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -111,7 +114,8 @@ where
 
 /// Build the Deferred program.  Verifies a batch of deferred recursive
 /// proofs, each a completed inner recursion, and rebuilds the
-/// reconstruct-deferred-digest chain.
+/// reconstruct-deferred-digest chain.  The prover instantiates it with
+/// `A = RecursionAir<KoalaBear, DEGREE>`, as [`build_compose_program`].
 pub fn build_deferred_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
     input: &ZKMDeferredWitnessValues<KoalaBearPoseidon2Compress>,
@@ -122,7 +126,7 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build deferred-whir program").entered();
+    let builder_span = tracing::debug_span!("build deferred program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
     verify_deferred_jagged::<InnerConfig, KoalaBearPoseidon2Compress, A>(
@@ -135,7 +139,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span = tracing::debug_span!("compile deferred-whir program").entered();
+    let compiler_span = tracing::debug_span!("compile deferred program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -158,7 +162,7 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
 {
-    let builder_span = tracing::debug_span!("build wrap-whir program").entered();
+    let builder_span = tracing::debug_span!("build wrap program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Shrink);
     let input_var = input.read(&mut builder);
     verify_wrap_jagged::<InnerConfig, KoalaBearPoseidon2Compress, A>(
@@ -172,7 +176,7 @@ where
     let operations = builder.into_operations();
     builder_span.exit();
 
-    let compiler_span = tracing::debug_span!("compile wrap-whir program").entered();
+    let compiler_span = tracing::debug_span!("compile wrap program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();

@@ -1025,7 +1025,7 @@ impl<const P: u8>
     /// Structural signature of the witness layout — the compose program
     /// cache key.
     ///
-    /// `shape_key(a) == shape_key(b)  ⟹  compose_program_jagged(a) == compose_program_jagged(b)`
+    /// `shape_key(a) == shape_key(b)  ⟹  compose_program(a) == compose_program(b)`
     /// bytewise.  The walk hashes every variable-length collection the
     /// `Witnessable::write` traversal meets, in write order, so a cache hit
     /// can only occur when the cached program's `Hint` count matches the next

@@ -12,7 +12,7 @@
 //!
 //! The output map contains one entry per *unique* compress VK hash
 //! (e2e tests usually produce 1 hash because they all use the
-//! `recursion_program_jagged` lift program with a fixed shape).
+//! `recursion_program` lift program with a fixed shape).
 
 use std::collections::BTreeMap;
 use std::fs::File;

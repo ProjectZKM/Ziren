@@ -46,11 +46,11 @@ The recursion compiler (`crates/recursion/compiler`) builds each program from th
 
 | Program | Built by | Verifies |
 |---|---|---|
-| normalize | `recursion_program_jagged` | one core shard proof |
-| compose | `compose_program_jagged` | one to three adjacent recursion proofs |
-| deferred | `deferred_program_jagged` | a batch of deferred compressed proofs |
-| shrink | `shrink_program_jagged` | the compressed proof |
-| wrap | `wrap_bn254_program_jagged` | the shrink proof, for the BN254 SNARK |
+| normalize | `recursion_program` | one core shard proof |
+| compose | `compose_program` | one to three adjacent recursion proofs |
+| deferred | `deferred_program` | a batch of deferred compressed proofs |
+| shrink | `shrink_program` | the compressed proof |
+| wrap | `wrap_program` | the shrink proof, for the BN254 SNARK |
 
 The program is fixed by the shape of the proofs it verifies. A normalize program depends on the chip set of the shard and its height class. A compose program depends only on its arity, since every recursion proof has the same shape. The prover caches programs and their keys.
 
@@ -75,7 +75,7 @@ Programs are generated, not written by hand, so the set of valid recursion keys 
 | Setup | `get_program`, `setup` | `MipsAir` |
 | Execution, traces, shard proofs | `prove_core` | `MipsAir` |
 | Leaf inputs | `get_first_layer_inputs`, `get_recursion_core_inputs`, `get_recursion_deferred_inputs` | |
-| Compression | `compress`, `compose_program_jagged`, `deferred_program_jagged` | `CompressAir` |
-| Shrink | `shrink`, `shrink_program_jagged` | `ShrinkAir` |
-| Wrap | `wrap_bn254`, `wrap_bn254_program_jagged` | `WrapAir` over `OuterSC` |
+| Compression | `compress`, `compose_program`, `deferred_program` | `CompressAir` |
+| Shrink | `shrink`, `shrink_program` | `ShrinkAir` |
+| Wrap | `wrap_bn254`, `wrap_program` | `WrapAir` over `OuterSC` |
 | SNARK | `wrap_groth16_bn254`, `wrap_plonk_bn254`, `wrap_dvsnark_bn254` | gnark over BN254 |
