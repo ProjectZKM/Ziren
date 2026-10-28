@@ -9,7 +9,7 @@
 //! The stir constraints join the sumcheck the same way the OOD constraints do
 //! (`stir_value = f(stir_point)`), preserving the tower's `claim = Σ weight·f`.
 //!
-//! This is the prover whose WORK PROFILE the WHIR-vs-BaseFold benchmark times:
+//! This prover does the whole WHIR work profile:
 //! encode + commit + re-encode + re-commit + OOD + query opens + PoW, at the
 //! real query counts and grinding bits.  No verifier consumes this flat
 //! commitment; the STIR-authenticated scheme with a verifier is the
@@ -25,11 +25,10 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::basefold::config::FriConfig;
-use crate::basefold::encoder::DftEncoder;
-use crate::basefold::fri::codeword_from_ef;
-use crate::basefold::mle::Mle;
-use crate::basefold::proof::{LeafOpening, MerkleOpening};
+use crate::whir::code::codeword_from_ef;
+use crate::whir::encoder::DftEncoder;
+use crate::whir::merkle::{LeafOpening, MerkleOpening};
+use crate::whir::mle::Mle;
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::prover::WhirProver;
 use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
@@ -82,7 +81,7 @@ where
         let num_rounds = self.config.round_parameters.len();
 
         let start_cw = self.encoder.encode_batch(alloc::vec![Arc::clone(&mle)]);
-        let start_values = crate::basefold::fri::take_codeword_values(start_cw);
+        let start_values = crate::whir::code::take_codeword_values(start_cw);
         let start_rows = start_values.len();
         let start_leaves = RowMajorMatrix::new(start_values, 1usize << ff);
         let (start_commit, start_data) = self.mmcs.commit(alloc::vec![start_leaves]);
@@ -139,13 +138,9 @@ where
 
             let folded_mle =
                 Arc::new(Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
-            let ef_encoder = DftEncoder::new(
-                FriConfig::<EF>::new(round_cfg.log_inv_rate, 0, 0),
-                Arc::clone(&ef_dft),
-            );
+            let ef_encoder = DftEncoder::<EF, _>::new(round_cfg.log_inv_rate, Arc::clone(&ef_dft));
             let ef_cw = ef_encoder.encode_batch(alloc::vec![folded_mle]);
-            let base_cw =
-                codeword_from_ef::<F, EF>(crate::basefold::fri::take_codeword_values(ef_cw));
+            let base_cw = codeword_from_ef::<F, EF>(crate::whir::code::take_codeword_values(ef_cw));
             let leaf_w = (1usize << ff) * EF::DIMENSION;
             let leaves = RowMajorMatrix::new(base_cw.data.values, leaf_w);
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![leaves]);
@@ -165,7 +160,7 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
-            folding_pow.push(ProofOfWork(crate::basefold::prover::accelerated_grind(
+            folding_pow.push(ProofOfWork(crate::whir::grind::accelerated_grind(
                 challenger,
                 round_cfg.queries_pow_bits,
             )));
@@ -207,7 +202,7 @@ where
         }
 
         let final_poly = folder.f_vec.clone();
-        let final_pow = ProofOfWork(crate::basefold::prover::accelerated_grind(
+        let final_pow = ProofOfWork(crate::whir::grind::accelerated_grind(
             challenger,
             self.config.final_pow_bits,
         ));

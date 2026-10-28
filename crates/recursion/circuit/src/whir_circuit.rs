@@ -1,6 +1,6 @@
 //! In-circuit verifier for the stacked-WHIR inner PCS.
 //!
-//! The WHIR sibling of [`crate::basefold_verifier`]: verifies a
+//! Verifies a
 //! [`zkm_pcs::whir::stacked::StackedWhirProof`] inside the recursion circuit,
 //! replaying the EXACT transcript of the host
 //! `StackedWhirVerifier::verify_trusted_evaluation`
@@ -9,7 +9,7 @@
 //! opening, and close with the terminal identity over the mixed
 //! Lagrange/monomial constraint set.
 //!
-//! Shape philosophy matches the BaseFold circuit verifier: everything
+//! Shape philosophy: everything
 //! structural (round count, folding factor, stripe counts, domain sizes, PoW
 //! bit budgets, path depths) is COMPILE-TIME from the `WhirConfig` + the
 //! round stripe counts, so the emitted program is value-independent; only
@@ -28,7 +28,7 @@ use crate::witness::{WitnessWriter, Witnessable};
 use crate::CircuitConfig;
 
 /// One opened Merkle leaf: the per-matrix opened rows plus the sibling path.
-/// Mirror of the host [`zkm_pcs::basefold::proof::LeafOpening`].
+/// Mirror of the host [`zkm_pcs::whir::merkle::LeafOpening`].
 #[derive(Clone)]
 pub struct RecursiveWhirLeafOpening<F, EF, Dig> {
     /// Round-0 stripe rows: one inner vec per committed stripe matrix at
@@ -37,15 +37,14 @@ pub struct RecursiveWhirLeafOpening<F, EF, Dig> {
     /// Later-round leaf: the `2^ff` EF codeword values (the host commits
     /// their base limbs; the circuit re-derives the limbs via `ext2felt`
     /// for the leaf hash — `CircuitFelts2Ext` is gnark-only, so the EF
-    /// values are witnessed directly, exactly like the BaseFold
-    /// commit-phase openings).  Empty for round-0 leaves.
+    /// values are witnessed directly).  Empty for round-0 leaves.
     pub ef_values: Vec<EF>,
     /// Sibling digests, leaf-to-root.
     pub path: Vec<Dig>,
 }
 
 /// One round's query openings (final queries ride in the last entry).
-/// Mirror of the host [`zkm_pcs::basefold::proof::MerkleOpening`].
+/// Mirror of the host [`zkm_pcs::whir::merkle::MerkleOpening`].
 #[derive(Clone)]
 pub struct RecursiveWhirMerkleOpening<F, EF, Dig> {
     pub leaves: Vec<RecursiveWhirLeafOpening<F, EF, Dig>>,
@@ -92,6 +91,22 @@ pub fn host_stacked_whir_to_recursive(
         zkm_pcs::jagged_pcs::JaggedMmcs,
     >,
 ) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]> {
+    host_stacked_whir_to_recursive_generic(proof)
+}
+
+/// [`host_stacked_whir_to_recursive`] over any Merkle tree MMCS: the inner
+/// ring's eight-felt digests or the wrap ring's single BN254 element.
+pub fn host_stacked_whir_to_recursive_generic<MT, Dig>(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
+) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>
+where
+    MT: p3_commit::Mmcs<
+        InnerVal,
+        Commitment = p3_symmetric::MerkleCap<InnerVal, Dig>,
+        Proof = Vec<Dig>,
+    >,
+    Dig: Copy,
+{
     let whir = &proof.whir_proof;
     let conv_msgs = |msgs: &[zkm_pcs::whir::proof::SumcheckPoly<InnerChallenge>]| {
         msgs.iter()
@@ -163,12 +178,15 @@ pub fn host_stacked_whir_to_recursive(
 
 /// Witness the host mirror into circuit variables, element by element, in
 /// declaration order.  [`write_stacked_whir_to_stream`] mirrors the order.
-pub fn read_stacked_whir_from_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+/// `Dig` is the host digest: eight felts on the inner ring, one BN254 element
+/// on the wrap ring.
+pub fn read_stacked_whir_from_stream<C, Dig>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>,
     builder: &mut Builder<C>,
-) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>
+) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, Dig::WitnessVariable>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    Dig: Witnessable<C>,
 {
     RecursiveStackedWhirProof {
         round_sumcheck_polys: host
@@ -181,11 +199,7 @@ where
             .iter()
             .map(|r| r.iter().map(|a| a.read(builder)).collect())
             .collect(),
-        round_commitments: host
-            .round_commitments
-            .iter()
-            .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-            .collect(),
+        round_commitments: host.round_commitments.iter().map(|d| d.read(builder)).collect(),
         round_query_openings: host
             .round_query_openings
             .iter()
@@ -200,11 +214,7 @@ where
                             .map(|row| row.iter().map(|v| v.read(builder)).collect())
                             .collect(),
                         ef_values: l.ef_values.iter().map(|v| v.read(builder)).collect(),
-                        path: l
-                            .path
-                            .iter()
-                            .map(|d| core::array::from_fn(|i| d[i].read(builder)))
-                            .collect(),
+                        path: l.path.iter().map(|d| d.read(builder)).collect(),
                     })
                     .collect(),
             })
@@ -228,11 +238,12 @@ where
 
 /// Stream-write the host mirror; MUST match [`read_stacked_whir_from_stream`]
 /// element order exactly.
-pub fn write_stacked_whir_to_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+pub fn write_stacked_whir_to_stream<C, Dig>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, Dig>,
     witness: &mut impl WitnessWriter<C>,
 ) where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    Dig: Witnessable<C>,
 {
     for r in &host.round_sumcheck_polys {
         for m in r {
@@ -247,9 +258,7 @@ pub fn write_stacked_whir_to_stream<C>(
         }
     }
     for d in &host.round_commitments {
-        for f in d {
-            f.write(witness);
-        }
+        d.write(witness);
     }
     for op in &host.round_query_openings {
         for l in &op.leaves {
@@ -262,9 +271,7 @@ pub fn write_stacked_whir_to_stream<C>(
                 v.write(witness);
             }
             for d in &l.path {
-                for f in d {
-                    f.write(witness);
-                }
+                d.write(witness);
             }
         }
     }
@@ -289,10 +296,9 @@ pub fn write_stacked_whir_to_stream<C>(
 }
 
 /// In-circuit verifier for a stacked-WHIR batched opening.  Generic over
-/// the Merkle hasher `HV` exactly like
-/// [`crate::basefold_verifier::RecursiveBasefoldVerifier`]; defaults to the
-/// inner KoalaBear Poseidon2 ring (the only ring that verifies WHIR core
-/// proofs — recursion shards stay BaseFold).
+/// the Merkle hasher `HV`; defaults to the
+/// inner KoalaBear Poseidon2 ring, the ring the core proofs are committed
+/// under.
 pub struct RecursiveStackedWhirVerifier<HV = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     pub config: WhirConfig,
     pub log_stacking_height: u32,
@@ -765,9 +771,9 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
-    use zkm_pcs::basefold::mle::Mle;
     use zkm_pcs::jagged_pcs::JaggedMmcs;
     use zkm_pcs::whir::jagged::whir_config_for_stack;
+    use zkm_pcs::whir::mle::Mle;
     use zkm_pcs::whir::stacked::{StackedWhirProver, StackedWhirVerifier};
     use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_pcs::{InnerChallenger, InnerCompress, InnerHash, InnerPerm};
@@ -900,7 +906,7 @@ mod tests {
         for x in &stack_point {
             Witnessable::<InnerConfig>::write(x, &mut witness_stream);
         }
-        write_stacked_whir_to_stream::<InnerConfig>(&host_mirror, &mut witness_stream);
+        write_stacked_whir_to_stream::<InnerConfig, _>(&host_mirror, &mut witness_stream);
 
         run_test_recursion(builder.into_operations(), witness_stream);
     }

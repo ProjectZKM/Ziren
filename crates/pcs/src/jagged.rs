@@ -1,7 +1,7 @@
-//! Jagged polynomial commitment adapter for the BaseFold PCS.
+//! Jagged polynomial commitment adapter for the WHIR PCS.
 //!
 //! Packs variable-height chip traces into a single dense multilinear
-//! polynomial, enabling a single BaseFold commit/open/verify cycle for all
+//! polynomial, enabling a single WHIR commit/open/verify cycle for all
 //! chips in a shard (Jagged Polynomial Commitments, ePrint 2025/917).
 //!
 //! Each chip produces a trace of a different height (T_k: h_k × w_k);
@@ -77,7 +77,7 @@ pub struct JaggedPacking<F> {
     /// Cumulative offsets: `offsets[k]` is the starting index of the
     /// k-th column in `dense_values`.  The slice carries `total_cols + 1`
     /// entries with the final sentinel `offsets[total_cols] = total_values`.
-    /// The recursion lift (`shard_level_witness.rs:lift_jagged_basefold_bundle`)
+    /// The recursion lift (`shard_level_witness.rs:lift_jagged_bundle`)
     /// emits `col_prefix_sums.len() = num_cols + 1`, and
     /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`;
     /// the sentinel keeps the host and recursion lengths in agreement.
@@ -300,7 +300,7 @@ impl<F> JaggedPacking<F> {
 /// describes the packing layout (chip dimensions, offsets, padded
 /// log size) without allocating the dense polynomial.  Call
 /// [`materialize_dense_jagged`] when the dense `Vec<F>` is actually
-/// needed (e.g. for the BaseFold commit).
+/// needed (e.g. for the WHIR commit).
 ///
 /// Most downstream code (sumcheck reduction, verifier weight tables)
 /// only needs the metadata, not the dense values.
@@ -384,7 +384,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 /// zero-padding out to the round's committed `dense_len`.
 ///
 /// Caller is expected to drop the result immediately after handing
-/// it to the consumer (e.g. the BaseFold commit) to avoid holding
+/// it to the consumer (e.g. the WHIR commit) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
@@ -456,7 +456,7 @@ pub fn materialize_dense_jagged<F: Field>(
 ///
 /// Prefer [`compute_jagged_metadata`] + [`materialize_dense_jagged`] for new
 /// code — that pair lets the dense vector exist only for the brief window
-/// when the BaseFold commit needs it.
+/// when the WHIR commit needs it.
 pub fn pack_traces_jagged<F: Field>(traces: &[(String, RowMajorMatrix<F>)]) -> JaggedPacking<F> {
     let mut chip_infos = Vec::with_capacity(traces.len());
     let mut offsets = Vec::new();
@@ -521,7 +521,7 @@ pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
 ///   by the offsets sentinel-walk (identical to the lift's `packing_row_counts`
 ///   in `recursion/circuit/src/shard_level_witness.rs`).
 /// * returns `padding_column_count` = the number of artificial columns the
-///   BaseFold stacking quantization adds to round the real total column count
+///   WHIR stacking quantization adds to round the real total column count
 ///   up to the next power of two (`padded_cols - total_real_cols`).
 ///
 /// For a single-stacked main commit there is exactly **one round**, so
@@ -603,7 +603,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
     }
 }
 
-//  Hierarchical PCS: Table-Local Column Folding + Global BaseFold
+//  Hierarchical PCS: Table-Local Column Folding + Global WHIR
 //
 // The naive approach (pack_traces_jagged above) treats all columns from
 // all tables as a single flat vector. This has O(total_columns) fan-in
@@ -614,7 +614,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
 //   Phase 1: For each table, fold N columns → 1 polynomial via random
 //            linear combination. This is table-local, aligned, SIMD-friendly.
 //   Phase 2: Pack the per-table polynomials (one per table, different heights)
-//            into a jagged vector for the global BaseFold commit. Fan-in = num_tables.
+//            into a jagged vector for the global WHIR commit. Fan-in = num_tables.
 //
 // This reduces fan-in from O(total_columns) to O(num_tables), preserves
 // data locality, and handles jagged heights naturally.
@@ -678,7 +678,7 @@ pub fn fold_tables_local<F: Field>(
 ///
 /// Each table is a single-column polynomial of height `table.height`.
 /// These are concatenated into one dense vector (with padding to power of 2)
-/// for a single BaseFold commit.
+/// for a single WHIR commit.
 ///
 /// Fan-in = number of tables (typically ~20), NOT number of columns (~hundreds).
 pub fn pack_folded_tables_jagged<F: Field>(tables: &[FoldedTable<F>]) -> JaggedPacking<F> {
@@ -705,11 +705,11 @@ pub fn pack_folded_tables_jagged<F: Field>(tables: &[FoldedTable<F>]) -> JaggedP
     JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
 }
 
-/// Full hierarchical PCS pipeline: fold tables locally, then pack for BaseFold.
+/// Full hierarchical PCS pipeline: fold tables locally, then pack for WHIR.
 ///
 /// ```text
 /// [Table_0: h_0 × w_0] → fold → [f_0: h_0 × 1]  ─┐
-/// [Table_1: h_1 × w_1] → fold → [f_1: h_1 × 1]  ─┤ pack_jagged → dense vector → BaseFold commit
+/// [Table_1: h_1 × w_1] → fold → [f_1: h_1 × 1]  ─┤ pack_jagged → dense vector → WHIR commit
 /// [Table_2: h_2 × w_2] → fold → [f_2: h_2 × 1]  ─┘
 /// ```
 ///
@@ -738,23 +738,6 @@ pub fn hierarchical_jagged_pack<F: Field>(
 /// `AreaOutOfBounds` / `log_m < 30` bound).  A round must hold a STRICTLY
 /// smaller dense area so its prefix-sum bit-width (`log_m + 1`) stays ≤ 31.
 pub const MAX_ROUND_LOG_AREA: u32 = 30;
-
-/// Derive the GROUP partition from name-sorted [`JaggedChipInfo`]s (the form
-/// both the prover's packing and the verifier's `chip_infos` carry).
-///
-/// A group is one INDEPENDENT jagged instance — its own reduction, jagged-eval
-/// and BaseFold open.  Even with several committed rounds, every round is
-/// batched into a single proof and only the COMMITMENTS are per round.  So
-/// the cover is always the identity, and a `[preprocessed | main]` column
-/// layout does NOT split it — those regions live in one jagged instance whose
-/// columns run end to end.
-///
-/// Both the prover and the verifier call this, and the verifier compares the
-/// proof's group map against its own run of it, so the two must agree.
-#[must_use]
-pub fn partition_from_chip_infos(chip_infos: &[JaggedChipInfo]) -> Vec<Vec<usize>> {
-    alloc::vec![(0..chip_infos.len()).collect()]
-}
 
 #[cfg(test)]
 mod tests {
@@ -896,7 +879,7 @@ mod tests {
         let traces: Vec<(String, PaddedMle<crate::InnerVal>)> = vec![(
             "a".into(),
             PaddedMle::padded_with_zeros(
-                std::sync::Arc::new(crate::basefold::Mle::from_row_major(RowMajorMatrix::new(
+                std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(RowMajorMatrix::new(
                     vec![crate::InnerVal::ONE; 96 * 3],
                     3,
                 ))),

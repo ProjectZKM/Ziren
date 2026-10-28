@@ -18,12 +18,10 @@ use zkm_recursion_compiler::{
 
 mod types;
 
-/// BaseFold proof verifier — see [`basefold_verifier`] module doc.
-pub mod basefold_chip_opened_values;
-pub mod basefold_constraint_folder;
-pub mod basefold_verifier;
-pub mod basefold_witness;
 pub mod challenger;
+/// WHIR proof verifier — see [`verifier`] module doc.
+pub mod chip_opened_values;
+pub mod constraint_folder;
 pub mod domain;
 pub mod dummy;
 pub mod fri;
@@ -31,7 +29,7 @@ pub mod hash;
 pub mod jagged_circuit;
 pub mod jagged_eval;
 pub mod jagged_eval_primitives;
-pub mod jagged_pcs_lift;
+pub mod jagged_witness;
 pub mod logup_gkr;
 pub mod logup_proof;
 pub mod machine;
@@ -40,7 +38,7 @@ pub mod partial_sumcheck;
 pub mod public_values_folder;
 pub mod recursive_jagged_pcs;
 pub mod recursive_stacked_pcs;
-pub mod shard_basefold;
+pub mod shard;
 pub mod shard_level_witness;
 pub mod shard_proof_variable_lift;
 pub mod stark;
@@ -128,10 +126,10 @@ pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
         pc_start: Felt<<C as Config>::F>,
     );
 
-    /// #H (BaseFold-over-BN254 wrap port): project this ring's vk preprocessed
+    /// Project this ring's vk preprocessed
     /// commitment digest to 8 KoalaBear felts — the in-circuit twin of host
-    /// `BasefoldRing::digest_felts`. Inner = identity ([Felt;8]); outer = split_32
-    /// of the BN254 commit. Lets the BaseFold shard verifier's preprocessed_commit
+    /// `WhirRing::digest_felts`. Inner = identity ([Felt;8]); outer = split_32
+    /// of the BN254 commit. Lets the jagged shard verifier's preprocessed_commit
     /// be uniformly [Felt;8] across rings.
     fn vk_preprocessed_commit_felts(
         builder: &mut Builder<C>,
@@ -239,7 +237,7 @@ pub trait CircuitConfig: Config {
     }
 
     /// P2c-for-outer (value-independent gnark wrap): WITNESS the outer
-    /// (BN254) jagged-basefold bundle's proof-specific values from the
+    /// (BN254) jagged-whir bundle's proof-specific values from the
     /// witness stream, returning the witnessed
     /// [`crate::shard_level_witness::LiftedEvalProof::OuterBundle`].
     ///
@@ -709,7 +707,7 @@ impl CircuitConfig for OuterConfig {
 
 impl<const P: u8> KoalaBearFriParameters for KoalaBearPoseidon2Ring<P> {
     const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
-        <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
+        <Self as zkm_pcs::WhirRing>::WHIR_PROFILE;
     type ValMmcs = ValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
@@ -717,7 +715,7 @@ impl<const P: u8> KoalaBearFriParameters for KoalaBearPoseidon2Ring<P> {
 
 impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
     const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
-        <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
+        <Self as zkm_pcs::WhirRing>::WHIR_PROFILE;
     type ValMmcs = OuterValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
 

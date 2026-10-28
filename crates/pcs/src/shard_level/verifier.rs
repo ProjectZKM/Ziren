@@ -8,7 +8,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
 
-use super::basefold_constraint_folder::{
+use super::constraint_folder::{
     compute_padded_row_adjustment_shard_host, eval_constraints_shard_host, ShardConstraintFolder,
 };
 use super::shard_proof::{FoldOrientation, JaggedShardProof};
@@ -65,7 +65,7 @@ pub fn chips_touch_public_value_buses<'a, F: Field + 'a, A: MachineAir<F> + 'a>(
     })
 }
 
-/// Errors emitted by the host-side shard-level BaseFold verifier.
+/// Errors emitted by the host-side shard-level WHIR verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JaggedShardVerifyError {
     /// The proof's `public_values` length is not the machine's PV count.
@@ -118,7 +118,7 @@ impl core::fmt::Display for JaggedShardVerifyError {
 
 impl std::error::Error for JaggedShardVerifyError {}
 
-/// Host-side shard-level BaseFold verifier: the LogUp-GKR + zerocheck +
+/// Host-side shard-level WHIR verifier: the LogUp-GKR + zerocheck +
 /// jagged-PCS flow, run against host types rather than symbolic AIR.
 ///
 /// The config travels with the proof it verifies, not with this struct -- the
@@ -157,7 +157,7 @@ impl JaggedShardVerifier {
         Self { max_log_row_count }
     }
 
-    /// Verify a shard-level BaseFold proof against the machine's
+    /// Verify a shard-level WHIR proof against the machine's
     /// chip set, verifying key, and public values.
     ///
     /// The verifier replays the prover's transcript: the prologue, LogUp-GKR,
@@ -184,7 +184,7 @@ impl JaggedShardVerifier {
         machine_has_pv_buses: bool,
     ) -> Result<(), JaggedShardVerifyError>
     where
-        SC: StarkGenericConfig + crate::BasefoldRing,
+        SC: StarkGenericConfig + crate::WhirRing,
         A: MachineAir<Val<SC>>
             + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
@@ -192,11 +192,7 @@ impl JaggedShardVerifier {
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         if proof.public_values.len() != num_pv_elts {
             return Err(JaggedShardVerifyError::PublicValuesLengthMismatch {
@@ -321,7 +317,7 @@ impl JaggedShardVerifier {
                             .into(),
                     ));
                 };
-                let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+                let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
 
                 let (rc_g, cc_g): (Vec<usize>, Vec<usize>) =
                     match bundle.packing.round_counts.last() {
@@ -429,19 +425,14 @@ fn verify_jagged_pcs_host<SC, A>(
     claimed_prep_pad_columns: Option<usize>,
 ) -> Result<(), JaggedShardVerifyError>
 where
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::jagged::JaggedChipInfo;
     use crate::jagged_pcs::jagged::JaggedPcsProof;
@@ -471,23 +462,23 @@ where
             EvaluationProof::Bytes(b) => b,
             EvaluationProof::Bundle(_) => {
                 return Err(JaggedShardVerifyError::JaggedPcs(
-                    "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle".into(),
+                    "outer ring expects a serialized (Bytes) jagged bundle, got Bundle".into(),
                 ));
             }
         };
         let bundle =
-            match JaggedPcsProofGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes_for_verification(bytes) {
+            match JaggedPcsProofGeneric::<<SC as crate::WhirRing>::WhirMmcs>::from_bytes_for_verification(bytes) {
                 Some(b) => b,
                 None => {
                     return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                        "outer BaseFold bundle deserialize failed ({} bytes)",
+                        "outer jagged bundle deserialize failed ({} bytes)",
                         bytes.len()
                     )));
                 }
             };
         {
             let projected =
-                <SC as crate::BasefoldRing>::digest_felts(&bundle.commit.original_commitment);
+                <SC as crate::WhirRing>::digest_felts(&bundle.commit.original_commitment);
             let projected_val: [Val<SC>; 8] = unsafe {
                 core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(
                     &projected,
@@ -624,7 +615,7 @@ where
         }
 
         for raw in bundle.preceding_commits.iter() {
-            match <SC as crate::BasefoldRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
+            match <SC as crate::WhirRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
                 Some(true) => {}
                 Some(false) => {
                     return Err(JaggedShardVerifyError::JaggedPcs(
@@ -638,9 +629,10 @@ where
             }
         }
 
-        let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
-        let fri = <SC as crate::BasefoldRing>::fri_config();
-        let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::BasefoldRing>::BfMmcs>(
+        let mmcs = <SC as crate::WhirRing>::whir_mmcs();
+        let config =
+            <SC as crate::WhirRing>::whir_config(bundle.commit.log_stacking_height as usize);
+        let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::WhirRing>::WhirMmcs>(
             &chip_infos,
             &r_row_per_chip,
             &z_row,
@@ -648,7 +640,7 @@ where
             challenger,
             mmcs,
             true,
-            fri,
+            config,
             &bundle
                 .preceding_commits
                 .iter()
@@ -670,7 +662,7 @@ where
         return if ok {
             Ok(())
         } else {
-            Err(JaggedShardVerifyError::JaggedPcs("outer BaseFold bundle rejected".into()))
+            Err(JaggedShardVerifyError::JaggedPcs("outer jagged bundle rejected".into()))
         };
     }
 
@@ -988,7 +980,7 @@ where
             .map(|i| (i.row_count, i.column_count))
             .unzip();
         let rebound = crate::jagged_pcs::jagged_hash_bind_modified(
-            crate::jagged_pcs::basefold_commit_digest_felts(raw),
+            crate::jagged_pcs::whir_commit_digest_felts(raw),
             &prep_rows,
             &prep_cols,
         );
@@ -1000,7 +992,7 @@ where
                 >>::Commitment,
             >(&core::mem::ManuallyDrop::new(vk.commit.clone()))
         };
-        if crate::jagged_pcs::basefold_commit_digest_felts(&key_commitment) != rebound {
+        if crate::jagged_pcs::whir_commit_digest_felts(&key_commitment) != rebound {
             return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the claimed commitment and geometry do not \
                  re-derive the verifying key's commitment"
@@ -1015,11 +1007,10 @@ where
         &r_row_per_chip,
         &z_row_inner,
         &prep_rounds,
-        n_prep_infos,
         &bundle,
         &opened_main,
         lb_challenger,
-        <SC as crate::BasefoldRing>::WHIR_PROFILE,
+        <SC as crate::WhirRing>::WHIR_PROFILE,
     ) {
         return Err(JaggedShardVerifyError::JaggedPcs(
             "verify_jagged_no_observe rejected the bundle".into(),

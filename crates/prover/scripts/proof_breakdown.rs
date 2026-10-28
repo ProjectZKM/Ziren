@@ -64,27 +64,26 @@ fn breakdown<SC: zkm_pcs::StarkGenericConfig>(
     println!("    chip heights: {}", heights.join(" "));
     if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) = &j.evaluation_proof {
         println!(
-            "    jagged: area {} = {} stripes of 2^{}, reduction {} B, y_per_chip {} B, basefold {} B",
+            "    jagged: area {} = {} stripes of 2^{}, reduction {} B, y_per_chip {} B, whir {} B",
             b.commit.area,
             b.commit.area >> b.commit.log_stacking_height,
             b.commit.log_stacking_height,
             sz(&b.reduction),
             sz(&b.y_per_chip),
-            sz(&b.basefold_proof)
+            sz(&b.whir_proof)
         );
-        if let Some(w) = &b.whir_proof {
-            let wp = &w.whir_proof;
-            let openings: Vec<String> =
-                wp.round_query_openings.iter().map(|o| format!("{} B", sz(o))).collect();
-            println!(
-                "    whir: query openings per round [{}], sumchecks {} B, ood {} B, final poly {} B, batch evals {} B",
-                openings.join(", "),
-                sz(&wp.round_sumcheck_polys),
-                sz(&wp.round_ood_answers),
-                sz(&wp.final_poly),
-                sz(&w.batch_evaluations)
-            );
-        }
+        let w = &b.whir_proof;
+        let wp = &w.whir_proof;
+        let openings: Vec<String> =
+            wp.round_query_openings.iter().map(|o| format!("{} B", sz(o))).collect();
+        println!(
+            "    whir: query openings per round [{}], sumchecks {} B, ood {} B, final poly {} B, batch evals {} B",
+            openings.join(", "),
+            sz(&wp.round_sumcheck_polys),
+            sz(&wp.round_ood_answers),
+            sz(&wp.final_poly),
+            sz(&w.batch_evaluations)
+        );
     }
 }
 

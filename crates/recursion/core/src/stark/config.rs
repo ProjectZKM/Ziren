@@ -9,7 +9,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm_pcs::{BasefoldRing, Com, StarkGenericConfig, ZeroCommitment};
+use zkm_pcs::{Com, StarkGenericConfig, WhirRing, ZeroCommitment};
 
 use super::{poseidon2::bn254_poseidon2_rc3, zkm_dev_mode};
 
@@ -180,59 +180,52 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
     }
 }
 
-// The OUTER (wrap) impl of `BasefoldRing`.
+// The OUTER (wrap) impl of `WhirRing`.
 // Lives here — not in zkm-pcs — because zkm-pcs cannot import OuterSC
 // (recursion-core depends on stark, not vice versa). `Val<OuterSC> = KoalaBear`
 // and `Challenge<OuterSC> = KoalaBear⁴` (same as
-// inner), so the BaseFold jagged-PCS over the
+// inner), so the WHIR jagged-PCS over the
 // Poseidon2-BN254 Merkle MMCS (`OuterValMmcs`, whose
-// `Commitment = Hash<KoalaBear, Bn254, 1>`) applies directly. `bf_mmcs()`
-// builds that MMCS so the generic BaseFold cores
-// (`commit/open/verify_jagged_pcs_generic`) can run over it once the
-// higher-level jagged bundle + 8-felt-digest stack is genericized over
-// `BfMmcs::Commitment`.
+// `Commitment = Hash<KoalaBear, Bn254, 1>`) applies directly; `whir_mmcs()`
+// builds that MMCS.
 //
-// The digest tunnel + the outer jagged open/verify dispatch are wired, so the
-// wrap STARK proves and host-verifies over the BN254 BaseFold jagged-PCS
-// (OuterValMmcs + OuterChallenger): the outer commit builds the BN254 commit
-// via the `BasefoldRing::commit_multilinears` default (over `OuterValMmcs`), and
-// `prove_trusted_evaluations` / `verify_jagged_pcs_host` dispatch statically
-// through this impl.
-impl BasefoldRing for KoalaBearPoseidon2Outer {
-    const WHIR_INNER_PCS: bool = false;
+// The wrap STARK proves and host-verifies over jagged-WHIR with BN254
+// Merkle trees (OuterValMmcs + OuterChallenger): the outer commit builds the
+// BN254 WHIR commit via the `WhirRing::commit_multilinears` default (over
+// `OuterValMmcs`), and `prove_trusted_evaluations` / `verify_jagged_pcs_host`
+// dispatch statically through this impl.
+impl WhirRing for KoalaBearPoseidon2Outer {
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
+        zkm_pcs::whir::jagged::WhirProfile::Wrap;
 
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
-    ) -> &zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+    ) -> &zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
         prep
     }
 
-    type BfMmcs = OuterValMmcs;
+    type WhirMmcs = OuterValMmcs;
 
-    fn bf_mmcs() -> Self::BfMmcs {
+    fn whir_mmcs() -> Self::WhirMmcs {
         let perm = outer_perm();
         let hash = OuterHash::new(perm.clone()).unwrap();
         let compress = OuterCompress::new(perm);
         OuterValMmcs::new(hash, compress, 0)
     }
 
-    fn fri_config() -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
-        zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
-    }
-
     /// `Com<KoalaBearPoseidon2Outer>` is `OuterPcs::Commitment` =
     /// `OuterValMmcs::Commitment` = `Hash<KoalaBear, Bn254, 1>`, the SAME type
-    /// the BaseFold open Merkle-verifies against, and this ring's `commit_root`
+    /// the WHIR open Merkle-verifies against, and this ring's `commit_root`
     /// stores it unmixed — so the bind is the equality itself.
     fn vk_commit_is_preceding_root(
         vk_commit: &zkm_pcs::Com<Self>,
-        raw: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
+        raw: &<Self::WhirMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
     ) -> Option<bool> {
         Some(vk_commit == raw)
     }
 
     fn digest_felts(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
+        commit: &<Self::WhirMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [zkm_pcs::jagged_pcs::JaggedVal; 8] {
         let roots = commit.roots();
         assert!(!roots.is_empty(), "BN254 wrap commitment MerkleCap must have at least one root",);
@@ -244,144 +237,36 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         out
     }
 
-    // `commit_multilinears` — the wrap ring's BN254 jagged BaseFold
-    // precompute — is the trait DEFAULT (this ring's `bf_mmcs()` /
-    // `fri_config()` are what it reads): EXACTLY the commit the retired
-    // outer BaseFold commit path produced for OuterSC.
+    // `commit_multilinears` — the wrap ring's BN254 jagged-WHIR precompute —
+    // is the trait DEFAULT (this ring's `whir_mmcs()` / `WHIR_PROFILE` are what
+    // it reads).
 
     fn prove_jagged_open(
         z_row: &[zkm_pcs::InnerChallenge],
-        rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+        rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
-            Self::BfMmcs,
+            Self::WhirMmcs,
             zkm_pcs::jagged_pcs::JaggedDft,
-            zkm_pcs::jagged_pcs::jagged::BasefoldDenseOpen,
         >(
             &rounds,
             z_row,
             challenger,
-            Self::bf_mmcs(),
+            Self::whir_mmcs(),
             std::sync::Arc::new(zkm_pcs::jagged_pcs::JaggedDft::default()),
-            Self::fri_config(),
             Self::WHIR_PROFILE,
         );
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
     }
 }
 
-// Compile-time proof that the genericized
-// BaseFold jagged-PCS digest path (`zkm_pcs::jagged_pcs::*_generic`) is
-// instantiable over the OUTER ring's BN254 commitment family, i.e. that the
-// BN254 commitment (`OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`)
-// "flows" through commit/open/verify exactly where the inner ring uses the
-// 8-felt Poseidon2-KoalaBear digest. `Val`/`Challenge` stay KoalaBear /
-// KoalaBear⁴ for both; only the
-// Merkle-commitment hash + challenger vary.
-//
-// No runtime body: these functions are never *called* here (the OuterSC wrap
-// orchestration that drives them lives in `zkm-pcs`'s `prover.rs`
-// `commit()/open()` + gnark `build_outer_circuit`, which are the remaining
-// wrap-port work). The point is purely to monomorphize the generic cores at
-// `MT = OuterValMmcs` + `Challenger = OuterChallenger` so the trait bounds
-// (`OuterChallenger: CanObserve<OuterValMmcs::Commitment>`,
-// `OuterDft: TwoAdicSubgroupDft<KoalaBear>`) are checked by the compiler. If
-// the BN254 commit family ever drifts out of the generic-core bounds, this
-// stops compiling — a guardrail for the wrap port.
-#[cfg(test)]
-#[allow(dead_code, clippy::type_complexity)]
-mod basefold_over_bn254_generic_typecheck {
-    use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
-    // The commit does not observe internally; the caller needs `CanObserve`.
-    use p3_challenger::CanObserve;
-    use p3_matrix::dense::RowMajorMatrix;
-    use std::sync::Arc;
-    use zkm_pcs::basefold::{StackedBasefoldProof, StackedVerifierError};
-    use zkm_pcs::jagged_pcs::{
-        commit_jagged_pcs_generic, open_jagged_pcs_generic, verify_jagged_pcs_generic,
-        JaggedChallenge, JaggedCommitGeneric, JaggedMmcs, JaggedProverDataGeneric, JaggedVal,
-    };
-
-    // Sanity: `JaggedVal == OuterVal == KoalaBear`, so the OUTER MMCS is an
-    // `Mmcs<JaggedVal>` exactly as the generic cores require. (Inner alias is
-    // a `MerkleTreeMmcs` over the same `JaggedVal`.)
-    type _AssertOuterIsJaggedValMmcs = OuterValMmcs;
-    type _AssertInner = JaggedMmcs;
-
-    // commit (no observe) over the BN254 MMCS.
-    fn _commit_no_observe(
-        traces: std::vec::Vec<(std::string::String, RowMajorMatrix<JaggedVal>)>,
-        mmcs: OuterValMmcs,
-        dft: Arc<OuterDft>,
-    ) -> (JaggedCommitGeneric<OuterValMmcs>, JaggedProverDataGeneric<OuterValMmcs>) {
-        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
-    }
-
-    // commit (with observe) — exercises `OuterChallenger:
-    // CanObserve<OuterValMmcs::Commitment>` (the BN254 commit observe the
-    // prologue would perform on the outer path).
-    fn _commit_observe(
-        traces: std::vec::Vec<(std::string::String, RowMajorMatrix<JaggedVal>)>,
-        ch: &mut OuterChallenger,
-        mmcs: OuterValMmcs,
-        dft: Arc<OuterDft>,
-    ) -> (JaggedCommitGeneric<OuterValMmcs>, JaggedProverDataGeneric<OuterValMmcs>) {
-        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        let (commit, prover_data) =
-            commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri);
-        ch.observe(commit.original_commitment.clone());
-        (commit, prover_data)
-    }
-
-    // open over the BN254 MMCS.
-    fn _open(
-        pd: JaggedProverDataGeneric<OuterValMmcs>,
-        eval_point: std::vec::Vec<JaggedChallenge>,
-        ch: &mut OuterChallenger,
-        mmcs: OuterValMmcs,
-        dft: Arc<OuterDft>,
-    ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
-        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        open_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            &pd, eval_point, ch, mmcs, dft, fri,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn _verify(
-        commitment: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
-        area: usize,
-        log_stacking_height: u32,
-        eval_point: &[JaggedChallenge],
-        evaluation_claim: JaggedChallenge,
-        proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs>,
-        ch: &mut OuterChallenger,
-        mmcs: OuterValMmcs,
-        _dft: Arc<OuterDft>,
-    ) -> Result<(), StackedVerifierError> {
-        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs>(
-            commitment,
-            area,
-            log_stacking_height,
-            eval_point,
-            evaluation_claim,
-            proof,
-            ch,
-            mmcs,
-            fri,
-        )
-    }
-}
-
-// OUTER-ring jagged BaseFold setup commit.
+// Outer-ring jagged WHIR setup commit.
 //
 // `outer_prep_commit` is the wrap ring's `StarkGenericConfig::prep_commit` body.
 // It exists because `StarkMachine::setup` is generic over `SC` and so cannot name
-// `OuterValMmcs`, while the ring commit (`BasefoldRing::commit_multilinears`)
+// `OuterValMmcs`, while the ring commit (`WhirRing::commit_multilinears`)
 // must be dispatched on a concrete ring; the config impl supplies it.  `Val`/`Challenge` are
 // KoalaBear / KoalaBear^4 for both rings, so only the MMCS differs.
 pub mod outer_jagged_hooks {
@@ -391,11 +276,11 @@ pub mod outer_jagged_hooks {
 
     // The shard prover (`prove_trusted_evaluations`) and host verifier
     // (`verify_jagged_pcs_host`) name `OuterChallenger`/`OuterValMmcs` via the
-    // `BasefoldRing` associated type and call the generic BaseFold open/verify
+    // `WhirRing` associated type and call the generic WHIR open/verify
     // statically, so only the setup/VK-side commit lives here.
 
     /// PREPROCESSED-trace setup commit for the OuterSC wrap
-    /// machine: stacked BaseFold over the Poseidon2-BN254 `OuterValMmcs`
+    /// machine: stacked WHIR over the Poseidon2-BN254 `OuterValMmcs`
     /// (no two-adic coset LDE).  Returns the `OuterValMmcs::Commitment`, which
     /// is `Com<KoalaBearPoseidon2Outer>` since
     /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>` -- the equality the
@@ -421,7 +306,7 @@ pub mod outer_jagged_hooks {
         outer_prep_precompute(chip_traces, pin).commit.original_commitment
     }
 
-    /// Same commit as [`outer_prep_commit`], keeping the BaseFold prover data
+    /// Same commit as [`outer_prep_commit`], keeping the WHIR prover data
     /// so the preprocessed round can be OPENED.  See
     /// `StarkGenericConfig::PrepPrecomputed`.
     pub(crate) fn outer_prep_precompute(
@@ -438,146 +323,48 @@ pub mod outer_jagged_hooks {
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_traces(chip_traces);
-        <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
-            &chip_trace_views,
-            pin,
-        )
+        <KoalaBearPoseidon2Outer as zkm_pcs::WhirRing>::commit_multilinears(&chip_trace_views, pin)
     }
 }
 
 // Runtime validation that the stacked
-// BaseFold jagged-PCS actually commits / opens / verifies over the OUTER ring
+// WHIR jagged-PCS actually commits / opens / verifies over the OUTER ring
 // (Poseidon2-BN254 `OuterValMmcs` + `MultiField32Challenger`). This is the
 // cryptographic heart the wrap shard reuses; an honest proof must verify.
 #[cfg(test)]
-mod basefold_over_bn254_roundtrip_test {
+mod whir_over_bn254_roundtrip_test {
     use super::{outer_perm, KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
     use zkm_pcs::jagged_pcs::JaggedVal;
-    use zkm_pcs::BasefoldRing;
+    use zkm_pcs::WhirRing;
 
     fn make_challenger() -> OuterChallenger {
         OuterChallenger::new(outer_perm()).unwrap()
     }
 
-    #[test]
-    fn test_basefold_jagged_pcs_roundtrip_bn254() {
-        let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
-            let v: Vec<JaggedVal> = (0..(w * h))
-                .map(|i| {
-                    JaggedVal::from_u32(((i as u64 * 2_654_435_761 + seed) % 1_000_003) as u32)
-                })
-                .collect();
-            RowMajorMatrix::new(v, w)
-        };
-        let traces = [("Cpu".to_string(), mk(20, 100, 1)), ("Add".to_string(), mk(8, 50, 7))];
-
-        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
-        let dft = Arc::new(OuterDft::default());
-
-        use p3_challenger::{CanObserve, FieldChallenger};
-        use zkm_pcs::basefold::FriConfig;
-        use zkm_pcs::jagged_pcs::{
-            commit_jagged_pcs_generic, open_jagged_pcs_generic, verify_jagged_pcs_generic,
-            JaggedChallenge,
-        };
-
-        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
-            .iter()
-            .map(|(name, m)| {
-                (name.clone(), {
-                    let h = m.values.len().checked_div(m.width).unwrap_or(0);
-                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                    zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
-                        std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
-                            p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
-                        )),
-                        log_h,
-                    )
-                })
-            })
-            .collect();
-        let packing = zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views);
-        let dense =
-            zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(&trace_views, packing.dense_len);
-        let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
-
-        let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
-        let mut p_chal = make_challenger();
-        let (commit, prover_data) = commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(
-            dense_traces,
-            mmcs.clone(),
-            dft.clone(),
-            rt_fri.clone(),
-        );
-        p_chal.observe(commit.original_commitment.clone());
-
-        let stack_dim = commit.log_stacking_height as usize;
-        let num_stripes = commit.area >> stack_dim;
-        let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
-        let total_vars = num_batch_vars + stack_dim;
-
-        let mut pt_chal = make_challenger();
-        let eval_point: Vec<JaggedChallenge> =
-            (0..total_vars).map(|_| pt_chal.sample_algebra_element()).collect();
-
-        let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
-        let batch_evals_flat: Vec<JaggedChallenge> = prover_data
-            .stacked_data
-            .interleaved_mles
-            .iter()
-            .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
-            .collect();
-        let batch_point = &eval_point[stack_dim..];
-        let evaluation_claim = {
-            let target = 1usize << batch_point.len();
-            let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
-            current.resize(target, JaggedChallenge::ZERO);
-            for &r in batch_point.iter() {
-                let half = current.len() / 2;
-                for i in 0..half {
-                    let lo = current[2 * i];
-                    let hi = current[2 * i + 1];
-                    current[i] = lo + r * (hi - lo);
-                }
-                current.truncate(half);
-            }
-            current[0]
-        };
-
-        let proof = open_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            &prover_data,
-            eval_point.clone(),
-            &mut p_chal,
-            mmcs.clone(),
-            dft.clone(),
-            rt_fri.clone(),
-        );
-
-        let mut v_chal = make_challenger();
-        v_chal.observe(commit.original_commitment.clone());
-        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs>(
-            &commit.original_commitment,
-            commit.area,
-            commit.log_stacking_height,
-            &eval_point,
-            evaluation_claim,
-            &proof,
-            &mut v_chal,
-            mmcs,
-            rt_fri,
-        )
-        .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
+    /// Drop the wrap schedule's grinding so a CPU test does not spend minutes
+    /// in BN254 proof-of-work.  The query counts are solved from the grinding,
+    /// so they rise to keep each phase at the target; every test that sets
+    /// this sets the same values, so the process-wide variables agree.
+    fn cheap_wrap_grinding() {
+        for var in [
+            "ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS",
+            "ZIREN_WRAP_FOLD_GRINDING_BITS",
+            "ZIREN_WRAP_BATCH_GRINDING_BITS",
+        ] {
+            std::env::set_var(var, "0");
+        }
     }
 
     #[test]
-    fn test_jagged_basefold_bundle_roundtrip_bn254() {
+    fn test_jagged_whir_bundle_roundtrip_bn254() {
+        cheap_wrap_grinding();
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            BasefoldDenseOpen, JaggedOpenRound,
+            JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -594,7 +381,7 @@ mod basefold_over_bn254_roundtrip_test {
         };
         let traces = [("Cpu".to_string(), mk(4, 16, 1)), ("Add".to_string(), mk(2, 8, 7))];
 
-        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let mmcs = <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs();
         let dft = Arc::new(OuterDft::default());
 
         let mut pt = make_challenger();
@@ -618,7 +405,7 @@ mod basefold_over_bn254_roundtrip_test {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
-                        std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
+                        std::sync::Arc::new(zkm_pcs::whir::mle::Mle::from_row_major(
                             p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
                         )),
                         log_h,
@@ -627,9 +414,11 @@ mod basefold_over_bn254_roundtrip_test {
             })
             .collect();
 
-        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
+        let whir = <KoalaBearPoseidon2Outer as WhirRing>::whir_config(
+            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
         let precompute =
-            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&trace_views, None);
+            <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&trace_views, None);
         let commitment = precompute.commit.original_commitment.clone();
 
         let claims: Vec<Vec<JaggedChallenge>> = {
@@ -659,19 +448,13 @@ mod basefold_over_bn254_roundtrip_test {
             claims,
             precomputed: &precompute,
         }];
-        let bundle = prove_jagged_rounds_generic::<
-            OuterChallenger,
-            OuterValMmcs,
-            OuterDft,
-            BasefoldDenseOpen,
-        >(
+        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &rounds,
             &z_row,
             &mut p_chal,
             mmcs.clone(),
             dft,
-            fri.clone(),
-            zkm_pcs::whir::jagged::WhirProfile::Core,
+            zkm_pcs::whir::jagged::WhirProfile::Wrap,
         );
 
         let chip_widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
@@ -687,14 +470,11 @@ mod basefold_over_bn254_roundtrip_test {
             &mut v_chal,
             mmcs,
             true,
-            fri,
+            whir.clone(),
             &[],
             &bundle.y_per_chip.clone(),
         );
-        assert!(
-            ok,
-            "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
-        );
+        assert!(ok, "jagged-WHIR full bundle pipeline should accept the honest proof over BN254");
 
         let honest: Vec<Vec<JaggedChallenge>> = bundle.y_per_chip.clone();
         let mut v_chal = make_challenger();
@@ -706,9 +486,9 @@ mod basefold_over_bn254_roundtrip_test {
                 &z_row_v,
                 &bundle,
                 &mut v_chal,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
+                <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs(),
                 true,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                whir.clone(),
                 &[],
                 &honest,
             ),
@@ -726,9 +506,9 @@ mod basefold_over_bn254_roundtrip_test {
                 &z_row_v,
                 &bundle,
                 &mut v_chal,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
+                <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs(),
                 true,
-                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                whir.clone(),
                 &[],
                 &tampered,
             ),
@@ -740,7 +520,7 @@ mod basefold_over_bn254_roundtrip_test {
 
     /// **Commitment order on the ring that feeds gnark.**
     ///
-    /// The outer BaseFold bundle is the artifact the Groth16 circuit verifies,
+    /// The outer jagged bundle is the artifact the Groth16 circuit verifies,
     /// and its roots must be witnessed in opening order `[preceding.., main]`.
     /// The single-round fixture above cannot reach that: with no preceding
     /// round the root vector has one entry, so every ordering of it is correct.
@@ -751,10 +531,11 @@ mod basefold_over_bn254_roundtrip_test {
     /// must verify first, or the rejections below prove nothing.
     #[test]
     fn outer_two_round_rejects_substituted_roots() {
+        cheap_wrap_grinding();
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            BasefoldDenseOpen, JaggedOpenRound,
+            JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -782,7 +563,7 @@ mod basefold_over_bn254_roundtrip_test {
                         let h = m.values.len().checked_div(m.width).unwrap_or(0);
                         let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                         zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
-                            std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
+                            std::sync::Arc::new(zkm_pcs::whir::mle::Mle::from_row_major(
                                 p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
                             )),
                             log_h,
@@ -794,13 +575,13 @@ mod basefold_over_bn254_roundtrip_test {
         let prep_views = views(&prep_traces);
         let main_views = views(&main_traces);
 
-        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let mmcs = <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs();
         let dft = Arc::new(OuterDft::default());
-        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
-        let prep =
-            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&prep_views, None);
-        let main =
-            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&main_views, None);
+        let whir = <KoalaBearPoseidon2Outer as WhirRing>::whir_config(
+            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
+        let prep = <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&prep_views, None);
+        let main = <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&main_views, None);
         let prep_root = prep.commit.original_commitment.clone();
         let main_root = main.commit.original_commitment.clone();
         assert_ne!(
@@ -860,19 +641,13 @@ mod basefold_over_bn254_roundtrip_test {
                 precomputed: &main,
             },
         ];
-        let bundle = prove_jagged_rounds_generic::<
-            OuterChallenger,
-            OuterValMmcs,
-            OuterDft,
-            BasefoldDenseOpen,
-        >(
+        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &rounds,
             &z_row,
             &mut p_chal,
             mmcs.clone(),
             dft,
-            fri.clone(),
-            zkm_pcs::whir::jagged::WhirProfile::Core,
+            zkm_pcs::whir::jagged::WhirProfile::Wrap,
         );
 
         assert_eq!(bundle.preceding_commits.len(), 1);
@@ -898,7 +673,7 @@ mod basefold_over_bn254_roundtrip_test {
                 &mut v_chal,
                 mmcs.clone(),
                 true,
-                fri.clone(),
+                whir.clone(),
                 &[(preceding_root.clone(), prep.prover_data.area)],
                 &b.y_per_chip.clone(),
             )
@@ -923,6 +698,7 @@ mod basefold_over_bn254_roundtrip_test {
     /// the thing to test.
     #[test]
     fn outer_vk_commit_bind_is_not_vacuous() {
+        cheap_wrap_grinding();
         type R = KoalaBearPoseidon2Outer;
         let traces = vec![("Cpu".to_string(), {
             let v: Vec<JaggedVal> = (0..64)
@@ -934,12 +710,12 @@ mod basefold_over_bn254_roundtrip_test {
         let other = zkm_pcs::Com::<R>::default();
         assert_ne!(real, other, "fixture precondition: a real commit differs from the default");
         assert_eq!(
-            <R as BasefoldRing>::vk_commit_is_preceding_root(&real, &real),
+            <R as WhirRing>::vk_commit_is_preceding_root(&real, &real),
             Some(true),
             "the outer ring stores the raw root, so a key equal to the proof's root is a match"
         );
         assert_eq!(
-            <R as BasefoldRing>::vk_commit_is_preceding_root(&other, &real),
+            <R as WhirRing>::vk_commit_is_preceding_root(&other, &real),
             Some(false),
             "a different root must be reported as a mismatch, not as unanswerable"
         );
@@ -956,8 +732,8 @@ mod basefold_over_bn254_roundtrip_test {
 /// figure credited 16 bits nothing earned, and the stated 100 was closer to 96.
 ///
 /// The premise for that split was that the outer challenger could not grind. It
-/// can: the wrap BaseFold open grinds `pow_bits = 22` through the very same
-/// `GrindingChallenger`. These tests pin all three halves of the property on
+/// can: the wrap WHIR open grinds its query, folding and batching challenges
+/// through the very same `GrindingChallenger`. These tests pin all three halves of the property on
 /// THIS ring — the grind advances the transcript, an honest witness is accepted
 /// and leaves prover and verifier in the same state, and a tampered one is not —
 /// so the no-op cannot come back and still pass.

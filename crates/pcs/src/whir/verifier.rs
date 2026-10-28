@@ -25,8 +25,8 @@ use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::Mmcs;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 
-use crate::basefold::mle::Mle;
 use crate::whir::config::WhirConfig;
+use crate::whir::mle::Mle;
 use crate::whir::round_prover::RoundedProof;
 
 pub use crate::whir::error::WhirVerifierError;

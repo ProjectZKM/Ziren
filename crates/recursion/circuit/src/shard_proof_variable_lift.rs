@@ -1,11 +1,11 @@
 //! Adapter: tuple from [`crate::shard_level_witness`]'s
 //! `JaggedShardProof::read` → assembled
-//! [`crate::shard_basefold::JaggedShardProofVariable`].
+//! [`crate::shard::JaggedShardProofVariable`].
 //!
 //! Bridges the stark-side proof types
 //! (`zkm_pcs::shard_level::types::*`) into the recursion-circuit's
 //! own copies (`crate::logup_proof::*`, `crate::partial_sumcheck::*`)
-//! that [`crate::shard_basefold::JaggedShardProofVariable`] consumes.
+//! that [`crate::shard::JaggedShardProofVariable`] consumes.
 //!
 //! Both sets are structurally identical.  The "conversion" is
 //! field-by-field copy.
@@ -19,7 +19,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 use crate::jagged_circuit::JaggedPcsProofVariable;
 use crate::logup_proof as rc;
 use crate::partial_sumcheck::PartialSumcheckProof as RcPartialSumcheckProof;
-use crate::shard_basefold::JaggedShardProofVariable;
+use crate::shard::JaggedShardProofVariable;
 use crate::univariate::UnivariatePolynomial as RcUnivariatePolynomial;
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
@@ -112,7 +112,7 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// - `public_values`: per-shard public values
 /// - `logup_gkr_proof`: stark-side proof, converted internally
 /// - `zerocheck_proof`: stark-side proof, converted internally
-/// - `evaluation_proof`: lifted by [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
+/// - `evaluation_proof`: the lifted jagged-WHIR opening
 /// - `chip_height_bits`: per-chip name + bit-decomposed height
 ///   coordinates, supplied by the caller.
 pub fn assemble_jagged_shard_proof_variable<C, HV, PP>(
@@ -137,7 +137,7 @@ where
     }
 }
 
-/// Build a [`crate::shard_basefold::ShardVerifyingKeyVariable`]
+/// Build a [`crate::shard::ShardVerifyingKeyVariable`]
 /// from a [`crate::VerifyingKeyVariable`].
 ///
 /// - `pc_start`: `[vk.pc_start, 0, 0]`; the pc fits one KoalaBear
@@ -146,10 +146,10 @@ where
 ///   via the `DigestVariable = [Felt<KoalaBear>; 8]` trait bound.
 /// - `enable_untrusted_programs`: `0`; the source vk carries no such
 ///   flag and describes a trusted program.
-pub fn build_basefold_verifying_key_variable<C, SC>(
+pub fn build_verifying_key_variable<C, SC>(
     builder: &mut Builder<C>,
     vk: &crate::VerifyingKeyVariable<C, SC>,
-) -> crate::shard_basefold::ShardVerifyingKeyVariable<C>
+) -> crate::shard::ShardVerifyingKeyVariable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     SC: crate::KoalaBearFriParametersVariable<C, Val = InnerVal>,
@@ -160,102 +160,14 @@ where
     let preprocessed_commit: [Felt<C::F>; 8] =
         SC::vk_preprocessed_commit_felts(builder, vk.commitment);
     let enable_untrusted = builder.constant(C::F::ZERO);
-    crate::shard_basefold::ShardVerifyingKeyVariable::<C>::new(
+    crate::shard::ShardVerifyingKeyVariable::<C>::new(
         pc_start,
         preprocessed_commit,
         enable_untrusted,
     )
 }
 
-/// Construct a [`crate::shard_basefold::JaggedShardVerifier`]
-/// configured with production defaults.
-///
-/// Wraps a [`crate::basefold_verifier::RecursiveBasefoldVerifier`]
-/// inside a [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier`]
-/// inside the shard verifier — a three-layer construction.
-///
-/// # Inputs
-///
-/// - `max_log_row_count`: shard-level upper bound on per-chip
-///   log-row-count.  Used by the verifier's height-bit
-///   representation length and by the inner PCS's MLE
-///   `num_variables`.
-/// - `log_stacking_height`: stacking factor for the stacked-PCS
-///   wrapper.  Production default: equal to `max_log_row_count`
-///   (one stripe per power-of-two chip-rows count).
-pub fn build_basefold_shard_verifier<HV>(
-    max_log_row_count: usize,
-    log_stacking_height: u32,
-) -> crate::shard_basefold::JaggedShardVerifier<
-    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
-> {
-    build_basefold_shard_verifier_with_num_vars::<HV>(
-        max_log_row_count,
-        log_stacking_height,
-        max_log_row_count,
-    )
-}
-
-/// Variant that accepts an explicit `num_variables` for the inner
-/// BasefoldVerifierParams, decoupled from `max_log_row_count`.  Used
-/// by the jagged-bundle path: when a bundle is present, the
-/// verifier's num_variables must match `bundle.basefold_proof
-/// .basefold_proof.fri_commitments.len()` (the prover-emitted FRI
-/// round count) rather than `max_log_row_count`, keeping the
-/// verifier's num_variables aligned with the prover's FRI params.
-pub fn build_basefold_shard_verifier_with_num_vars<HV>(
-    max_log_row_count: usize,
-    log_stacking_height: u32,
-    num_variables: usize,
-) -> crate::shard_basefold::JaggedShardVerifier<
-    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
-> {
-    build_basefold_shard_verifier_with_params::<HV>(
-        max_log_row_count,
-        log_stacking_height,
-        crate::basefold_verifier::BasefoldVerifierParams::production_default(num_variables),
-    )
-}
-
-/// WRAP-stage in-circuit verifier: `wrap_default`
-/// (log_blowup=3, num_queries=94, pow_bits=wrap_query_grinding_bits()) so the
-/// gnark OUTER circuit
-/// reads the wrap codeword at the same rate the wrap prover committed
-/// (100-bit query-phase soundness; the inner default would be ~55-bit).
-/// See `BasefoldVerifierParams::wrap_default`.
-pub fn build_basefold_shard_verifier_wrap<HV>(
-    max_log_row_count: usize,
-    log_stacking_height: u32,
-    num_variables: usize,
-) -> crate::shard_basefold::JaggedShardVerifier<
-    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
-> {
-    build_basefold_shard_verifier_with_params::<HV>(
-        max_log_row_count,
-        log_stacking_height,
-        crate::basefold_verifier::BasefoldVerifierParams::wrap_default(num_variables),
-    )
-}
-
-/// Lowest-level builder: explicit `BasefoldVerifierParams` (rate / queries
-/// / grinding).  All stage builders funnel through here so the FRI rate is
-/// a single source of truth per stage.
-pub fn build_basefold_shard_verifier_with_params<HV>(
-    max_log_row_count: usize,
-    log_stacking_height: u32,
-    params: crate::basefold_verifier::BasefoldVerifierParams,
-) -> crate::shard_basefold::JaggedShardVerifier<
-    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
-> {
-    let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(params);
-    let stacked_pcs_verifier = crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
-        basefold_verifier,
-        log_stacking_height,
-    );
-    crate::shard_basefold::JaggedShardVerifier::new(stacked_pcs_verifier, max_log_row_count)
-}
-
-/// Build a [`crate::basefold_chip_opened_values::JaggedShardOpenedValues`]
+/// Build a [`crate::chip_opened_values::JaggedShardOpenedValues`]
 /// from the per-chip `LogUpEvaluations.chip_openings` map.
 ///
 /// Per-chip mapping:
@@ -267,7 +179,7 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
 ///   - `global_cumulative_sum` ← zero septic digest placeholder
 ///     (TBD: thread through the proof pipeline)
 ///
-/// Used by `compress_basefold` and similar call sites that need
+/// Used by `compress_jagged` and similar call sites that need
 /// to assemble opened_values for `verify_shard`.
 pub fn build_opened_values_from_chip_openings<C>(
     builder: &mut Builder<C>,
@@ -276,7 +188,7 @@ pub fn build_opened_values_from_chip_openings<C>(
         zkm_pcs::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -296,13 +208,11 @@ where
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
             let degree_bits: Vec<Ext<C::F, C::EF>> =
                 (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
-            crate::basefold_chip_opened_values::JaggedChipOpenedValues {
-                preprocessed: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
+            crate::chip_opened_values::JaggedChipOpenedValues {
+                preprocessed: crate::chip_opened_values::JaggedAirOpenedValues {
                     local: preprocessed_evals,
                 },
-                main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
-                    local: main_evals,
-                },
+                main: crate::chip_opened_values::JaggedAirOpenedValues { local: main_evals },
                 degree: degree_bits,
                 local_cumulative_sum: zero_ext,
                 global_cumulative_sum: SepticDigest(SepticCurve {
@@ -312,7 +222,7 @@ where
             }
         })
         .collect();
-    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
+    crate::chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Variant of [`build_opened_values_from_chip_openings`]
@@ -333,7 +243,7 @@ pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
         zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -367,20 +277,18 @@ where
                     )
                 };
 
-            crate::basefold_chip_opened_values::JaggedChipOpenedValues {
-                preprocessed: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
+            crate::chip_opened_values::JaggedChipOpenedValues {
+                preprocessed: crate::chip_opened_values::JaggedAirOpenedValues {
                     local: preprocessed_evals,
                 },
-                main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
-                    local: main_evals,
-                },
+                main: crate::chip_opened_values::JaggedAirOpenedValues { local: main_evals },
                 degree: degree_bits,
                 local_cumulative_sum,
                 global_cumulative_sum,
             }
         })
         .collect();
-    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
+    crate::chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Finalize the per-chip opened values carried from
@@ -404,10 +312,7 @@ where
 /// `preprocessed.local` / `main.local` (trace@z) are kept verbatim.
 pub fn finalize_carried_opened_values<C>(
     _builder: &mut Builder<C>,
-    carried: crate::basefold_chip_opened_values::JaggedShardOpenedValues<
-        Felt<C::F>,
-        Ext<C::F, C::EF>,
-    >,
+    carried: crate::chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
     chip_names: &[String],
     chip_heights: &BTreeMap<String, usize>,
     chip_cumulative_sums: &BTreeMap<
@@ -415,7 +320,7 @@ pub fn finalize_carried_opened_values<C>(
         zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -439,7 +344,7 @@ where
             chip_opening
         })
         .collect();
-    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
+    crate::chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Build empty `chip_height_bits` placeholder of the given size.
@@ -534,7 +439,7 @@ where
 /// prologue observes (Horner-recomposed by the shard verifier)
 /// from the WITNESSED per-chip `degree` (= host `quotient[0]`, the
 /// big-endian boolean coordinates of the chip's RAW HEIGHT, lifted
-/// in [`crate::shard_level_witness::basefold_opened_values_from_host`]).
+/// in [`crate::shard_level_witness::opened_values_from_host`]).
 /// Because the emitted ops are fixed (independent of the witnessed
 /// values), the program becomes chip-set-determined ⇒ one program per
 /// cluster ⇒ the enumerated `vk_map` covers every real workload.
@@ -553,7 +458,7 @@ where
 pub fn chip_height_bits_from_opened_degrees<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
-    opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
+    opened_values: &crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
@@ -606,7 +511,7 @@ where
 pub fn chip_height_felts_from_opened_degrees<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
-    opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
+    opened_values: &crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
@@ -792,97 +697,6 @@ mod tests {
         let opened =
             build_opened_values_from_chip_openings::<InnerConfig>(&mut builder, &chip_openings, 4);
         assert_eq!(opened.chips.len(), 0);
-    }
-
-    /// Integration test: assemble_jagged_shard_proof_variable
-    /// composes all the lift adapters end-to-end and produces a
-    /// structurally-valid JaggedShardProofVariable.  Verifies
-    /// the complete tuple → variable assembly path used inside
-    /// each machine_basefold module.
-    #[test]
-    fn assemble_jagged_shard_proof_variable_composes() {
-        use p3_field::PrimeCharacteristicRing;
-        use zkm_recursion_compiler::circuit::AsmBuilder;
-        use zkm_recursion_compiler::config::InnerConfig;
-
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let main_commit: [Felt<InnerVal>; 8] =
-            std::array::from_fn(|_| builder.constant(InnerVal::ZERO));
-        let public_values: Vec<Felt<InnerVal>> =
-            (0..16).map(|_| builder.constant(InnerVal::ZERO)).collect();
-        let logup_gkr_proof: zkm_pcs::shard_level::types::LogupGkrProof<
-            Felt<InnerVal>,
-            Ext<InnerVal, InnerChallenge>,
-        > = zkm_pcs::shard_level::types::LogupGkrProof {
-            circuit_output: zkm_pcs::shard_level::types::LogUpGkrOutput {
-                numerator: Vec::new(),
-                denominator: Vec::new(),
-            },
-            round_proofs: Vec::new(),
-            logup_evaluations: zkm_pcs::shard_level::types::LogUpEvaluations {
-                point: Vec::new(),
-                chip_openings: std::collections::BTreeMap::new(),
-            },
-            witness: builder.constant(InnerVal::ZERO),
-        };
-        let zerocheck_proof: zkm_pcs::shard_level::types::PartialSumcheckProof<
-            Ext<InnerVal, InnerChallenge>,
-        > = zkm_pcs::shard_level::types::PartialSumcheckProof {
-            univariate_polys: Vec::new(),
-            claimed_sum: builder.constant(InnerChallenge::ZERO),
-            point_and_eval: (Vec::new(), builder.constant(InnerChallenge::ZERO)),
-        };
-        let empty_cols: Vec<Vec<usize>> = Vec::new();
-        let evaluation_proof = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<
-            InnerConfig,
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-        >(&mut builder, &[], 21, &empty_cols);
-        let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
-
-        let assembled = assemble_jagged_shard_proof_variable::<
-            InnerConfig,
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            _,
-        >(
-            main_commit,
-            public_values,
-            &logup_gkr_proof,
-            &zerocheck_proof,
-            evaluation_proof,
-            chip_height_bits,
-        );
-        assert_eq!(assembled.public_values.len(), 16);
-        assert_eq!(assembled.main_commitment.len(), 8);
-        assert_eq!(assembled.logup_gkr_proof.round_proofs.len(), 0);
-        assert_eq!(assembled.zerocheck_proof.univariate_polys.len(), 0);
-        assert_eq!(assembled.chip_height_bits.len(), 0);
-    }
-
-    /// Smoke test: JaggedShardVerifier construction with
-    /// production defaults yields a correctly-shaped verifier.
-    #[test]
-    fn build_basefold_shard_verifier_production_default() {
-        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
-            21, 21,
-        );
-        assert_eq!(v.max_log_row_count, 21);
-        assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 2);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 124);
-    }
-
-    /// Verify build_basefold_shard_verifier with mismatched
-    /// max_log_row_count and log_stacking_height (uncommon
-    /// configuration — verifier still constructs).
-    #[test]
-    fn build_basefold_shard_verifier_with_mismatched_heights() {
-        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
-            15, 12,
-        );
-        assert_eq!(v.max_log_row_count, 15);
-        assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 12);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 15);
     }
 
     /// Edge case: empty chip names list yields empty bits vec.

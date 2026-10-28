@@ -2,7 +2,7 @@
 //!
 //! A `Tensor<T, A>` is a [`Buffer<T, A>`] paired with its 2D
 //! [`Dimensions`] (`[rows, cols]`, row-major).  It is the storage type
-//! for [`crate::basefold::Mle`].
+//! for [`crate::whir::mle::Mle`].
 //!
 //! The *shape* accessors (`sizes`, `total_len`) are backend-agnostic —
 //! they read only the [`Dimensions`].  The *data* accessors

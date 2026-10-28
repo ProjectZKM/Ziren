@@ -9,16 +9,9 @@ repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
-# `ha_measure_base` is a NON-PRODUCTION measurement cfg: build with
-# `RUSTFLAGS="--cfg ha_measure_base"` to compile out the height-agnostic
-# round-count soundness binding (assert_num_vars_le_max call site in
-# basefold_verifier.rs) so the base instruction count can be measured for
-# the byte-identical delta.  Default builds DO include the binding.
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ha_measure_base)'] }
 
 [lints.clippy]
-# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# The jagged/WHIR generics (`Challenger` x `Mmcs` x `Dft` over two rings)
 # make the honest signatures wide; factoring them behind aliases hides which
 # ring a function is instantiated for, which is exactly what the soundness
 # review needs to read off the signature.

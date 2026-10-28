@@ -1,11 +1,11 @@
 //! The compose recursion stage: verifies a batch of
 //! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`]s through
-//! [`crate::shard_basefold::JaggedShardVerifier::verify_shard`] and aggregates
+//! [`crate::shard::JaggedShardVerifier::verify_shard`] and aggregates
 //! their public values.
 //!
-//! [`verify_compress_basefold`], per input:
+//! [`verify_compress_jagged`], per input:
 //!
-//!   1. assembles a [`crate::shard_basefold::JaggedShardProofVariable`] from
+//!   1. assembles a [`crate::shard::JaggedShardProofVariable`] from
 //!      the witnessed tuple of [`crate::shard_level_witness`] and the lifted
 //!      jagged-PCS proof;
 //!   2. builds the machine's wiring closures (`eval_public_values_fn`,
@@ -14,7 +14,6 @@
 //!      accumulator.
 
 use std::array;
-use std::marker::PhantomData;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
@@ -48,10 +47,8 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable}
     serialize = "StarkVerifyingKey<SC>: Serialize, ZKMMerkleProofWitnessValues<SC>: Serialize",
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
-pub struct ZKMCompressBasefoldWitnessValues<
-    SC: zkm_pcs::StarkGenericConfig + FieldHasher<KoalaBear>,
-> {
-    /// Per-input (vk, basefold-proof) pairs to aggregate.
+pub struct ZKMCompressWitnessValues<SC: zkm_pcs::StarkGenericConfig + FieldHasher<KoalaBear>> {
+    /// Per-input (vk, whir-proof) pairs to aggregate.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, JaggedShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the vk_root used by the verifier to the
     /// allowed-VK set.
@@ -63,17 +60,17 @@ pub struct ZKMCompressBasefoldWitnessValues<
 }
 
 /// Compress witness variable type — the in-circuit cousin of
-/// [`ZKMCompressBasefoldWitnessValues`].
+/// [`ZKMCompressWitnessValues`].
 ///
 /// The proof variable is the tuple `JaggedShardProof::read` returns
 /// ([`crate::shard_level_witness`]): main commitment, public values,
 /// LogUp-GKR proof, zerocheck proof, lifted evaluation proof, openings at z,
 /// and the preprocessed round's inputs.
-pub struct ZKMCompressBasefoldWitnessVariable<
+pub struct ZKMCompressWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
     SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
-    /// Per-input (vk, basefold-proof-tuple) pairs.
+    /// Per-input (vk, whir-proof-tuple) pairs.
     pub vks_and_proofs: Vec<(
         VerifyingKeyVariable<C, SC>,
         (
@@ -87,7 +84,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
-            crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
+            crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
@@ -111,17 +108,12 @@ pub struct ZKMCompressBasefoldWitnessVariable<
     /// rather than the zero placeholder.
     pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — the in-circuit cousin of
-    /// [`ZKMCompressBasefoldWitnessValues::vk_merkle_data`].
+    /// [`ZKMCompressWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub is_complete: Felt<C::F>,
 }
 
-/// Compress verifier over basefold shard proofs.
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCompressBasefoldVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
+/// Compress verifier over whir shard proofs.
 /// Verify a batch of shard-level recursive proofs.
 ///
 /// Per (vk, proof) in `vks_and_proofs`: assemble the
@@ -131,9 +123,9 @@ pub struct ZKMCompressBasefoldVerifier<C, SC, A> {
 ///
 /// The machine reference carries the bounds `verify_shard` needs:
 /// `A: MachineAir<SC::Val>` and its constraint folders.
-pub fn verify_compress_basefold<C, SC, A>(
+pub fn verify_compress_jagged<C, SC, A>(
     builder: &mut zkm_recursion_compiler::ir::Builder<C>,
-    input: ZKMCompressBasefoldWitnessVariable<C, SC>,
+    input: ZKMCompressWitnessVariable<C, SC>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     value_assertions: bool,
     kind: super::compress::PublicValuesOutputDigest,
@@ -146,10 +138,10 @@ pub fn verify_compress_basefold<C, SC, A>(
         > + FieldHasherVariable<C>,
     C: CircuitConfig<F = zkm_pcs::InnerVal, EF = zkm_pcs::InnerChallenge>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     use std::borrow::BorrowMut;
-    let ZKMCompressBasefoldWitnessVariable {
+    let ZKMCompressWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
         chip_heights_per_input,
@@ -185,10 +177,6 @@ pub fn verify_compress_basefold<C, SC, A>(
     let mut _finalize_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     use p3_field::PrimeCharacteristicRing;
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
-
-    let _basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
-        SC,
-    >(max_log_row_count, max_log_row_count as u32);
 
     let _verify_pubvals: Vec<Vec<Felt<C::F>>> = vks_and_proofs
         .into_iter()
@@ -257,8 +245,8 @@ pub fn verify_compress_basefold<C, SC, A>(
             hs
         });
         let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
-        let basefold_vk_pre =
-            crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
+        let jagged_vk_pre =
+            crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
                 builder,
                 &vk_legacy,
             );
@@ -266,63 +254,38 @@ pub fn verify_compress_basefold<C, SC, A>(
             if prep_widths_pre.is_empty() {
                 Vec::new()
             } else {
-                vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
+                vec![(preprocessed_round.raw_commit, jagged_vk_pre.preprocessed_commit)]
             };
 
         use crate::shard_level_witness::LiftedEvalProof;
-        let mut whir_evaluation_proof_var = None;
-        let evaluation_proof_var = match &evaluation_proof {
-            LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                whir_evaluation_proof_var =
-                    Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
-                        builder,
-                        host,
-                        whir_proof.clone(),
-                        whir_proof.batch_evaluations.clone(),
-                        sumcheck.clone(),
-                        jagged_eval.clone(),
-                        *expected_eval,
-                        *commit_root,
-                        *modified_commitment,
-                        &preceding_commitments,
-                        &preprocessed_round.padding_heights,
-                        max_log_row_count,
-                        &column_counts_by_round_pre,
-                        None,
-                        cps_heights,
-                    ));
-                None
-            }
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+        let whir_evaluation_proof_var = match &evaluation_proof {
+            LiftedEvalProof::WhirBundle {
+                host,
+                whir_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                modified_commitment,
+            } => {
+                crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
                     builder,
                     host,
-                        basefold_proof.clone(),
-                        sumcheck.clone(),
-                        jagged_eval.clone(),
-                        *expected_eval,
-                        *commit_root,
-                        *modified_commitment,
+                    whir_proof.as_ref().clone(),
+                    whir_proof.batch_evaluations.clone(),
+                    sumcheck.clone(),
+                    jagged_eval.clone(),
+                    *expected_eval,
+                    *commit_root,
+                    *modified_commitment,
                     &preceding_commitments,
                     &preprocessed_round.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
                     cps_heights,
-                ))
+                )
             }
-            LiftedEvalProof::Bytes(bytes) => Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                builder,
-                bytes,
-                max_log_row_count,
-                &column_counts_by_round_pre,
-            )),
-            LiftedEvalProof::Empty => Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                builder,
-                &[],
-                max_log_row_count,
-                &column_counts_by_round_pre,
-            )),
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("compress path never carries an OUTER (gnark) bundle")
             }
@@ -350,8 +313,8 @@ pub fn verify_compress_basefold<C, SC, A>(
             MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                 .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
         });
-        let _chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
-            crate::basefold_verifier::RecursiveBasefoldVerifier,
+        let _chip_metadata = crate::shard::JaggedShardVerifier::<
+            crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
         >::chip_metadata_from_chips::<SC, A>(&_shard_chips);
 
         use p3_air::BaseAir;
@@ -365,32 +328,21 @@ pub fn verify_compress_basefold<C, SC, A>(
             .collect();
         let _ = main_widths;
         let _column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
-        let _insertion_points = crate::shard_basefold::JaggedShardVerifier::<
-            crate::basefold_verifier::RecursiveBasefoldVerifier,
+        let _insertion_points = crate::shard::JaggedShardVerifier::<
+            crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
         >::insertion_points_from_column_counts(&_column_counts_by_round);
-        let _jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
-            crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
-                main_commit,
-                public_values.clone(),
-                &logup_gkr_proof,
-                &zerocheck_proof,
-                epv,
-                chip_height_bits.clone(),
-            )
-        });
-        let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
+        let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
                 public_values,
                 &logup_gkr_proof,
                 &zerocheck_proof,
-                epv,
+                whir_evaluation_proof_var,
                 chip_height_bits,
-            )
-        });
+            );
 
-        let _basefold_vk =
-            crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
+        let _jagged_vk =
+            crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
                 builder,
                 &vk_legacy,
             );
@@ -428,81 +380,39 @@ pub fn verify_compress_basefold<C, SC, A>(
             }
         }
 
-        if let Some(whir_pv) = &whir_shard_proof_variable {
-            let lsh = match &evaluation_proof {
-                LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
-                _ => unreachable!("whir proof variable implies a WhirBundle"),
-            };
-            let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
-                crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
-            > {
-                stacked_pcs_verifier:
-                    crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
-                        crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                            config: zkm_pcs::whir::jagged::whir_config_for_profile(
+        let lsh = match &evaluation_proof {
+            LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+            _ => unreachable!("whir proof variable implies a WhirBundle"),
+        };
+        let whir_verifier = crate::shard::JaggedShardVerifier::<
+            crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
+        > {
+            stacked_pcs_verifier: crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
+                crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
+                    config: zkm_pcs::whir::jagged::whir_config_for_profile(
                         <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
                         lsh as usize,
                     ),
-                            log_stacking_height: lsh,
-                            _hasher: core::marker::PhantomData,
-                        },
-                        lsh,
-                    ),
-                max_log_row_count,
-            };
-            whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
-                builder,
-                &_basefold_vk,
-                whir_pv,
-                &_shard_chips,
-                &_chip_metadata,
-                &_opened_values,
-                &_insertion_points,
-                &mut _challenger,
-                machine.num_pv_elts(),
-                _eval_public_values_fn,
-                _jagged_evaluator_fn,
-            );
-        } else {
-        let _jagged_shard_proof_variable = _jagged_shard_proof_variable
-            .as_ref()
-            .expect("non-whir child lifts to the BaseFold variable");
-        let per_proof_verifier;
-        let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, .. } => {
-                let bundle_num_vars =
-                    host.basefold_proof.basefold_proof.fri_commitments.len();
-                crate::shard_level_witness::assert_recursion_stacking_height_fixed(
-                    bundle_num_vars,
-                    host.commit.log_stacking_height,
-                    "compress_basefold",
-                );
-                per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
-                        max_log_row_count,
-                        host.commit.log_stacking_height,
-                        host.commit.log_stacking_height as usize,
-                    );
-                &per_proof_verifier
-            }
-            _ => &_basefold_shard_verifier,
+                    log_stacking_height: lsh,
+                    _hasher: core::marker::PhantomData,
+                },
+                lsh,
+            ),
+            max_log_row_count,
         };
-
-        active_verifier
-            .verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
-                builder,
-                &_basefold_vk,
-                _jagged_shard_proof_variable,
-                &_shard_chips,
-                &_chip_metadata,
-                &_opened_values,
-                &_insertion_points,
-                &mut _challenger,
-                machine.num_pv_elts(),
-                _eval_public_values_fn,
-                _jagged_evaluator_fn,
-            );
-        }
+        whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+            builder,
+            &_jagged_vk,
+            &whir_pv,
+            &_shard_chips,
+            &_chip_metadata,
+            &_opened_values,
+            &_insertion_points,
+            &mut _challenger,
+            machine.num_pv_elts(),
+            _eval_public_values_fn,
+            _jagged_evaluator_fn,
+        );
 
         _pubvals_for_aggregate
     });
@@ -1036,14 +946,26 @@ where
     }
 }
 
+/// Domain tag hashed first into
+/// [`ZKMCompressWitnessValues::shape_key`], the compose program's
+/// cache key.
+///
+/// It keeps a compress key distinct from a core or wrap key even when the
+/// fields hashed after it coincide; those keys open with
+/// `CORE_SHAPE_KEY_DOMAIN` and `WRAP_SHAPE_KEY_DOMAIN`.  The value is
+/// arbitrary and only has to differ from theirs.  Changing it changes every
+/// compress key, including the names of compose programs in the on-disk
+/// program cache.
+const COMPRESS_SHAPE_KEY_DOMAIN: u32 = 0xC0_FE_BA_61;
+
 impl<const P: u8>
-    ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+    ZKMCompressWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
 {
     /// Construct a dummy compress witness for a given compress shape.
-    /// Drives the multi-chip basefold dummy
+    /// Drives the multi-chip whir dummy
     /// helper for each input proof shape.
     ///
-    /// Used by `program_from_shape` to build basefold compress
+    /// Used by `program_from_shape` to build whir compress
     /// programs from cached shapes.  Takes the full `ZKMCompressWithVkeyShape`
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness
     /// (vk-root from witness, not a baked constant).
@@ -1068,10 +990,7 @@ impl<const P: u8>
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof_rows::<_, A>(
-                    machine,
-                    &proof_shape.inner,
-                )
+                crate::stark::dummy_vk_and_shard_proof_rows::<_, A>(machine, &proof_shape.inner)
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
@@ -1124,7 +1043,7 @@ impl<const P: u8>
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        0xC0_FE_BA_61_u32.hash(&mut h);
+        COMPRESS_SHAPE_KEY_DOMAIN.hash(&mut h);
 
         self.vks_and_proofs.len().hash(&mut h);
         for (_vk, sp) in self.vks_and_proofs.iter() {

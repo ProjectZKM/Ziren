@@ -74,7 +74,7 @@ pub enum LookupKind {
     /// terminal index; each worker row receives `state @ index` and sends
     /// `state @ index + 1`, so the per-row ordering is pinned by lookup
     /// multiplicity rather than `when_first_row`/`when_transition`
-    /// constraints (which the single-row BaseFold zerocheck folder cannot
+    /// constraints (which the single-row jagged zerocheck folder cannot
     /// evaluate).  A leading precompile-ID field in the tuple isolates each
     /// precompile's chain (e.g. SHA_COMPRESS sends only balance SHA_COMPRESS
     /// receives), so a single kind serves all multi-row precompiles.

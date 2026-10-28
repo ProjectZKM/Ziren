@@ -1,7 +1,7 @@
 //! In-circuit jagged-PCS verifier orchestrator.
 //!
 //! The jagged PCS layers a per-chip-evaluation reduction on top of
-//! the stacked-BaseFold PCS.  This module hosts the top-level
+//! the stacked-WHIR PCS.  This module hosts the top-level
 //! orchestrator that composes the four subroutines of the jagged
 //! verifier:
 //!
@@ -50,13 +50,13 @@ use crate::CircuitConfig;
 /// In-circuit jagged-PCS verifier.
 ///
 /// Generic over the underlying multilinear PCS verifier `P` — in
-/// production, [`crate::basefold_verifier::RecursiveBasefoldVerifier`].
+/// production, [`crate::whir_circuit::RecursiveStackedWhirVerifier`].
 /// Holds the stacked-PCS wrapper + `max_log_row_count` bound used
 /// to size per-chip height-bit representations.
 #[derive(Clone)]
 pub struct RecursiveJaggedPcsVerifier<P> {
     /// Stacked-PCS verifier wrapping the underlying multilinear
-    /// PCS.  Drives the inner BaseFold opening once the jagged
+    /// PCS.  Drives the inner WHIR opening once the jagged
     /// reduction finishes.
     pub stacked_pcs_verifier: RecursiveStackedPcsVerifier<P>,
     /// Maximum log row count across shards verified by this
@@ -268,7 +268,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let evaluation_point = sumcheck_proof.point_and_eval.0.clone();
         let expected_eval_sym: SymbolicExt<C::F, C::EF> = (*expected_eval).into();
         builder.cycle_tracker_v2_exit();
-        builder.cycle_tracker_v2_enter("basefold_open".to_string());
+        builder.cycle_tracker_v2_enter("whir_open".to_string());
         self.stacked_pcs_verifier.verify_untrusted_evaluation::<C, FC>(
             builder,
             original_commitments,
@@ -383,41 +383,8 @@ impl<'a, P> RecursiveMachineJaggedPcsVerifier<'a, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basefold_verifier::{BasefoldVerifierParams, RecursiveBasefoldVerifier};
 
     use zkm_recursion_compiler::config::InnerConfig;
-
-    type C = InnerConfig;
-
-    /// Construction smoke test: the jagged-PCS verifier composes
-    /// with the production RecursiveBasefoldVerifier + stacked-PCS
-    /// wrapper without requiring any circuit-compiler wiring.
-    #[test]
-    fn jagged_pcs_verifier_constructs() {
-        let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-        >::new(basefold_params);
-        let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
-        let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
-        assert_eq!(jagged.max_log_row_count, 21);
-        let _phantom: std::marker::PhantomData<C> = std::marker::PhantomData;
-    }
-
-    /// Construction smoke test: the per-shard machine wrapper
-    /// derives insertion points from a column-count table.
-    #[test]
-    fn machine_jagged_pcs_verifier_constructs() {
-        let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-        >::new(basefold_params);
-        let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
-        let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
-        let machine_jagged =
-            RecursiveMachineJaggedPcsVerifier::new(&jagged, vec![vec![3, 4, 5], vec![2, 6]]);
-        assert_eq!(machine_jagged.column_counts_by_round.len(), 2);
-    }
 
     // HEIGHT-BINDING GUARD executed-circuit tests
     //

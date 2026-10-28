@@ -1,12 +1,11 @@
-//! Compose-stage **shape carriers** shared by the basefold compose pipeline.
+//! Compose-stage **shape carriers** shared by the jagged compose pipeline.
 //!
-//! The compose verifier is [`super::compress_basefold::verify_compress_basefold`],
-//! with the recursion-AIR variant in [`super::compress_basefold_recursion`];
-//! both consume the basefold-shaped witness layouts from those modules.
+//! The compose verifier is [`super::compress_jagged::verify_compress_jagged`],
+//! built into a program by [`super::programs::build_compose_program`].
 //!
-//! - [`PublicValuesOutputDigest`] — imported by all basefold compose
-//!   builders (`compress_basefold.rs`, `compress_basefold_recursion.rs`,
-//!   `basefold_programs.rs`) to select between
+//! - [`PublicValuesOutputDigest`] — imported by the compose verifier and
+//!   its program builder (`compress_jagged.rs`, `programs.rs`) to select
+//!   between
 //!   [`super::recursion_public_values_digest`] and
 //!   [`super::root_public_values_digest`] in the public-values output stream.
 //! - [`ZKMCompressShape`] — the shape-enumeration carrier embedded in

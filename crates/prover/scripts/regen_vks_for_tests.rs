@@ -1,18 +1,18 @@
 //! Regenerate `vk_map.bin` from the test-artifact ELFs that the e2e
 //! tests exercise.
 //!
-//! Builds a `BTreeMap<[KoalaBear; 8], usize>` keyed by the basefold
+//! Builds a `BTreeMap<[KoalaBear; 8], usize>` keyed by the whir
 //! compress program's VK hash for each ELF in the workload list.
 //! Output goes to `crates/prover/vk_map.bin` so VERIFY_VK=true reads
 //! the regenerated map.
 //!
 //! Usage:
 //!   VERIFY_VK=false RUST_LOG=info \
-//!     cargo run --release -p zkm-prover --bin regen_basefold_vks_for_tests
+//!     cargo run --release -p zkm-prover --bin regen_vks_for_tests
 //!
 //! The output map contains one entry per *unique* compress VK hash
 //! (e2e tests usually produce 1 hash because they all use the
-//! `recursion_program_basefold` lift program with a fixed shape).
+//! `recursion_program` lift program with a fixed shape).
 
 use std::collections::BTreeMap;
 use std::fs::File;

@@ -19,7 +19,7 @@ use crate::Chip;
 /// sumchecks.
 ///
 /// Host-only: the GPU prover has its own device-native builder in
-/// zkm-gpu-basefold; this one never constructs [`LayerState::Device`]
+/// zkm-gpu-jagged-whir; this one never constructs [`LayerState::Device`]
 /// (the variant survives only for enum compatibility).
 ///
 /// **Inputs:**

@@ -1,31 +1,35 @@
-//! Per-chip BaseFold jagged-PCS adapter.
+//! Per-chip WHIR jagged-PCS adapter.
 //!
-//! Each chip trace becomes one MLE that goes through
-//! [`crate::basefold::StackedPcsProver`], so the BaseFold encoder
-//! materializes one stripe at a time (`1 << log_stacking_height`
-//! rows × `batch_size` polys) instead of one giant dense LDE.  No
-//! `Vec<F>` of size `2^(num_vars + log_blowup)` is ever held in
-//! memory at once.
+//! Each chip trace becomes one MLE, interleaved into stripes of
+//! `1 << log_stacking_height` rows that the WHIR commit
+//! ([`crate::whir::jagged`]) encodes one at a time instead of as one giant
+//! dense LDE.  No `Vec<F>` of size `2^(num_vars + log_blowup)` is ever held
+//! in memory at once.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use p3_challenger::CanObserve;
 use p3_dft::Radix2DitParallel;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::basefold::{
-    BasefoldProver, BasefoldVerifier, FriConfig, Mle, StackedBasefoldProof,
-    StackedBasefoldProverData, StackedPcsProver, StackedPcsVerifier,
-};
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerValMmcs};
+use crate::whir::mle::Mle;
 
 pub type JaggedVal = crate::kb31_poseidon2::InnerVal;
 pub type JaggedChallenge = InnerChallenge;
 pub type JaggedDft = Radix2DitParallel<JaggedVal>;
 pub type JaggedMmcs = InnerValMmcs;
 pub type JaggedChallenger = InnerChallenger;
+
+/// The inner ring's WHIR MMCS: Poseidon2-KoalaBear Merkle trees over the
+/// shared `poseidon2_init` permutation.
+pub fn jagged_mmcs() -> JaggedMmcs {
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+    JaggedMmcs::new(hash, compress, 0)
+}
 
 /// One committed batch of chip traces, plus the per-chip metadata
 /// needed to recompute evaluation points on the verifier side.
@@ -63,15 +67,29 @@ pub struct JaggedCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
 /// literals / field access compile unchanged.
 pub type JaggedCommit = JaggedCommitGeneric<JaggedMmcs>;
 
-pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
-    pub stacked_data: StackedBasefoldProverData<JaggedVal, MT>,
+/// What the jagged reduction needs of a committed round besides its WHIR
+/// data: the interleaved MLEs it rebuilds the dense polynomial from, and the
+/// round's geometry.
+pub struct JaggedProverData {
+    /// The stacked stripes the commit interleaved, in commit order.  Empty on
+    /// a device-built commit, whose dense polynomial stays on the device.
+    pub interleaved_mles: Vec<Arc<Mle<JaggedVal>>>,
     pub chip_dims: Vec<(usize, u32)>,
     pub area: usize,
     pub log_stacking_height: u32,
 }
 
-/// Concrete inner prover-data alias (`MT = JaggedMmcs`).
-pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
+impl JaggedProverData {
+    #[must_use]
+    pub fn new(
+        interleaved_mles: Vec<Arc<Mle<JaggedVal>>>,
+        chip_dims: Vec<(usize, u32)>,
+        area: usize,
+        log_stacking_height: u32,
+    ) -> Self {
+        Self { interleaved_mles, chip_dims, area, log_stacking_height }
+    }
+}
 
 /// Stacking height of the stacked PCS: `2^21` rows per stripe, never clamped for
 /// small commits -- an area-dependent height would make the VK area-dependent.
@@ -149,78 +167,6 @@ pub fn chips_to_mles_owned(
     (mles, dims)
 }
 
-/// Commit a batch of chip traces (consumes ownership — saves the
-/// `trace.values.clone()` round-trip in `chips_to_mles_owned`).
-/// Returns a public commitment and prover-side state for later opening.
-///
-/// The shard commit runs the host BaseFold + Plonky3 MMCS commit.  The GPU
-/// prover does NOT reach this free-fn — its device dense-pack + BaseFold commit
-/// is the `StarkGpuProver` override of `MachineProver::commit_multilinears`
-/// (unconditional device commit, no host fallback).  This free-fn is
-/// the CPU-prover / unit-test path.
-///
-/// Does NOT observe the commitment — it takes no challenger; the CALLER owns
-/// the transcript write and must observe `commit.original_commitment` at the
-/// same position as the verifier.  On the single-main-commit flow that write
-/// is the shard-level Phase 1 prologue's 8-felt `main_commitment` observe —
-/// observing here as well would desync the prover against the verifier.  The
-/// verifier counterpart is [`jagged::verify_jagged_no_observe`].
-pub fn commit_jagged_pcs(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-) -> (JaggedCommit, JaggedProverData) {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
-    commit_jagged_pcs_generic::<JaggedMmcs, JaggedDft>(
-        chip_traces,
-        mmcs,
-        dft,
-        FriConfig::<JaggedVal>::from_env_or_default(),
-    )
-}
-
-/// GC-generic commit core.  Does not touch the transcript: it takes no
-/// challenger, and the caller owns the `observe` of the returned commitment.
-/// Parameterized over the MMCS `MT` + DFT `D`; the caller supplies the
-/// concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear) and the wrap
-/// (OuterSC, Poseidon2-BN254) paths share one body.  `Val`/`Challenge` stay
-/// KoalaBear / KoalaBear⁴ for both.
-#[allow(clippy::type_complexity)]
-pub fn commit_jagged_pcs_generic<MT, D>(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    mmcs: MT,
-    dft: Arc<D>,
-    fri: FriConfig<JaggedVal>,
-) -> (JaggedCommitGeneric<MT>, JaggedProverDataGeneric<MT>)
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
-{
-    let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
-    let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
-    let log_stacking_height = pick_log_stacking_height(total_entries);
-    let area = total_entries.next_multiple_of(1usize << log_stacking_height);
-
-    let prover = StackedPcsProver::new(
-        BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
-        log_stacking_height,
-        DEFAULT_BATCH_SIZE,
-    );
-    let (commitment, stacked_data) = prover.commit_multilinears(mles);
-
-    let commit = JaggedCommitGeneric::<MT> {
-        original_commitment: commitment.clone(),
-        chip_dims: chip_dims.clone(),
-        area,
-        log_stacking_height,
-    };
-    let prover_data =
-        JaggedProverDataGeneric::<MT> { stacked_data, chip_dims, area, log_stacking_height };
-    (commit, prover_data)
-}
-
 /// Extract the 8-felt MMCS digest from a [`JaggedCommit`].
 /// The digest is the value the verifier's Phase 1 prologue observes as
 /// `main_commitment` in the single-main-commit flow.
@@ -230,8 +176,8 @@ where
 /// helper pulls out the first cap root — the same byte sequence
 /// `DuplexChallenger::observe(MerkleCap)` consumes.
 /// Extract the 8-felt MerkleCap root from a JaggedMmcs commitment (the
-/// inner BasefoldRing::digest_felts body).
-pub fn basefold_commit_digest_felts(
+/// inner WhirRing::digest_felts body).
+pub fn whir_commit_digest_felts(
     commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
 ) -> [JaggedVal; 8] {
     let roots = commitment.roots();
@@ -239,7 +185,7 @@ pub fn basefold_commit_digest_felts(
     roots[0]
 }
 
-pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
+pub fn whir_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
     let roots = commit.original_commitment.roots();
     assert!(!roots.is_empty(), "JaggedCommit MerkleCap must have at least one root",);
     roots[0]
@@ -247,7 +193,7 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 
 // Jagged "hash-bind" (the count ↔ commitment tie).
 //
-// Observing only the RAW BaseFold root would leave the per-chip
+// Observing only the RAW WHIR root would leave the per-chip
 // (row_count, column_count) geometry prover-supplied and (under the
 // height-agnostic recursion) forgeable: a prover could witness a different
 // geometry than was actually committed and still pass the prefix-sum / area
@@ -259,7 +205,7 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 //     modified = compress([raw_root, hash])
 //
 // and re-checked at verify time.  The observed (Fiat-Shamir) commitment is
-// `modified`; the BaseFold opening still binds against `raw_root` (carried
+// `modified`; the WHIR opening still binds against `raw_root` (carried
 // as `original_commitment`).
 //
 // CONVENTION LOCK (host == circuit must be byte-identical):
@@ -324,7 +270,7 @@ pub fn jagged_geometry_hash(row_counts: &[usize], column_counts: &[usize]) -> [J
     hasher.hash_iter(iter)
 }
 
-/// Fold the geometry hash into the raw BaseFold root: `compress([raw, hash])`.
+/// Fold the geometry hash into the raw WHIR root: `compress([raw, hash])`.
 /// Uses `InnerCompress` (the SAME compressor `SC::compress` resolves to
 /// in-circuit).  Returns the MODIFIED 8-felt digest that the Fiat-Shamir
 /// transcript observes as `main_commitment`.
@@ -409,14 +355,6 @@ pub fn jagged_hash_bind_verify(
     recomputed == modified
 }
 
-/// Production-grade FRI config used by the jagged-PCS pipeline.
-/// Public so the GPU dispatch hook can construct a matching
-/// device-side encoder (same `log_blowup`, same coset shift) without
-/// re-creating the env-overrides logic.
-pub fn lb_fri_config() -> FriConfig<JaggedVal> {
-    FriConfig::<JaggedVal>::from_env_or_default()
-}
-
 // GPU jagged-reduction sumcheck dispatch hook.
 //
 // Mirrors the host `crate::jagged_sumcheck::prove_jagged_reduction_owned`
@@ -475,298 +413,11 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
     NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
-/// Batched multi-ROUND open: one BaseFold proof covering every round's
-/// committed data — NOT one proof per round.  Every round's stripes are
-/// `log_stacking_height` tall, so `BasefoldProver::batch` folds them into one
-/// codeword regardless of how many stripes each round contributes.
-///
-/// Pure host-side implementation — always runs the CPU StackedPcsProver
-/// `prove_trusted_evaluation` body; the GPU dispatch hook falls back to it on
-/// shape-unsupported / runtime errors.
-pub fn open_jagged_pcs_rounds(
-    rounds: &[&JaggedProverData],
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut JaggedChallenger,
-) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
-    let log_stacking_height = rounds[0].log_stacking_height;
-    let prover = StackedPcsProver::new(
-        BasefoldProver::<JaggedVal, JaggedChallenge, JaggedMmcs, JaggedDft>::new(
-            FriConfig::<JaggedVal>::from_env_or_default(),
-            dft,
-            mmcs,
-            rounds.len(),
-        ),
-        log_stacking_height,
-        DEFAULT_BATCH_SIZE,
-    );
-    let stacked: Vec<&_> = rounds.iter().map(|r| &r.stacked_data).collect();
-    prover.prove_trusted_evaluation(eval_point, &stacked, challenger)
-}
-
-/// Ring-generic counterpart of [`open_jagged_pcs_rounds`]: ONE batched open
-/// across every round's committed data, over any commitment family.  The
-/// BN254 wrap ring reaches the multi-round open through this.
-pub fn open_jagged_pcs_rounds_generic<Challenger, MT, D>(
-    rounds: &[&JaggedProverDataGeneric<MT>],
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut Challenger,
-    mmcs: MT,
-    dft: Arc<D>,
-    fri: FriConfig<JaggedVal>,
-) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
-    Challenger: p3_challenger::FieldChallenger<JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
-        + 'static,
-{
-    let log_stacking_height = rounds[0].log_stacking_height;
-    let prover = StackedPcsProver::new(
-        BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, rounds.len()),
-        log_stacking_height,
-        DEFAULT_BATCH_SIZE,
-    );
-    let stacked: Vec<&_> = rounds.iter().map(|r| &r.stacked_data).collect();
-    prover.prove_trusted_evaluation(eval_point, &stacked, challenger)
-}
-
-pub fn open_jagged_pcs(
-    prover_data: &JaggedProverData,
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut JaggedChallenger,
-) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
-    open_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
-        prover_data,
-        eval_point,
-        challenger,
-        mmcs,
-        dft,
-        FriConfig::<JaggedVal>::from_env_or_default(),
-    )
-}
-
-/// BaseFold-over-BN254 port: GC-generic host open core.  Parameterized
-/// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
-/// supplies the concrete `mmcs`/`dft`.  The inner path uses
-/// `JaggedChallenger` + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will
-/// pass the BN254 challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge`
-/// stay KoalaBear / KoalaBear⁴ for both (the eval-point is over
-/// `JaggedChallenge`).
-#[allow(clippy::type_complexity)]
-pub fn open_jagged_pcs_generic<Challenger, MT, D>(
-    prover_data: &JaggedProverDataGeneric<MT>,
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut Challenger,
-    mmcs: MT,
-    dft: Arc<D>,
-    fri: FriConfig<JaggedVal>,
-) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
-    Challenger: p3_challenger::FieldChallenger<JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
-        + 'static,
-{
-    let prover = StackedPcsProver::new(
-        BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
-        prover_data.log_stacking_height,
-        DEFAULT_BATCH_SIZE,
-    );
-    prover.prove_trusted_evaluation(eval_point, &[&prover_data.stacked_data], challenger)
-}
-
-// GPU BaseFold open dispatch.
-//
-// Mirror of the GPU commit override — provided statically by the prover
-// (`MachineProver::gpu_basefold_open_hook`) and threaded down to the
-// `open_jagged_pcs_generic` dispatch, not via a registry.  The hook receives
-// the same inputs as `open_jagged_pcs_generic` and returns a byte-identical
-// `StackedBasefoldProof` — the device side is responsible for:
-//
-//   * routing the per-stripe MLEs / codewords held in
-//     `prover_data.stacked_data.pcs_batch_data` to GPU memory (or
-//     reading from a device-resident cache if the commit hook installed
-//     one),
-//   * running `FriCudaProver::prove` (the device prove driver in
-//     `ziren-gpu/basefold/src/fri.rs`),
-//   * observing the per-round univariate-poly evals + Merkle commits +
-//     PoW witness into the supplied `JaggedChallenger` so the transcript
-//     stays in lock-step with the host path,
-//   * assembling a `StackedBasefoldProof` whose `basefold_proof.*` is
-//     shape-compatible with the host path consumed by
-//     `verify_jagged_pcs`.
-//
-// The hook returns `Result<.., (prover_data, eval_point)>` so the device
-// side can tunnel ownership of the host inputs back to the host fallback
-// on error (mirrors the `commit_jagged_pcs` hook contract).
-
-// The device open lives in the `JaggedOpener` impl `DeviceJaggedOpener`
-// (zkm-gpu-basefold), which calls `FriCudaProver::prove` and falls back to
-// `open_jagged_pcs` on `Err` (returning `(prover_data, eval_point)`
-// ownership so nothing is lost).  The open fn is threaded from the `prover`
-// crate into the `prove_shard_with_data` free-fn (through the jagged-eval
-// producer + `prove_trusted_evaluations` down to
-// `prove_jagged_rounds`' open closure).
-
-/// Verify the proof against a previously observed commitment.
-/// Multi-ROUND verify: one BaseFold proof covering every round's commitment.
-///
-/// The verifier builds the commitment list itself, so a round whose
-/// commitment lives in the verifying key is never taken from the proof.
-pub fn verify_jagged_pcs_rounds(
-    commitments: &[<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment],
-    areas: &[usize],
-    log_stacking_height: u32,
-    eval_point: &[JaggedChallenge],
-    evaluation_claim: JaggedChallenge,
-    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
-    challenger: &mut JaggedChallenger,
-) -> Result<(), crate::basefold::StackedVerifierError> {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let fri = FriConfig::<JaggedVal>::from_env_or_default();
-    let verifier = crate::basefold::stacked::StackedPcsVerifier::new(
-        crate::basefold::verifier::BasefoldVerifier::<JaggedVal, JaggedChallenge, JaggedMmcs>::new(
-            fri,
-            mmcs,
-            commitments.len(),
-        ),
-        log_stacking_height,
-    );
-    verifier.verify_trusted_evaluation(
-        commitments,
-        areas,
-        eval_point,
-        proof,
-        evaluation_claim,
-        challenger,
-    )
-}
-
-/// Ring-generic counterpart of [`verify_jagged_pcs_rounds`]: verify ONE batched
-/// BaseFold opening that covers every round.  The BN254 wrap ring reaches the
-/// multi-round verify through this.
-#[allow(clippy::too_many_arguments)]
-pub fn verify_jagged_pcs_rounds_generic<Challenger, MT>(
-    commitments: &[<MT as p3_commit::Mmcs<JaggedVal>>::Commitment],
-    areas: &[usize],
-    log_stacking_height: u32,
-    eval_point: &[JaggedChallenge],
-    evaluation_claim: JaggedChallenge,
-    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>,
-    challenger: &mut Challenger,
-    mmcs: MT,
-    fri: FriConfig<JaggedVal>,
-) -> Result<(), crate::basefold::StackedVerifierError>
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    Challenger: p3_challenger::FieldChallenger<JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
-{
-    let verifier = crate::basefold::stacked::StackedPcsVerifier::new(
-        crate::basefold::verifier::BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(
-            fri,
-            mmcs,
-            commitments.len(),
-        ),
-        log_stacking_height,
-    );
-    verifier.verify_trusted_evaluation(
-        commitments,
-        areas,
-        eval_point,
-        proof,
-        evaluation_claim,
-        challenger,
-    )
-}
-
-pub fn verify_jagged_pcs(
-    commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
-    area: usize,
-    log_stacking_height: u32,
-    eval_point: &[JaggedChallenge],
-    evaluation_claim: JaggedChallenge,
-    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
-    challenger: &mut JaggedChallenger,
-) -> Result<(), crate::basefold::StackedVerifierError> {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    verify_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs>(
-        commitment,
-        area,
-        log_stacking_height,
-        eval_point,
-        evaluation_claim,
-        proof,
-        challenger,
-        mmcs,
-        FriConfig::<JaggedVal>::from_env_or_default(),
-    )
-}
-
-/// BaseFold-over-BN254 port: GC-generic verify core.  Parameterized
-/// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
-/// supplies the concrete `mmcs`/`dft`.  The inner path uses
-/// `JaggedChallenger` + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will
-/// pass the BN254 challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge`
-/// stay KoalaBear / KoalaBear⁴ for both.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn verify_jagged_pcs_generic<Challenger, MT>(
-    commitment: &<MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
-    area: usize,
-    log_stacking_height: u32,
-    eval_point: &[JaggedChallenge],
-    evaluation_claim: JaggedChallenge,
-    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>,
-    challenger: &mut Challenger,
-    mmcs: MT,
-    fri: FriConfig<JaggedVal>,
-) -> Result<(), crate::basefold::StackedVerifierError>
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    Challenger: p3_challenger::FieldChallenger<JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
-{
-    let verifier = StackedPcsVerifier::new(
-        BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(fri, mmcs, 1),
-        log_stacking_height,
-    );
-    verifier.verify_trusted_evaluation(
-        core::slice::from_ref(commitment),
-        &[area],
-        eval_point,
-        proof,
-        evaluation_claim,
-        challenger,
-    )
-}
-
 // Jagged-sumcheck integration
 //
 // The dense polynomial is still materialized for the sumcheck reduction (the
-// memory win is in the commit phase: BaseFold streams stripes through
-// dft_batch instead of blowing up the whole dense vector by 16×).
+// memory win is in the commit phase: WHIR streams stripes through
+// dft_batch instead of blowing up the whole dense vector at once).
 //
 // Built on `jagged.rs` (data structures) and `jagged_sumcheck.rs`
 // (PCS-agnostic reduction math).
@@ -778,7 +429,10 @@ pub mod jagged {
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
-    use crate::basefold::StackedBasefoldProof;
+    use super::{
+        jagged_mmcs, JaggedChallenger, JaggedDft, JaggedMmcs, JaggedVal,
+        DEFAULT_LOG_STACKING_HEIGHT,
+    };
     use crate::jagged::{JaggedChipInfo, JaggedPacking};
     use crate::jagged_sumcheck::{verify_jagged_reduction, JaggedReductionProof};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
@@ -792,8 +446,6 @@ pub mod jagged {
     /// `rematerialize_chip_traces_via_provider` produces owned side-storage
     /// the caller re-wraps.
     pub type ChipTraceView = (alloc::string::String, crate::multilinear::PaddedMle<InnerVal>);
-
-    use super::FriConfig;
 
     /// Wire-format jagged metadata: the per-bundle quantities the verifier needs
     /// to reconstruct the same `JaggedPacking` from chip_infos it receives
@@ -860,173 +512,54 @@ pub mod jagged {
         pub padding_heights: Vec<Vec<usize>>,
     }
 
-    // BaseFold-over-BN254: generic over the Mmcs so the wrap (OuterSC)
+    // WHIR-over-BN254: generic over the Mmcs so the wrap (OuterSC)
     // bundle holds the BN254 commitment + proof; inner alias below keeps every
     // caller + the rmp wire-format unchanged. serde(bound) mirrors the
     // JaggedCommitGeneric pattern (commitment + proof must serde).
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     #[serde(bound(
-        serialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Serialize, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Serialize",
-        deserialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Deserialize<'de>, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Deserialize<'de>"
+        serialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Serialize, <MT as p3_commit::Mmcs<JaggedVal>>::Proof: serde::Serialize",
+        deserialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Deserialize<'de>, <MT as p3_commit::Mmcs<JaggedVal>>::Proof: serde::Deserialize<'de>"
     ))]
-    pub struct JaggedPcsProofGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
-        /// Group-0 jagged-sumcheck reduction proof.  On the default (G==1)
-        /// path this is the WHOLE proof and `extra_*` below are empty —
-        /// byte-identical to the pre-split bundle.  On the per-round split
-        /// (G≥2) path this is the FIRST group and the remaining G-1 groups
-        /// live in the `extra_*` Vecs (see [`Self::reduction_g`]).
-        ///
-        /// "Scalar group-0 + extra Vecs" rather than a single `Vec<G>` keeps
-        /// the recursion lift + in-circuit verifier
-        /// (`shard_level_witness.rs`, `recursive_jagged_pcs.rs`) — which read
-        /// these scalar fields — compiling unchanged, AND keeps the G==1 wire
-        /// format byte-identical (the `extra_*` / `groups` fields are
-        /// `serde(default)` empty so they serialize away).
+    pub struct JaggedPcsProofGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+        /// The jagged-sumcheck reduction proof.
         pub reduction: JaggedReductionProof<InnerChallenge>,
-        /// Group-0 BaseFold open proof.
-        pub basefold_proof: StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
-        /// Group-0 WHIR open proof — `Some` when the shard was proven under
-        /// the jagged-WHIR inner PCS (the core-machine default); the
-        /// `basefold_proof` slot then holds an empty placeholder.  The
-        /// verifier dispatches on this field.
-        #[serde(default)]
-        pub whir_proof:
-            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
-        /// Per-chip per-column row-MLE values, FLAT in name-sorted chip order
-        /// (NOT grouped) — the `groups` index map below partitions it.  Shared
-        /// across all groups.
+        /// The WHIR opening of the dense polynomial.
+        pub whir_proof: crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
+        /// Per-chip per-column row-MLE values, in name-sorted chip order.
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
-        /// Group-0 BaseFold commit.
+        /// The WHIR commit.
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
-        /// Group-0 packing metadata (group-LOCAL offsets / prefix-sums).
+        /// Packing metadata (offsets / prefix-sums).
         pub packing: PackingMeta,
-        /// Group-0 jagged-eval sub-protocol proof.
+        /// The jagged-eval sub-protocol proof.
         ///
         /// `serde(default)` so existing wire-format bundles deserialize.
         #[serde(default = "crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy")]
         pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
 
-        /// The RAW BaseFold roots of the opening rounds BEFORE the last, in
+        /// The RAW WHIR roots of the opening rounds BEFORE the last, in
         /// round order.
         ///
         /// A round's commitment as the VERIFYING KEY holds it is the HASH-BOUND
-        /// digest `compress([raw, hash(geometry)])`, but the BaseFold open
+        /// digest `compress([raw, hash(geometry)])`, but the WHIR open
         /// Merkle-verifies its leaves against the RAW root.  So the proof
         /// carries the raw root and the verifier re-derives the bound form to
         /// check it against the key — which is what pins that round's
         /// geometry.  Empty on a single-round proof.
         #[serde(default)]
-        pub preceding_commits:
-            Vec<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
-
-        // Per-round split extra groups (G≥2 only)
-        // All `serde(default)` empty so a G==1 bundle is byte-identical to the
-        // pre-split wire format.  Indexed g-1 for group g≥1.
-        /// Reductions for groups 1..G.
-        #[serde(default)]
-        pub extra_reduction: Vec<JaggedReductionProof<InnerChallenge>>,
-        /// BaseFold opens for groups 1..G.
-        #[serde(default)]
-        pub extra_basefold_proof: Vec<StackedBasefoldProof<InnerVal, InnerChallenge, MT>>,
-        /// BaseFold commits for groups 1..G.
-        #[serde(default)]
-        pub extra_commit: Vec<crate::jagged_pcs::JaggedCommitGeneric<MT>>,
-        /// Packing metadata for groups 1..G.
-        #[serde(default)]
-        pub extra_packing: Vec<PackingMeta>,
-        /// Jagged-eval proofs for groups 1..G.
-        #[serde(default)]
-        pub extra_jagged_eval:
-            Vec<crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>>,
-        /// Group membership: `groups[g]` lists the indices (INTO the
-        /// name-sorted chip set) committed in group `g`.  THE wire form the
-        /// verifier's coverage check validates against an independent
-        /// [`crate::jagged::partition_from_chip_infos`] run.  Must be an
-        /// exact cover (no drop, no dup, canonical name-sorted order).
-        /// Empty for G = 1 (`serde(default)`): the verifier reads an empty map
-        /// as the single-group identity cover.
-        #[serde(default)]
-        pub groups: Vec<Vec<usize>>,
-    }
-
-    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedPcsProofGeneric<MT> {
-        /// Number of independent jagged groups (G).  `1` on the default path.
-        #[must_use]
-        pub fn num_groups(&self) -> usize {
-            1 + self.extra_reduction.len()
-        }
-        /// Reduction proof for group `g` (group 0 is the scalar field).
-        #[must_use]
-        pub fn reduction_g(&self, g: usize) -> &JaggedReductionProof<InnerChallenge> {
-            if g == 0 {
-                &self.reduction
-            } else {
-                &self.extra_reduction[g - 1]
-            }
-        }
-        /// BaseFold open proof for group `g`.
-        #[must_use]
-        pub fn basefold_proof_g(
-            &self,
-            g: usize,
-        ) -> &StackedBasefoldProof<InnerVal, InnerChallenge, MT> {
-            if g == 0 {
-                &self.basefold_proof
-            } else {
-                &self.extra_basefold_proof[g - 1]
-            }
-        }
-        /// BaseFold commit for group `g`.
-        #[must_use]
-        pub fn commit_g(&self, g: usize) -> &crate::jagged_pcs::JaggedCommitGeneric<MT> {
-            if g == 0 {
-                &self.commit
-            } else {
-                &self.extra_commit[g - 1]
-            }
-        }
-        /// Packing metadata for group `g`.
-        #[must_use]
-        pub fn packing_g(&self, g: usize) -> &PackingMeta {
-            if g == 0 {
-                &self.packing
-            } else {
-                &self.extra_packing[g - 1]
-            }
-        }
-        /// Jagged-eval proof for group `g`.
-        #[must_use]
-        pub fn jagged_eval_g(
-            &self,
-            g: usize,
-        ) -> &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge> {
-            if g == 0 {
-                &self.jagged_eval
-            } else {
-                &self.extra_jagged_eval[g - 1]
-            }
-        }
-        /// The group membership map; the identity single-group cover when
-        /// empty (G = 1).
-        #[must_use]
-        pub fn groups_or_identity(&self, n_chips: usize) -> Vec<Vec<usize>> {
-            if self.groups.is_empty() {
-                alloc::vec![(0..n_chips).collect()]
-            } else {
-                self.groups.clone()
-            }
-        }
+        pub preceding_commits: Vec<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
     }
 
     /// Concrete inner (Poseidon2-KoalaBear) bundle alias -- the type every
     /// current caller + wire-format uses.
-    pub type JaggedPcsProof = JaggedPcsProofGeneric<crate::jagged_pcs::JaggedMmcs>;
+    pub type JaggedPcsProof = JaggedPcsProofGeneric<JaggedMmcs>;
 
-    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedPcsProofGeneric<MT>
+    impl<MT: p3_commit::Mmcs<JaggedVal>> JaggedPcsProofGeneric<MT>
     where
-        <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment:
+        <MT as p3_commit::Mmcs<JaggedVal>>::Commitment:
             serde::Serialize + for<'d> serde::Deserialize<'d>,
-        <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof:
+        <MT as p3_commit::Mmcs<JaggedVal>>::Proof:
             serde::Serialize + for<'d> serde::Deserialize<'d>,
     {
         /// Wire-format bytes (rmp-serde — matches the existing
@@ -1063,11 +596,11 @@ pub mod jagged {
         /// already-structured bundle that never passes through this function.
         pub fn from_bytes_for_verification(bytes: &[u8]) -> Option<Self> {
             let bundle = Self::from_bytes(bytes)?;
-            if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
+            if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
                 tracing::debug!(
                     "jagged bundle decode: log_stacking_height {} is not the protocol's {}",
                     bundle.commit.log_stacking_height,
-                    crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT,
+                    DEFAULT_LOG_STACKING_HEIGHT,
                 );
                 return None;
             }
@@ -1077,22 +610,21 @@ pub mod jagged {
 
     /// Pre-computed jagged-PCS commit bundle for the
     /// single-main-commit flow.  Produced by
-    /// [`crate::config::BasefoldRing::commit_multilinears`] before the shard-level
+    /// [`crate::config::WhirRing::commit_multilinears`] before the shard-level
     /// Phase 1 prologue, then consumed as a [`JaggedOpenRound`] by
     /// [`prove_jagged_rounds`] in Phase 4.
     ///
     /// The 8-felt digest of `commit.original_commitment` (via
-    /// [`crate::jagged_pcs::basefold_commit_digest`]) is the
+    /// [`crate::jagged_pcs::whir_commit_digest`]) is the
     /// `main_commitment` that the prologue + verifier observe.
-    pub struct PrecomputedJaggedCommitGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
+    pub struct PrecomputedJaggedCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
-        pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
-        /// WHIR-committed data when the shard runs the jagged-WHIR inner PCS
-        /// (the core-machine default); `prover_data` then carries the SAME
-        /// width-1 polynomials as `interleaved_mles` (the reduction reads
-        /// them) over a placeholder Merkle tree.
-        pub whir_data: Option<crate::whir::jagged::JaggedWhirProverDataGeneric<MT>>,
+        pub prover_data: crate::jagged_pcs::JaggedProverData,
+        /// The WHIR-committed data the open runs over; `prover_data` carries
+        /// the SAME width-1 polynomials as `interleaved_mles` (the reduction
+        /// reads them).
+        pub whir_data: crate::whir::jagged::JaggedWhirProverDataGeneric<MT>,
         /// `Some(k)` when this round was committed under an
         /// [`crate::jagged::AreaPin`]: its stacking gap is laid out as exactly
         /// `k` padding columns (`prove_jagged_rounds_generic`), so the
@@ -1101,8 +633,7 @@ pub mod jagged {
         pub fixed_pad_columns: Option<usize>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
-    pub type PrecomputedJaggedCommit =
-        PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
+    pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<JaggedMmcs>;
 
     // Single shard-wide commit buffer — GPU precompute-commit hook.
     //
@@ -1118,10 +649,10 @@ pub mod jagged {
     // recursion-AREA-PIN + provider-read rev(zeta) semantics match this host
     // path byte-identically.
 
-    // The generic BaseFold precompute body now lives as the DEFAULT
-    // `BasefoldRing::commit_multilinears` trait method (no free-fn
-    // indirection); each ring commits with its own `bf_mmcs()` /
-    // `fri_config()`.
+    // The generic WHIR precompute body now lives as the DEFAULT
+    // `WhirRing::commit_multilinears` trait method (no free-fn
+    // indirection); each ring commits with its own `whir_mmcs()` /
+    // `whir_config()`.
 
     /// One commitment ROUND's inputs to the jagged open.
     ///
@@ -1131,7 +662,7 @@ pub mod jagged {
     ///
     /// `precomputed` is BORROWED: the preprocessed round opens the proving
     /// key's commit, built once by `setup` and shared by every shard.
-    pub struct JaggedOpenRound<'a, MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
+    pub struct JaggedOpenRound<'a, MT: p3_commit::Mmcs<JaggedVal>> {
         pub chip_traces: &'a [ChipTraceView],
         pub r_row_per_chip: &'a [Vec<InnerChallenge>],
         /// This round's per-chip column claims.
@@ -1163,7 +694,7 @@ pub mod jagged {
             .map(|(name, m)| {
                 let h = m.values.len().checked_div(m.width).unwrap_or(0);
                 let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
+                let mle = alloc::sync::Arc::new(crate::whir::mle::Mle::from_row_major(m));
                 (name, crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h))
             })
             .collect()
@@ -1231,243 +762,49 @@ pub mod jagged {
         (reduction, jagged_eval, proof)
     }
 
-    /// Multi-ROUND prove: ONE jagged proof spanning every committed round —
-    /// one jagged sumcheck over every round's stripes, ONE jagged-eval, and
-    /// ONE batched BaseFold open; only the commitments are per round.
-    /// Proving each round as its own jagged group instead would cost a
-    /// reduction, an eval and an open PER ROUND.
-    ///
-    /// The rounds are concatenated into ONE column space: round r's offsets are
-    /// shifted by the total cell count of the rounds before it, so the packing
-    /// the reduction and the jagged-eval see is a single jagged matrix whose
-    /// columns run `[round 0 | round 1 | ...]`.
-    ///
-    /// Round order is load-bearing — it fixes the column order the verifier
-    /// reconstructs — and the preprocessed round comes first.
-    ///
-    /// The dense multilinear scheme the jagged layer opens through. It is a
-    /// property of the ring (`commit_multilinears` builds WHIR data exactly
-    /// when `BasefoldRing::WHIR_INNER_PCS`), and as a type it rules out a round
-    /// set that is WHIR in part, or opening one scheme's data against the
-    /// other's observed root.
-    ///
-    /// `open_rounds` is the whole variation. Everything before it — sampling
-    /// `z_col`, the reduction, the jagged-eval sub-protocol, extending the point
-    /// to `log2(area)` — is one transcript order shared by every scheme and
-    /// every backend, and lives in [`prove_jagged_linear_core`].
-    pub trait JaggedDenseOpen<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
-        /// The opening this scheme produces.
-        type Proof;
-
-        /// Open every round's committed data at one point; `profile` selects
-        /// the WHIR schedule, which the BaseFold opening ignores.
-        fn open_rounds<Challenger, D>(
-            rounds: &[JaggedOpenRound<'_, MT>],
-            point: Vec<InnerChallenge>,
-            challenger: &mut Challenger,
-            mmcs: MT,
-            dft: alloc::sync::Arc<D>,
-            fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
-            profile: crate::whir::jagged::WhirProfile,
-        ) -> Self::Proof
-        where
-            MT: p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                    Commitment: Clone,
-                    ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: 'static,
-                > + Clone,
-            D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
-            Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-                + p3_challenger::CanObserve<
-                    <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static;
-
-        /// Place the opening into the bundle's two proof slots.
-        ///
-        /// The wire format predates this trait: it has a BaseFold slot and an
-        /// optional WHIR one, and the verifier dispatches on the latter. So the
-        /// scheme that does not own a slot fills it with an empty value, and
-        /// that fabrication belongs to the scheme rather than to the prover,
-        /// which now never constructs a proof it did not open.
-        fn into_bundle_slots(
-            proof: Self::Proof,
-        ) -> (
-            StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
-            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
+    /// Open every round's WHIR data at one point under the WHIR schedule of
+    /// `profile`: ONE batched opening across all rounds.
+    pub fn open_whir_rounds<Challenger, MT, D>(
+        rounds: &[JaggedOpenRound<'_, MT>],
+        point: Vec<InnerChallenge>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        dft: alloc::sync::Arc<D>,
+        profile: crate::whir::jagged::WhirProfile,
+    ) -> crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>
+    where
+        MT: p3_commit::Mmcs<
+                JaggedVal,
+                Commitment: Clone,
+                ProverData<p3_matrix::dense::RowMajorMatrix<JaggedVal>>: 'static,
+            > + Clone,
+        D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+        Challenger: p3_challenger::FieldChallenger<JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+            + 'static,
+    {
+        let _open_span = tracing::info_span!("jagged_whir_open").entered();
+        let wdatas: Vec<&crate::whir::jagged::JaggedWhirProverDataGeneric<MT>> =
+            rounds.iter().map(|r| &r.precomputed.whir_data).collect();
+        let lsh = wdatas[0].log_stacking_height as usize;
+        assert!(
+            wdatas.iter().all(|w| w.log_stacking_height as usize == lsh),
+            "jagged-WHIR open: rounds disagree on log_stacking_height",
         );
+        let cfg = crate::whir::jagged::whir_config_for_profile(profile, lsh);
+        let ef_dft = alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
+        crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
+            &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
+        )
     }
 
-    /// The opening one of the two dense schemes produced.
-    ///
-    /// The HOST picks its scheme by type, so it never needs this. The DEVICE
-    /// does: its commit hook gates WHIR on the core machine alone, so which
-    /// scheme a device-built commit belongs to is decided per commit and has to
-    /// travel as a value.
-    ///
-    /// Both provers still have to land that opening in the same wire format —
-    /// a BaseFold slot and an optional WHIR one — and doing it in two places is
-    /// how they drift. [`Self::into_bundle_slots`] is the one definition, used
-    /// by the host impls below and by the device prover.
-    pub enum DenseOpening<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
-        /// Opened under jagged-over-WHIR.
-        Whir(crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>),
-        /// Opened under jagged-over-BaseFold.
-        Basefold(StackedBasefoldProof<InnerVal, InnerChallenge, MT>),
-    }
-
-    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> DenseOpening<MT> {
-        /// The bundle's two proof slots.
-        ///
-        /// The verifier dispatches on the WHIR slot, so the scheme that owns it
-        /// fills it and leaves an EMPTY BaseFold value behind — a value no
-        /// opening produced, and the only place in either prover that builds
-        /// one.
-        pub fn into_bundle_slots(
-            self,
-        ) -> (
-            StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
-            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
-        ) {
-            match self {
-                Self::Whir(proof) => (Self::empty_basefold_slot(), Some(proof)),
-                Self::Basefold(proof) => (proof, None),
-            }
-        }
-
-        /// The unused BaseFold slot of a WHIR-opened bundle.
-        pub fn empty_basefold_slot() -> StackedBasefoldProof<InnerVal, InnerChallenge, MT> {
-            StackedBasefoldProof {
-                basefold_proof: crate::basefold::proof::BasefoldProof {
-                    univariate_messages: Vec::new(),
-                    fri_commitments: Vec::new(),
-                    component_polynomials_query_openings_and_proofs: Vec::new(),
-                    query_phase_openings_and_proofs: Vec::new(),
-                    final_poly: InnerChallenge::ZERO,
-                    pow_witness: InnerVal::ZERO,
-                    batch_grinding_witness: InnerVal::ZERO,
-                },
-                batch_evaluations: Vec::new(),
-            }
-        }
-    }
-
-    /// Jagged-over-WHIR: the inner rings (core, normalize, compose, shrink).
-    pub struct WhirDenseOpen;
-
-    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedDenseOpen<MT> for WhirDenseOpen {
-        type Proof = crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>;
-
-        fn open_rounds<Challenger, D>(
-            rounds: &[JaggedOpenRound<'_, MT>],
-            point: Vec<InnerChallenge>,
-            challenger: &mut Challenger,
-            mmcs: MT,
-            dft: alloc::sync::Arc<D>,
-            _fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
-            profile: crate::whir::jagged::WhirProfile,
-        ) -> Self::Proof
-        where
-            MT: p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                    Commitment: Clone,
-                    ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: 'static,
-                > + Clone,
-            D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
-            Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-                + p3_challenger::CanObserve<
-                    <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static,
-        {
-            let _open_span = tracing::info_span!("jagged_whir_open").entered();
-            let wdatas: Vec<&crate::whir::jagged::JaggedWhirProverDataGeneric<MT>> = rounds
-                .iter()
-                .enumerate()
-                .map(|(ri, r)| {
-                    r.precomputed.whir_data.as_ref().unwrap_or_else(|| {
-                        panic!(
-                            "jagged-WHIR open: round {ri} carries no WHIR data, so its \
-                             observed commitment is not a WHIR root"
-                        )
-                    })
-                })
-                .collect();
-            let lsh = wdatas[0].log_stacking_height as usize;
-            assert!(
-                wdatas.iter().all(|w| w.log_stacking_height as usize == lsh),
-                "jagged-WHIR open: rounds disagree on log_stacking_height",
-            );
-            let cfg = crate::whir::jagged::whir_config_for_profile(profile, lsh);
-            let ef_dft =
-                alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
-            crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
-                &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
-            )
-        }
-
-        fn into_bundle_slots(
-            proof: Self::Proof,
-        ) -> (
-            StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
-            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
-        ) {
-            DenseOpening::Whir(proof).into_bundle_slots()
-        }
-    }
-
-    /// Jagged-over-BaseFold: the outer (wrap) ring, whose proof feeds gnark.
-    pub struct BasefoldDenseOpen;
-
-    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedDenseOpen<MT> for BasefoldDenseOpen {
-        type Proof = StackedBasefoldProof<InnerVal, InnerChallenge, MT>;
-
-        fn open_rounds<Challenger, D>(
-            rounds: &[JaggedOpenRound<'_, MT>],
-            point: Vec<InnerChallenge>,
-            challenger: &mut Challenger,
-            mmcs: MT,
-            dft: alloc::sync::Arc<D>,
-            fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
-            _profile: crate::whir::jagged::WhirProfile,
-        ) -> Self::Proof
-        where
-            MT: p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                    Commitment: Clone,
-                    ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: 'static,
-                > + Clone,
-            D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
-            Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-                + p3_challenger::CanObserve<
-                    <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static,
-        {
-            let _open_span = tracing::info_span!("jagged_basefold_open").entered();
-            let datas: Vec<&crate::jagged_pcs::JaggedProverDataGeneric<MT>> =
-                rounds.iter().map(|r| &r.precomputed.prover_data).collect();
-            crate::jagged_pcs::open_jagged_pcs_rounds_generic::<Challenger, MT, D>(
-                &datas, point, challenger, mmcs, dft, fri,
-            )
-        }
-
-        fn into_bundle_slots(
-            proof: Self::Proof,
-        ) -> (
-            StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
-            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
-        ) {
-            DenseOpening::Basefold(proof).into_bundle_slots()
-        }
-    }
-
-    /// The INNER ring's multi-round prove — the ring's own Mmcs / DFT / FRI
-    /// config, forwarded to the generic body below.
+    /// The INNER ring's multi-round prove — the ring's own Mmcs and DFT,
+    /// forwarded to the generic body below.
     pub fn prove_jagged_rounds(
-        rounds: &[JaggedOpenRound<'_, crate::jagged_pcs::JaggedMmcs>],
+        rounds: &[JaggedOpenRound<'_, JaggedMmcs>],
         z_row: &[InnerChallenge],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        challenger: &mut JaggedChallenger,
     ) -> JaggedPcsProof {
         prove_jagged_rounds_with_profile(
             rounds,
@@ -1479,58 +816,47 @@ pub mod jagged {
 
     /// [`prove_jagged_rounds`] under the WHIR schedule of `profile`.
     pub fn prove_jagged_rounds_with_profile(
-        rounds: &[JaggedOpenRound<'_, crate::jagged_pcs::JaggedMmcs>],
+        rounds: &[JaggedOpenRound<'_, JaggedMmcs>],
         z_row: &[InnerChallenge],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
     ) -> JaggedPcsProof {
-        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-        let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-        let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-        let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
-        let dft = alloc::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-        prove_jagged_rounds_generic::<
-            crate::jagged_pcs::JaggedChallenger,
-            crate::jagged_pcs::JaggedMmcs,
-            crate::jagged_pcs::JaggedDft,
-            WhirDenseOpen,
-        >(
-            rounds,
-            z_row,
-            challenger,
-            mmcs,
-            dft,
-            crate::basefold::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default(),
-            profile,
+        let mmcs = jagged_mmcs();
+        let dft = alloc::sync::Arc::new(JaggedDft::default());
+        prove_jagged_rounds_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+            rounds, z_row, challenger, mmcs, dft, profile,
         )
     }
 
     /// Checks every precondition of a multi-round jagged open before the
     /// transcript is touched, and returns the common `log_stacking_height`.
     ///
-    /// Each entry is one round `(precomputed, claims, r_row_per_chip)`.  With
+    /// Each entry is one round `(precomputed, claims, r_row_per_chip)`, where
+    /// `r_row_per_chip` is `None` for a prover that takes every chip's row
+    /// point from `z_row` rather than per round, as the BN254 wrap does.  With
     /// `ℓ` the stacking height, `A_r` round `r`'s committed area, `n_r` its
     /// packed cells and `c_i`, `h_i` chip `i`'s column and row counts:
     ///
     /// * the commit, the prover data and (when present) the WHIR data agree on
     ///   `A_r` and `ℓ`, and every round has the same `ℓ`;
-    /// * `|claims| = |r_row_per_chip| = |chips|`, `|claims_i| = c_i`, and
+    /// * `|claims| = |chips|` (and `|r_row_per_chip| = |chips|` when given),
+    ///   `|claims_i| = c_i`, and
     ///   `h_i ≤ 2^{|z_row|}`;
     /// * `0 < A_r`, `2^ℓ | A_r` and `n_r ≤ A_r`;
     /// * `2^{ℓ + ⌈log₂(Σ_r A_r / 2^ℓ)⌉} = next_pow2(Σ_r A_r)`.
     ///
-    /// These are the checks [`prove_jagged_rounds_generic`] makes; a device
+    /// [`prove_jagged_rounds_generic`] runs these checks first; a device
     /// prover that builds the same instance calls this first.
     ///
     /// # Panics
     /// When any of the above fails.
     #[allow(clippy::type_complexity)]
     pub fn validate_jagged_rounds<MT, C>(
-        rounds: &[(&PrecomputedJaggedCommitGeneric<MT>, &[Vec<C>], &[Vec<C>])],
+        rounds: &[(&PrecomputedJaggedCommitGeneric<MT>, &[Vec<C>], Option<&[Vec<C>]>)],
         z_row_len: usize,
     ) -> usize
     where
-        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>,
+        MT: p3_commit::Mmcs<JaggedVal>,
     {
         assert!(!rounds.is_empty(), "prove_jagged_rounds: no rounds");
         let row_cube = 1usize << z_row_len;
@@ -1547,19 +873,18 @@ pub mod jagged {
                 "prove_jagged_rounds: round {ri} commit log_stacking_height {} != prover-data {}",
                 c.log_stacking_height, pd.log_stacking_height,
             );
-            if let Some(wd) = pre.whir_data.as_ref() {
-                assert_eq!(
-                    wd.area, pd.area,
-                    "prove_jagged_rounds: round {ri} WHIR area {} != prover-data area {}",
-                    wd.area, pd.area,
-                );
-                assert_eq!(
-                    wd.log_stacking_height, pd.log_stacking_height,
-                    "prove_jagged_rounds: round {ri} WHIR log_stacking_height {} != \
-                     prover-data {}",
-                    wd.log_stacking_height, pd.log_stacking_height,
-                );
-            }
+            let wd = &pre.whir_data;
+            assert_eq!(
+                wd.area, pd.area,
+                "prove_jagged_rounds: round {ri} WHIR area {} != prover-data area {}",
+                wd.area, pd.area,
+            );
+            assert_eq!(
+                wd.log_stacking_height, pd.log_stacking_height,
+                "prove_jagged_rounds: round {ri} WHIR log_stacking_height {} != \
+                 prover-data {}",
+                wd.log_stacking_height, pd.log_stacking_height,
+            );
             let pk = &pre.packing;
             assert_eq!(
                 claims.len(),
@@ -1568,13 +893,15 @@ pub mod jagged {
                 claims.len(),
                 pk.chip_infos.len(),
             );
-            assert_eq!(
-                r_row.len(),
-                pk.chip_infos.len(),
-                "prove_jagged_rounds: round {ri} has {} row points for {} chips",
-                r_row.len(),
-                pk.chip_infos.len(),
-            );
+            if let Some(r_row) = r_row {
+                assert_eq!(
+                    r_row.len(),
+                    pk.chip_infos.len(),
+                    "prove_jagged_rounds: round {ri} has {} row points for {} chips",
+                    r_row.len(),
+                    pk.chip_infos.len(),
+                );
+            }
             for (ci, (claim, info)) in claims.iter().zip(pk.chip_infos.iter()).enumerate() {
                 assert!(
                     info.row_count <= row_cube,
@@ -1645,58 +972,33 @@ pub mod jagged {
     /// own commitment family, which is what lets the terminal stage open a
     /// preprocessed round like every other stage.
     #[allow(clippy::type_complexity)]
-    pub fn prove_jagged_rounds_generic<Challenger, MT, D, P>(
+    pub fn prove_jagged_rounds_generic<Challenger, MT, D>(
         rounds: &[JaggedOpenRound<'_, MT>],
         z_row: &[InnerChallenge],
         challenger: &mut Challenger,
         mmcs: MT,
         dft: alloc::sync::Arc<D>,
-        fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
         profile: crate::whir::jagged::WhirProfile,
     ) -> JaggedPcsProofGeneric<MT>
     where
-        P: JaggedDenseOpen<MT>,
         MT: p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
+                JaggedVal,
                 Commitment: Clone,
-                ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: 'static,
+                ProverData<p3_matrix::dense::RowMajorMatrix<JaggedVal>>: 'static,
             > + Clone,
-        D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
-        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-            > + 'static,
+        D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+        Challenger: p3_challenger::FieldChallenger<JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+            + 'static,
     {
-        assert!(!rounds.is_empty(), "prove_jagged_rounds: no rounds");
-
-        for (ri, r) in rounds.iter().enumerate() {
-            let pd = &r.precomputed.prover_data;
-            let c = &r.precomputed.commit;
-            assert_eq!(
-                c.area, pd.area,
-                "prove_jagged_rounds: round {ri} commit area {} != prover-data area {}",
-                c.area, pd.area,
-            );
-            assert_eq!(
-                c.log_stacking_height, pd.log_stacking_height,
-                "prove_jagged_rounds: round {ri} commit log_stacking_height {} != prover-data {}",
-                c.log_stacking_height, pd.log_stacking_height,
-            );
-            if let Some(wd) = r.precomputed.whir_data.as_ref() {
-                assert_eq!(
-                    wd.area, pd.area,
-                    "prove_jagged_rounds: round {ri} WHIR area {} != prover-data area {}",
-                    wd.area, pd.area,
-                );
-                assert_eq!(
-                    wd.log_stacking_height, pd.log_stacking_height,
-                    "prove_jagged_rounds: round {ri} WHIR log_stacking_height {} != \
-                     prover-data {}",
-                    wd.log_stacking_height, pd.log_stacking_height,
-                );
-            }
-        }
+        let log_stacking_height = validate_jagged_rounds(
+            &rounds
+                .iter()
+                .map(|r| (r.precomputed, r.claims.as_slice(), Some(r.r_row_per_chip)))
+                .collect::<Vec<_>>(),
+            z_row.len(),
+        );
 
         let mut chip_infos: Vec<crate::jagged::JaggedChipInfo> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();
@@ -1704,42 +1006,8 @@ pub mod jagged {
         let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut r_row_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut base = 0usize;
-        for (ri, r) in rounds.iter().enumerate() {
+        for r in rounds {
             let pk = &r.precomputed.packing;
-            assert_eq!(
-                r.claims.len(),
-                pk.chip_infos.len(),
-                "prove_jagged_rounds: round {ri} has {} claim groups for {} chips",
-                r.claims.len(),
-                pk.chip_infos.len(),
-            );
-            assert_eq!(
-                r.r_row_per_chip.len(),
-                pk.chip_infos.len(),
-                "prove_jagged_rounds: round {ri} has {} row points for {} chips",
-                r.r_row_per_chip.len(),
-                pk.chip_infos.len(),
-            );
-            let row_cube = 1usize << z_row.len();
-            for (ci, (claim, info)) in r.claims.iter().zip(pk.chip_infos.iter()).enumerate() {
-                assert!(
-                    info.row_count <= row_cube,
-                    "prove_jagged_rounds: round {ri} chip {ci} ({}) has {} rows, above \
-                     the row cube 2^{} the shared eval point spans",
-                    info.name,
-                    info.row_count,
-                    z_row.len(),
-                );
-                assert_eq!(
-                    claim.len(),
-                    info.column_count,
-                    "prove_jagged_rounds: round {ri} chip {ci} ({}) has {} claims for \
-                     {} columns",
-                    info.name,
-                    claim.len(),
-                    info.column_count,
-                );
-            }
             chip_infos.extend(pk.chip_infos.iter().cloned());
             let n_cols = pk.offsets.len().saturating_sub(1);
             offsets.extend(pk.offsets.iter().take(n_cols).map(|o| o + base));
@@ -1747,20 +1015,14 @@ pub mod jagged {
             r_row_per_chip.extend(r.r_row_per_chip.iter().cloned());
 
             let area = r.precomputed.prover_data.area;
-            let pad = area.checked_sub(pk.total_values).unwrap_or_else(|| {
-                panic!(
-                    "prove_jagged_rounds: round {ri} committed area {area} is below its \
-                     packing's {} real cells -- commitment and packing metadata disagree",
-                    pk.total_values,
-                )
-            });
+            let pad = area - pk.total_values;
             {
                 let cube = 1usize << z_row.len();
                 let pad_heights: Vec<usize> = {
                     let k = r.precomputed.fixed_pad_columns.unwrap_or_else(|| {
                         crate::jagged::unpinned_pad_columns(
                             pk.total_values,
-                            crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+                            DEFAULT_LOG_STACKING_HEIGHT as usize,
                             cube,
                         )
                     });
@@ -1809,8 +1071,8 @@ pub mod jagged {
             let mut dense_q: Vec<InnerVal> = Vec::with_capacity(1usize << log_dense_size);
             for r in rounds.iter() {
                 let area = r.precomputed.prover_data.area;
-                let round_dense = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
-                    &r.precomputed.prover_data.stacked_data.interleaved_mles,
+                let round_dense = crate::whir::stripes::dense_from_interleaved_mles::<InnerVal>(
+                    &r.precomputed.prover_data.interleaved_mles,
                     area,
                 );
                 dense_q.extend_from_slice(&round_dense[..area]);
@@ -1818,11 +1080,11 @@ pub mod jagged {
             dense_q.resize(1usize << log_dense_size, InnerVal::ZERO);
             let hp = crate::jagged_long::HadamardProduct {
                 base: crate::jagged_long::LongMle::from_components(
-                    alloc::vec![crate::basefold::Mle::from_values(dense_q)],
+                    alloc::vec![crate::whir::mle::Mle::from_values(dense_q)],
                     log_dense_size as u32,
                 ),
                 ext: crate::jagged_long::LongMle::from_components(
-                    alloc::vec![crate::basefold::Mle::from_values(weights)],
+                    alloc::vec![crate::whir::mle::Mle::from_values(weights)],
                     log_dense_size as u32,
                 ),
             };
@@ -1830,52 +1092,20 @@ pub mod jagged {
         };
 
         let open = |extended_eval_point: Vec<InnerChallenge>, challenger: &mut Challenger| {
-            P::open_rounds::<Challenger, D>(
+            open_whir_rounds::<Challenger, MT, D>(
                 rounds,
                 extended_eval_point,
                 challenger,
                 mmcs,
                 dft,
-                fri,
                 profile,
             )
         };
 
-        let log_stacking_height = rounds[0].precomputed.prover_data.log_stacking_height as usize;
-        assert!(
-            rounds
-                .iter()
-                .all(|r| r.precomputed.prover_data.log_stacking_height as usize
-                    == log_stacking_height),
-            "prove_jagged_rounds: rounds disagree on log_stacking_height {:?}; the \
-             batched open indexes every round's stripes with round 0's height",
-            rounds
-                .iter()
-                .map(|r| r.precomputed.prover_data.log_stacking_height)
-                .collect::<alloc::vec::Vec<_>>(),
-        );
-        let stripe = 1usize << log_stacking_height;
-        for (ri, r) in rounds.iter().enumerate() {
-            let area = r.precomputed.prover_data.area;
-            assert!(area > 0, "prove_jagged_rounds: round {ri} committed area is zero");
-            assert_eq!(
-                area % stripe,
-                0,
-                "prove_jagged_rounds: round {ri} area {area} is not a whole number of \
-                 2^{log_stacking_height} stripes",
-            );
-        }
         let total_stripes: usize =
             rounds.iter().map(|r| r.precomputed.prover_data.area >> log_stacking_height).sum();
         let batch_dim = total_stripes.max(1).next_power_of_two().trailing_zeros() as usize;
         let effective_area = 1usize << (log_stacking_height + batch_dim);
-        let sum_areas: usize = rounds.iter().map(|r| r.precomputed.prover_data.area).sum();
-        assert_eq!(
-            effective_area,
-            sum_areas.next_power_of_two(),
-            "prove_jagged_rounds: opening area {effective_area} != \
-             next_power_of_two(sum of round areas {sum_areas})",
-        );
         assert_eq!(
             packing.log_dense_size(),
             log_stacking_height + batch_dim,
@@ -1910,21 +1140,13 @@ pub mod jagged {
                 .collect(),
             padding_heights: round_padding_heights,
         };
-        let (basefold_proof, whir_proof) = P::into_bundle_slots(dense_proof);
         JaggedPcsProofGeneric::<MT> {
             reduction,
-            basefold_proof,
-            whir_proof,
+            whir_proof: dense_proof,
             y_per_chip,
             commit: main.precomputed.commit.clone(),
             packing: packing_meta,
             jagged_eval,
-            extra_reduction: Vec::new(),
-            extra_basefold_proof: Vec::new(),
-            extra_commit: Vec::new(),
-            extra_packing: Vec::new(),
-            extra_jagged_eval: Vec::new(),
-            groups: Vec::new(),
             preceding_commits,
         }
     }
@@ -1937,9 +1159,6 @@ pub mod jagged {
     /// * `preceding_rounds` — the rounds committed before the proof's own, as
     ///   (commitment, area); their commitments are the verifying key's (the
     ///   preprocessed round).
-    /// * `n_prep` — the number of leading preprocessed entries in
-    ///   `chip_infos`: 0 for a main-only proof. Read off the key, never the
-    ///   proof: the coverage check measures the proof's group map against it.
     /// * `opened_main` — per chip, the `main.local` openings the zerocheck
     ///   consumed, index-aligned with `chip_infos` and `bundle.y_per_chip`.
     ///   Required: the cross-bind ties those openings to the jagged column
@@ -1949,23 +1168,16 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
-        preceding_rounds: &[(
-            <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-            usize,
-        )],
-        n_prep: usize,
+        preceding_rounds: &[(<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         bundle: &JaggedPcsProof,
         opened_main: &[Vec<InnerChallenge>],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        challenger: &mut JaggedChallenger,
     ) -> bool {
         verify_jagged_no_observe_with_profile(
             chip_infos,
             r_row_per_chip,
             z_row,
             preceding_rounds,
-            n_prep,
             bundle,
             opened_main,
             challenger,
@@ -1980,121 +1192,33 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
-        preceding_rounds: &[(
-            <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-            usize,
-        )],
-        n_prep: usize,
+        preceding_rounds: &[(<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         bundle: &JaggedPcsProof,
         opened_main: &[Vec<InnerChallenge>],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
     ) -> bool {
-        verify_jagged_inner(
+        // Checked again inside, but the schedule below is only defined at
+        // the production height.
+        if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
+            return false;
+        }
+        let config = crate::whir::jagged::whir_config_for_profile(
+            profile,
+            DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
+        verify_jagged_inner_generic(
             chip_infos,
             r_row_per_chip,
             z_row,
-            n_prep,
-            preceding_rounds,
             bundle,
-            opened_main,
             challenger,
+            jagged_mmcs(),
             true,
-            profile,
+            config,
+            preceding_rounds,
+            opened_main,
         )
-    }
-
-    /// The body of [`verify_jagged_no_observe`], with the same arguments;
-    /// `skip_commit_observe` is true there.
-    #[allow(clippy::too_many_arguments)]
-    fn verify_jagged_inner(
-        chip_infos: &[JaggedChipInfo],
-        r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge],
-        _n_prep: usize,
-        preceding_rounds: &[(
-            <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-            usize,
-        )],
-        bundle: &JaggedPcsProof,
-        opened_main: &[Vec<InnerChallenge>],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        skip_commit_observe: bool,
-        profile: crate::whir::jagged::WhirProfile,
-    ) -> bool {
-        if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "inner") {
-            tracing::info!("[basefold verify] {why}");
-            return false;
-        }
-
-        let expected_groups = crate::jagged::partition_from_chip_infos(chip_infos);
-        let proof_groups: Vec<Vec<usize>> = bundle.groups_or_identity(chip_infos.len());
-        if proof_groups != expected_groups {
-            tracing::warn!(
-                "[basefold verify] COVERAGE CHECK FAILED: proof groups {:?} != expected {:?}",
-                proof_groups,
-                expected_groups
-            );
-            return false;
-        }
-        let g_count = proof_groups.len();
-        if bundle.num_groups() != g_count {
-            tracing::warn!(
-                "[basefold verify] COVERAGE CHECK FAILED: bundle carries {} groups \
-                 but the group map has G={}",
-                bundle.num_groups(),
-                g_count,
-            );
-            return false;
-        }
-
-        if !skip_commit_observe {
-            for g in 0..g_count {
-                challenger.observe(bundle.commit_g(g).original_commitment.clone());
-            }
-        }
-
-        for (g, grp) in proof_groups.iter().enumerate() {
-            let chip_infos_g: Vec<JaggedChipInfo> =
-                grp.iter().map(|&i| chip_infos[i].clone()).collect();
-            let r_row_g: Vec<Vec<InnerChallenge>> =
-                grp.iter().map(|&i| r_row_per_chip[i].clone()).collect();
-            let y_per_chip_g: Vec<Vec<InnerChallenge>> =
-                grp.iter().map(|&i| bundle.y_per_chip[i].clone()).collect();
-            let opened_main_g: Vec<Vec<InnerChallenge>> =
-                grp.iter().map(|&i| opened_main[i].clone()).collect();
-            let pkg = bundle.packing_g(g);
-            let packing = JaggedPacking {
-                dense_values: Vec::new(),
-                chip_infos: chip_infos_g,
-                offsets: pkg.offsets.clone(),
-                total_values: pkg.total_values,
-                dense_len: pkg.total_values,
-            };
-            if !verify_one_jagged_group(
-                &packing,
-                &r_row_g,
-                z_row,
-                &y_per_chip_g,
-                &opened_main_g,
-                bundle.reduction_g(g),
-                bundle.jagged_eval_g(g),
-                bundle.commit_g(g),
-                bundle.basefold_proof_g(g),
-                if g == 0 { bundle.whir_proof.as_ref() } else { None },
-                challenger,
-                if g == 0 { preceding_rounds } else { &[] },
-                g,
-                profile,
-            ) {
-                return false;
-            }
-        }
-        true
     }
 
     /// Bind the bundle's column claims to the trace openings the AIR phases
@@ -2166,137 +1290,7 @@ pub mod jagged {
         Ok(())
     }
 
-    /// Verify one jagged group. `opened_main` are this group's `main.local`
-    /// openings, index-aligned with `y_per_chip`; `whir_proof` is `Some`
-    /// when the shard was opened with WHIR; `preceding_rounds` are the rounds
-    /// before this one, as (commitment, area), whose commitments are the
-    /// verifying key's.
-    #[allow(clippy::too_many_arguments)]
-    fn verify_one_jagged_group(
-        packing: &JaggedPacking<InnerVal>,
-        r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge],
-        y_per_chip: &[Vec<InnerChallenge>],
-        opened_main: &[Vec<InnerChallenge>],
-        reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
-        jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
-        commit: &crate::jagged_pcs::JaggedCommit,
-        basefold_proof: &crate::basefold::StackedBasefoldProof<
-            InnerVal,
-            InnerChallenge,
-            crate::jagged_pcs::JaggedMmcs,
-        >,
-        whir_proof: Option<
-            &crate::whir::stacked::StackedWhirProof<
-                InnerVal,
-                InnerChallenge,
-                crate::jagged_pcs::JaggedMmcs,
-            >,
-        >,
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        preceding_rounds: &[(
-            <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-            usize,
-        )],
-        g: usize,
-        profile: crate::whir::jagged::WhirProfile,
-    ) -> bool {
-        if commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
-            return false;
-        }
-        let num_cols = packing.offsets.len().saturating_sub(1);
-        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<InnerChallenge> =
-            (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
-        let red_result = verify_jagged_reduction(
-            reduction,
-            packing,
-            r_row_per_chip,
-            opened_main,
-            &z_col,
-            z_row,
-            challenger,
-        );
-        let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            tracing::warn!("[basefold verify] group {g}: jagged sumcheck reduction REJECTED");
-            return false;
-        };
-
-        if let Err(why) = cross_bind_openings(y_per_chip, opened_main, &z_col) {
-            tracing::warn!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
-            return false;
-        }
-
-        crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(jagged_eval, challenger);
-
-        let z_star_orig_len = z_star.len();
-        let stack_dim_for_target = commit.log_stacking_height as usize;
-        let total_stripes: usize =
-            preceding_rounds.iter().map(|(_, a)| a >> stack_dim_for_target).sum::<usize>()
-                + (commit.area >> stack_dim_for_target);
-        let target_dim = stack_dim_for_target
-            + total_stripes.max(1).next_power_of_two().trailing_zeros() as usize;
-        let mut extended_z_star = z_star;
-        while extended_z_star.len() < target_dim {
-            let r: InnerChallenge = challenger.sample_algebra_element();
-            extended_z_star.push(r);
-        }
-
-        let stack_dim = commit.log_stacking_height as usize;
-        let mut q_at_z_adj = q_at_z;
-        if z_star_orig_len < stack_dim {
-            for r in &extended_z_star[z_star_orig_len..stack_dim.min(target_dim)] {
-                q_at_z_adj *= InnerChallenge::ONE - *r;
-            }
-        }
-
-        let mut commitments: Vec<_> = preceding_rounds.iter().map(|(c, _)| c.clone()).collect();
-        commitments.push(commit.original_commitment.clone());
-        let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
-        areas.push(commit.area);
-        if let Some(wp) = whir_proof {
-            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-            let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-            let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-            let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
-            let cfg = crate::whir::jagged::whir_config_for_profile(
-                profile,
-                commit.log_stacking_height as usize,
-            );
-            let res = crate::whir::jagged::verify_jagged_whir_rounds(
-                mmcs,
-                cfg,
-                commit.log_stacking_height,
-                &commitments,
-                &areas,
-                &extended_z_star,
-                wp,
-                q_at_z_adj,
-                challenger,
-            );
-            if let Err(e) = &res {
-                tracing::warn!("[whir verify] whir opening REJECTED: {:?}", e);
-            }
-            return res.is_ok();
-        }
-        let res = crate::jagged_pcs::verify_jagged_pcs_rounds(
-            &commitments,
-            &areas,
-            commit.log_stacking_height,
-            &extended_z_star,
-            q_at_z_adj,
-            basefold_proof,
-            challenger,
-        );
-        if let Err(e) = &res {
-            tracing::warn!("[basefold verify] basefold opening REJECTED: {:?}", e);
-        }
-        res.is_ok()
-    }
-
-    /// BaseFold-over-BN254 wrap port: build the ring-agnostic verifier
+    /// Build the ring-agnostic verifier
     /// inputs (chip_infos / r_row_per_chip / z_row) from the bundle's
     /// `PackingMeta` + per-chip column widths + the shared zerocheck eval
     /// point. Mirrors the host verifier's construction
@@ -2355,9 +1349,10 @@ pub mod jagged {
     }
 
     /// Verifier counterpart of `prove_jagged_rounds_generic`, generic over the
-    /// challenger and the MMCS. The outer (wrap) ring runs it with
-    /// `OuterChallenger` and `OuterValMmcs`; the inner ring uses
-    /// `verify_jagged_inner`.
+    /// challenger and the MMCS, under the WHIR schedule `config`. The outer
+    /// (wrap) ring runs it with `OuterChallenger` and `OuterValMmcs`; the inner
+    /// ring through [`verify_jagged_no_observe`] with `JaggedChallenger` and
+    /// `JaggedMmcs`.
     ///
     /// `preceding_rounds` are the rounds before the main one, as
     /// (commitment, area): the preprocessed round, whose commitment the key
@@ -2374,28 +1369,28 @@ pub mod jagged {
         challenger: &mut Challenger,
         mmcs: MT,
         skip_commit_observe: bool,
-        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
-        preceding_rounds: &[(
-            <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-            usize,
-        )],
+        config: crate::whir::config::WhirConfig,
+        preceding_rounds: &[(<MT as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         opened_main: &[Vec<InnerChallenge>],
     ) -> bool
     where
-        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
-        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+        MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+            + 'static,
     {
-        if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
-            tracing::info!("[basefold verify] {why}");
+        if let Err(why) =
+            crate::jagged_pcs::check_canonical_packing(&bundle.packing, "jagged verify")
+        {
+            tracing::info!("[jagged verify] {why}");
             return false;
         }
 
-        if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
+        if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
-        debug_assert_eq!(bundle.num_groups(), 1, "wrap verify expects a single-GROUP bundle",);
+        let whir_proof = &bundle.whir_proof;
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
         }
@@ -2411,10 +1406,10 @@ pub mod jagged {
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
         if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
-            tracing::warn!("[basefold verify outer] CROSS-BIND FAILED — {why}");
+            tracing::warn!("[jagged verify] cross-bind failed: {why}");
             return false;
         }
-        let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
+        let red_result = verify_jagged_reduction(
             &bundle.reduction,
             &packing,
             r_row_per_chip,
@@ -2424,7 +1419,7 @@ pub mod jagged {
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            tracing::warn!("[basefold verify outer] jagged sumcheck reduction REJECTED");
+            tracing::warn!("[jagged verify] jagged sumcheck reduction rejected");
             return false;
         };
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
@@ -2454,19 +1449,19 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
-        let res = crate::jagged_pcs::verify_jagged_pcs_rounds_generic::<Challenger, MT>(
+        let res = crate::whir::jagged::verify_jagged_whir_rounds::<Challenger, MT>(
+            mmcs,
+            config,
+            bundle.commit.log_stacking_height,
             &commitments,
             &areas,
-            bundle.commit.log_stacking_height,
             &extended_z_star,
+            whir_proof,
             q_at_z_adj,
-            &bundle.basefold_proof,
             challenger,
-            mmcs,
-            fri,
         );
         if let Err(e) = &res {
-            tracing::warn!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
+            tracing::warn!("[jagged verify] WHIR opening rejected: {:?}", e);
         }
         res.is_ok()
     }
@@ -2686,6 +1681,7 @@ a consumer reading the witness field here would verify over the wrong number of 
 mod test {
     use super::*;
 
+    use p3_challenger::CanObserve;
     use p3_field::BasedVectorSpace;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
@@ -2706,78 +1702,7 @@ mod test {
         JaggedChallenger::new(perm)
     }
 
-    /// End-to-end: commit a small batch of heterogeneous chip traces,
-    /// open at a random point, verify.  This is the OOM-cure flow
-    /// (per-chip Mles → stacked PCS → BaseFold) on a toy size.
-    #[test]
-    fn test_jagged_pcs_roundtrip() {
-        let mut rng = StdRng::seed_from_u64(0xBA5E_F01D_5EED);
-
-        let mk_trace = |width: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<JaggedVal> {
-            let v: Vec<JaggedVal> = (0..width * h).map(|_| rand_kb(rng)).collect();
-            RowMajorMatrix::new(v, width)
-        };
-        let traces = vec![
-            ("Cpu".into(), mk_trace(20, 100, &mut rng)),
-            ("Add".into(), mk_trace(8, 50, &mut rng)),
-        ];
-        let views = as_chip_views(&traces);
-        let packing = crate::jagged::compute_jagged_metadata::<JaggedVal>(&views);
-        let dense = crate::jagged::materialize_dense_jagged::<JaggedVal>(&views, packing.dense_len);
-        let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
-
-        let mut p_chal = build_challenger();
-        let (commit, prover_data) = commit_jagged_pcs(dense_traces);
-        p_chal.observe(commit.original_commitment.clone());
-
-        let stack_dim = commit.log_stacking_height as usize;
-        let num_stripes = commit.area >> stack_dim;
-        let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
-        let total_vars = num_batch_vars + stack_dim;
-        let eval_point: Vec<JaggedChallenge> = (0..total_vars).map(|_| rand_ef(&mut rng)).collect();
-
-        let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
-        let batch_evals_flat: Vec<JaggedChallenge> = prover_data
-            .stacked_data
-            .interleaved_mles
-            .iter()
-            .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
-            .collect();
-
-        let batch_point = &eval_point[stack_dim..];
-        let evaluation_claim = {
-            let target = 1usize << batch_point.len();
-            let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
-            current.resize(target, JaggedChallenge::ZERO);
-            for &r in batch_point.iter() {
-                let half = current.len() / 2;
-                for i in 0..half {
-                    let lo = current[2 * i];
-                    let hi = current[2 * i + 1];
-                    current[i] = lo + r * (hi - lo);
-                }
-                current.truncate(half);
-            }
-            current[0]
-        };
-
-        let proof = open_jagged_pcs(&prover_data, eval_point.clone(), &mut p_chal);
-
-        let mut v_chal = build_challenger();
-        v_chal.observe(commit.original_commitment.clone());
-        verify_jagged_pcs(
-            &commit.original_commitment,
-            commit.area,
-            commit.log_stacking_height,
-            &eval_point,
-            evaluation_claim,
-            &proof,
-            &mut v_chal,
-        )
-        .expect("basefold jagged-PCS roundtrip");
-    }
-
-    // Jagged-BaseFold bundle tests — driven through the PRODUCTION
+    // Jagged bundle tests — driven through the PRODUCTION
     // pipeline pair: `prove_jagged_rounds` (here with the
     // shard's single MAIN round) and `verify_jagged_no_observe`,
     // with the verifier inputs rebuilt by `build_jagged_verify_inputs`
@@ -2804,7 +1729,7 @@ mod test {
                     let h = t.values.len().checked_div(t.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     crate::multilinear::PaddedMle::padded_with_zeros(
-                        std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                        std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(
                             p3_matrix::dense::RowMajorMatrix::new(t.values.clone(), t.width),
                         )),
                         log_h,
@@ -2907,27 +1832,24 @@ mod test {
             &r_row_per_chip,
             &z_row_v,
             &[],
-            0,
             bundle,
             opened_main,
             &mut v_chal,
         )
     }
 
-    /// Full jagged-sumcheck pipeline backed by BaseFold: an honest
+    /// Full jagged-sumcheck pipeline backed by WHIR: an honest
     /// single-main-round bundle from the production rounds prover must
     /// round-trip through the production verifier.
     #[test]
-    fn test_jagged_basefold_roundtrip() {
+    fn test_jagged_roundtrip() {
         // Cover both power-of-two heights and a chip padded to 96 rows.
         for shapes in [&[(4, 16), (2, 8)][..], &[(4, 96), (2, 32)][..]] {
             let (traces, z_row) = mk_shard(shapes, 0xC0DE_BA5E);
             let views = as_chip_views(&traces);
             let mut p_chal = build_challenger();
             let precomputed =
-                <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-                    &views, None,
-                );
+                <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&views, None);
             p_chal.observe(precomputed.commit.original_commitment.clone());
             let r_row = r_row_suffixes(&views, &z_row);
             let rounds = [JaggedOpenRound {
@@ -2940,7 +1862,7 @@ mod test {
             let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
             assert!(
                 verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
-                "jagged-basefold pipeline should accept honest proof"
+                "jagged-WHIR pipeline should accept honest proof"
             );
         }
     }
@@ -2982,12 +1904,10 @@ mod test {
         crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
     ) {
         (
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(
                 prep_views, prep_pin,
             ),
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-                main_views, None,
-            ),
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(main_views, None),
         )
     }
 
@@ -3053,7 +1973,7 @@ mod test {
     /// so its gap is ZERO and it contributes only the one zero-height column the
     /// layout always emits.
     #[test]
-    fn test_jagged_basefold_two_round_layout() {
+    fn test_jagged_two_round_layout() {
         const STRIPE: usize = 1usize << DEFAULT_LOG_STACKING_HEIGHT;
         const PREP_CELLS: usize = 4 * 16 + 2 * 8;
         const PREP_PAD_COLS: usize = 16;
@@ -3112,7 +2032,6 @@ mod test {
                 &r_row_v,
                 &z_row_v,
                 &[(preceding_root.clone(), prep.prover_data.area)],
-                prep_traces.len(),
                 &bundle,
                 &bundle.y_per_chip,
                 &mut v_chal,
@@ -3144,38 +2063,13 @@ mod test {
         if let Some(a) = area {
             pre.commit.area = a;
             pre.prover_data.area = a;
-            if let Some(w) = pre.whir_data.as_mut() {
-                w.area = a;
-            }
+            pre.whir_data.area = a;
         }
         if let Some(h) = lsh {
             pre.commit.log_stacking_height = h;
             pre.prover_data.log_stacking_height = h;
-            if let Some(w) = pre.whir_data.as_mut() {
-                w.log_stacking_height = h;
-            }
+            pre.whir_data.log_stacking_height = h;
         }
-    }
-
-    /// Fail-fast control: a round whose commit was built for the OTHER scheme.
-    ///
-    /// Each round's commitment was observed into the transcript as whatever its
-    /// commit produced — a WHIR root for a WHIR-committed round, a BaseFold root
-    /// otherwise — and the batched open runs ONE scheme over all of them. A
-    /// round missing its WHIR data under `WhirDenseOpen` would be opened against
-    /// a tree that was never built, while the verifier (which dispatches on
-    /// `bundle.whir_proof`) replays a different transcript.
-    ///
-    /// The scheme is a type, so the rejection comes from the scheme finding a
-    /// round it cannot open.
-    #[test]
-    #[should_panic(expected = "carries no WHIR data")]
-    fn two_round_rejects_a_round_committed_for_the_other_scheme() {
-        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        assert!(prep.whir_data.is_some(), "the inner ring must commit under WHIR");
-        assert!(main.whir_data.is_some(), "the inner ring must commit under WHIR");
-        main.whir_data = None;
-        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
 
     /// Fail-fast control: a round carries its geometry three times and three
@@ -3202,15 +2096,15 @@ mod test {
     /// Fail-fast control: the WHIR record of one round, moved alone.
     ///
     /// The cross-round checks compare WHIR records with other rounds' WHIR
-    /// records, so a round whose WHIR copy disagrees with its OWN BaseFold copy
-    /// satisfies every one of them -- and the audit lists the WHIR half of this
-    /// case as uncovered.  The rounds then open under one geometry while the
-    /// reduction and the verifier use another.
+    /// records, so a round whose `whir_data` disagrees with its OWN `commit`
+    /// and `prover_data` satisfies every one of them -- and the audit lists
+    /// the WHIR half of this case as uncovered.  The rounds then open under
+    /// one geometry while the reduction and the verifier use another.
     #[test]
     #[should_panic(expected = "WHIR log_stacking_height")]
     fn two_round_rejects_a_whir_height_disagreeing_with_its_own_round() {
         let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        let wd = main.whir_data.as_mut().expect("the inner ring commits under WHIR");
+        let wd = &mut main.whir_data;
         wd.log_stacking_height = DEFAULT_LOG_STACKING_HEIGHT - 1;
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
@@ -3220,7 +2114,7 @@ mod test {
     #[should_panic(expected = "WHIR area")]
     fn two_round_rejects_a_whir_area_disagreeing_with_its_own_round() {
         let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        let wd = main.whir_data.as_mut().expect("the inner ring commits under WHIR");
+        let wd = &mut main.whir_data;
         wd.area += 1usize << DEFAULT_LOG_STACKING_HEIGHT;
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
@@ -3289,7 +2183,23 @@ mod test {
         let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
         let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
         let h = validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
+            z_row.len(),
+        );
+        assert_eq!(h, prep.prover_data.log_stacking_height as usize);
+    }
+
+    /// Without per-round row points, the remaining checks still run and
+    /// accept the honest instance.
+    #[test]
+    fn validate_jagged_rounds_accepts_rounds_without_row_points() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
+        let h = validate_jagged_rounds(
+            &[(&prep, pc.as_slice(), None), (&main, mc.as_slice(), None)],
             z_row.len(),
         );
         assert_eq!(h, prep.prover_data.log_stacking_height as usize);
@@ -3305,7 +2215,10 @@ mod test {
         mc[0].push(JaggedChallenge::ONE);
         let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
         validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
             z_row.len(),
         );
     }
@@ -3320,7 +2233,10 @@ mod test {
         let mut mr = r_row_suffixes(&main_views, &z_row);
         mr.pop();
         validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
             z_row.len(),
         );
     }
@@ -3354,7 +2270,6 @@ mod test {
                 &r_row_v,
                 &z_row_v,
                 &[(prep.commit.original_commitment.clone(), prep.prover_data.area)],
-                prep_views.len(),
                 b,
                 &b.y_per_chip,
                 &mut v_chal,
@@ -3502,12 +2417,12 @@ mod test {
     /// "I forgot to observe X into the challenger" bugs that pass
     /// honest-prover tests but admit forgery.
     #[test]
-    fn test_jagged_basefold_rejects_tampered_proof() {
+    fn test_jagged_rejects_tampered_proof() {
         let (traces, z_row) = mk_shard(&[(4, 16)], 0xDEAD_BEEF);
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -3539,11 +2454,7 @@ mod test {
         );
 
         let mut tampered = bundle.clone();
-        if let Some(wp) = tampered.whir_proof.as_mut() {
-            wp.whir_proof.final_poly[0] += JaggedChallenge::ONE;
-        } else {
-            tampered.basefold_proof.basefold_proof.final_poly += JaggedChallenge::ONE;
-        }
+        tampered.whir_proof.whir_proof.final_poly[0] += JaggedChallenge::ONE;
         assert!(
             !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject final_poly tampering"
@@ -3562,7 +2473,7 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -3598,7 +2509,7 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -3631,18 +2542,15 @@ mod test {
         );
     }
 
-    /// (i) NO-OP byte-identity: with grouping OFF (the default), a G==1
-    /// bundle has scalar group-0 fields, EMPTY `extra_*` + `groups`, and an
-    /// honest roundtrip verifies.  The empty `serde(default)` fields make the
-    /// wire bytes byte-identical to the pre-split format (a freshly
-    /// deserialized bundle is bit-for-bit equal AND still verifies).
+    /// A bundle's wire bytes round-trip, and the deserialized bundle verifies
+    /// exactly as the original does.
     #[test]
-    fn test_cp_a_g1_noop_byte_identity() {
+    fn bundle_bytes_round_trip() {
         let (traces, z_row) = mk_shard(&[(4, 16), (2, 8), (6, 4)], 0xA11CE);
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+            <KoalaBearPoseidon2 as crate::config::WhirRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -3653,27 +2561,19 @@ mod test {
         }];
         let bundle = prove_jagged_rounds(&rounds, &z_row, &mut p_chal);
 
-        assert_eq!(bundle.num_groups(), 1, "grouping OFF ⇒ G==1");
-        assert!(bundle.groups.is_empty(), "G==1 ⇒ empty group map");
-        assert!(bundle.extra_reduction.is_empty());
-        assert!(bundle.extra_basefold_proof.is_empty());
-        assert!(bundle.extra_commit.is_empty());
-        assert!(bundle.extra_packing.is_empty());
-        assert!(bundle.extra_jagged_eval.is_empty());
-
         let bytes = bundle.to_bytes();
-        let bundle2 = JaggedPcsProof::from_bytes(&bytes).expect("deserialize G==1 bundle");
+        let bundle2 = JaggedPcsProof::from_bytes(&bytes).expect("deserialize the bundle");
         let bytes2 = bundle2.to_bytes();
-        assert_eq!(bytes, bytes2, "G==1 bundle bytes must round-trip identically");
+        assert_eq!(bytes, bytes2, "bundle bytes must round-trip identically");
 
         let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
         assert!(
             verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
-            "G==1 bundle must verify"
+            "the bundle must verify"
         );
         assert!(
             verify_main_round(&bundle2, &widths, &z_row, &bundle2.y_per_chip),
-            "deserialized G==1 bundle must verify identically"
+            "the deserialized bundle must verify identically"
         );
     }
 

@@ -1,4 +1,4 @@
-//! Host-side chip-constraint folder for the BaseFold pipeline.
+//! Host-side chip-constraint folder for the jagged pipeline.
 //!
 //! Row-selector accessors panic: chips evaluated through this folder
 //! must have already folded `is_first_row`/`is_last_row`/transition
@@ -35,7 +35,7 @@ use crate::Chip;
 /// into their constraint expressions.
 pub struct ShardConstraintFolder<'a, F: Field, K: Field, EF: ExtensionField<F>> {
     /// Preprocessed row at the sumcheck point. `PairWindow` always
-    /// has `local == next`; BaseFold has no transition window.
+    /// has `local == next`; the jagged zerocheck has no transition window.
     pub preprocessed: PairWindow<'a, K>,
     /// Main row at the sumcheck point, same convention.
     pub main: PairWindow<'a, K>,

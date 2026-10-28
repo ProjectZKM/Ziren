@@ -11,7 +11,7 @@ A compressed proof is a KoalaBear STARK. Verifying it on a blockchain would cost
 `ZKMProver::wrap_bn254(shrink_proof, opts)` runs the *wrap* program, which verifies the shrink proof. The wrap program is proved with a different configuration (`OuterSC` in `crates/recursion/core/src/stark/config.rs`), chosen to be cheap to verify in a BN254 circuit:
 
 - the field is still KoalaBear with its degree-4 extension, but Merkle trees and the transcript use Poseidon2 over the BN254 scalar field (width 3). The transcript is a `MultiField32Challenger`, which packs KoalaBear elements into BN254 elements;
-- the dense polynomial commitment under the jagged layer is BaseFold at rate \\( 2^{-3} \\), with 94 queries and 26 bits of query grinding (`ZIREN_WRAP_QUERY_GRINDING_BITS`);
+- the dense polynomial commitment under the jagged layer is WHIR under the wrap schedule (`wrap_whir_config` in `crates/pcs/src/whir/jagged.rs`): first rate \\( 2^{-3} \\), folds \\( [2, 6, 6] \\), queries counted under the Johnson bound at multiplicity 3, and 24 bits of query grinding (`ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS`);
 - the wrap machine (`WrapAir`) allows constraints of degree 9, so its Poseidon2 chip uses the degree-9 column layout with fewer intermediate columns than the degree-3 layout of the compress and shrink machines.
 
 ## 3. SNARK

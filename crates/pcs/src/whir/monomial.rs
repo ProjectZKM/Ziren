@@ -3,7 +3,7 @@
 //! WHIR commits the polynomial as **monomial coefficients** (the codeword is a
 //! DFT of coefficients), and answers OOD / STIR constraints with the monomial
 //! evaluation, not the Lagrange one.  The distinction is exactly what an earlier
-//! set of probes tripped over: Ziren's [`crate::basefold::mle::Mle::eval_at`] is
+//! set of probes tripped over: Ziren's [`crate::whir::mle::Mle::eval_at`] is
 //! the Lagrange multilinear extension (`lo+α(hi−lo)`), whereas the codeword is a
 //! coefficient-basis univariate.  These helpers provide the monomial side.
 //!

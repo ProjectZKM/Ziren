@@ -73,8 +73,8 @@ impl<F, A: Backend> DerefMut for Traces<F, A> {
 #[cfg(test)]
 mod tests {
     use super::Traces;
-    use crate::basefold::Mle;
     use crate::multilinear::PaddedMle;
+    use crate::whir::mle::Mle;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;

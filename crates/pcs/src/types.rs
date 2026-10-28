@@ -73,9 +73,9 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// opening per shard.  Every prover stage (core, compress, shrink, wrap)
     /// emits it; a proof without one is malformed and the verifier rejects it.
     ///
-    /// Named for the jagged opening, not for a dense scheme: the dense PCS
-    /// underneath is WHIR on the inner ring and BaseFold on the outer one,
-    /// chosen per proof, so no single scheme name describes this value.
+    /// Named for the jagged opening rather than for the dense PCS under it
+    /// (stacked WHIR on every ring, with a ring-specific Merkle hash and
+    /// schedule).
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
     /// JaggedShardProof is ~KB of nested structs.
@@ -96,7 +96,7 @@ impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
 
 /// The instruction-bearing chips of the core machine: present in a shard
 /// proof IFF the shard executed instructions.  Mirrored by the recursion
-/// circuit's execution-shard detection (`core_basefold.rs`).
+/// circuit's execution-shard detection (`core_jagged.rs`).
 pub const EXECUTION_CHIP_NAMES: &[&str] = &[
     "AddSub",
     "AddSubImm",

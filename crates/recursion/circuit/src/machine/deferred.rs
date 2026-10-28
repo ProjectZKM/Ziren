@@ -1,12 +1,12 @@
 //! Deferred-stage shape carrier.
 //!
 //! The deferred verifier lives in
-//! [`super::deferred_basefold::verify_deferred_basefold`]; the recursion-AIR
-//! variant lives in [`super::deferred_basefold_recursion`].
+//! [`super::deferred_jagged::verify_deferred_jagged`], built into a program
+//! by [`super::programs::build_deferred_program`].
 //!
 //! [`ZKMDeferredShape`] is the shape-enumeration carrier on the
 //! compress branch (consumed by
-//! [`super::deferred_basefold::ZKMDeferredBasefoldWitnessValues::dummy`])
+//! [`super::deferred_jagged::ZKMDeferredWitnessValues::dummy`])
 //! and references [`super::ZKMCompressShape`] from [`super::compress`].
 
 use super::ZKMCompressShape;

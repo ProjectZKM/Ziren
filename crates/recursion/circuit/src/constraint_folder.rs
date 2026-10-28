@@ -1,4 +1,4 @@
-//! In-circuit chip-constraint folder for the BaseFold pipeline.
+//! In-circuit chip-constraint folder for the jagged pipeline.
 //!
 //! Specialised constraint-folding builder used by the recursion-
 //! circuit shard verifier's zerocheck phase to evaluate per-chip
@@ -24,14 +24,14 @@ use zkm_pcs::folder::PairWindow;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 
-/// In-circuit chip-constraint folder for the BaseFold pipeline.
+/// In-circuit chip-constraint folder for the jagged pipeline.
 ///
 /// `'a` borrows the per-chip opening references (preprocessed
 /// local row, main local row, public values).
 pub struct ShardConstraintFolder<'a, C: Config> {
     /// Local row of the preprocessed trace at the sumcheck point.
     /// Wrapped as a [`PairWindow`] where `local == next == &row`
-    /// (the BaseFold pipeline has no next-row concept; the row
+    /// (the jagged pipeline has no next-row concept; the row
     /// duplication satisfies [`p3_air::WindowAccess`] without
     /// exposing a real transition window).
     pub preprocessed: PairWindow<'a, SymbolicExt<C::F, C::EF>>,
@@ -47,7 +47,7 @@ pub struct ShardConstraintFolder<'a, C: Config> {
     /// Shard public values.
     pub public_values: &'a [Felt<C::F>],
     /// Local cumulative sum reference required by
-    /// [`zkm_pcs::air::MultiTableAirBuilder`].  In the BaseFold
+    /// [`zkm_pcs::air::MultiTableAirBuilder`].  In the jagged
     /// pipeline the per-chip cumulative sums live in the LogUp-GKR
     /// sumcheck output rather than as Air-side fields, so this
     /// reference can point at a placeholder / zero value when the
@@ -262,7 +262,7 @@ mod tests {
 /// `RecursionAir` chip implements
 /// `Air<ShardConstraintFolder<'a, InnerConfig>>` — the in-circuit
 /// counterpart to the host-side assertion in
-/// `crates/recursion/core/src/machine.rs::basefold_air_assertions`.
+/// `crates/recursion/core/src/machine.rs::jagged_air_assertions`.
 ///
 /// The in-circuit `ShardConstraintFolder<'a, C: Config>` (above)
 /// is `AirBuilder + EmptyMessageBuilder + ExtensionBuilder +
@@ -280,7 +280,7 @@ mod tests {
 /// `#[derive(MachineAir)]` macro for `RecursionAir<F, DEGREE>` is
 /// satisfied.
 #[cfg(test)]
-mod basefold_air_assertions_circuit {
+mod jagged_air_assertions_circuit {
     use super::*;
     use p3_air::Air;
     use zkm_pcs::InnerVal;
@@ -298,7 +298,7 @@ mod basefold_air_assertions_circuit {
     type C = InnerConfig;
 
     /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, C>>`.
-    fn assert_basefold_air_circuit<T>()
+    fn assert_jagged_air_circuit<T>()
     where
         T: for<'a> Air<ShardConstraintFolder<'a, C>>,
     {
@@ -312,19 +312,19 @@ mod basefold_air_assertions_circuit {
     #[allow(dead_code)]
     const _ASSERT_ALL_CHIPS_CIRCUIT: fn() = || {
         // 1. MemoryConst
-        assert_basefold_air_circuit::<MemoryConstChip<InnerVal>>();
+        assert_jagged_air_circuit::<MemoryConstChip<InnerVal>>();
         // 2. MemoryVar
-        assert_basefold_air_circuit::<MemoryVarChip<InnerVal>>();
+        assert_jagged_air_circuit::<MemoryVarChip<InnerVal>>();
         // 3. BaseAlu
-        assert_basefold_air_circuit::<BaseAluChip>();
+        assert_jagged_air_circuit::<BaseAluChip>();
         // 4. ExtAlu
-        assert_basefold_air_circuit::<ExtAluChip>();
+        assert_jagged_air_circuit::<ExtAluChip>();
         // 5. Poseidon2Wide
-        assert_basefold_air_circuit::<Poseidon2WideChip<9>>();
+        assert_jagged_air_circuit::<Poseidon2WideChip<9>>();
         // 6. Select
-        assert_basefold_air_circuit::<SelectChip>();
+        assert_jagged_air_circuit::<SelectChip>();
         // 7. PublicValues
-        assert_basefold_air_circuit::<PublicValuesChip>();
+        assert_jagged_air_circuit::<PublicValuesChip>();
 
         // Enum-level: derive-generated
         // `impl<F, const DEGREE, AB: ZKMRecursionAirBuilder<F = F>>
@@ -332,6 +332,6 @@ mod basefold_air_assertions_circuit {
         // For AB = ShardConstraintFolder<'a, InnerConfig>:
         //   AB::F = InnerConfig::F = KoalaBear = InnerVal ✓
         //   AB::Var = Ext<KoalaBear, InnerChallenge>: 'static ✓
-        assert_basefold_air_circuit::<RecursionAir<InnerVal, 9>>();
+        assert_jagged_air_circuit::<RecursionAir<InnerVal, 9>>();
     };
 }

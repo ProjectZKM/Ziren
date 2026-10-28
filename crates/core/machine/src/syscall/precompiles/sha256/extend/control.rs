@@ -1,7 +1,7 @@
 //! SHA-256 extend control chip: the two endpoints of the
 //! [`LookupKind::PrecompileChain`] state-chaining bus for SHA-256 extend.
 //!
-//! The single-row BaseFold zerocheck folder sees no neighbouring row, so the
+//! The single-row jagged zerocheck folder sees no neighbouring row, so the
 //! per-row loop index is sequenced on a LogUp bus. This control chip emits
 //! exactly one row per `SHA_EXTEND` syscall: it receives the syscall, sends
 //! the initial index `i = 16`, and receives the final index `i = 64`.  Each `ShaExtendChip` worker row receives `i` and sends `i + 1`,

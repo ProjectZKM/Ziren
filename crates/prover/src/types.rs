@@ -10,9 +10,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
-use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
-use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
-use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::compress_jagged::ZKMCompressWitnessValues;
+use zkm_recursion_circuit::machine::core_jagged::ZKMCoreWitnessValues;
+use zkm_recursion_circuit::machine::deferred_jagged::ZKMDeferredWitnessValues;
 
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
@@ -236,14 +236,14 @@ impl From<VkNotAllowed> for ZKMRecursionProverError {
 
 #[allow(clippy::large_enum_variant)]
 pub enum ZKMCircuitWitness {
-    /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
+    /// jagged-shape normalize input — consumes `JaggedShardProof`s from
     /// the core prover (carried on `ShardProof.jagged_shard_proof`).
-    /// Dispatches to `build_normalize_basefold_program` during compress.
-    CoreBasefold(ZKMCoreBasefoldWitnessValues<CoreSC>),
-    /// Basefold-shape compose input — tree-reduction layer.
-    /// Dispatches to `build_compose_basefold_program`.
-    ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),
-    /// Basefold-shape deferred input — verifies already-recursed deferred
-    /// branches. Dispatches to `build_deferred_basefold_program`.
-    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<CompressedSC>),
+    /// Dispatches to `build_normalize_program` during compress.
+    CoreJagged(ZKMCoreWitnessValues<CoreSC>),
+    /// jagged-shape compose input — tree-reduction layer.
+    /// Dispatches to `build_compose_program`.
+    ComposeJagged(ZKMCompressWitnessValues<InnerSC>),
+    /// jagged-shape deferred input — verifies already-recursed deferred
+    /// branches. Dispatches to `build_deferred_program`.
+    DeferredJagged(ZKMDeferredWitnessValues<CompressedSC>),
 }

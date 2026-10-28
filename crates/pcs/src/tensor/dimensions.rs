@@ -1,7 +1,7 @@
 //! 2D row-major shape descriptor: [`Dimensions`].
 //!
 //! Ziren's tensors are always 2D `[rows, cols]` row-major (that is the
-//! full extent of what `Mle` / the basefold commit path needs), so we
+//! full extent of what `Mle` / the whir commit path needs), so we
 //! use plain fixed-size `[usize; 2]` arrays rather than an `arrayvec`.
 //! `strides` is carried for forward-compatibility (a future device
 //! backend / non-contiguous view) but for the contiguous CPU tensors it

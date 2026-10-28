@@ -31,10 +31,9 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::basefold::config::FriConfig;
-use crate::basefold::encoder::DftEncoder;
-use crate::basefold::fri::codeword_from_ef;
-use crate::basefold::mle::Mle;
+use crate::whir::code::codeword_from_ef;
+use crate::whir::encoder::DftEncoder;
+use crate::whir::mle::Mle;
 use crate::whir::proof::{ParsedCommitment, ProofOfWork, SumcheckPoly};
 use crate::whir::prover::WhirProver;
 use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
@@ -42,14 +41,14 @@ use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
 /// One committed round of the tower: its parsed commitment (Merkle root + OOD)
 /// alongside the prover-side Merkle data, retained for the query openings.
 pub struct RoundCommitment<F: p3_field::Field, EF, MT: Mmcs<F>> {
-    pub parsed: ParsedCommitment<F, EF, MT::Commitment>,
+    pub parsed: ParsedCommitment<EF, MT::Commitment>,
     pub prover_data: MT::ProverData<RowMajorMatrix<F>>,
 }
 
 /// The output of the folding tower.
 pub struct RoundedProof<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// The starting commitment + its OOD.
-    pub starting: ParsedCommitment<F, EF, MT::Commitment>,
+    pub starting: ParsedCommitment<EF, MT::Commitment>,
     /// The starting codeword's Merkle data, for the first round's query opening.
     pub starting_prover_data: MT::ProverData<RowMajorMatrix<F>>,
     /// The intermediate round commitments (re-encoded folded codewords + OOD).
@@ -132,13 +131,10 @@ where
             let rem = folder.f_vec.len().trailing_zeros() as usize;
             let folded_mle =
                 Arc::new(Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
-            let ef_encoder = DftEncoder::new(
-                FriConfig::<EF>::new(round_cfg.log_inv_rate, 0, 0),
-                Arc::clone(&ef_dft),
-            );
+            let ef_encoder = DftEncoder::<EF, _>::new(round_cfg.log_inv_rate, Arc::clone(&ef_dft));
             let ef_codewords = ef_encoder.encode_batch(alloc::vec![folded_mle]);
             let base_codeword =
-                codeword_from_ef::<F, EF>(crate::basefold::fri::take_codeword_values(ef_codewords));
+                codeword_from_ef::<F, EF>(crate::whir::code::take_codeword_values(ef_codewords));
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![base_codeword.data]);
             challenger.observe(commitment.clone());
 
@@ -161,7 +157,6 @@ where
                     commitment: alloc::vec![commitment],
                     ood_points,
                     ood_answers,
-                    _f: core::marker::PhantomData,
                 },
                 prover_data,
             });

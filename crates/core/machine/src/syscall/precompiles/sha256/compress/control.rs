@@ -1,7 +1,7 @@
 //! SHA-256 compress **control chip** — the two endpoints of the
 //! [`LookupKind::PrecompileChain`] state-chaining bus for SHA-256 compress.
 //!
-//! The single-row BaseFold zerocheck folder evaluates no
+//! The single-row jagged zerocheck folder evaluates no
 //! `when_first_row`/`when_transition`/`next.*` constraints, so the per-row
 //! state transition is carried on a LogUp bus instead.  This
 //! control chip emits exactly one row per `SHA_COMPRESS` syscall: it

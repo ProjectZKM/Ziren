@@ -228,7 +228,7 @@ impl From<RecursionShape> for OrderedShape {
 /// `Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
 ///
 /// The host-side `ShardConstraintFolder` (defined at
-/// `zkm-pcs::shard_level::basefold_constraint_folder`) is
+/// `zkm-pcs::shard_level::constraint_folder`) is
 /// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
 /// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
 /// (in `zkm_pcs::air`),
@@ -241,11 +241,11 @@ impl From<RecursionShape> for OrderedShape {
 /// and act as a regression guard if any chip's bounds tighten.
 ///
 /// The in-circuit folder
-/// (`zkm-recursion-circuit::basefold_constraint_folder`) lives in a
+/// (`zkm-recursion-circuit::constraint_folder`) lives in a
 /// downstream crate, so its assertion lives in `zkm-recursion-circuit`
-/// (see `crates/recursion/circuit/src/basefold_constraint_folder.rs`).
+/// (see `crates/recursion/circuit/src/constraint_folder.rs`).
 #[cfg(test)]
-mod basefold_air_assertions {
+mod jagged_air_assertions {
     use super::*;
     use crate::chips::{
         alu_base::BaseAluChip,
@@ -257,10 +257,10 @@ mod basefold_air_assertions {
     };
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
-    use zkm_pcs::{shard_level::basefold_constraint_folder::ShardConstraintFolder, InnerChallenge};
+    use zkm_pcs::{shard_level::constraint_folder::ShardConstraintFolder, InnerChallenge};
 
     /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
-    fn assert_basefold_air<T>()
+    fn assert_jagged_air<T>()
     where
         T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>,
     {
@@ -274,19 +274,19 @@ mod basefold_air_assertions {
     #[allow(dead_code)]
     const _ASSERT_ALL_CHIPS: fn() = || {
         // 1. MemoryConst
-        assert_basefold_air::<MemoryConstChip<KoalaBear>>();
+        assert_jagged_air::<MemoryConstChip<KoalaBear>>();
         // 2. MemoryVar
-        assert_basefold_air::<MemoryVarChip<KoalaBear>>();
+        assert_jagged_air::<MemoryVarChip<KoalaBear>>();
         // 3. BaseAlu
-        assert_basefold_air::<BaseAluChip>();
+        assert_jagged_air::<BaseAluChip>();
         // 4. ExtAlu
-        assert_basefold_air::<ExtAluChip>();
+        assert_jagged_air::<ExtAluChip>();
         // 5. Poseidon2Wide (DEGREE=9, the production const)
-        assert_basefold_air::<Poseidon2WideChip<9>>();
+        assert_jagged_air::<Poseidon2WideChip<9>>();
         // 6. Select
-        assert_basefold_air::<SelectChip>();
+        assert_jagged_air::<SelectChip>();
         // 7. PublicValues
-        assert_basefold_air::<PublicValuesChip>();
+        assert_jagged_air::<PublicValuesChip>();
 
         // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
         // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
@@ -295,7 +295,7 @@ mod basefold_air_assertions {
         // For `AB = ShardConstraintFolder<'a, KoalaBear, InnerChallenge>`,
         // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
         // InnerChallenge: 'static`, so the bound resolves.
-        assert_basefold_air::<RecursionAir<KoalaBear, 9>>();
+        assert_jagged_air::<RecursionAir<KoalaBear, 9>>();
     };
 }
 

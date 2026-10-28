@@ -74,7 +74,7 @@ where
     F: p3_field::Field + 'static,
     C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static,
 {
-    as_jagged_val(crate::basefold::prover::deterministic_grind(challenger, bits))
+    as_jagged_val(crate::whir::grind::deterministic_grind(challenger, bits))
 }
 
 /// Verifier side: re-observe the witness and check the `bits` leading zeros,

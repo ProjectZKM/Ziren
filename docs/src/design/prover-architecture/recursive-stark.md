@@ -46,11 +46,11 @@ The recursion compiler (`crates/recursion/compiler`) builds each program from th
 
 | Program | Built by | Verifies |
 |---|---|---|
-| normalize | `recursion_program_basefold` | one core shard proof |
-| compose | `compose_program_basefold` | one to three adjacent recursion proofs |
-| deferred | `deferred_program_basefold` | a batch of deferred compressed proofs |
-| shrink | `shrink_program_basefold` | the compressed proof |
-| wrap | `wrap_bn254_program_basefold` | the shrink proof, for the BN254 SNARK |
+| normalize | `recursion_program` | one core shard proof |
+| compose | `compose_program` | one to three adjacent recursion proofs |
+| deferred | `deferred_program` | a batch of deferred compressed proofs |
+| shrink | `shrink_program` | the compressed proof |
+| wrap | `wrap_program` | the shrink proof, for the BN254 SNARK |
 
 The program is fixed by the shape of the proofs it verifies. A normalize program depends on the chip set of the shard and its height class. A compose program depends only on its arity, since every recursion proof has the same shape. The prover caches programs and their keys.
 
@@ -62,7 +62,7 @@ Programs are generated, not written by hand, so the set of valid recursion keys 
 
 `ZKMProver::compress(vk, core_proof, deferred_proofs, opts)`:
 
-1. builds the leaf inputs with `get_first_layer_inputs`: one normalize input per shard (`get_recursion_core_inputs_basefold`) and the deferred batches (`get_recursion_deferred_inputs_basefold`);
+1. builds the leaf inputs with `get_first_layer_inputs`: one normalize input per shard (`get_recursion_core_inputs`) and the deferred batches (`get_recursion_deferred_inputs`);
 2. runs the range-keyed reduction tree of compose programs (`compress_tree.rs`) until one proof covers the whole execution;
 3. returns the root proof as a `ZKMReduceProof`.
 
@@ -74,8 +74,8 @@ Programs are generated, not written by hand, so the set of valid recursion keys 
 |---|---|---|
 | Setup | `get_program`, `setup` | `MipsAir` |
 | Execution, traces, shard proofs | `prove_core` | `MipsAir` |
-| Leaf inputs | `get_first_layer_inputs`, `get_recursion_core_inputs_basefold`, `get_recursion_deferred_inputs_basefold` | |
-| Compression | `compress`, `compose_program_basefold`, `deferred_program_basefold` | `CompressAir` |
-| Shrink | `shrink`, `shrink_program_basefold` | `ShrinkAir` |
-| Wrap | `wrap_bn254`, `wrap_bn254_program_basefold` | `WrapAir` over `OuterSC` |
+| Leaf inputs | `get_first_layer_inputs`, `get_recursion_core_inputs`, `get_recursion_deferred_inputs` | |
+| Compression | `compress`, `compose_program`, `deferred_program` | `CompressAir` |
+| Shrink | `shrink`, `shrink_program` | `ShrinkAir` |
+| Wrap | `wrap_bn254`, `wrap_program` | `WrapAir` over `OuterSC` |
 | SNARK | `wrap_groth16_bn254`, `wrap_plonk_bn254`, `wrap_dvsnark_bn254` | gnark over BN254 |

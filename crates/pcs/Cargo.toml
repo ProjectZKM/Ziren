@@ -45,8 +45,8 @@ num-traits = "0.2.19"
 sysinfo = "0.30.13"
 
 [features]
-# gpu feature flag reserved for GPU basefold prover integration
-# (ziren-gpu/core/src/basefold/). No-op until the GPU port lands;
+# gpu feature flag reserved for GPU jagged-WHIR prover integration
+# (ziren-gpu/core/src/jagged_whir/). No-op until the GPU port lands;
 # downstream crates can plumb "--features gpu" without a cascading
 # Cargo.toml change.
 gpu = []
@@ -68,7 +68,7 @@ tracing-forest = { workspace = true, features = ["ansi", "smallvec"] }
 zkm-zkvm = { workspace = true }
 
 [lints.clippy]
-# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# The jagged/WHIR generics (`Challenger` x `Mmcs` x `Dft` over two rings)
 # make the honest signatures wide; factoring them behind aliases hides which
 # ring a function is instantiated for, which is exactly what the soundness
 # review needs to read off the signature.

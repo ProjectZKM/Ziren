@@ -2,7 +2,7 @@
 //!
 //! The stacked-PCS layer interleaves heterogeneous per-chip MLEs
 //! into fixed-size stripes before committing via the underlying
-//! BaseFold PCS.  Verification reduces to:
+//! WHIR PCS.  Verification reduces to:
 //!
 //!   1. Observe the evaluation claim into the transcript
 //!   2. Split the verifier's full eval point into
@@ -23,11 +23,10 @@ use crate::CircuitConfig;
 
 /// Trait abstracting over the underlying multilinear PCS that the
 /// stacked verifier wraps.  Allows the stacked verifier to be
-/// generic over the PCS choice (BaseFold, future PCSs).
+/// generic over the PCS choice (WHIR, future PCSs).
 ///
-/// Mirrors `RecursiveMultilinearPcsVerifier`
-/// (crates/recursion/circuit/src/basefold/mod.rs) from the upstream
-/// reference, specialised to Ziren's
+/// Mirrors the upstream reference's `RecursiveMultilinearPcsVerifier`,
+/// specialised to Ziren's
 /// CircuitConfig + FieldChallengerVariable conventions.
 pub trait RecursiveMultilinearPcsVerifier<C: CircuitConfig, FC>
 where
@@ -37,7 +36,7 @@ where
     /// `[Felt<F>; DIGEST_SIZE]`.
     type Commitment;
     /// PCS opening proof type — typically a
-    /// [`crate::basefold_verifier::RecursiveBasefoldProof`].
+    /// [`crate::whir_circuit::RecursiveStackedWhirProof`].
     type Proof;
 
     /// Verify untrusted multilinear evaluation claims.  The
@@ -55,12 +54,12 @@ where
         challenger: &mut FC,
     );
 
-    /// #H (BaseFold-over-BN254 wrap port): observe a single commitment
+    /// Observe a single commitment
     /// digest into the transcript.  The jagged layer calls this to absorb
     /// the main PCS commitment BEFORE sampling z_col (mirror of host
     /// verify_jagged_inner_generic's leading
     /// `challenger.observe(commit)`).  Implemented where the digest's
-    /// CanObserveVariable bound is available (the basefold verifier).
+    /// CanObserveVariable bound is available (the whir verifier).
     fn observe_commitment(
         &self,
         builder: &mut Builder<C>,

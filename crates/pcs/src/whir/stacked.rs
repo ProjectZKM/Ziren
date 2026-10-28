@@ -1,5 +1,5 @@
 //! Stacked WHIR — the multi-stripe, multi-round batched form the shard-level
-//! PCS needs (the WHIR counterpart of `basefold::stacked`).
+//! PCS needs.
 //!
 //! The stacked layer interleaves a heterogeneous MLE batch into equal-height
 //! stripes (`2^log_stacking_height` each) and commits a round's stripes in ONE
@@ -28,10 +28,10 @@ use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
-use crate::basefold::mle::Mle;
-use crate::basefold::proof::{LeafOpening, MerkleOpening};
 use crate::whir::config::WhirConfig;
 use crate::whir::error::WhirVerifierError;
+use crate::whir::merkle::{LeafOpening, MerkleOpening};
+use crate::whir::mle::Mle;
 use crate::whir::monomial::{map_to_pow_lsb, mono_eval_lsb};
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::sumcheck::{eq_table, WhirFolder};
@@ -100,7 +100,7 @@ pub struct StackedWhirProverData<F: p3_field::Field, MT: Mmcs<F>> {
 
 /// The stacked WHIR proof: the inner WHIR proof plus the echoed per-round
 /// per-stripe evaluations at the stack point (the verifier interpolates these
-/// against the batch coordinates, exactly as the BaseFold stacked layer does).
+/// against the batch coordinates).
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "")]
 pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<F>> {
@@ -138,7 +138,7 @@ pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<
 /// the host extracts the (by then small) vectors.
 ///
 /// Pair convention throughout: lo = index `2i`, hi = `2i+1`, matching
-/// [`crate::basefold::mle::Mle::fix_last_variable`] and [`WhirFolder`].
+/// [`crate::whir::mle::Mle::fix_last_variable`] and [`WhirFolder`].
 pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// Per-round per-stripe evaluations at the stack point — the same shape
     /// (round-major, stripe-minor) the host computes from `d.stripes`.
@@ -260,10 +260,8 @@ mod open_timing {
     pub static FOPEN: AtomicUsize = AtomicUsize::new(0);
     pub static CENGINE: AtomicUsize = AtomicUsize::new(0);
     pub static CHOST: AtomicUsize = AtomicUsize::new(0);
-    // The PROLOGUE — everything before the round loop, previously untimed.
-    // The seven umbrellas above summed to 18.0 s against a census-measured
-    // 28.4 s of host time in `basefold_open`, so the largest single slice of
-    // the open was the part no timer covered.
+    // The prologue: everything before the round loop.  Without these, the
+    // umbrellas above leave a large share of `whir_open` uncovered.
     pub static PEVALS: AtomicUsize = AtomicUsize::new(0);
     pub static PINIT: AtomicUsize = AtomicUsize::new(0);
     pub static OPENS: AtomicUsize = AtomicUsize::new(0);
@@ -425,7 +423,7 @@ where
         drop(_t_pevals);
         let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
         let batch_grinding_witness =
-            crate::basefold::prover::accelerated_grind(challenger, self.config.batch_pow_bits);
+            crate::whir::grind::accelerated_grind(challenger, self.config.batch_pow_bits);
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
@@ -523,7 +521,7 @@ where
                     challenger.observe_algebra_element(c0);
                     challenger.observe_algebra_element(c1);
                     challenger.observe_algebra_element(c2);
-                    let pow = crate::basefold::prover::accelerated_grind(
+                    let pow = crate::whir::grind::accelerated_grind(
                         challenger,
                         round_cfg.pow_bits.get(var).copied().unwrap_or(0),
                     );
@@ -623,7 +621,7 @@ where
             let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
             {
                 let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
-                folding_pow.push(ProofOfWork(crate::basefold::prover::accelerated_grind(
+                folding_pow.push(ProofOfWork(crate::whir::grind::accelerated_grind(
                     challenger,
                     round_cfg.queries_pow_bits,
                 )));
@@ -778,7 +776,7 @@ where
         }
         let final_pow = {
             let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
-            ProofOfWork(crate::basefold::prover::accelerated_grind(
+            ProofOfWork(crate::whir::grind::accelerated_grind(
                 challenger,
                 self.config.final_pow_bits,
             ))
@@ -875,7 +873,7 @@ where
 
     /// Verify a batched stacked opening.  `round_stripe_counts[r]` is the
     /// number of stripes committed in round `r` (bound by the caller from the
-    /// round's area, exactly as the BaseFold stacked verifier does);
+    /// round's area);
     /// `expected_claim`, when supplied, must equal the λ-combination of the
     /// echoed batch evaluations that the caller has SEPARATELY bound to its
     /// own claim structure (the jagged layer interpolates them itself).

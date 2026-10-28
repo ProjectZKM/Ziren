@@ -11,8 +11,8 @@ use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
     machine::{
-        wrap_basefold::{verify_wrap_basefold_core, ZKMWrapBasefoldWitnessValues},
-        PublicValuesOutputDigest, ZKMMerkleProofWitnessValues, ZKMWrapBasefoldWitnessVariable,
+        wrap::{verify_wrap_jagged_core, ZKMWrapWitnessValues},
+        PublicValuesOutputDigest, ZKMMerkleProofWitnessValues, ZKMWrapWitnessVariable,
     },
 };
 use zkm_recursion_compiler::{
@@ -180,10 +180,10 @@ pub fn build_constraints_and_witness(
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
     tracing::info!("building verifier constraints");
-    let basefold_proof = (*template_proof.jagged_shard_proof).clone();
+    let jagged_whir_proof = (*template_proof.jagged_shard_proof).clone();
     let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-    let template_input = ZKMWrapBasefoldWitnessValues {
-        vks_and_proofs: vec![(template_vk.clone(), basefold_proof)],
+    let template_input = ZKMWrapWitnessValues {
+        vks_and_proofs: vec![(template_vk.clone(), jagged_whir_proof)],
         vk_merkle_data,
     };
     let constraints =
@@ -240,7 +240,7 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     (wrapped_proof.vk, wrapped_proof.proof)
 }
 
-fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
+fn build_outer_circuit(template_input: &ZKMWrapWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
     let max_log_row_count =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
@@ -250,7 +250,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
 
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
     let input = template_input.read(&mut builder);
-    let ZKMWrapBasefoldWitnessVariable {
+    let ZKMWrapWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
         chip_heights_per_input,
@@ -266,7 +266,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
     }
 
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
-    verify_wrap_basefold_core::<OuterConfig, OuterSC, WrapAir<KoalaBear>>(
+    verify_wrap_jagged_core::<OuterConfig, OuterSC, WrapAir<KoalaBear>>(
         &mut builder,
         vk_legacy,
         proof_tuple,

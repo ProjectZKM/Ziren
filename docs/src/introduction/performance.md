@@ -1,6 +1,6 @@
 # Performance
 
-The latest Ethereum block benchmarks (11 October 2026) reach **75.8 MHz** on eight RTX 5090 GPUs, with **60.6 MHz aggregate throughput** across 15 blocks using Geth. The latest compressed-proof benchmark (14 October 2026) measures **290,643 bytes (284 KiB)** and **25.2 ms native verification**. The workloads and measurement conditions are detailed below.
+The latest Ethereum block benchmarks (11 October 2026) reach **75.8 MHz** on eight RTX 5090 GPUs, with **60.6 MHz aggregate throughput** across 15 blocks using Geth. The latest compressed-proof benchmark (28 October 2026) measures **290,530 bytes (284 KiB)** and **25.5 ms native verification**. The workloads and measurement conditions are detailed below.
 
 ## Metrics
 
@@ -18,7 +18,7 @@ To reproduce measurements on your own hardware, use the [zkvm-benchmarks](https:
 
 The figures below are from the Ziren V2.0 paper (`docs/paper`). The throughput workload is Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth (Rust) and the block keeper of Geth (Go). The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor, 124 vCPUs and 925 GiB of memory. The throughput runs use driver 570.153.02 and CUDA 12.8 on Ubuntu 22.04, with the GPU server in a CUDA 12.8.1 container based on Ubuntu 24.04.
 
-The throughput tables were rerun on 11 October 2026, before the subsequent Linux syscall and Poseidon2 address constraint fixes. The proof-size and native-verification measurements were rerun on 14 October 2026 at revision `cf0b3742`, with both fixes and the regenerated verification-key map. The GPU kernel profile and executor rates are historical measurements from an earlier configuration, including 13 Poseidon2 partial rounds rather than the corrected 20 and no lookup-challenge grinding. These results should be interpreted within their respective configurations.
+The throughput tables were rerun on 11 October 2026, before the subsequent Linux syscall and Poseidon2 address constraint fixes. The proof-size and native-verification measurements were rerun on 28 October 2026 at revision `7b9eec72`, with both fixes and the regenerated verification-key map. The GPU kernel profile and executor rates are historical measurements from an earlier configuration, including 13 Poseidon2 partial rounds rather than the corrected 20 and no lookup-challenge grinding. These results should be interpreted within their respective configurations.
 
 ### Instruction efficiency
 
@@ -81,13 +81,13 @@ With one GPU, execution does not limit proving. With several GPUs fed by one hos
 
 ### Proof size
 
-On 14 October 2026, a freshly generated Fibonacci proof (`n = 500`) at revision `cf0b3742` was measured with both the prover's in-circuit child-key allowlist checks and the native verifier's root-key check enabled, using the regenerated map of 6,494 supported verification keys. Proving used one RTX 5090; native verification used the AMD EPYC 9355 host with 24 Rayon threads.
+On 28 October 2026, a freshly generated Fibonacci proof (`n = 500`) at revision `7b9eec72` was measured with both the prover's in-circuit child-key allowlist checks and the native verifier's root-key check enabled, using the regenerated map of 12,226 supported verification keys. Proving used one RTX 5090; native verification used the AMD EPYC 9355 host with 24 Rayon threads.
 
 | Measurement | Result |
 |-------------|-------:|
-| Compressed proof including its recursion key (`ZKMReduceProof`) | 290,643 bytes (284 KiB) |
-| SDK container including variant, public outputs and version | 290,681 bytes |
-| Native verification, median of five warm runs | 25.2 ms |
-| Native verification, range across those runs | 24.8–25.3 ms |
+| Compressed proof including its recursion key (`ZKMReduceProof`) | 290,530 bytes (284 KiB) |
+| SDK container including variant, public outputs and version | 290,568 bytes |
+| Native verification, median of five warm runs | 25.5 ms |
+| Native verification, range across those runs | 24.4–26.1 ms |
 
 Verification time excludes proving, setup, deserialization and one warm-up verification. The compressed proof uses the root's compress schedule (rate 1/8, Johnson-bound WHIR); openings of the first WHIR oracle account for most of its size. For a fixed root program and commitment shape, proof size is independent of the guest's execution length. Groth16 and PLONK wrapping produce separate constant-size SNARKs for on-chain verification; the measurements above are for the native compressed proof.

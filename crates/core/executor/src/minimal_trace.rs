@@ -4,7 +4,7 @@
 //! ----------
 //! The current Ziren prover hot path runs the full MIPS interpreter with
 //! per-cycle event emission inline. On reth (60–80 shards) this surfaces as a
-//! single `zkm-bf-core-N` thread pegged at 99.9 % CPU for several minutes
+//! single jagged-pool thread pegged at 99.9 % CPU for several minutes
 //! while all other prover threads sit idle.
 //!
 //! The fix is to split execution into two stages:
