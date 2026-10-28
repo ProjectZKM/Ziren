@@ -46,6 +46,12 @@ pub struct PublicValuesConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
 }
 
 impl<'a, F: Field, EF: ExtensionField<F>> AirBuilder for PublicValuesConstraintFolder<'a, F, EF> {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = F;
     type Expr = EF;
     type Var = EF;

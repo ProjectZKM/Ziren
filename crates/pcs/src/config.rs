@@ -72,7 +72,9 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         + CanSample<Self::Challenge>
         + FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + 'static;
+        + 'static
+        + Clone
+        + Sync;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
@@ -443,21 +445,41 @@ pub trait BasefoldRing: StarkGenericConfig {
 pub type BfCommitment<SC> =
     <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment;
 
-#[derive(Clone)]
-pub struct UniConfig<SC>(pub SC);
+/// The univariate FRI commitment the chip fixtures prove under: the inner
+/// ring's KoalaBear Poseidon2 Merkle tree over a two-adic FRI, the shape
+/// `p3_uni_stark` expects of a configuration, which the jagged commitment of
+/// the proof system is not.
+pub type UniPcs = p3_fri::TwoAdicFriPcs<
+    crate::InnerVal,
+    p3_dft::Radix2DitParallel<crate::InnerVal>,
+    crate::InnerValMmcs,
+    p3_commit::ExtensionMmcs<crate::InnerVal, crate::InnerChallenge, crate::InnerValMmcs>,
+>;
 
-impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC> {
-    type Pcs = SC::Pcs;
+/// The configuration of the single-AIR chip fixtures (`uni_stark_prove`); a
+/// test fixture that no stage of the proof system goes through.
+pub type UniConfig =
+    p3_uni_stark::StarkConfig<UniPcs, crate::InnerChallenge, crate::InnerChallenger>;
 
-    type Challenge = SC::Challenge;
-
-    type Challenger = SC::Challenger;
-
-    fn pcs(&self) -> &Self::Pcs {
-        self.0.pcs()
-    }
-
-    fn initialise_challenger(&self) -> Self::Challenger {
-        self.0.challenger()
-    }
+/// A [`UniConfig`] at blowup 2 with 100 queries and no proof of work.
+#[must_use]
+pub fn uni_config() -> UniConfig {
+    let perm = crate::inner_perm();
+    let hash = crate::InnerHash::new(perm.clone());
+    let compress = crate::InnerCompress::new(perm.clone());
+    let val_mmcs = crate::InnerValMmcs::new(hash, compress, 0);
+    let challenge_mmcs = p3_commit::ExtensionMmcs::new(val_mmcs.clone());
+    let fri_params = p3_fri::FriParameters {
+        log_blowup: 1,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries: 100,
+        batch_proof_of_work_bits: 0,
+        commit_proof_of_work_bits: 0,
+        query_proof_of_work_bits: 0,
+        mmcs: challenge_mmcs,
+    };
+    let pcs =
+        p3_fri::TwoAdicFriPcs::new(p3_dft::Radix2DitParallel::default(), val_mmcs, fri_params);
+    p3_uni_stark::StarkConfig::new(pcs, crate::InnerChallenger::new(perm))
 }

@@ -170,6 +170,14 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for i := 0; i < len(cs.Args[0]); i++ {
 				vars[cs.Args[0][i]] = bits[i]
 			}
+		case "Var2FeltLimbs":
+			limbs := fieldAPI.SplitFieldOrderLimbs(vars[cs.Args[1][0]])
+			if len(cs.Args[0]) != len(limbs) {
+				return fmt.Errorf("Var2FeltLimbs expects %d outputs, got %d", len(limbs), len(cs.Args[0]))
+			}
+			for i := 0; i < len(cs.Args[0]); i++ {
+				felts[cs.Args[0][i]] = limbs[i]
+			}
 		case "Permute":
 			state := [3]frontend.Variable{vars[cs.Args[0][0]], vars[cs.Args[1][0]], vars[cs.Args[2][0]]}
 			hashAPI.PermuteMut(&state)

@@ -1,4 +1,4 @@
-use p3_bn254_fr::Bn254Fr;
+use p3_bn254_fr::Bn254;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_symmetric::Permutation;
 use zkm_pcs::PartStarkVerifyingKey;
@@ -24,11 +24,11 @@ pub fn zkm_imm_wrap_vk_mode() -> bool {
 /// Combine the base vkey hash with `vk_commitment` and `pc_start` using a Poseidon2 permutation.
 pub fn hash_vkey_with_part_vk(
     vk: &PartStarkVerifyingKey<KoalaBearPoseidon2Outer>,
-    vkey_hash: Bn254Fr,
-) -> Bn254Fr {
-    let cap: &[[Bn254Fr; 1]] = vk.commit.as_ref();
+    vkey_hash: Bn254,
+) -> Bn254 {
+    let cap: &[[Bn254; 1]] = vk.commit.as_ref();
     let commitment = cap[0][0];
-    let pc_start_bn254 = Bn254Fr::from_u32(vk.pc_start.as_canonical_u32());
+    let pc_start_bn254 = Bn254::from_u32(vk.pc_start.as_canonical_u32());
     let mut state = [vkey_hash, commitment, pc_start_bn254];
     outer_perm().permute_mut(&mut state);
     state[0]

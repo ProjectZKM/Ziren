@@ -54,6 +54,12 @@ where
     K: ExtensionField<F>,
     EF: ExtensionField<F> + ExtensionField<K>,
 {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = F;
     type Expr = K;
     type Var = K;

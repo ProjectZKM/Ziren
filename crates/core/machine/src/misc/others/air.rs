@@ -116,7 +116,7 @@ impl MiscInstrsChip {
             ByteOpcode::MSB.as_field::<AB::F>(),
             sext_cols.most_sig_bit,
             sext_cols.sig_byte,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_sext,
         );
 
@@ -243,7 +243,7 @@ impl MiscInstrsChip {
 
         {
             use crate::operations::{AddOperation, ShiftLeftOperation, ShiftRightOperation};
-            let zero = || AB::Expr::zero();
+            let zero = || AB::Expr::ZERO;
             let shift_word = |amount: AB::Expr| Word([amount, zero(), zero(), zero()]);
 
             ShiftRightOperation::<AB::F>::eval(
@@ -259,7 +259,7 @@ impl MiscInstrsChip {
             ShiftRightOperation::<AB::F>::eval(
                 builder,
                 local.ins_ror.value().map(|x| x.into()),
-                shift_word(AB::Expr::one()),
+                shift_word(AB::Expr::ONE),
                 &local.ins_srl1,
                 local.is_ins.into(),
                 zero(),
@@ -311,7 +311,7 @@ impl MiscInstrsChip {
 
         builder.send_byte(
             ByteOpcode::U8Range.as_field::<AB::F>(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             ins_cols.lsb,
             ins_cols.msb,
             local.is_ins,
@@ -319,15 +319,15 @@ impl MiscInstrsChip {
 
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::one(),
+            AB::Expr::ONE,
             ins_cols.lsb,
-            ins_cols.msb + AB::Expr::one(),
+            ins_cols.msb + AB::Expr::ONE,
             local.is_ins,
         );
 
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::one(),
+            AB::Expr::ONE,
             ins_cols.msb,
             AB::Expr::from_u32(32),
             local.is_ins,
@@ -343,7 +343,7 @@ impl MiscInstrsChip {
 
         {
             use crate::operations::{ShiftLeftOperation, ShiftRightOperation};
-            let zero = || AB::Expr::zero();
+            let zero = || AB::Expr::ZERO;
 
             ShiftLeftOperation::<AB::F>::eval(
                 builder,
@@ -378,7 +378,7 @@ impl MiscInstrsChip {
 
         builder.send_byte(
             ByteOpcode::U8Range.as_field::<AB::F>(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             ext_cols.lsb,
             ext_cols.msbd,
             local.is_ext,
@@ -386,7 +386,7 @@ impl MiscInstrsChip {
 
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::one(),
+            AB::Expr::ONE,
             ext_cols.lsb + ext_cols.msbd,
             AB::Expr::from_u32(32),
             local.is_ext,

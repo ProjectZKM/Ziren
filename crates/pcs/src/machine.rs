@@ -431,7 +431,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         for (name, r) in rows {
             if let Some(chip) = self.chips().iter().find(|c| c.name() == *name) {
                 main += r * <A as BaseAir<Val<SC>>>::width(&chip.air);
-                prep += r * chip.preprocessed_width();
+                prep += r * MachineAir::preprocessed_width(chip);
             }
         }
         let main_c = crate::jagged::committed_dense_len(main, log_stack);
@@ -684,14 +684,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
                         assert_eq!(
                             expected_width,
-                            chip.preprocessed_width(),
+                            MachineAir::preprocessed_width(chip),
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
                             AirLayout {
-                                preprocessed_width: chip.preprocessed_width(),
+                                preprocessed_width: MachineAir::preprocessed_width(chip),
                                 main_width: chip.width(),
                                 num_public_values: PROOF_MAX_NUM_PVS,
                                 ..Default::default()
@@ -805,14 +805,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             prep_trace.as_ref().map_or(0, p3_matrix::Matrix::width);
                         assert_eq!(
                             expected_width,
-                            chip.preprocessed_width(),
+                            MachineAir::preprocessed_width(chip),
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
                             AirLayout {
-                                preprocessed_width: chip.preprocessed_width(),
+                                preprocessed_width: MachineAir::preprocessed_width(chip),
                                 main_width: chip.width(),
                                 num_public_values: PROOF_MAX_NUM_PVS,
                                 ..Default::default()

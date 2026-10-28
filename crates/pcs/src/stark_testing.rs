@@ -135,6 +135,7 @@ fn test_public_value_impl(n: usize, x: u64) {
         max_log_arity: 1,
         num_queries: 8,
         commit_proof_of_work_bits: 0,
+        batch_proof_of_work_bits: 0,
         query_proof_of_work_bits: 8,
         mmcs: challenge_mmcs,
     };
@@ -142,7 +143,8 @@ fn test_public_value_impl(n: usize, x: u64) {
     let challenger = Challenger::from_hasher(vec![], byte_hash);
     let config = p3_uni_stark::StarkConfig::new(pcs, challenger);
     let pis = vec![Mersenne31::from_u64(0), Mersenne31::from_u64(1), Mersenne31::from_u64(x)];
-    let proof = p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis);
+    let proof =
+        p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis).expect("uni-stark proof");
     p3_uni_stark::verify(&config, &FibonacciAir {}, &proof, &pis).expect("verification failed");
 }
 
@@ -171,6 +173,7 @@ fn test_incorrect_public_value() {
         max_log_arity: 1,
         num_queries: 28,
         commit_proof_of_work_bits: 0,
+        batch_proof_of_work_bits: 0,
         query_proof_of_work_bits: 8,
         mmcs: challenge_mmcs,
     };

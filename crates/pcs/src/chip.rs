@@ -66,7 +66,7 @@ where
     where
         A: MachineAir<F> + Air<LookupBuilder<F>> + Air<SymbolicAirBuilder<F>>,
     {
-        let mut builder = LookupBuilder::new(air.preprocessed_width(), air.width());
+        let mut builder = LookupBuilder::new(MachineAir::preprocessed_width(&air), air.width());
         air.eval(&mut builder);
         let (sends, receives) = builder.lookups();
 
@@ -81,11 +81,12 @@ where
         let mut max_constraint_degree = get_max_constraint_degree(
             &air,
             AirLayout {
-                preprocessed_width: air.preprocessed_width(),
+                preprocessed_width: MachineAir::preprocessed_width(&air),
                 main_width: air.width(),
                 num_public_values: PROOF_MAX_NUM_PVS,
                 ..Default::default()
             },
+            1,
         );
 
         if !sends.is_empty() || !receives.is_empty() {
@@ -165,7 +166,7 @@ where
     where
         A: MachineAir<F>,
     {
-        let preprocessed_cols = self.preprocessed_width();
+        let preprocessed_cols = MachineAir::preprocessed_width(self);
         let main_cols = self.width();
         (preprocessed_cols + main_cols) as u64
     }
@@ -194,6 +195,10 @@ where
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         panic!("Chip should not use the `BaseAir` method, but the `MachineAir` method.")
+    }
+
+    fn num_public_values(&self) -> usize {
+        self.air.num_public_values()
     }
 }
 

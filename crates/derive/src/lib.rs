@@ -142,6 +142,10 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                     fn preprocessed_trace(&self) -> Option<p3_matrix::dense::RowMajorMatrix<F>> {
                         unreachable!("A machine air should use the preprocessed trace from the `MachineAir` trait")
                     }
+
+                    fn num_public_values(&self) -> usize {
+                        zkm_pcs::PROOF_MAX_NUM_PVS
+                    }
                 }
             };
 

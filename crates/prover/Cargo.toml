@@ -14,6 +14,7 @@ p3-air = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-matrix = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
+zkm-binary-stark = { workspace = true }
 zkm-recursion-core = { workspace = true }
 zkm-recursion-circuit = { workspace = true }
 zkm-recursion-gnark-ffi = { workspace = true }
@@ -38,7 +39,7 @@ serde_json = { workspace = true }
 clap = { version = "4.5.9", features = ["derive", "env"] }
 anyhow = "1.0.83"
 dirs = "5.0.1"
-num-bigint = "0.4.6"
+num-bigint = "0.5.1"
 thiserror = "1.0.63"
 rayon = "1.10.0"
 eyre = "0.6.12"

@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/rangecheck"
@@ -19,12 +20,36 @@ import (
 var modulus = new(big.Int).SetUint64(2130706433)
 var modulus_sub_1 = new(big.Int).SetUint64(2130706432)
 
+// The number of base-modulus digits SplitFieldOrderLimbs proves, the limbs a
+// native field element is squeezed into (p3_field::squeeze_field_order_num_limbs).
+const numFieldOrderLimbs = 7
+
+// modulusPowers[i] = modulus^i, up to the weight of the digit above the proven ones.
+var modulusPowers [numFieldOrderLimbs + 1]*big.Int
+
+// The digit above the proven ones is at most limbsHeadMax, and when it is, the
+// proven digits weigh at most limbsTailMax: (nativeOrder - 1) = limbsHeadMax *
+// modulus^numFieldOrderLimbs + limbsTailMax.
+var limbsHeadMax, limbsTailMax *big.Int
+
+func init() {
+	modulusPowers[0] = big.NewInt(1)
+	for i := 1; i <= numFieldOrderLimbs; i++ {
+		modulusPowers[i] = new(big.Int).Mul(modulusPowers[i-1], modulus)
+	}
+	orderSub1 := new(big.Int).Sub(fr.Modulus(), big.NewInt(1))
+	limbsHeadMax = new(big.Int)
+	limbsTailMax = new(big.Int)
+	limbsHeadMax.DivMod(orderSub1, modulusPowers[numFieldOrderLimbs], limbsTailMax)
+}
+
 func init() {
 	// These functions must be public so Gnark's hint system can access them.
 	solver.RegisterHint(InvFHint)
 	solver.RegisterHint(InvEHint)
 	solver.RegisterHint(ReduceHint)
 	solver.RegisterHint(SplitLimbsHint)
+	solver.RegisterHint(SplitFieldOrderLimbsHint)
 }
 
 type Variable struct {
@@ -369,9 +394,17 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		p.api.ToBinary(quotient, int(maxNbBits-30))
 	}
 
-	// Check that the remainder has size less than the KoalaBear modulus, by decomposing it into a 24
-	// bit limb and a 7 bit limb.
-	new_result, new_err := p.api.Compiler().NewHint(SplitLimbsHint, 2, remainder)
+	p.assertBelowModulus(remainder)
+
+	p.api.AssertIsEqual(x, p.api.Add(p.api.Mul(quotient, modulus), remainder))
+
+	return remainder
+}
+
+// assertBelowModulus constrains x to be below the KoalaBear modulus, by decomposing it into a 24
+// bit limb and a 7 bit limb.
+func (p *Chip) assertBelowModulus(x frontend.Variable) {
+	new_result, new_err := p.api.Compiler().NewHint(SplitLimbsHint, 2, x)
 	if new_err != nil {
 		panic(new_err)
 	}
@@ -385,7 +418,7 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 			p.api.Mul(highLimb, frontend.Variable(uint64(math.Pow(2, 24)))),
 			lowLimb,
 		),
-		remainder,
+		x,
 	)
 	if os.Getenv("GROTH16") != "1" {
 		p.RangeChecker.Check(highLimb, 7)
@@ -406,10 +439,56 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		),
 		frontend.Variable(0),
 	)
+}
 
-	p.api.AssertIsEqual(x, p.api.Add(p.api.Mul(quotient, modulus), remainder))
+// SplitFieldOrderLimbs proves the numFieldOrderLimbs least significant base-modulus digits of the
+// canonical value of x, least significant first: x = sum_i limb_i * modulus^i + head *
+// modulus^numFieldOrderLimbs as integers, with every limb below the modulus, head at most
+// limbsHeadMax, and the limbs weighing at most limbsTailMax when head is limbsHeadMax, so the
+// sum is below the native order and equals the canonical x.
+func (p *Chip) SplitFieldOrderLimbs(x frontend.Variable) [numFieldOrderLimbs]Variable {
+	result, err := p.api.Compiler().NewHint(SplitFieldOrderLimbsHint, numFieldOrderLimbs+1, x)
+	if err != nil {
+		panic(err)
+	}
+	head := result[numFieldOrderLimbs]
 
-	return remainder
+	var limbs [numFieldOrderLimbs]Variable
+	tail := frontend.Variable(0)
+	for i := 0; i < numFieldOrderLimbs; i++ {
+		p.assertBelowModulus(result[i])
+		limbs[i] = Variable{Value: result[i], UpperBound: modulus_sub_1}
+		tail = p.api.Add(tail, p.api.Mul(result[i], modulusPowers[i]))
+	}
+	p.api.AssertIsEqual(x, p.api.Add(tail, p.api.Mul(head, modulusPowers[numFieldOrderLimbs])))
+	p.api.AssertIsLessOrEqual(head, limbsHeadMax)
+	headIsMax := p.api.IsZero(p.api.Sub(head, limbsHeadMax))
+	p.api.AssertIsLessOrEqual(p.api.Select(headIsMax, tail, 0), limbsTailMax)
+
+	return limbs
+}
+
+// The hint used to compute SplitFieldOrderLimbs: the base-modulus digits of the input and what
+// remains above them.
+func SplitFieldOrderLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
+	if len(inputs) != 1 {
+		panic("SplitFieldOrderLimbsHint expects 1 input operand")
+	}
+	if len(results) != numFieldOrderLimbs+1 {
+		panic("SplitFieldOrderLimbsHint expects numFieldOrderLimbs+1 outputs")
+	}
+
+	rem := new(big.Int).Set(inputs[0])
+	for i := 0; i < numFieldOrderLimbs; i++ {
+		quotient := new(big.Int)
+		digit := new(big.Int)
+		quotient.DivMod(rem, modulus, digit)
+		results[i] = digit
+		rem = quotient
+	}
+	results[numFieldOrderLimbs] = rem
+
+	return nil
 }
 
 // The hint used to compute Reduce.

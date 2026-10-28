@@ -117,6 +117,14 @@ impl<F: Field<Packing = F>> PackedFieldExtension<F, SepticExtension<F>> for Sept
     }
 }
 
+/// The septic extension's defining relations and basis, as the transcript
+/// label of every algebra built over it; a change here moves every digest.
+impl<F: Field> p3_field::AlgebraIdentity<F> for SepticExtension<F> {
+    fn algebra_id() -> Vec<u8> {
+        b"zkm-septic-extension-x7-2x-5-v1".to_vec()
+    }
+}
+
 impl<F: Field<Packing = F>> ExtensionField<F> for SepticExtension<F> {
     type ExtensionPacking = Self;
 

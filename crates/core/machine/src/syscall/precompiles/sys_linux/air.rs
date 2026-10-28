@@ -157,13 +157,13 @@ where
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a0_decode.clone() - AB::Expr::one(),
+            a0_decode.clone() - AB::Expr::ONE,
             local.decode_a0_1,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a0_decode - AB::Expr::two(),
+            a0_decode - AB::Expr::TWO,
             local.decode_a0_2,
             local.is_real.into(),
         );
@@ -171,7 +171,7 @@ where
         let a1_decode = Self::small_arg_comparison_value(local.a1.map(Into::<AB::Expr>::into));
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a1_decode.clone() - AB::Expr::one(),
+            a1_decode.clone() - AB::Expr::ONE,
             local.decode_a1_1,
             local.is_real.into(),
         );
@@ -284,12 +284,12 @@ impl SysLinuxChip {
         local: &SysLinuxCols<AB::Var>,
         is_a0_0: AB::Var,
     ) {
-        let mut a1_byte1_lo = AB::Expr::zero();
+        let mut a1_byte1_lo = AB::Expr::ZERO;
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
             a1_byte1_lo = a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
-        let mut a1_byte1_hi = AB::Expr::zero();
+        let mut a1_byte1_hi = AB::Expr::ZERO;
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
             a1_byte1_hi = a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_u32(1 << bit);
@@ -311,7 +311,7 @@ impl SysLinuxChip {
 
         let base = AB::Expr::from_u32(256);
         let sixteen = AB::Expr::from_u32(16);
-        let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::one() - is_offset_0);
+        let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::ONE - is_offset_0);
 
         builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[0]);
         builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[1]);

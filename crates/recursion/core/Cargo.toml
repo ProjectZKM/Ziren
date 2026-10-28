@@ -56,6 +56,7 @@ zkm-primitives = { workspace = true }
 
 [dev-dependencies]
 zkm-pcs = { workspace = true, features = ["test-harness"] }
+blake3 = { workspace = true }
 rand = "0.8.5"
 smallvec = { version = "1.13.2", features = [
     "const_generics",

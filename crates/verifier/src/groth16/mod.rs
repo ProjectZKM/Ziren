@@ -4,7 +4,7 @@ mod verify;
 
 include!(concat!(env!("OUT_DIR"), "/part_stark_vk_registry.rs"));
 
-use p3_bn254_fr::Bn254Fr;
+use p3_bn254_fr::Bn254 as Bn254Fr;
 use p3_field::{PrimeCharacteristicRing, PrimeField};
 use substrate_bn::Fr;
 

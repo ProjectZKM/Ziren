@@ -61,6 +61,12 @@ impl<F: Field> LookupBuilder<F> {
 }
 
 impl<F: Field> AirBuilder for LookupBuilder<F> {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = F;
     type Expr = SymbolicExpression<F>;
     type Var = SymbolicVariable<F>;

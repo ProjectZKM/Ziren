@@ -269,7 +269,7 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 //     the SAME `packing.offsets` / `packing.column_counts` the recursion
 //     lift reconstructs (`shard_level_witness.rs` `packing_row_counts`),
 //     so the in-circuit recompute hashes the identical felt sequence.
-//   * felts are `from_canonical_usize` (wraps mod the field order — the
+//   * felts are `from_usize` (wraps mod the field order — the
 //     in-circuit verifier guards each count `< F::ORDER` so the wrap can
 //     never be exploited; see the recursion guards).
 
@@ -318,9 +318,9 @@ pub fn jagged_geometry_hash(row_counts: &[usize], column_counts: &[usize]) -> [J
     let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
     let hasher = crate::kb31_poseidon2::InnerHash::new(perm);
     let len = column_counts.len();
-    let iter = core::iter::once(JaggedVal::from_canonical_usize(len))
-        .chain(row_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)))
-        .chain(column_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)));
+    let iter = core::iter::once(JaggedVal::from_usize(len))
+        .chain(row_counts.iter().map(|&c| JaggedVal::from_usize(c)))
+        .chain(column_counts.iter().map(|&c| JaggedVal::from_usize(c)));
     hasher.hash_iter(iter)
 }
 
@@ -525,7 +525,9 @@ where
     Challenger: p3_challenger::FieldChallenger<JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
-        + 'static,
+        + 'static
+        + Clone
+        + Sync,
 {
     let log_stacking_height = rounds[0].log_stacking_height;
     let prover = StackedPcsProver::new(
@@ -579,7 +581,9 @@ where
     Challenger: p3_challenger::FieldChallenger<JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
-        + 'static,
+        + 'static
+        + Clone
+        + Sync,
 {
     let prover = StackedPcsProver::new(
         BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
@@ -1281,7 +1285,10 @@ pub mod jagged {
                 + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
                 + p3_challenger::CanObserve<
                     <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static;
+                >
+                + 'static
+                + Clone
+                + Sync;
 
         /// Place the opening into the bundle's two proof slots.
         ///
@@ -1378,7 +1385,10 @@ pub mod jagged {
                 + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
                 + p3_challenger::CanObserve<
                     <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static,
+                >
+                + 'static
+                + Clone
+                + Sync,
         {
             let _open_span = tracing::info_span!("jagged_whir_open").entered();
             let wdatas: Vec<&crate::whir::jagged::JaggedWhirProverDataGeneric<MT>> = rounds
@@ -1442,7 +1452,10 @@ pub mod jagged {
                 + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
                 + p3_challenger::CanObserve<
                     <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-                > + 'static,
+                >
+                + 'static
+                + Clone
+                + Sync,
         {
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
             let datas: Vec<&crate::jagged_pcs::JaggedProverDataGeneric<MT>> =
@@ -1666,7 +1679,10 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<
                 <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-            > + 'static,
+            >
+            + 'static
+            + Clone
+            + Sync,
     {
         assert!(!rounds.is_empty(), "prove_jagged_rounds: no rounds");
 
@@ -2385,7 +2401,49 @@ pub mod jagged {
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
+    {
+        verify_jagged_inner_generic_with_profile(
+            chip_infos,
+            r_row_per_chip,
+            z_row,
+            bundle,
+            challenger,
+            mmcs,
+            skip_commit_observe,
+            fri,
+            preceding_rounds,
+            opened_main,
+            crate::whir::jagged::WhirProfile::Core,
+        )
+    }
+
+    /// [`verify_jagged_inner_generic`] with the WHIR schedule a ring opened
+    /// under, for a bundle whose dense opening is WHIR rather than BaseFold.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_inner_generic_with_profile<Challenger, MT>(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        bundle: &JaggedPcsProofGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        skip_commit_observe: bool,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
+        preceding_rounds: &[(
+            <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+            usize,
+        )],
+        opened_main: &[Vec<InnerChallenge>],
+        profile: crate::whir::jagged::WhirProfile,
+    ) -> bool
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
     {
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
             tracing::info!("[basefold verify] {why}");
@@ -2454,6 +2512,27 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
+        if let Some(wp) = bundle.whir_proof.as_ref() {
+            let cfg = crate::whir::jagged::whir_config_for_profile(
+                profile,
+                bundle.commit.log_stacking_height as usize,
+            );
+            let res = crate::whir::jagged::verify_jagged_whir_rounds(
+                mmcs,
+                cfg,
+                bundle.commit.log_stacking_height,
+                &commitments,
+                &areas,
+                &extended_z_star,
+                wp,
+                q_at_z_adj,
+                challenger,
+            );
+            if let Err(e) = &res {
+                tracing::warn!("[whir verify generic] whir opening REJECTED: {:?}", e);
+            }
+            return res.is_ok();
+        }
         let res = crate::jagged_pcs::verify_jagged_pcs_rounds_generic::<Challenger, MT>(
             &commitments,
             &areas,

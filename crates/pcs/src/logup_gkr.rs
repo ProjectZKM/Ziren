@@ -72,7 +72,7 @@ fn from_f<F: p3_field::Field + 'static>(w: F) -> crate::jagged_pcs::JaggedVal {
 pub fn gkr_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::Field + 'static,
-    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static,
+    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static + Clone + Sync,
 {
     as_jagged_val(crate::basefold::prover::deterministic_grind(challenger, bits))
 }
