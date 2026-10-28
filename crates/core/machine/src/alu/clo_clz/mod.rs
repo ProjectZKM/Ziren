@@ -237,6 +237,7 @@ where
             local.next_pc.into(),
             AB::Expr::ZERO,
             local.is_real.into(),
+            true,
         );
 
         {

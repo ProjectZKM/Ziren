@@ -252,6 +252,7 @@ where
             local.next_pc.into(),
             AB::Expr::ZERO,
             is_real,
+            true,
         );
     }
 }

@@ -203,6 +203,7 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
         cols.next_pc.into(),
         AB::Expr::ZERO,
         is_real.clone(),
+        false,
     );
     builder
         .when(op_a_immutable.clone() * is_real.clone())

@@ -45,7 +45,8 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
     /// For the memory-INSTRUCTION chips only: a store's word is a register value (registers
     /// trust their writers — `eval_register_access` never byte-checks), a load's word goes to a
     /// register, and every other entry into memory keeps its checks (`MemoryGlobalInit`
-    /// witnesses bits, precompile writes use `eval_memory_access`).  This removes 2 of the
+    /// witnesses bits, `MemoryLocal` byte-checks every shard's initial values, precompile
+    /// writes use `eval_memory_access`).  This removes 2 of the
     /// 4 byte lookups per word-access row (~6% of the LogUp-GKR terms of a reth block).
     fn eval_memory_access_trusted<E: Into<Self::Expr> + Clone>(
         &mut self,

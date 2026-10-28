@@ -35,7 +35,7 @@ pub struct InstructionFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// (A per-shard `clk` runs to `2^26` = `CORE_SHARD_CLK_LIMIT`: the memory-argument ordering
     /// proof needs every timestamp it compares bounded by the same width it range-checks
@@ -85,6 +85,19 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 ///   `pc + 4` while its own `next_pc` is the exit signal 0.
 /// * `num_extra_cycles`: cycles this instruction adds to `clk`; 0 except for
 ///   syscalls.
+///
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`, where `extra` is 0 except on the syscall chip, which
+/// byte-checks it.  Every row's clock is range-checked below `2^26`
+/// (`send_timestamp_range_checks`), so each step joins two clocks below `2^26`
+/// by at most 260 and is an integer increase: no set of rows can close a
+/// cycle, and every row lies on the one chain whose ends the public-values AIR
+/// anchors to `execution_shard`.  Only these two local checks are used, not
+/// the memory argument, whose cross-shard timestamp order needs the shard
+/// bound this argument yields.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
@@ -109,13 +122,6 @@ pub fn eval_instruction_frame<AB>(
 
     builder.when(is_real.clone()).assert_eq(frame.instruction.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.when(frame.instruction.imm_b).assert_word_eq(frame.op_b_val(), frame.instruction.op_b);
@@ -212,13 +218,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -473,7 +472,7 @@ pub struct ITypeFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -540,6 +539,33 @@ fn i_type_instruction<AB: AirBuilder>(
 /// vanish there.  Here the multiplicities are `is_real` directly (the same
 /// degree, since `imm_b` was a column), so a padding row needs no neutralising
 /// at all and the chips' `populate_dependency` calls disappear with it.
+///
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`, where `extra` is 0 except on the syscall chip, which
+/// byte-checks it.  Every row's clock is range-checked below `2^26`
+/// (`send_timestamp_range_checks`), so each step joins two clocks below `2^26`
+/// by at most 260 and is an integer increase: no set of rows can close a
+/// cycle, and every row lies on the one chain whose ends the public-values AIR
+/// anchors to `execution_shard`.  Only these two local checks are used, not
+/// the memory argument, whose cross-shard timestamp order needs the shard
+/// bound this argument yields.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
+///
+/// `check_op_a_bytes` is `false` for the memory instructions and the branches,
+/// whose op_a value is bytes by induction: the branches and SW/SB/SH/SWL/SWR
+/// only read op_a (`value == prev`), SC writes the constant `[1, 0, 0, 0]`,
+/// and LW/LL/LB/LH/LBU/LHU/LWL/LWR copy bytes of a memory word (and of op_a's
+/// previous value).  The induction runs over memory timestamps `(shard, clk)`,
+/// which are integers once the shard column is pinned as above.  Every
+/// register write elsewhere is byte-checked by its
+/// writer (this check where `check_op_a_bytes` is `true`, the chips' own
+/// operations otherwise); memory holds bytes because MemoryGlobalInit
+/// rebuilds initial words from bits, MemoryLocal checks every shard's initial
+/// values, MemoryBump checks a register's first touch per shard,
+/// stores copy register bytes, and precompile writes go through the checked
+/// `eval_memory_access`.  The ALU immediate chips pass `true`.
 #[allow(clippy::too_many_arguments)]
 pub fn eval_i_type_frame<AB>(
     builder: &mut AB,
@@ -551,6 +577,7 @@ pub fn eval_i_type_frame<AB>(
     recv_next_pc: AB::Expr,
     num_extra_cycles: AB::Expr,
     is_real: AB::Expr,
+    check_op_a_bytes: bool,
 ) where
     AB: ZKMCoreAirBuilder,
 {
@@ -559,13 +586,6 @@ pub fn eval_i_type_frame<AB>(
     builder.send_program(pc.clone(), i_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -586,7 +606,9 @@ pub fn eval_i_type_frame<AB>(
         is_real.clone(),
     );
 
-    builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+    if check_op_a_bytes {
+        builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+    }
 
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
@@ -615,13 +637,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -653,29 +668,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
             self.op_b_access.populate_register(event.b_record, blu);
         }
-
-        let a_bytes = self
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[0] as u8,
-            c: a_bytes[1] as u8,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[2] as u8,
-            c: a_bytes[3] as u8,
-        });
     }
 
     /// Populate the frame for an immediate-form ALU instruction.  Mirrors
@@ -703,6 +695,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             program,
             shard,
             blu,
+            true,
         );
     }
 
@@ -729,6 +722,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             program,
             shard,
             blu,
+            false,
         );
     }
 
@@ -746,19 +740,13 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         program: &Program,
         shard: u32,
         blu: &mut impl ByteRecord,
+        check_op_a_bytes: bool,
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (clk & 0xffff) as u16;
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -790,28 +778,30 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             self.op_b_access.populate_register(b_record, blu);
         }
 
-        let a_bytes = self
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[0] as u8,
-            c: a_bytes[1] as u8,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[2] as u8,
-            c: a_bytes[3] as u8,
-        });
+        if check_op_a_bytes {
+            let a_bytes = self
+                .op_a_access
+                .access
+                .value
+                .0
+                .iter()
+                .map(|x| x.as_canonical_u32())
+                .collect::<Vec<_>>();
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[0] as u8,
+                c: a_bytes[1] as u8,
+            });
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[2] as u8,
+                c: a_bytes[3] as u8,
+            });
+        }
     }
 }
 
@@ -831,7 +821,7 @@ pub struct RTypeFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -889,6 +879,19 @@ fn r_type_instruction<AB: AirBuilder>(
 /// read together, and any rule added to one belongs in the other.  As with
 /// [`eval_i_type_frame`], the register-access multiplicities are `is_real`
 /// directly, so a padding row needs no neutralising.
+///
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`, where `extra` is 0 except on the syscall chip, which
+/// byte-checks it.  Every row's clock is range-checked below `2^26`
+/// (`send_timestamp_range_checks`), so each step joins two clocks below `2^26`
+/// by at most 260 and is an integer increase: no set of rows can close a
+/// cycle, and every row lies on the one chain whose ends the public-values AIR
+/// anchors to `execution_shard`.  Only these two local checks are used, not
+/// the memory argument, whose cross-shard timestamp order needs the shard
+/// bound this argument yields.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_r_type_frame<AB>(
     builder: &mut AB,
@@ -908,13 +911,6 @@ pub fn eval_r_type_frame<AB>(
     builder.send_program(pc.clone(), r_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -1055,13 +1051,6 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
@@ -1135,7 +1124,7 @@ pub struct ShamtFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The middle 8 bit limb of clk.
+    /// The high limb of clk (`TIMESTAMP_HIGH_LIMB_BITS` bits).
     pub clk_high_limb: T,
     /// The opcode for this cycle.
     pub opcode: T,
@@ -1186,6 +1175,19 @@ fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> Instruc
 /// does — the two must be read together, and any rule added to one belongs in
 /// the other.  Register-access multiplicities are `is_real` directly, so a
 /// padding row needs no neutralising.
+///
+/// The shard column is not range-checked.  Every real row receives
+/// `(shard, clk, pc, next_pc)` on the State bus and sends the same shard with
+/// `clk + 5 + extra`, where `extra` is 0 except on the syscall chip, which
+/// byte-checks it.  Every row's clock is range-checked below `2^26`
+/// (`send_timestamp_range_checks`), so each step joins two clocks below `2^26`
+/// by at most 260 and is an integer increase: no set of rows can close a
+/// cycle, and every row lies on the one chain whose ends the public-values AIR
+/// anchors to `execution_shard`.  Only these two local checks are used, not
+/// the memory argument, whose cross-shard timestamp order needs the shard
+/// bound this argument yields.  The column therefore
+/// equals the public `execution_shard`, which the complete-proof check pins to
+/// `1, 2, ...` across shards (bounded by the leaf's range check on `shard`).
 #[allow(clippy::too_many_arguments)]
 pub fn eval_shamt_frame<AB>(
     builder: &mut AB,
@@ -1205,13 +1207,6 @@ pub fn eval_shamt_frame<AB>(
     builder.send_program(pc.clone(), shamt_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    builder.send_byte(
-        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
-        frame.shard,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        is_real.clone(),
-    );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
     builder.eval_register_access(
@@ -1260,13 +1255,6 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
         let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::Range,
