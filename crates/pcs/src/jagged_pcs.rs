@@ -831,13 +831,16 @@ pub mod jagged {
     /// Checks every precondition of a multi-round jagged open before the
     /// transcript is touched, and returns the common `log_stacking_height`.
     ///
-    /// Each entry is one round `(precomputed, claims, r_row_per_chip)`.  With
+    /// Each entry is one round `(precomputed, claims, r_row_per_chip)`, where
+    /// `r_row_per_chip` is `None` for a prover that takes every chip's row
+    /// point from `z_row` rather than per round, as the BN254 wrap does.  With
     /// `ℓ` the stacking height, `A_r` round `r`'s committed area, `n_r` its
     /// packed cells and `c_i`, `h_i` chip `i`'s column and row counts:
     ///
     /// * the commit, the prover data and (when present) the WHIR data agree on
     ///   `A_r` and `ℓ`, and every round has the same `ℓ`;
-    /// * `|claims| = |r_row_per_chip| = |chips|`, `|claims_i| = c_i`, and
+    /// * `|claims| = |chips|` (and `|r_row_per_chip| = |chips|` when given),
+    ///   `|claims_i| = c_i`, and
     ///   `h_i ≤ 2^{|z_row|}`;
     /// * `0 < A_r`, `2^ℓ | A_r` and `n_r ≤ A_r`;
     /// * `2^{ℓ + ⌈log₂(Σ_r A_r / 2^ℓ)⌉} = next_pow2(Σ_r A_r)`.
@@ -849,7 +852,7 @@ pub mod jagged {
     /// When any of the above fails.
     #[allow(clippy::type_complexity)]
     pub fn validate_jagged_rounds<MT, C>(
-        rounds: &[(&PrecomputedJaggedCommitGeneric<MT>, &[Vec<C>], &[Vec<C>])],
+        rounds: &[(&PrecomputedJaggedCommitGeneric<MT>, &[Vec<C>], Option<&[Vec<C>]>)],
         z_row_len: usize,
     ) -> usize
     where
@@ -890,13 +893,15 @@ pub mod jagged {
                 claims.len(),
                 pk.chip_infos.len(),
             );
-            assert_eq!(
-                r_row.len(),
-                pk.chip_infos.len(),
-                "prove_jagged_rounds: round {ri} has {} row points for {} chips",
-                r_row.len(),
-                pk.chip_infos.len(),
-            );
+            if let Some(r_row) = r_row {
+                assert_eq!(
+                    r_row.len(),
+                    pk.chip_infos.len(),
+                    "prove_jagged_rounds: round {ri} has {} row points for {} chips",
+                    r_row.len(),
+                    pk.chip_infos.len(),
+                );
+            }
             for (ci, (claim, info)) in claims.iter().zip(pk.chip_infos.iter()).enumerate() {
                 assert!(
                     info.row_count <= row_cube,
@@ -990,7 +995,7 @@ pub mod jagged {
         let log_stacking_height = validate_jagged_rounds(
             &rounds
                 .iter()
-                .map(|r| (r.precomputed, r.claims.as_slice(), r.r_row_per_chip))
+                .map(|r| (r.precomputed, r.claims.as_slice(), Some(r.r_row_per_chip)))
                 .collect::<Vec<_>>(),
             z_row.len(),
         );
@@ -2178,7 +2183,23 @@ mod test {
         let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
         let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
         let h = validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
+            z_row.len(),
+        );
+        assert_eq!(h, prep.prover_data.log_stacking_height as usize);
+    }
+
+    /// Without per-round row points, the remaining checks still run and
+    /// accept the honest instance.
+    #[test]
+    fn validate_jagged_rounds_accepts_rounds_without_row_points() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
+        let h = validate_jagged_rounds(
+            &[(&prep, pc.as_slice(), None), (&main, mc.as_slice(), None)],
             z_row.len(),
         );
         assert_eq!(h, prep.prover_data.log_stacking_height as usize);
@@ -2194,7 +2215,10 @@ mod test {
         mc[0].push(JaggedChallenge::ONE);
         let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
         validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
             z_row.len(),
         );
     }
@@ -2209,7 +2233,10 @@ mod test {
         let mut mr = r_row_suffixes(&main_views, &z_row);
         mr.pop();
         validate_jagged_rounds(
-            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            &[
+                (&prep, pc.as_slice(), Some(pr.as_slice())),
+                (&main, mc.as_slice(), Some(mr.as_slice())),
+            ],
             z_row.len(),
         );
     }
