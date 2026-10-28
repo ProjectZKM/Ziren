@@ -257,7 +257,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         } => <SC as FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
             builder,
             host,
-            whir_proof.clone(),
+            whir_proof.as_ref().clone(),
             whir_proof.batch_evaluations.clone(),
             sumcheck.clone(),
             jagged_eval.clone(),

@@ -227,10 +227,12 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     // checks.
     WhirBundle {
         host: JaggedPcsProof,
-        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-            [Felt<C::F>; 8],
+        whir_proof: Box<
+            crate::whir_circuit::RecursiveStackedWhirProof<
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
+                [Felt<C::F>; 8],
+            >,
         >,
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -382,7 +384,7 @@ where
                         let expected_eval = bundle.reduction.q_at_z.read(builder);
                         LiftedEvalProof::WhirBundle {
                             host: bundle.clone(),
-                            whir_proof,
+                            whir_proof: Box::new(whir_proof),
                             sumcheck,
                             jagged_eval,
                             expected_eval,

@@ -277,7 +277,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
                 let lifted = crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
                     builder,
                     host,
-                    whir_proof.clone(),
+                    whir_proof.as_ref().clone(),
                     whir_proof.batch_evaluations.clone(),
                     sumcheck.clone(),
                     jagged_eval.clone(),
