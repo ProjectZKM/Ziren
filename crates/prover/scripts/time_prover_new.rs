@@ -1,10 +1,4 @@
-//! Time how long `ZKMProver::new()` takes with VK verification on.
-//!
-//! Useful for diagnosing slow startup when `VERIFY_VK=true` —
-//! `new()` builds N compress programs upfront, where N is the
-//! `multi_cartesian_product` of the allowed_shapes raised to
-//! `REDUCE_BATCH_SIZE`.  With 4 shapes and batch_size=2, that's
-//! 16 compress programs each compiled via `compress_program_from_input`.
+//! Time how long `ZKMProver::new()` takes.
 
 use std::time::Instant;
 use zkm_core_machine::utils::setup_cli_logger;

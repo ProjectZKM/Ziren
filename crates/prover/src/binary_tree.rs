@@ -36,7 +36,7 @@ use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 use crate::components::ZKMProverComponents;
 use crate::types::RingDigests;
 use crate::{
-    BinaryShrinkProof, CoreSC, InnerSC, VkDigest, ZKMCoreProof, ZKMProver, ZKMRecursionProverError,
+    BinaryLeafProof, CoreSC, InnerSC, VkDigest, ZKMCoreProof, ZKMProver, ZKMRecursionProverError,
     ZKMVerifyingKey,
 };
 
@@ -227,7 +227,7 @@ impl BinaryKeyStore {
         ProvedProgram::from_bytes(&bytes).ok()
     }
 
-    fn put_leaf_sample(&self, class: usize, leaf: BinaryShrinkProof) -> std::io::Result<()> {
+    fn put_leaf_sample(&self, class: usize, leaf: BinaryLeafProof) -> std::io::Result<()> {
         let sample = ProvedProgram {
             program: (*leaf.program).clone(),
             digest: leaf.digest,
@@ -311,7 +311,7 @@ struct LeafProgram {
 /// A proved leaf and the program it is of.
 struct ProvedLeaf {
     program: [u8; 32],
-    proof: BinaryShrinkProof,
+    proof: BinaryLeafProof,
 }
 
 impl ProvedLeaf {
@@ -336,14 +336,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Compress `proof` over bits, with keys and samples from `store`.
     ///
     /// # Errors
-    /// Returns an error if a shard's program has no leaf class, a key cannot
-    /// be had, or a leaf or node fails to prove.
+    /// Returns an error if the execution verified deferred proofs, a shard's
+    /// program has no leaf class, a key cannot be had, or a leaf or node fails
+    /// to prove.
     pub fn compress_binary(
         &self,
         vk: &ZKMVerifyingKey,
         proof: &ZKMCoreProof,
         store: &BinaryKeyStore,
     ) -> Result<BinaryCompressedProof, ZKMRecursionProverError> {
+        let last = proof.proof.0.last().ok_or_else(|| stage("the core proof has no shards"))?;
+        let last: &zkm_pcs::air::PublicValues<zkm_pcs::Word<KoalaBear>, KoalaBear> =
+            last.public_values.as_slice().borrow();
+        if last.deferred_proofs_digest.iter().any(|x| x.as_canonical_u32() != 0) {
+            return Err(stage("deferred proofs are not supported by the binary compress"));
+        }
         let schedule = BinarySchedule::default();
         let mut inputs = self.get_recursion_core_inputs_basefold(&vk.vk, &proof.proof.0, 1, false);
         let started = std::time::Instant::now();

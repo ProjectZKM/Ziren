@@ -1,17 +1,13 @@
 #![allow(unused_variables)]
-use hashbrown::HashMap;
-use zkm_core_executor::{ZKMContext, ZKMReduceProof};
+use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
-use zkm_pcs::{shard_level::shard_proof::JaggedShardProof, ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
     ZKMVerifyingKey,
 };
 use anyhow::Result;
-use p3_field::{PrimeCharacteristicRing, PrimeField};
-use p3_koala_bear::KoalaBear;
-use zkm_pcs::septic_digest::SepticDigest;
+use p3_field::PrimeField;
 use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
@@ -69,36 +65,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                 ))
             }
             ZKMProofKind::Compressed => {
-                let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
-
-                let shard_proof = ShardProof {
-                    public_values: vec![],
-                    jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
-                };
-
-                let reduce_vk = StarkVerifyingKey {
-                    commit: zkm_pcs::ZeroCommitment::<zkm_prover::CompressedSC>::zero_commitment(
-                        zkm_pcs::StarkGenericConfig::pcs(&zkm_prover::CompressedSC::default()),
-                    ),
-                    pc_start: KoalaBear::ZERO,
-                    chip_information: vec![],
-                    chip_ordering: HashMap::new(),
-                    initial_global_cumulative_sum: SepticDigest::zero(),
-                };
-
-                let proof = ZKMProof::Compressed(Box::new(ZKMReduceProof {
-                    vk: reduce_vk,
-                    proof: shard_proof,
-                }));
-
-                Ok((
-                    ZKMProofWithPublicValues {
-                        proof,
-                        public_values,
-                        zkm_version: self.version().to_string(),
-                    },
-                    0,
-                ))
+                Err(anyhow::anyhow!("the mock prover has no binary compress mode"))
             }
             ZKMProofKind::Plonk => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
@@ -152,9 +119,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                 ))
             }
             ZKMProofKind::CompressToGroth16 => unreachable!(),
-            ZKMProofKind::Binary => {
-                Err(anyhow::anyhow!("the mock prover has no binary compress mode"))
-            }
         }
     }
 

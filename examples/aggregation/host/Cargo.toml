@@ -8,5 +8,3 @@ publish = false
 zkm-sdk = { workspace = true }
 tracing = { workspace = true }
 
-[build-dependencies]
-zkm-build = { workspace = true }

@@ -130,6 +130,10 @@ impl<'a> Prove<'a> {
 
         crate::utils::zkm_dump(&pk.elf, &stdin);
 
+        if kind != ZKMProofKind::Core && !stdin.proofs.is_empty() {
+            anyhow::bail!("deferred proofs are not supported by the binary compress");
+        }
+
         Ok(prover.prove_impl(pk, stdin, proof_opts, context, kind, None)?.0)
     }
 
@@ -160,12 +164,6 @@ impl<'a> Prove<'a> {
     // Set the proof mode to the dv-snark bn254 mode.
     pub fn dvsnark(mut self) -> Self {
         self.kind = ZKMProofKind::DvSnark;
-        self
-    }
-
-    /// Set the proof mode to the binary compress mode.
-    pub fn binary(mut self) -> Self {
-        self.kind = ZKMProofKind::Binary;
         self
     }
 

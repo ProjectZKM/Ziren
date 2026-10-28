@@ -51,9 +51,9 @@ impl VkeyCmd {
             let (_, vk) = prover.setup(&elf);
 
             if let Some(target) = target {
-                println!("Verification Key Hash for '{target}':\n{}", vk.vk.bytes32());
+                println!("Verification Key Hash for '{target}':\n{}", vk.bytes32());
             } else {
-                println!("Verification Key Hash:\n{}", vk.vk.bytes32());
+                println!("Verification Key Hash:\n{}", vk.bytes32());
             }
         }
 

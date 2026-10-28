@@ -62,7 +62,6 @@ name = "aggregation-host"
 version = "1.1.0"
 dependencies = [
  "tracing",
- "zkm-build",
  "zkm-sdk",
 ]
 

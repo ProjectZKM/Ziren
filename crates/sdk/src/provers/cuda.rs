@@ -1,15 +1,10 @@
 use anyhow::Result;
-use p3_field::PrimeField;
-use std::fs;
-use std::path::PathBuf;
 use tonic::async_trait;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_cuda::{ZKMCudaProver, ZKMGpuServer};
-use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
-use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::{
     provers::ProofOpts, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey,
     ZKMVerifyingKey,
@@ -41,15 +36,11 @@ impl CudaProver {
         stdin: &ZKMStdin,
         kind: ZKMProofKind,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
-        if kind == ZKMProofKind::CompressToGroth16 {
-            return Ok((self.compress_to_groth16(stdin.clone())?, 0));
+        if !matches!(kind, ZKMProofKind::Core | ZKMProofKind::Compressed) {
+            anyhow::bail!(super::wrap_unsupported(kind));
         }
 
-        let proof = self.cuda_prover.prove_core_stateless_retaining(
-            pk,
-            stdin,
-            kind != ZKMProofKind::Core && kind != ZKMProofKind::Binary,
-        )?;
+        let proof = self.cuda_prover.prove_core_stateless_retaining(pk, stdin, false)?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -60,157 +51,23 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        if kind == ZKMProofKind::Binary {
-            if !stdin.proofs.is_empty() {
-                anyhow::bail!("the binary compress mode takes no deferred proofs");
-            }
-            let binary = if std::env::var_os("ZIREN_BINARY_ON_HOST").is_some() {
-                self.cpu_prover.compress_binary(
-                    &pk.vk,
-                    &proof,
-                    &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
-                )?
-            } else {
-                self.cuda_prover.compress_binary(&pk.vk, proof.clone())?
-            };
-            return Ok((
-                ZKMProofWithPublicValues {
-                    proof: ZKMProof::Binary(Box::new(binary)),
-                    public_values: proof.public_values,
-                    zkm_version: self.version().to_string(),
-                },
-                cycles,
-            ));
-        }
-
-        let deferred_proofs =
-            stdin.proofs.iter().map(|(reduce_proof, _)| reduce_proof.clone()).collect();
-        let public_values = proof.public_values.clone();
-        let reduce_proof = self.cuda_prover.compress(&pk.vk, proof, deferred_proofs)?;
-        if kind == ZKMProofKind::Compressed {
-            let proof_with_pv = ZKMProofWithPublicValues {
-                proof: ZKMProof::Compressed(Box::new(reduce_proof)),
-                public_values,
-                zkm_version: self.version().to_string(),
-            };
-            return Ok((proof_with_pv, cycles));
-        }
-
-        let compress_proof = self.cuda_prover.shrink(reduce_proof)?;
-
-        let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
-
-        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
-            .as_canonical_biguint();
-        let expected_digest = public_values.hash_bn254();
-        if actual_digest != expected_digest {
-            anyhow::bail!(
-                "guest committed-values digest doesn't match the hash algorithm this prover \
-                 currently expects (ZKM_IMM_WRAP_VK={}); the guest ELF may have been built in a \
-                 different mode",
-                zkm_prover::build::zkm_imm_wrap_vk_mode()
-            );
-        }
-
-        if kind == ZKMProofKind::Plonk {
-            let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
-                zkm_prover::build::try_build_plonk_bn254_artifacts_dev(
-                    &outer_proof.vk,
-                    &outer_proof.proof,
-                )
-            } else {
-                try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
-            };
-            let proof = self.cpu_prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
-            let proof_with_pv = ZKMProofWithPublicValues {
-                proof: ZKMProof::Plonk(proof),
-                public_values,
-                zkm_version: self.version().to_string(),
-            };
-            return Ok((proof_with_pv, cycles));
-        } else if kind == ZKMProofKind::Groth16 {
-            let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
-                zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
-                    &outer_proof.vk,
-                    &outer_proof.proof,
-                )
-            } else {
-                try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
-            };
-
-            let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-            let proof_with_pv = ZKMProofWithPublicValues {
-                proof: ZKMProof::Groth16(proof),
-                public_values,
-                zkm_version: self.version().to_string(),
-            };
-            return Ok((proof_with_pv, cycles));
-        } else if kind == ZKMProofKind::DvSnark {
-            let store_dir: PathBuf = std::env::var("DVSNARK_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::new())
-                .join(format!("dvsnark_artifacts_{}", env!("CARGO_PKG_VERSION")));
-            fs::create_dir_all(&store_dir)
-                .expect("failed to create dvsnark artifacts store directory");
-            let dv_snark_artifacts = zkm_prover::build::try_build_dvsnark_bn254_artifacts_dev(
-                &outer_proof.vk,
-                &outer_proof.proof,
-                &store_dir,
-            );
-            let proof =
-                self.cpu_prover.wrap_dvsnark_bn254(outer_proof, &dv_snark_artifacts, &store_dir);
-            return Ok((
-                ZKMProofWithPublicValues {
-                    proof: ZKMProof::DvSnark(proof),
-                    public_values,
-                    zkm_version: self.version().to_string(),
-                },
-                cycles,
-            ));
-        }
-
-        unreachable!()
-    }
-
-    fn compress_to_groth16(&self, mut stdin: ZKMStdin) -> Result<ZKMProofWithPublicValues> {
-        assert_eq!(stdin.buffer.len(), 1);
-        let public_values: crate::ZKMPublicValues =
-            bincode::deserialize(stdin.buffer.last().unwrap())?;
-
-        assert_eq!(stdin.proofs.len(), 1);
-        let (proof, _) = stdin.proofs.pop().unwrap();
-
-        let shrink_proof = self.cuda_prover.shrink(proof)?;
-
-        let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
-
-        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
-            .as_canonical_biguint();
-        let expected_digest = public_values.hash_bn254();
-        if actual_digest != expected_digest {
-            anyhow::bail!(
-                "guest committed-values digest doesn't match the hash algorithm this prover \
-                 currently expects (ZKM_IMM_WRAP_VK={}); the guest ELF may have been built in a \
-                 different mode",
-                zkm_prover::build::zkm_imm_wrap_vk_mode()
-            );
-        }
-
-        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
-            zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
-                &outer_proof.vk,
-                &outer_proof.proof,
-            )
+        let compressed = if std::env::var_os("ZIREN_BINARY_ON_HOST").is_some() {
+            self.cpu_prover.compress_binary(
+                &pk.vk,
+                &proof,
+                &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
+            )?
         } else {
-            try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
+            self.cuda_prover.compress_binary(&pk.vk, proof.clone())?
         };
-
-        let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-        Ok(ZKMProofWithPublicValues {
-            proof: ZKMProof::Groth16(proof),
-            public_values,
-            zkm_version: self.version().to_string(),
-        })
+        Ok((
+            ZKMProofWithPublicValues {
+                proof: ZKMProof::Compressed(Box::new(compressed)),
+                public_values: proof.public_values,
+                zkm_version: self.version().to_string(),
+            },
+            cycles,
+        ))
     }
 }
 
@@ -270,52 +127,5 @@ mod test {
 
         let proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();
-    }
-
-    /// Deferred proofs through the GPU server: two compressed keccak proofs
-    /// are absorbed by the verify program, whose reduce tree takes them as
-    /// first-layer inputs after its core leaves.
-    #[ignore]
-    #[test]
-    fn test_deferred_proofs_cuda() {
-        use crate::{ZKMProof, ZKMProofWithPublicValues};
-        use zkm_prover::types::HashableKey;
-        utils::setup_logger();
-
-        let client = ProverClient::cuda();
-        let (keccak_pk, keccak_vk) = client.setup(test_artifacts::KECCAK_SPONGE_ELF);
-        let (verify_pk, verify_vk) = client.setup(test_artifacts::VERIFY_PROOF_ELF);
-
-        let mut stdin = ZKMStdin::new();
-        stdin.write(&1usize);
-        stdin.write(&vec![0u8, 0, 0]);
-        let proof_1 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
-        client.verify(&proof_1, &keccak_vk).unwrap();
-
-        let mut stdin = ZKMStdin::new();
-        stdin.write(&3usize);
-        stdin.write(&vec![0u8, 1, 2]);
-        stdin.write(&vec![2, 3, 4]);
-        stdin.write(&vec![5, 6, 7]);
-        let proof_2 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
-        client.verify(&proof_2, &keccak_vk).unwrap();
-
-        let reduced = |p: &ZKMProofWithPublicValues| match &p.proof {
-            ZKMProof::Compressed(r) => (**r).clone(),
-            _ => panic!("a compressed proof"),
-        };
-        let mut stdin = ZKMStdin::new();
-        stdin.write(&keccak_vk.hash_u32());
-        stdin.write(&vec![
-            proof_1.public_values.as_slice().to_vec(),
-            proof_2.public_values.as_slice().to_vec(),
-            proof_2.public_values.as_slice().to_vec(),
-        ]);
-        stdin.write_proof(reduced(&proof_1), keccak_vk.vk.clone());
-        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
-        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
-
-        let proof = client.prove(&verify_pk, stdin).compressed().run().unwrap();
-        client.verify(&proof, &verify_vk).unwrap();
     }
 }

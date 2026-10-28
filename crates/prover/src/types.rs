@@ -7,12 +7,8 @@ use p3_commit::Pcs;
 use p3_field::{PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
+use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
-
-use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
-use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
-use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
 
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
@@ -21,7 +17,7 @@ use zkm_pcs::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},
-    CompressedSC, CoreSC, InnerSC,
+    CoreSC,
 };
 
 /// The information necessary to generate a proof for a given MIPS program.
@@ -130,10 +126,6 @@ impl<P: std::fmt::Debug + Clone> std::fmt::Debug for ZKMProofWithMetadata<P> {
 /// A proof of a Ziren program without any wrapping.
 pub type ZKMCoreProof = ZKMProofWithMetadata<ZKMCoreProofData>;
 
-/// A Ziren proof that has been recursively reduced into a single proof. This proof can be verified
-/// within Ziren programs.
-pub type ZKMReducedProof = ZKMProofWithMetadata<ZKMReducedProofData>;
-
 /// A Ziren proof that has been wrapped into a single PLONK proof and can be verified onchain.
 pub type ZKMPlonkBn254Proof = ZKMProofWithMetadata<ZKMPlonkBn254ProofData>;
 
@@ -145,9 +137,6 @@ pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMCoreProofData(pub Vec<ShardProof<CoreSC>>);
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ZKMReducedProofData(pub ShardProof<InnerSC>);
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMPlonkBn254ProofData(pub PlonkBn254Proof);
@@ -202,13 +191,6 @@ impl ProofSystem {
     }
 }
 
-/// A proof that can be reduced along with other proofs into one proof.
-#[derive(Serialize, Deserialize, Clone)]
-pub enum ZKMReduceProofWrapper {
-    Core(ZKMReduceProof<CoreSC>),
-    Recursive(ZKMReduceProof<InnerSC>),
-}
-
 #[derive(Error, Debug)]
 pub enum ZKMRecursionProverError {
     #[error("Runtime error: {0}")]
@@ -221,10 +203,10 @@ pub enum ZKMRecursionProverError {
     BinaryStage(String),
 }
 
-/// A proof of the binary stage: the shrink program it executes, the digest
-/// it commits to, and the proof of the recursion machine over bits.
-pub struct BinaryShrinkProof {
-    /// The shrink program, which fixes the machine and its keys.
+/// A binary leaf: the normalize program it executes, the digest it commits
+/// to, and the proof of the recursion machine over bits.
+pub struct BinaryLeafProof {
+    /// The normalize program, which fixes the machine and its keys.
     pub program: std::sync::Arc<zkm_recursion_core::RecursionProgram<p3_koala_bear::KoalaBear>>,
     /// The digest the program commits to: the stage's public values.
     pub digest: [u32; zkm_recursion_core::DIGEST_SIZE],
@@ -232,35 +214,6 @@ pub struct BinaryShrinkProof {
     pub public_values: Vec<u32>,
     /// The proof.
     pub proof: zkm_binary_stark::config::MachineProof,
-}
-
-/// A recursion vk whose KoalaBear digest `digest` is not one of the
-/// `map_size` keys of the vk allowlist.
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-#[error("vk not allowed: {digest:?} (map_size={map_size})")]
-pub struct VkNotAllowed {
-    pub digest: Vec<u32>,
-    pub map_size: usize,
-}
-
-impl From<VkNotAllowed> for ZKMRecursionProverError {
-    fn from(e: VkNotAllowed) -> Self {
-        Self::RuntimeError(e.to_string())
-    }
-}
-
-#[allow(clippy::large_enum_variant)]
-pub enum ZKMCircuitWitness {
-    /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
-    /// the core prover (carried on `ShardProof.jagged_shard_proof`).
-    /// Dispatches to `build_normalize_basefold_program` during compress.
-    CoreBasefold(ZKMCoreBasefoldWitnessValues<CoreSC>),
-    /// Basefold-shape compose input — tree-reduction layer.
-    /// Dispatches to `build_compose_basefold_program`.
-    ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),
-    /// Basefold-shape deferred input — verifies already-recursed deferred
-    /// branches. Dispatches to `build_deferred_basefold_program`.
-    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<CompressedSC>),
 }
 
 /// What a ring hashes on the host as its circuit hashes it in-ring: the

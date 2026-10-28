@@ -23,8 +23,7 @@ use twirp::{
 };
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof, utils::ZKMCoreProverError};
 use zkm_prover::{
-    CompressedSC, OuterSC, ShrinkSC, ZKMCoreProof, ZKMProvingKey, ZKMRecursionProverError,
-    ZKMVerifyingKey,
+    OuterSC, ShrinkSC, ZKMCoreProof, ZKMProvingKey, ZKMRecursionProverError, ZKMVerifyingKey,
 };
 
 use crate::api::{ProverServiceClient, ReadyRequest};
@@ -109,19 +108,6 @@ pub struct StatelessProveCoreRequestPayload {
     pub retain_for_compress: bool,
 }
 
-/// The payload for the [zkm_prover::ZKMProver::compress] method.
-///
-/// This object is used to serialize and deserialize the payloads for the GPU server.
-#[derive(Serialize, Deserialize)]
-pub struct CompressRequestPayload {
-    /// The verifying key.
-    pub vk: ZKMVerifyingKey,
-    /// The core proof.
-    pub proof: ZKMCoreProof,
-    /// The deferred proofs.
-    pub deferred_proofs: Vec<ZKMReduceProof<CompressedSC>>,
-}
-
 /// The payload for the [zkm_prover::ZKMProver::compress_binary] method.
 ///
 /// This object is used to serialize and deserialize the payloads for the GPU server.
@@ -131,14 +117,6 @@ pub struct CompressBinaryRequestPayload {
     pub vk: ZKMVerifyingKey,
     /// The core proof, every shard proof included.
     pub proof: ZKMCoreProof,
-}
-
-/// The payload for the [zkm_prover::ZKMProver::shrink] method.
-///
-/// This object is used to serialize and deserialize the payloads for the GPU server.
-#[derive(Serialize, Deserialize)]
-pub struct ShrinkRequestPayload {
-    pub reduced_proof: ZKMReduceProof<CompressedSC>,
 }
 
 /// The payload for the [zkm_prover::ZKMProver::wrap_bn254] method.
@@ -442,10 +420,10 @@ impl ZKMCudaProver {
         self.prove_core_stateless_retaining(pk, stdin, false)
     }
 
-    /// [`Self::prove_core_stateless`] for a caller that will [`Self::compress`]
-    /// the result next: with `retain_for_compress` the server keeps the shard
+    /// [`Self::prove_core_stateless`] for a caller that will compress the
+    /// result next on the server: with `retain_for_compress` the server keeps the shard
     /// proofs and the returned [`ZKMCoreProof`] carries an empty proof body
-    /// (public values and cycles are real).  Hand that value to `compress`
+    /// (public values and cycles are real).  Hand that value to the compress
     /// unchanged; the server substitutes what it kept.
     pub fn prove_core_stateless_retaining(
         &self,
@@ -469,27 +447,6 @@ impl ZKMCudaProver {
         Ok(proof)
     }
 
-    /// Executes the [zkm_prover::ZKMProver::compress] method inside the container.
-    ///
-    /// You will need at least 24GB of VRAM to run this method.
-    pub fn compress(
-        &self,
-        vk: &ZKMVerifyingKey,
-        proof: ZKMCoreProof,
-        deferred_proofs: Vec<ZKMReduceProof<CompressedSC>>,
-    ) -> Result<ZKMReduceProof<CompressedSC>, ZKMRecursionProverError> {
-        let payload = CompressRequestPayload { vk: vk.clone(), proof, deferred_proofs };
-        let data = bincode::serialize(&payload)
-            .map_err(|e| rec_codec("compress", "encode the request", e))?;
-        let request = crate::api::CompressRequest { data };
-        let response = block_on(async { self.client.compress(request).await })
-            .map_err(|e| rec_transport("compress", e))?;
-        self.record_server_prove_ms(response.prove_ms);
-        let proof: ZKMReduceProof<CompressedSC> = bincode::deserialize(&response.result)
-            .map_err(|e| rec_codec("compress", "decode the response", e))?;
-        Ok(proof)
-    }
-
     /// Executes the [zkm_prover::ZKMProver::compress_binary] method inside the container, with
     /// the server's own binary key store.
     pub fn compress_binary(
@@ -506,24 +463,6 @@ impl ZKMCudaProver {
         self.record_server_prove_ms(response.prove_ms);
         bincode::deserialize(&response.result)
             .map_err(|e| rec_codec("compress_binary", "decode the response", e))
-    }
-
-    /// Executes the [zkm_prover::ZKMProver::shrink] method inside the container.
-    ///
-    /// You will need at least 24GB of VRAM to run this method.
-    pub fn shrink(
-        &self,
-        reduced_proof: ZKMReduceProof<CompressedSC>,
-    ) -> Result<ZKMReduceProof<ShrinkSC>, ZKMRecursionProverError> {
-        let payload = ShrinkRequestPayload { reduced_proof: reduced_proof.clone() };
-        let data = bincode::serialize(&payload)
-            .map_err(|e| rec_codec("shrink", "encode the request", e))?;
-        let request = crate::api::ShrinkRequest { data };
-        let response = block_on(async { self.client.shrink(request).await })
-            .map_err(|e| rec_transport("shrink", e))?;
-        let proof: ZKMReduceProof<ShrinkSC> = bincode::deserialize(&response.result)
-            .map_err(|e| rec_codec("shrink", "decode the response", e))?;
-        Ok(proof)
     }
 
     /// Executes the [zkm_prover::ZKMProver::wrap_bn254] method inside the container.
@@ -696,12 +635,13 @@ mod tests {
         let msg = format!("{e}");
         assert!(msg.contains("prove_core") && msg.contains("version mismatch"), "got: {msg}");
 
-        let Err(e) = bincode::deserialize::<ZKMReduceProof<zkm_prover::InnerSC>>(&garbage)
-            .map_err(|e| rec_codec("compress", "decode the response", e))
+        let Err(e) =
+            bincode::deserialize::<zkm_prover::binary_tree::BinaryCompressedProof>(&garbage)
+                .map_err(|e| rec_codec("compress_binary", "decode the response", e))
         else {
             panic!("garbage must not decode")
         };
         assert!(matches!(e, ZKMRecursionProverError::RuntimeError(_)), "got: {e}");
-        assert!(format!("{e}").contains("compress"), "got: {e}");
+        assert!(format!("{e}").contains("compress_binary"), "got: {e}");
     }
 }

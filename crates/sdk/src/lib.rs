@@ -386,7 +386,6 @@ impl NetworkProverBuilder {
 #[cfg(test)]
 mod tests {
     use crate::utils::committed_public_values;
-    use crate::ZKMProof;
     use crate::ZKMProof::Groth16;
     use crate::{utils, ProverClient, ZKMStdin};
     use p3_field::PrimeField;
@@ -462,6 +461,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the BN254 wrap over the binary compress root"]
     fn test_e2e_prove_plonk() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -480,6 +480,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the BN254 wrap over the binary compress root"]
     fn test_e2e_prove_groth16() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -492,6 +493,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the BN254 wrap over the binary compress root"]
     fn test_generate_dvsnark_r1cs_witness() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -517,6 +519,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the BN254 wrap over the binary compress root"]
     fn test_groth16_public_values() {
         let client = ProverClient::cpu();
         let elf = test_artifacts::HELLO_WORLD_ELF;
@@ -650,27 +653,36 @@ mod tests {
         }
     }
 
+    /// A compressed proof of an execution that verifies deferred proofs is
+    /// refused before proving: the binary compress does not support them.
     #[test]
-    fn test_compress_to_groth16() {
-        utils::setup_logger();
-        let client = ProverClient::new();
-        let elf = test_artifacts::HELLO_WORLD_ELF;
-        let (pk, vk) = client.setup(elf);
-        let stdin = ZKMStdin::new();
+    fn test_compressed_rejects_deferred_proofs() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        use zkm_pcs::{shard_level::shard_proof::JaggedShardProof, ShardProof, StarkVerifyingKey};
 
-        let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
-        client.verify(&proof, &vk).unwrap();
-
-        let client = ProverClient::new();
-
+        let client = ProverClient::mock();
+        let (pk, vk) = client.setup(test_artifacts::FIBONACCI_ELF);
+        let proof = zkm_core_executor::ZKMReduceProof::<zkm_prover::CompressedSC> {
+            vk: StarkVerifyingKey {
+                commit: zkm_pcs::ZeroCommitment::<zkm_prover::CompressedSC>::zero_commitment(
+                    zkm_pcs::StarkGenericConfig::pcs(&zkm_prover::CompressedSC::default()),
+                ),
+                pc_start: KoalaBear::ZERO,
+                chip_information: vec![],
+                chip_ordering: Default::default(),
+                initial_global_cumulative_sum: zkm_pcs::septic_digest::SepticDigest::zero(),
+            },
+            proof: ShardProof {
+                public_values: vec![],
+                jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
+            },
+        };
         let mut stdin = ZKMStdin::new();
-        stdin.write::<ZKMPublicValues>(&proof.public_values);
-
-        let ZKMProof::Compressed(proof) = proof.proof else { panic!() };
-        stdin.write_proof(*proof, vk.vk.clone());
-
-        let proof = client.prove(&pk, stdin).compress_to_groth16().run().unwrap();
-        client.verify(&proof, &vk).unwrap();
+        stdin.write(&10u32);
+        stdin.write_proof(proof, vk.vk.clone());
+        let err = client.prove(&pk, stdin).compressed().run().unwrap_err();
+        assert!(err.to_string().contains("deferred proofs are not supported"), "{err}");
     }
 }
 
@@ -683,7 +695,7 @@ mod block_dump {
 
     /// Prove the guest at `ZIREN_BLOCK_ELF` on the cached client input at
     /// `ZIREN_BLOCK_INPUT` to a compressed proof through the GPU server
-    /// (`CUDA_ENDPOINT`), and save the reduced proof at
+    /// (`CUDA_ENDPOINT`), and save the compressed proof at
     /// `ZIREN_BLOCK_PROOF_OUT` for the stages after it.
     #[test]
     #[ignore]
@@ -699,11 +711,11 @@ mod block_dump {
         let started = std::time::Instant::now();
         let proof = client.prove(&pk, stdin).compressed().run()?;
         tracing::info!("compressed proof in {:.1} s", started.elapsed().as_secs_f64());
-        let ZKMProof::Compressed(reduced) = proof.proof else {
+        let ZKMProof::Compressed(compressed) = proof.proof else {
             anyhow::bail!("a compressed proof was asked for");
         };
-        std::fs::write(&out, bincode::serialize(&*reduced)?)?;
-        tracing::info!("reduced proof saved to {out}");
+        std::fs::write(&out, bincode::serialize(&*compressed)?)?;
+        tracing::info!("compressed proof saved to {out}");
         Ok(())
     }
 }

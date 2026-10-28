@@ -5,8 +5,6 @@ use std::{
     io::Write,
     path::PathBuf,
 };
-use zkm_core_executor::ZKMContext;
-use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
@@ -26,12 +24,12 @@ use zkm_recursion_core::{air::RecursionPublicValues, hash_vkey_with_part_vk};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
-use zkm_pcs::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
+use zkm_pcs::{ShardProof, StarkVerifyingKey};
 use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
 
 use crate::{
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
-    OuterSC, WrapAir, ZKMProver,
+    OuterSC, WrapAir,
 };
 
 pub const PART_STARK_VK_PATH: &str = "part_stark_vk.bin";
@@ -161,7 +159,7 @@ pub fn build_dvsnark_bn254_artifacts(
 /// This may take a while as it needs to first generate a dummy proof and then it needs to compile
 /// the circuit.
 pub fn build_plonk_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
-    let (wrap_vk, wrapped_proof) = dummy_proof();
+    let (wrap_vk, wrapped_proof) = dummy_proof().expect("dummy wrap proof");
     crate::build::build_plonk_bn254_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
 }
 
@@ -170,7 +168,7 @@ pub fn build_plonk_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
 /// This may take a while as it needs to first generate a dummy proof and then it needs to compile
 /// the circuit.
 pub fn build_groth16_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
-    let (wrap_vk, wrapped_proof) = dummy_proof();
+    let (wrap_vk, wrapped_proof) = dummy_proof().expect("dummy wrap proof");
     crate::build::build_groth16_bn254_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
 }
 
@@ -212,32 +210,14 @@ pub fn build_constraints_and_witness(
 
 /// Generate a dummy proof that we can use to build the circuit. We need this to know the shape of
 /// the proof.
-pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
-    let elf = include_bytes!("../elf/mipsel-zkm-zkvm-elf");
-
-    tracing::info!("initializing prover");
-    let prover: ZKMProver = ZKMProver::new();
-    let opts = ZKMProverOpts::default();
-    let context = ZKMContext::default();
-
-    tracing::info!("setup elf");
-    let (_, pk_d, program, vk) = prover.setup(elf);
-
-    tracing::info!("prove core");
-    let mut stdin = ZKMStdin::new();
-    stdin.write(&500u32);
-    let core_proof = prover.prove_core(&pk_d, program, &stdin, opts, context).unwrap();
-
-    tracing::info!("compress");
-    let compressed_proof = prover.compress(&vk, core_proof, vec![], opts).unwrap();
-
-    tracing::info!("shrink");
-    let shrink_proof = prover.shrink(compressed_proof, opts).unwrap();
-
-    tracing::info!("wrap");
-    let wrapped_proof = prover.wrap_bn254(shrink_proof, opts).unwrap();
-
-    (wrapped_proof.vk, wrapped_proof.proof)
+///
+/// The wrap over the binary compress root is not built yet, so there is no proof to take the
+/// shape from.
+pub fn dummy_proof(
+) -> Result<(StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>), crate::ZKMRecursionProverError> {
+    Err(crate::ZKMRecursionProverError::RuntimeError(
+        "the BN254 wrap over the binary compress root is not built yet".to_string(),
+    ))
 }
 
 fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
