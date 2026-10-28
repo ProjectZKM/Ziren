@@ -18,6 +18,19 @@ pub type Commitment = <BitPcs as BooleanBackend<F>>::Commitment;
 /// A word proof.
 pub type Proof = WordProof<F, F, <BitPcs as BooleanBackend<F>>::Proof>;
 
+/// The schedule a word proof commits under.
+///
+/// Decoding to the proven Johnson radius halves the queries of unique
+/// decoding, which keeps a leaf's opening under the proof-size ceiling.
+pub fn schedule() -> BinarySchedule {
+    BinarySchedule {
+        regime: zkm_binary_stark::WhirRegime::Johnson,
+        log_inv_rate: 2,
+        folding: 3,
+        ..BinarySchedule::default()
+    }
+}
+
 /// A key, the commitment it is proven under, and its relations.
 pub struct WordKey {
     /// The compiled relations.
@@ -82,11 +95,40 @@ mod tests {
         let output = builder.output(0, acc.value);
         builder.assert_zero(acc.terms().chain([output]));
         let built = builder.build().unwrap();
-        let key = WordKey::new(&built, &BinarySchedule::default()).unwrap();
+        let key = WordKey::new(&built, &schedule()).unwrap();
         let (commitment, proof) = key.prove(&built).unwrap();
         key.verify(&commitment, &built.public, &proof).unwrap();
         let mut wrong = built.public.clone();
         wrong[0] = Word64::new(wrong[0].get() ^ 1);
         assert!(key.verify(&commitment, &wrong, &proof).is_err());
+    }
+
+    /// The opening's queries, grinding and byte bound at the leaf's arity, per schedule.
+    #[test]
+    #[ignore]
+    fn leaf_schedule_sizes() {
+        let arity = std::env::var("ZIREN_WORD_ARITY").map_or(31, |a| a.parse().unwrap());
+        for regime in
+            [zkm_binary_stark::WhirRegime::UniqueDecoding, zkm_binary_stark::WhirRegime::Johnson]
+        {
+            for log_inv_rate in 1..=6 {
+                for folding in 2..=8 {
+                    let schedule =
+                        BinarySchedule { regime, log_inv_rate, folding, ..Default::default() };
+                    match bit_commitment(arity, &schedule) {
+                        Ok(pcs) => {
+                            let shape = pcs.proof_shape(1, false);
+                            println!(
+                                "{regime:?} rate 2^-{log_inv_rate} fold {folding}: {} queries, {} grind bits, {} bytes",
+                                shape.stir_queries,
+                                shape.grinding_bits,
+                                shape.max_bytes(19, 19, 32)
+                            );
+                        }
+                        Err(e) => println!("{regime:?} rate 2^-{log_inv_rate} fold {folding}: {e}"),
+                    }
+                }
+            }
+        }
     }
 }

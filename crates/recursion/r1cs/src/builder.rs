@@ -128,6 +128,53 @@ pub struct Built {
     pub witness: Vec<Word64>,
 }
 
+impl Built {
+    /// Writes the relations and words as little-endian integers: the five
+    /// counts (public, witness, zero, AND and product relations), the public
+    /// and committed words, then every operand of every relation in family
+    /// order as a term count followed by its terms.  A term is its position
+    /// with the top bit set for a committed word, then the code and amount
+    /// of its inner and of its outer shift, one byte each.
+    pub fn write(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        let system = &self.system;
+        let counts = [
+            self.public.len(),
+            self.witness.len(),
+            system.zero_constraints().len(),
+            system.and_constraints().len(),
+            system.integer_mul_constraints().len(),
+        ];
+        for count in counts {
+            out.write_all(&(count as u64).to_le_bytes())?;
+        }
+        for word in self.public.iter().chain(&self.witness) {
+            out.write_all(&word.get().to_le_bytes())?;
+        }
+        let zero = system.zero_constraints().iter().map(|c| vec![c.value()]);
+        let and = system.and_constraints().iter().map(|c| vec![c.left(), c.right(), c.output()]);
+        let mul = system
+            .integer_mul_constraints()
+            .iter()
+            .map(|c| vec![c.left(), c.right(), c.low(), c.high()]);
+        for operand in zero.chain(and).chain(mul).flatten() {
+            out.write_all(&(operand.terms().len() as u32).to_le_bytes())?;
+            for term in operand.terms() {
+                let index = term.index();
+                let committed = u32::from(index.segment() == Segment::Witness) << 31;
+                out.write_all(&(index.position() | committed).to_le_bytes())?;
+                let [inner, outer] = term.shifts();
+                out.write_all(&[
+                    inner.kind().code(),
+                    inner.amount(),
+                    outer.kind().code(),
+                    outer.amount(),
+                ])?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Accumulates words and relations.
 pub struct Builder {
     public: Vec<u64>,

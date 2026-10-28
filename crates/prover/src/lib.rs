@@ -1840,11 +1840,16 @@ pub mod tests {
             "word leaf relations hold, checked in {:.1} s",
             started.elapsed().as_secs_f64()
         );
+        if let Some(path) = std::env::var_os("ZIREN_WORD_DUMP") {
+            let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+            built.write(&mut out)?;
+            std::io::Write::flush(&mut out)?;
+        }
         if std::env::var_os("ZIREN_WORD_PROVE").is_some() {
             let started = std::time::Instant::now();
             let key = zkm_recursion_r1cs::prove::WordKey::new(
                 built,
-                &zkm_binary_stark::BinarySchedule::default(),
+                &zkm_recursion_r1cs::prove::schedule(),
             )
             .map_err(|e| anyhow::anyhow!(e))?;
             tracing::info!(

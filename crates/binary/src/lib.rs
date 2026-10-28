@@ -19,9 +19,10 @@ use p3_binary_field::{BinaryChallenger, BinaryField128, BinaryField2, Ghash128};
 use p3_binary_pcs::whir::BinaryWhirProfile;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
+pub use p3_examples::binary::WhirRegime;
 use p3_examples::binary::{
     boolean_whir_config, BinaryAir, BinaryProofError, BinaryProofOptions, BinaryWhirBudget,
-    BooleanPcsChoice, BooleanWhirStarkConfig, HashFamily, WhirOptions, WhirRegime,
+    BooleanPcsChoice, BooleanWhirStarkConfig, HashFamily, WhirOptions,
 };
 use p3_multi_stark::config::{PcsError, PcsProverError};
 use p3_multi_stark::{
