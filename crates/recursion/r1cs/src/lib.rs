@@ -12,6 +12,7 @@ pub mod blake3;
 pub mod builder;
 pub mod kb;
 pub mod lower;
+pub mod prove;
 
 pub use builder::{Builder, Built, Cost, Val};
 pub use lower::{lower, LowerError, Lowered};

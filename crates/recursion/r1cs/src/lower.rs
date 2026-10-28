@@ -313,6 +313,10 @@ impl Lowering<'_> {
         self.set_felt(instr.addrs.output[1].as_usize(), high)
     }
 
+    /// The jagged prefix-sum chains.  With `x1` a bit, the Lagrange step
+    /// `acc (1 - x1 - x2 + 2 x1 x2)` is `x1 ? acc x2 : acc - acc x2`: one
+    /// extension product, one difference and a selection, with `x1`
+    /// checked to be a bit.
     fn prefix_sum_checks(&mut self, instr: &PrefixSumChecksInstr<F>) -> Result<(), LowerError> {
         let addrs = &instr.addrs;
         let one = self.builder.constant(1);
@@ -320,13 +324,11 @@ impl Lowering<'_> {
         let mut field_acc = Val::ZERO;
         for i in 0..addrs.x1.len() {
             let x1 = self.felt(addrs.x1[i].as_usize())?;
+            let x1 = self.builder.bit(x1);
             let x2 = self.ext(addrs.x2[i].as_usize())?;
-            let product = self.builder.ext_mul(x2, Builder::embed(x1));
-            let twice = self.builder.ext_add(product, product);
-            let start = self.builder.sub(one, x1);
-            let shifted = self.builder.ext_sub(Builder::embed(start), x2);
-            let term = self.builder.ext_add(shifted, twice);
-            acc = self.builder.ext_mul(acc, term);
+            let matched = self.builder.ext_mul(acc, x2);
+            let missed = self.builder.ext_sub(acc, matched);
+            acc = std::array::from_fn(|j| self.builder.select(x1, missed[j], matched[j]).0);
             let doubled = self.builder.add(field_acc, field_acc);
             field_acc = self.builder.add(x1, doubled);
             self.set_ext(addrs.accs[i].as_usize(), acc)?;
@@ -427,6 +429,14 @@ pub fn lower(
         entry.0 += 1;
         entry.1 += lowering.builder.cost() - before;
     }
+    lowering.kind = "Blake3Compress";
+    let before = lowering.builder.cost();
+    lowering.builder.flush_compressions();
+    census.entry(lowering.kind).or_default().1 += lowering.builder.cost() - before;
+    lowering.kind = "Range";
+    let before = lowering.builder.cost();
+    lowering.builder.flush_ranges();
+    census.entry(lowering.kind).or_default().1 += lowering.builder.cost() - before;
     if lowering.commits != 1 {
         return Err(LowerError::Commits(lowering.commits));
     }

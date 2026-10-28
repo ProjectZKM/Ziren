@@ -3704,6 +3704,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-word-backend"
+version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
+dependencies = [
+ "p3-binary-field",
+ "p3-binary-pcs",
+ "p3-challenger",
+ "p3-field",
+ "p3-multilinear-util",
+ "p3-security",
+ "p3-sumcheck",
+ "p3-word",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "p3-zk-codes"
 version = "0.8.0"
 source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
@@ -6946,11 +6963,15 @@ dependencies = [
 name = "zkm-recursion-r1cs"
 version = "2.0.0"
 dependencies = [
+ "p3-binary-pcs",
  "p3-field",
  "p3-koala-bear",
  "p3-word",
+ "p3-word-backend",
+ "postcard",
  "rand 0.8.6",
  "thiserror 1.0.69",
+ "zkm-binary-stark",
  "zkm-recursion-core",
 ]
 

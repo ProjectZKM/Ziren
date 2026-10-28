@@ -75,6 +75,8 @@ impl Val {
 
 /// The outcome of a carry chain `x + y`.
 pub struct Chain {
+    /// The carry-out word.
+    pub carry: Term,
     /// The terms whose XOR is the sum.
     pub sum: Vec<Term>,
     /// The sum's native value.
@@ -134,6 +136,8 @@ pub struct Builder {
     zero: Vec<ZeroConstraint<Word64>>,
     and: Vec<AndConstraint<Word64>>,
     mul: Vec<IntegerMulConstraint<Word64>>,
+    pub(crate) compressions: Vec<crate::blake3::Compression>,
+    pub(crate) pending_range: Option<Val>,
 }
 
 fn shift(kind: ShiftKind, amount: usize) -> Shift<Word64> {
@@ -162,6 +166,8 @@ impl Builder {
             zero: Vec::new(),
             and: Vec::new(),
             mul: Vec::new(),
+            compressions: Vec::new(),
+            pending_range: None,
         }
     }
 
@@ -382,7 +388,7 @@ impl Builder {
                 shift(ShiftKind::LogicalRight, 63),
             )]);
         }
-        Chain { sum: x.iter().chain(y).copied().chain([carry_in]).collect(), value: sum }
+        Chain { carry, sum: x.iter().chain(y).copied().chain([carry_in]).collect(), value: sum }
     }
 
     /// The carry chain of two values with the sum committed.
@@ -401,8 +407,18 @@ impl Builder {
         sum
     }
 
+    /// `term < 2^bits`.
+    pub fn below_bits(&mut self, term: Term, bits: usize) {
+        self.assert_zero([ShiftedValue::single(
+            term.index(),
+            shift(ShiftKind::LogicalRight, bits),
+        )]);
+    }
+
     /// The relations and the words that satisfy them.
-    pub fn build(self) -> Result<Built, SystemError> {
+    pub fn build(mut self) -> Result<Built, SystemError> {
+        self.flush_compressions();
+        self.flush_ranges();
         let system = ConstraintSystem::new(
             self.public.len(),
             self.witness.len(),

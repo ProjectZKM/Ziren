@@ -170,10 +170,22 @@ pub fn paired_arity(main: &[TableShape], preprocessed: &[TableShape]) -> usize {
     }
 }
 
+/// The Boolean WHIR commitment of one bit witness.
+pub type BitPcs = BooleanWhirPcs<F, F, BooleanWhirDomain, MerkleMmcs, Challenger>;
+
 /// The Boolean WHIR commitment of a stacked witness of `arity` variables
 /// under `schedule`; the fold is shortened to fit a witness smaller than
 /// one fold.
 fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, MachineConfigError> {
+    Ok(BooleanWhirTracePcs::from_commitment(bit_commitment(arity, schedule)?))
+}
+
+/// The Boolean WHIR commitment of a bit witness of `arity` variables under
+/// `schedule`, the commitment a machine stacks its tables into.
+pub fn bit_commitment(
+    arity: usize,
+    schedule: &BinarySchedule,
+) -> Result<BitPcs, MachineConfigError> {
     let absorbed = BitRingSwitch::<F>::ABSORBED;
     let packed = arity
         .checked_sub(absorbed)
@@ -197,8 +209,7 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, Mac
         cap_height,
     );
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);
-    let pcs = BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)?;
-    Ok(BooleanWhirTracePcs::from_commitment(pcs))
+    BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)
 }
 
 impl MultiStarkConfig for MachineConfig {

@@ -76,21 +76,47 @@ impl Builder {
     }
 
     fn below(&mut self, term: Term, bits: usize) {
-        self.assert_zero([ShiftedValue::single(
-            term.index(),
-            p3_word::Shift::new(ShiftKind::LogicalRight, bits).expect("a shift within the word"),
-        )]);
+        self.below_bits(term, bits);
     }
 
-    /// `value < p`.
+    /// `value < p`.  Checks are emitted two at a time, one per lane of a
+    /// carry chain adding `2^32 - p` to each: a lane below `p` does not
+    /// carry out of its bit 31.
     pub fn range(&mut self, value: Val) {
         if value.constant {
             return;
         }
-        let terms: Vec<Term> = value.terms().collect();
-        let bound = self.constant(P.wrapping_neg());
+        match self.pending_range.take() {
+            None => self.pending_range = Some(value),
+            Some(first) => self.range_lanes(first, Some(value)),
+        }
+    }
+
+    /// Emits a range check still waiting for a partner.
+    pub fn flush_ranges(&mut self) {
+        if let Some(value) = self.pending_range.take() {
+            self.range_lanes(value, None);
+        }
+    }
+
+    fn range_lanes(&mut self, low: Val, high: Option<Val>) {
+        let low = self.materialize(low);
+        self.below(low.plain().expect("a materialized value is plain"), 32);
+        let high = high.map(|value| {
+            let value = self.materialize(value);
+            self.below(value.plain().expect("a materialized value is plain"), 32);
+            value
+        });
+        let packed = self.lanes(low, high);
+        let bound = (1u64 << 32) - P;
+        let bound = self.constant(bound | if high.is_some() { bound << 32 } else { 0 });
+        let packed_terms: Vec<Term> = packed.terms().collect();
         let bound_terms: Vec<Term> = bound.terms().collect();
-        self.chain(&terms, value.value, &bound_terms, bound.value, false, true);
+        let chain = self.chain(&packed_terms, packed.value, &bound_terms, bound.value, true, false);
+        self.assert_zero([ShiftedValue::single(
+            chain.carry.index(),
+            p3_word::Shift::new(ShiftKind::Lane32LogicalRight, 31).expect("a lane shift"),
+        )]);
     }
 
     /// A hinted element, checked canonical.
@@ -106,6 +132,18 @@ impl Builder {
         let term = word.plain().expect("a fresh word is plain");
         self.below(term, 1);
         word.narrowed()
+    }
+
+    /// `value`, checked to be a bit.
+    pub fn bit(&mut self, value: Val) -> Val {
+        if value.constant {
+            assert!(value.value <= 1, "a constant bit is 0 or 1");
+            return value;
+        }
+        let value = self.materialize(value);
+        let term = value.plain().expect("a materialized value is plain");
+        self.below(term, 1);
+        value.narrowed()
     }
 
     /// `a + b`.

@@ -1840,6 +1840,29 @@ pub mod tests {
             "word leaf relations hold, checked in {:.1} s",
             started.elapsed().as_secs_f64()
         );
+        if std::env::var_os("ZIREN_WORD_PROVE").is_some() {
+            let started = std::time::Instant::now();
+            let key = zkm_recursion_r1cs::prove::WordKey::new(
+                built,
+                &zkm_binary_stark::BinarySchedule::default(),
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
+            tracing::info!(
+                "word leaf key: {} trace variables, {:.1} s",
+                key.key.trace_variables(),
+                started.elapsed().as_secs_f64()
+            );
+            let started = std::time::Instant::now();
+            let (commitment, proof) = key.prove(built).map_err(|e| anyhow::anyhow!(e))?;
+            tracing::info!(
+                "word leaf proved in {:.1} s, {} bytes",
+                started.elapsed().as_secs_f64(),
+                zkm_recursion_r1cs::prove::proof_size(&proof)
+            );
+            let started = std::time::Instant::now();
+            key.verify(&commitment, &built.public, &proof).map_err(|e| anyhow::anyhow!(e))?;
+            tracing::info!("word leaf verified in {:.2} s", started.elapsed().as_secs_f64());
+        }
         Ok(())
     }
 
