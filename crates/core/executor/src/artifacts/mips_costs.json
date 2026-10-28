@@ -56,7 +56,7 @@
   "LtImm": 47,
   "MemoryGlobalFinalize": 152,
   "Bitwise": 37,
-  "MemoryLocal": 80,
+  "MemoryLocal": 72,
   "Global": 57,
   "MemoryBump": 12,
   "Byte": 22,

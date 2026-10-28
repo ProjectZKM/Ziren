@@ -30,6 +30,13 @@ where
     /// `is_syscall = 1`, `next_pc = is_halt ? 0 : pc + 4` (the halt row sends
     /// `(0, 4)` to the final endpoint), and `num_extra_cycles`, `op_a_val`,
     /// `is_halt` are fixed here, in `eval_syscall` and `eval_is_halt_syscall`.
+    ///
+    /// `num_extra_cycles` is byte-checked here, together with the send-table
+    /// byte, rather than trusted as a byte of a register value: it is the only
+    /// non-constant State step, and the State chain's acyclicity (which pins
+    /// the frames' unchecked shard column) must not rest on the memory
+    /// argument, whose cross-shard timestamp order itself needs that shard
+    /// bound.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -69,6 +76,10 @@ where
         builder.assert_eq::<AB::Var, AB::Expr>(
             local.num_extra_cycles,
             self.get_num_extra_syscall_cycles::<AB>(local),
+        );
+        builder.slice_range_check_u8(
+            &[local.frame.op_a_access.prev_value[2], local.num_extra_cycles],
+            local.is_real,
         );
 
         self.eval_syscall(builder, local);
