@@ -18,6 +18,7 @@
 pub mod air;
 pub mod alu;
 pub mod bytes;
+pub mod cluster;
 pub mod control_flow;
 pub mod frame;
 pub mod global;
@@ -31,7 +32,6 @@ pub mod program;
 #[cfg(test)]
 pub mod programs;
 pub mod range;
-pub mod shape;
 #[cfg(feature = "sys")]
 pub mod sys;
 pub mod syscall;

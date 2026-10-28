@@ -1,25 +1,20 @@
 use crate::{
     global::GlobalChip,
-    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
+    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip},
     syscall::precompiles::{
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
     },
 };
 use core::fmt;
-use hashbrown::{HashMap, HashSet};
-use itertools::Itertools;
+use hashbrown::HashMap;
 pub use mips_chips::*;
 use p3_field::PrimeField32;
 use strum_macros::{EnumDiscriminants, EnumIter};
-use zkm_core_executor::events::PrecompileEvent;
-use zkm_core_executor::{
-    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, MipsAirId, Program,
-};
 use zkm_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm_pcs::{
     air::{LookupScope, MachineAir, PicusInfo, ZKM_PROOF_NUM_PV_ELTS},
-    Chip, LookupKind, StarkGenericConfig, StarkMachine,
+    Chip, StarkGenericConfig, StarkMachine,
 };
 
 /// A module for importing all the different MIPS chips.
@@ -522,300 +517,6 @@ impl<F: PrimeField32> MipsAir<F> {
 
         (chips, costs)
     }
-
-    /// Get the heights of the preprocessed chips for a given program.
-    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(MipsAirId, usize)> {
-        vec![
-            (MipsAirId::Program, program.instructions.len()),
-            (MipsAirId::Byte, 1 << 16),
-            (MipsAirId::Range, 1 << 10),
-        ]
-    }
-
-    /// Get the heights of the chips for a given execution record.
-    pub fn core_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
-        vec![
-            (MipsAirId::Branch, record.branch_events.len()),
-            (MipsAirId::Jump, record.jump_events.len()),
-            (MipsAirId::MovCond, record.movcond_events.len()),
-            (MipsAirId::Cpu, record.cpu_events.len()),
-            (MipsAirId::MiscInstrs, record.misc_events.len()),
-            (MipsAirId::LoadNarrow, record.memory_load_narrow_events.len()),
-            (MipsAirId::LoadWord, record.memory_load_word_events.len()),
-            (MipsAirId::StoreNarrow, record.memory_store_narrow_events.len()),
-            (MipsAirId::StoreWord, record.memory_store_word_events.len()),
-            (MipsAirId::MemoryUnaligned, record.memory_unaligned_events.len()),
-            (MipsAirId::SyscallInstrs, record.syscall_events.len()),
-            (MipsAirId::DivRem, record.divrem_events.len()),
-            (MipsAirId::AddSub, record.add_sub_events.len()),
-            (MipsAirId::AddSubImm, record.add_sub_imm_events.len()),
-            (MipsAirId::Bitwise, record.bitwise_events.len()),
-            (MipsAirId::BitwiseImm, record.bitwise_imm_events.len()),
-            (MipsAirId::Mul, record.mul_events.len()),
-            (MipsAirId::ShiftRight, record.shift_right_events.len()),
-            (MipsAirId::ShiftRightImm, record.shift_right_imm_events.len()),
-            (MipsAirId::ShiftLeft, record.shift_left_events.len()),
-            (MipsAirId::ShiftLeftImm, record.shift_left_imm_events.len()),
-            (MipsAirId::Lt, record.lt_events.len()),
-            (MipsAirId::LtImm, record.lt_imm_events.len()),
-            (
-                MipsAirId::MemoryLocal,
-                record
-                    .get_local_mem_events()
-                    .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
-                    .into_iter()
-                    .count(),
-            ),
-            (MipsAirId::MemoryBump, record.bump_memory_events.len()),
-            (MipsAirId::CloClz, record.cloclz_events.len()),
-            (
-                MipsAirId::Global,
-                2 * record.get_local_mem_events().count() + 2 * record.syscall_events.len(),
-            ),
-            (MipsAirId::SyscallCore, record.syscall_events.len()),
-        ]
-    }
-
-    pub(crate) fn precompile_heights(
-        &self,
-        record: &ExecutionRecord,
-    ) -> Option<(usize, usize, usize)> {
-        record
-            .precompile_events
-            .get_events(self.syscall_code())
-            .filter(|events| !events.is_empty())
-            .map(|events| {
-                let events_len = match self {
-                    Self::KeccakSponge(_) => self.keccak_permutation_in_record(record),
-                    _ => events.len(),
-                };
-                let num_rows = events_len * self.rows_per_event();
-                let num_local_mem_events = match self {
-                    Self::Sha256CompressControl(_) | Self::Sha256ExtendControl(_) => 0,
-                    _ => events.get_local_mem_events().into_iter().count(),
-                };
-                (num_rows, num_local_mem_events, record.global_lookup_events.len())
-            })
-    }
-
-    pub(crate) fn memory_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
-        vec![
-            (MipsAirId::MemoryGlobalInit, record.global_memory_initialize_events.len()),
-            (MipsAirId::MemoryGlobalFinalize, record.global_memory_finalize_events.len()),
-            (
-                MipsAirId::Global,
-                record.global_memory_finalize_events.len()
-                    + record.global_memory_initialize_events.len(),
-            ),
-        ]
-    }
-
-    pub(crate) fn get_all_core_airs() -> Vec<Self> {
-        vec![
-            MipsAir::Add(AddSubChip::default()),
-            MipsAir::AddImm(AddSubImmChip::default()),
-            MipsAir::Bitwise(BitwiseChip::default()),
-            MipsAir::BitwiseImm(BitwiseImmChip::default()),
-            MipsAir::Mul(MulChip::default()),
-            MipsAir::DivRem(DivRemChip::default()),
-            MipsAir::Lt(LtChip::default()),
-            MipsAir::LtImm(LtImmChip::default()),
-            MipsAir::CloClz(CloClzChip::default()),
-            MipsAir::ShiftLeft(ShiftLeft::default()),
-            MipsAir::ShiftLeftImm(ShiftLeftImm::default()),
-            MipsAir::ShiftRight(ShiftRightChip::default()),
-            MipsAir::ShiftRightImm(ShiftRightImmChip::default()),
-            MipsAir::Branch(BranchChip::default()),
-            MipsAir::Jump(JumpChip::default()),
-            MipsAir::SyscallInstrs(SyscallInstrsChip::default()),
-            MipsAir::LoadNarrow(LoadNarrowChip),
-            MipsAir::LoadWord(LoadWordChip),
-            MipsAir::StoreNarrow(StoreNarrowChip),
-            MipsAir::StoreWord(StoreWordChip),
-            MipsAir::MemoryUnaligned(MemoryUnalignedChip),
-            MipsAir::MovCond(MovCondChip::default()),
-            MipsAir::MiscInstrs(MiscInstrsChip::default()),
-            MipsAir::MemoryLocal(MemoryLocalChip::new()),
-            MipsAir::MemoryBump(MemoryBumpChip::new()),
-            MipsAir::Global(GlobalChip),
-            MipsAir::SyscallCore(SyscallChip::core()),
-        ]
-    }
-
-    pub(crate) fn memory_init_final_airs() -> Vec<Self> {
-        vec![
-            MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)),
-            MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(MemoryChipType::Finalize)),
-            MipsAir::Global(GlobalChip),
-        ]
-    }
-
-    pub(crate) fn precompile_airs_with_memory_events_per_row() -> Vec<(Self, usize)> {
-        let mut airs: HashSet<_> = Self::get_airs_and_costs().0.into_iter().collect();
-
-        for core_air in Self::get_all_core_airs() {
-            airs.remove(&core_air);
-        }
-
-        for memory_air in Self::memory_init_final_airs() {
-            airs.remove(&memory_air);
-        }
-
-        airs.remove(&Self::SyscallPrecompile(SyscallChip::precompile()));
-
-        airs.remove(&Self::Program(ProgramChip::default()));
-        airs.remove(&Self::ByteLookup(ByteChip::default()));
-        airs.remove(&Self::RangeLookup(RangeChip::default()));
-
-        airs.remove(&Self::Sha256CompressControl(ShaCompressControlChip::default()));
-        airs.remove(&Self::Sha256ExtendControl(ShaExtendControlChip::default()));
-        airs.remove(&Self::KeccakSpongeControl(KeccakSpongeControlChip::default()));
-
-        airs.into_iter()
-            .map(|air| {
-                let control_air = air.precompile_control_air();
-                let rows_per_event = air.rows_per_event();
-                let chip = Chip::new(air);
-                let mut local_mem_events: usize = chip
-                    .sends()
-                    .iter()
-                    .chain(chip.receives())
-                    .filter(|lookup| {
-                        lookup.kind == LookupKind::Memory && lookup.scope == LookupScope::Local
-                    })
-                    .count();
-                if let Some(control) = control_air {
-                    let control_chip = Chip::new(control);
-                    let control_mem: usize = control_chip
-                        .sends()
-                        .iter()
-                        .chain(control_chip.receives())
-                        .filter(|lookup| {
-                            lookup.kind == LookupKind::Memory && lookup.scope == LookupScope::Local
-                        })
-                        .count();
-                    local_mem_events += control_mem.div_ceil(rows_per_event);
-                }
-
-                (chip.into_inner(), local_mem_events)
-            })
-            .collect()
-    }
-
-    /// For a bus-ported precompile **worker** air, returns its paired
-    /// `PrecompileChain` **control** air (the chip that seeds/drains the state
-    /// bus, 1 row per syscall).  Returns `None` for precompiles that have no
-    /// control chip.  Used by `get_precompile_shapes` to size the worker+control
-    /// pair together in a single shard shape.
-    pub(crate) fn precompile_control_air(&self) -> Option<Self> {
-        match self {
-            Self::Sha256Compress(_) => {
-                Some(Self::Sha256CompressControl(ShaCompressControlChip::default()))
-            }
-            Self::Sha256Extend(_) => {
-                Some(Self::Sha256ExtendControl(ShaExtendControlChip::default()))
-            }
-            Self::KeccakSponge(_) => {
-                Some(Self::KeccakSpongeControl(KeccakSpongeControlChip::default()))
-            }
-            _ => None,
-        }
-    }
-
-    pub(crate) fn rows_per_event(&self) -> usize {
-        match self {
-            Self::Sha256Compress(_) => 80,
-            Self::Sha256Extend(_) => 48,
-            Self::KeccakSponge(_) => 24,
-            _ => 1,
-        }
-    }
-
-    fn keccak_permutation_in_record(&self, record: &ExecutionRecord) -> usize {
-        record
-            .precompile_events
-            .get_events(SyscallCode::KECCAK_SPONGE)
-            .map(|events| {
-                events
-                    .iter()
-                    .map(|(_, pre_e)| {
-                        if let PrecompileEvent::KeccakSponge(event) = pre_e {
-                            event.num_blocks()
-                        } else {
-                            unreachable!()
-                        }
-                    })
-                    .sum::<usize>()
-            })
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn syscall_code(&self) -> SyscallCode {
-        match self {
-            Self::Bls12381Add(_) => SyscallCode::BLS12381_ADD,
-            Self::Bn254Add(_) => SyscallCode::BN254_ADD,
-            Self::Bn254Double(_) => SyscallCode::BN254_DOUBLE,
-            Self::Bn254Fp(_) => SyscallCode::BN254_FP_ADD,
-            Self::Bn254Fp2AddSub(_) => SyscallCode::BN254_FP2_ADD,
-            Self::Bn254Fp2Mul(_) => SyscallCode::BN254_FP2_MUL,
-            Self::Ed25519Add(_) => SyscallCode::ED_ADD,
-            Self::Ed25519Decompress(_) => SyscallCode::ED_DECOMPRESS,
-            Self::Secp256k1Add(_) => SyscallCode::SECP256K1_ADD,
-            Self::Secp256k1Double(_) => SyscallCode::SECP256K1_DOUBLE,
-            Self::Secp256r1Add(_) => SyscallCode::SECP256R1_ADD,
-            Self::Secp256r1Double(_) => SyscallCode::SECP256R1_DOUBLE,
-            Self::Sha256Compress(_) => SyscallCode::SHA_COMPRESS,
-            Self::Sha256CompressControl(_) => SyscallCode::SHA_COMPRESS,
-            Self::Sha256Extend(_) => SyscallCode::SHA_EXTEND,
-            Self::Sha256ExtendControl(_) => SyscallCode::SHA_EXTEND,
-            Self::Uint256Mul(_) => SyscallCode::UINT256_MUL,
-            Self::U256x2048Mul(_) => SyscallCode::U256XU2048_MUL,
-            Self::Bls12381Decompress(_) => SyscallCode::BLS12381_DECOMPRESS,
-            Self::K256Decompress(_) => SyscallCode::SECP256K1_DECOMPRESS,
-            Self::P256Decompress(_) => SyscallCode::SECP256R1_DECOMPRESS,
-            Self::Bls12381Double(_) => SyscallCode::BLS12381_DOUBLE,
-            Self::Bls12381Fp(_) => SyscallCode::BLS12381_FP_ADD,
-            Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
-            Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
-            Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
-            Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
-            Self::KeccakSpongeControl(_) => SyscallCode::KECCAK_SPONGE,
-            Self::SysLinux(_) => SyscallCode::SYS_LINUX,
-            Self::Add(_) => unreachable!("Invalid for core chip"),
-            Self::AddImm(_) => unreachable!("Invalid for core chip"),
-            Self::Bitwise(_) => unreachable!("Invalid for core chip"),
-            Self::BitwiseImm(_) => unreachable!("Invalid for core chip"),
-            Self::DivRem(_) => unreachable!("Invalid for core chip"),
-            Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
-            Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
-            Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
-            Self::MemoryBump(_) => unreachable!("Invalid for memory bump"),
-            Self::Global(_) => unreachable!("Invalid for global chip"),
-            Self::Program(_) => unreachable!("Invalid for core chip"),
-            Self::Mul(_) => unreachable!("Invalid for core chip"),
-            Self::Lt(_) => unreachable!("Invalid for core chip"),
-            Self::LtImm(_) => unreachable!("Invalid for core chip"),
-            Self::CloClz(_) => unreachable!("Invalid for core chip"),
-            Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
-            Self::ShiftRightImm(_) => unreachable!("Invalid for core chip"),
-            Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
-            Self::ShiftLeftImm(_) => unreachable!("Invalid for core chip"),
-            Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
-            Self::RangeLookup(_) => unreachable!("Invalid for core chip"),
-            Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
-            Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
-            Self::Branch(_) => unreachable!("Invalid for core chip"),
-            Self::Jump(_) => unreachable!("Invalid for core chip"),
-            Self::SyscallInstrs(_) => unreachable!("Invalid for core chip"),
-            Self::LoadNarrow(_) => unreachable!("Invalid for core chip"),
-            Self::LoadWord(_) => unreachable!("Invalid for core chip"),
-            Self::StoreNarrow(_) => unreachable!("Invalid for core chip"),
-            Self::StoreWord(_) => unreachable!("Invalid for core chip"),
-            Self::MemoryUnaligned(_) => unreachable!("Invalid for core chip"),
-            Self::MiscInstrs(_) => unreachable!("Invalid for core chip"),
-            Self::MovCond(_) => unreachable!("Invalid for core chip"),
-        }
-    }
 }
 
 impl<F: PrimeField32> fmt::Debug for MipsAir<F> {
@@ -1011,7 +712,7 @@ pub mod tests {
             runtime.run().unwrap();
             runtime
         };
-        let result = crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
+        let result = crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new());
         for sp in &result.unwrap().shard_proofs {
             let bsp = sp.jagged_shard_proof.as_ref();
             assert!(
@@ -1372,8 +1073,7 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1024;
         opts.shard_batch_size = 2;
-        prove::<_, CpuProver<_, _>>(program, &stdin, KoalaBearPoseidon2::new(), opts, None)
-            .unwrap();
+        prove::<_, CpuProver<_, _>>(program, &stdin, KoalaBearPoseidon2::new(), opts).unwrap();
     }
 
     #[test]
@@ -1386,7 +1086,6 @@ pub mod tests {
             &stdin,
             KoalaBearPoseidon2::new(),
             ZKMCoreOpts::default(),
-            None,
         )
         .unwrap();
     }
@@ -1401,128 +1100,11 @@ pub mod tests {
         let mut runtime = Executor::new(program, opts);
         runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
-        utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
+        utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin()).unwrap();
     }
 
-    #[test]
-    fn test_fibonacci_core_verify_fixed_shapes() {
-        use crate::shape::CoreShapeConfig;
-        use zkm_core_executor::Executor;
-        setup_logger();
-        let mut program = fibonacci_program();
-        let shape_config = CoreShapeConfig::default();
-        shape_config.fix_preprocessed_shape(&mut program).unwrap();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 262_144;
-        let mut runtime = Executor::new(program, opts);
-        runtime.write_vecs(&fib_stdin().buffer);
-        runtime.run().unwrap();
-        utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config)).unwrap();
-    }
-
-    #[test]
-    fn test_fixed_shape_height_forgery_rejected() {
-        use crate::shape::CoreShapeConfig;
-        use zkm_core_executor::Executor;
-        use zkm_pcs::{MachineProver, StarkGenericConfig};
-        setup_logger();
-
-        let mut program = fibonacci_program();
-        let shape_config = CoreShapeConfig::default();
-        shape_config.fix_preprocessed_shape(&mut program).unwrap();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 262_144;
-        let mut runtime = Executor::new(program, opts);
-        runtime.write_vecs(&fib_stdin().buffer);
-        runtime.run().unwrap();
-
-        let config = KoalaBearPoseidon2::new();
-        let machine = MipsAir::machine(config);
-        let prover = CpuProver::new(MipsAir::machine(KoalaBearPoseidon2::new()));
-        let (pk, _) = prover.setup(runtime.program.as_ref());
-        let (proof, _output, _) = utils::prove_with_context::<_, CpuProver<_, _>>(
-            &prover,
-            &pk,
-            Program::clone(&runtime.program),
-            &fib_stdin(),
-            ZKMCoreOpts::default(),
-            zkm_core_executor::ZKMContext::default(),
-            Some(&shape_config),
-        )
-        .unwrap();
-
-        let (_pk, vk) = machine.setup(runtime.program.as_ref());
-
-        let verify = |p: &zkm_pcs::MachineProof<KoalaBearPoseidon2>| -> String {
-            let mut challenger = machine.config().challenger();
-            match machine.verify(&vk, p, &mut challenger) {
-                Ok(()) => "OK".to_string(),
-                Err(e) => format!("{e}"),
-            }
-        };
-
-        let honest = verify(&proof);
-        tracing::info!("honest verify => {honest}");
-        assert_eq!(
-            honest, "OK",
-            "honest fixed-shape proof must verify; a reconstruction error here means \
-             the leaf-assembly transform is wrong"
-        );
-
-        let mut forged = proof.clone();
-        let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-
-        let nchips = jagged.opened_values.chips.len();
-        assert!(nchips >= 2, "need >=2 chips to forge area-preserving heights");
-
-        let bit_len = jagged.opened_values.chips[0].quotient[0].len();
-        let one = <KoalaBear as p3_field::PrimeCharacteristicRing>::ONE;
-        let zero = <KoalaBear as p3_field::PrimeCharacteristicRing>::ZERO;
-        let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
-        let zero_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(zero);
-
-        let mut raise: Option<(usize, usize)> = None;
-        let mut lower: Option<(usize, usize)> = None;
-        'outer: for bit in (1..bit_len).rev() {
-            let mut r = None;
-            let mut l = None;
-            for c in 0..nchips {
-                let v = jagged.opened_values.chips[c].quotient[0][bit];
-                if v == zero_ef && r.is_none() {
-                    r = Some(c);
-                } else if v == one_ef && l.is_none() {
-                    l = Some(c);
-                }
-            }
-            if let (Some(rc), Some(lc)) = (r, l) {
-                if rc != lc {
-                    raise = Some((rc, bit));
-                    lower = Some((lc, bit));
-                    break 'outer;
-                }
-            }
-        }
-        let (rc, rb) = raise.expect("found a chip with a settable high degree bit");
-        let (lc, lb) = lower.expect("found a chip with a clearable high degree bit");
-        tracing::info!(
-            "area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
-             lower chip[{lc}] bit {lb} (1->0); bit_len={bit_len}"
-        );
-        jagged.opened_values.chips[rc].quotient[0][rb] = one_ef;
-        jagged.opened_values.chips[lc].quotient[0][lb] = zero_ef;
-
-        let forged_res = verify(&forged);
-        tracing::info!("forged verify => {forged_res}");
-        assert!(
-            rejected_on_degree_bits(&forged_res),
-            "the area-preserving height forgery must be rejected on its opened degree \
-             bits; got: {forged_res}"
-        );
-    }
-
-    // Height-soundness tests at raw heights (`shape_config = None`, no shape
-    // padding, so they are fast): the honest cases verify and the
-    // area-preserving height forgeries are rejected.
+    // Height-soundness tests: the honest cases verify and the area-preserving
+    // height forgeries are rejected.
 
     #[cfg(test)]
     fn prove_raw_heights(
@@ -1554,7 +1136,6 @@ pub mod tests {
             &inputs,
             opts,
             zkm_core_executor::ZKMContext::default(),
-            None,
         )
         .unwrap();
         let (_pk, vk) = machine.setup(runtime.program.as_ref());

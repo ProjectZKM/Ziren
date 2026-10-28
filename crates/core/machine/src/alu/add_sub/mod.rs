@@ -81,7 +81,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
             input.add_sub_events.len(),
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <AddSubChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
@@ -157,11 +157,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.add_sub_events.is_empty()
-        }
+        !shard.add_sub_events.is_empty()
     }
 }
 

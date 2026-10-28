@@ -193,12 +193,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 .collect::<Vec<_>>(),
         };
         let nb_rows = events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_multiple_of_32(
-            nb_rows,
-            size_log2,
-            <SyscallChip as MachineAir<F>>::name(self).as_str(),
-        );
+        let padded_nb_rows =
+            next_multiple_of_32(nb_rows, None, <SyscallChip as MachineAir<F>>::name(self).as_str());
         Some(padded_nb_rows)
     }
 
@@ -267,28 +263,24 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            match self.shard_kind {
-                SyscallShardKind::Core => {
-                    shard
-                        .syscall_events
-                        .iter()
-                        .filter(|e| {
-                            (e.a_record.prev_value.to_le_bytes()[2] == 1)
-                                || (e.a_record.prev_value.to_le_bytes()[1] != 0)
-                        })
-                        .take(1)
-                        .count()
-                        > 0
-                }
-                SyscallShardKind::Precompile => {
-                    !shard.precompile_events.is_empty()
-                        && shard.cpu_events.is_empty()
-                        && shard.global_memory_initialize_events.is_empty()
-                        && shard.global_memory_finalize_events.is_empty()
-                }
+        match self.shard_kind {
+            SyscallShardKind::Core => {
+                shard
+                    .syscall_events
+                    .iter()
+                    .filter(|e| {
+                        (e.a_record.prev_value.to_le_bytes()[2] == 1)
+                            || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                    })
+                    .take(1)
+                    .count()
+                    > 0
+            }
+            SyscallShardKind::Precompile => {
+                !shard.precompile_events.is_empty()
+                    && shard.cpu_events.is_empty()
+                    && shard.global_memory_initialize_events.is_empty()
+                    && shard.global_memory_finalize_events.is_empty()
             }
         }
     }

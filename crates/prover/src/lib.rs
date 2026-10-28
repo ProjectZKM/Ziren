@@ -1030,7 +1030,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 stdin,
                 opts.core_opts,
                 context,
-                None,
             )?;
         Self::check_for_high_cycles(cycles);
         let public_values = ZKMPublicValues::from(&public_values_stream);
@@ -2737,13 +2736,11 @@ pub mod tests {
     /// core shards differ from one another only in their per-chip heights,
     /// which the normalize circuit is deliberately agnostic to (heights are
     /// Horner-recomposed from the WITNESSED per-chip `degree`, a fixed
-    /// `max_log_row_count + 1` felts wide).  So bands must NOT split the key
+    /// `max_log_row_count + 1` felts wide).  So heights must NOT split the key
     /// while the chip SET must.
     #[test]
     #[serial]
     fn normalize_program_cache_key_implies_identical_program() {
-        use zkm_core_machine::shape::CoreShapeConfig;
-        use zkm_pcs::shape::OrderedShape;
         use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
@@ -2754,26 +2751,21 @@ pub mod tests {
                 .expect("serialize normalize program")
         };
 
-        let core_shape_config = CoreShapeConfig::<KoalaBear>::default();
-        let base_os = core_shape_config
-            .maximal_core_shapes(21)
+        let base: Vec<(String, usize)> = crate::shapes::ZKMProofShape::generate_normalize(machine)
             .into_iter()
-            .next()
-            .map(|core_shape| OrderedShape {
-                inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            .find_map(|shape| match shape {
+                crate::shapes::ZKMProofShape::Normalize(os) => Some(os.inner),
+                _ => None,
             })
-            .expect("the shape config admits at least one maximal core shape");
-        let base: Vec<(String, usize)> = base_os.inner.clone();
+            .expect("the core machine admits at least one normalize shape");
 
-        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreWitnessValues<CoreSC> {
-            let os = OrderedShape { inner: hs.to_vec() };
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            ZKMCoreWitnessValues::dummy(machine, &shape)
+        let witness_of = |rows: &[(String, usize)]| -> ZKMCoreWitnessValues<CoreSC> {
+            ZKMCoreWitnessValues::dummy_rows(machine, rows, false)
         };
 
         let shrink_one = |idx: usize| -> Vec<(String, usize)> {
             let mut v = base.clone();
-            v[idx].1 = v[idx].1.saturating_sub(1).max(1);
+            v[idx].1 = (v[idx].1 / 2).max(1);
             v
         };
         let candidates: Vec<Vec<(String, usize)>> =
@@ -4570,39 +4562,6 @@ pub mod tests {
             c.1,
             d.1,
             vk_c == vk_d,
-        );
-    }
-
-    /// PROBE: how large is the shape space `fix_shape` can actually snap a core
-    /// record onto?  That set is what the enumeration has to cover, and the vk
-    /// merkle tree has a FIXED capacity, so its size decides whether a full
-    /// enumeration is even representable.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn core_shape_space_size_probe() {
-        use zkm_core_machine::shape::CoreShapeConfig;
-        setup_logger();
-        let cfg = CoreShapeConfig::<KoalaBear>::default();
-        let t = std::time::Instant::now();
-        let mut n = 0usize;
-        const CAP: usize = 5_000_000;
-        for _ in cfg.all_shapes() {
-            n += 1;
-            if n >= CAP {
-                break;
-            }
-        }
-        tracing::info!(
-            "[SHAPESPACE] all_shapes count={n}{} in {:?} (vk merkle capacity = 2^{} = {})",
-            if n >= CAP { " (CAPPED)" } else { "" },
-            t.elapsed(),
-            VK_MERKLE_TREE_HEIGHT,
-            1usize << VK_MERKLE_TREE_HEIGHT,
-        );
-        tracing::info!(
-            "[SHAPESPACE] canonical cluster shapes = {}",
-            cfg.enumerate_canonical_cluster_shapes().len(),
         );
     }
 

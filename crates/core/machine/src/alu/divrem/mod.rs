@@ -230,7 +230,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
             input.divrem_events.len(),
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <Self as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
@@ -385,11 +385,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.divrem_events.is_empty()
-        }
+        !shard.divrem_events.is_empty()
     }
 }
 

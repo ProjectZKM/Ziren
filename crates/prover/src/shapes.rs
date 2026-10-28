@@ -16,7 +16,6 @@ use thiserror::Error;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm_core_machine::shape::CoreShapeConfig;
 use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 use zkm_recursion_circuit::machine::{
     ZKMCompressWithVkeyShape, ZKMCompressWitnessValues, ZKMCoreWitnessValues, ZKMDeferredShape,
@@ -94,7 +93,6 @@ pub enum VkBuildError {
 
 pub fn check_shapes<C: ZKMProverComponents>(
     reduce_batch_size: usize,
-    no_precompiles: bool,
     num_compiler_workers: usize,
     prover: &ZKMProver<C>,
 ) -> bool {
@@ -103,16 +101,14 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let (panic_tx, panic_rx) = std::sync::mpsc::channel();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
-    let core_shape_config = &CoreShapeConfig::default();
 
-    let all_maximal_shapes = ZKMProofShape::generate_maximal_shapes(
-        core_shape_config,
+    let all_shapes = ZKMProofShape::generate_all(
         recursion_shape_config,
         reduce_batch_size,
-        no_precompiles,
+        prover.core_prover.machine(),
     )
     .collect::<BTreeSet<ZKMProofShape>>();
-    let num_shapes = all_maximal_shapes.len();
+    let num_shapes = all_shapes.len();
     tracing::info!("number of shapes: {}", num_shapes);
 
     let height = crate::VK_MERKLE_TREE_HEIGHT;
@@ -145,7 +141,7 @@ pub fn check_shapes<C: ZKMProverComponents>(
             });
         }
 
-        all_maximal_shapes.into_iter().for_each(|program_shape| {
+        all_shapes.into_iter().for_each(|program_shape| {
             shape_tx
                 .send(ZKMCompressProgramShape::from_proof_shape(program_shape, height))
                 .unwrap();
@@ -620,37 +616,6 @@ impl ZKMProofShape {
             zkm_pcs::jagged::committed_dense_len(prep, LOG_STACK) / block,
             zkm_pcs::jagged::committed_dense_len(main, LOG_STACK) / block,
         )
-    }
-
-    pub fn generate_maximal_shapes<'a>(
-        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
-        recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
-        reduce_batch_size: usize,
-        no_precompiles: bool,
-    ) -> impl Iterator<Item = Self> + 'a {
-        let core_shape_iter = if no_precompiles {
-            core_shape_config.maximal_core_shapes(21).into_iter()
-        } else {
-            core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
-        };
-        core_shape_iter
-            .map(move |core_shape| {
-                let os = OrderedShape {
-                    inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
-                };
-                Self::Recursion(vec![os])
-            })
-            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
-                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
-            }))
-            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
-                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Deferred)
-            }))
-            .chain(
-                recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Shrink(x.pop().unwrap())),
-            )
     }
 
     pub fn dummy_vk_map(

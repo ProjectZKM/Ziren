@@ -182,10 +182,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let count = input.get_local_mem_events().count();
         let nb_rows = nb_rows(count);
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
         Some(next_multiple_of_32(
             nb_rows,
-            size_log2,
+            None,
             <MemoryLocalChip as MachineAir<F>>::name(self).as_str(),
         ))
     }
@@ -239,11 +238,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            shard.get_local_mem_events().nth(0).is_some()
-        }
+        shard.get_local_mem_events().nth(0).is_some()
     }
 
     fn commit_scope(&self) -> LookupScope {

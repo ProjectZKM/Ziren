@@ -100,14 +100,6 @@ name = "prove_dump"
 path = "scripts/prove_dump.rs"
 
 [[bin]]
-name = "find_maximal_shapes"
-path = "scripts/find_maximal_shapes.rs"
-
-[[bin]]
-name = "find_small_shapes"
-path = "scripts/find_small_shapes.rs"
-
-[[bin]]
 name = "find_recursion_shapes"
 path = "scripts/find_recursion_shapes.rs"
 

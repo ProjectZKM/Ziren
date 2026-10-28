@@ -105,11 +105,8 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
             FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP2_ADD).len(),
             FieldType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_FP2_ADD).len(),
         };
-        let nb_rows = next_multiple_of_32(
-            events_len,
-            input.fixed_log2_rows::<F, _>(self),
-            <Self as MachineAir<F>>::name(self).as_str(),
-        );
+        let nb_rows =
+            next_multiple_of_32(events_len, None, <Self as MachineAir<F>>::name(self).as_str());
         Some(nb_rows)
     }
 
@@ -206,16 +203,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
                 && shard.get_precompile_events(SyscallCode::BLS12381_FP_SUB).is_empty()
         );
 
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            match P::FIELD_TYPE {
-                FieldType::Bn254 => {
-                    !shard.get_precompile_events(SyscallCode::BN254_FP2_ADD).is_empty()
-                }
-                FieldType::Bls12381 => {
-                    !shard.get_precompile_events(SyscallCode::BLS12381_FP2_ADD).is_empty()
-                }
+        match P::FIELD_TYPE {
+            FieldType::Bn254 => !shard.get_precompile_events(SyscallCode::BN254_FP2_ADD).is_empty(),
+            FieldType::Bls12381 => {
+                !shard.get_precompile_events(SyscallCode::BLS12381_FP2_ADD).is_empty()
             }
         }
     }

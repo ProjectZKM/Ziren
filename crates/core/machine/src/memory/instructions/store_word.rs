@@ -138,7 +138,7 @@ impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         Some(next_multiple_of_32(
             input.memory_store_word_events.len(),
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <Self as MachineAir<F>>::name(self).as_str(),
         ))
     }
@@ -164,10 +164,6 @@ impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.memory_store_word_events.is_empty()
-        }
+        !shard.memory_store_word_events.is_empty()
     }
 }
