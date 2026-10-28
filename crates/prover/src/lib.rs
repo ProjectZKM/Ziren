@@ -1461,6 +1461,10 @@ pub mod tests {
             "compressed proof size: {} bytes",
             bincode::serialize(&compressed).unwrap().len()
         );
+        let root = compressed.root.machine_proof().map_err(|e| anyhow::anyhow!(e))?;
+        for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&root) {
+            tracing::info!("compressed root part {label}: {bytes} bytes");
+        }
         if verify {
             tracing::info!("verify compressed");
             prover.verify_binary_compressed(&compressed, &vk, None)?;

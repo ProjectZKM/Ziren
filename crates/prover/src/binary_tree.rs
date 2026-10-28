@@ -49,6 +49,20 @@ pub struct BinaryCompressedProof {
     pub membership_path: Vec<[u8; 32]>,
 }
 
+/// The schedule the root of a tree is proved under.  No node verifies the
+/// root, so it alone trades queries for grinding under the Johnson bound,
+/// which keeps its proof under 300 KiB; the nodes below stay on the default
+/// schedule their parents' verifiers are built for.
+#[must_use]
+pub fn root_schedule() -> BinarySchedule {
+    BinarySchedule {
+        regime: zkm_binary_stark::WhirRegime::Johnson,
+        log_inv_rate: 2,
+        folding: 3,
+        ..BinarySchedule::default()
+    }
+}
+
 /// The level of a compose node, which fixes what its children are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -101,6 +115,15 @@ impl Family {
         Level::of(self.level)
     }
 
+    /// The schedule the family's nodes are proved under.
+    fn schedule(&self) -> BinarySchedule {
+        if self.complete {
+            root_schedule()
+        } else {
+            BinarySchedule::default()
+        }
+    }
+
     fn name(&self) -> String {
         let classes: Vec<String> = self.classes.iter().map(usize::to_string).collect();
         format!(
@@ -108,7 +131,7 @@ impl Family {
             self.level().name(),
             self.arity,
             if classes.is_empty() { "any".to_string() } else { classes.join(".") },
-            if self.complete { "complete" } else { "open" }
+            if self.complete { "root" } else { "open" }
         )
     }
 }
@@ -475,8 +498,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         })
                         .collect()
                 };
-                let node = prove_node(children, family.complete, family.level().floor(), schedule)
-                    .map_err(stage)?;
+                let node = prove_node(
+                    children,
+                    family.complete,
+                    family.level().floor(),
+                    &family.schedule(),
+                )
+                .map_err(stage)?;
                 tracing::info!(
                     "binary compress: node {} over {:?} in {:.1} s",
                     family.name(),
@@ -532,7 +560,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         )
                     })
                     .collect();
-                node_key(children, family.complete, NODE_FLOOR, schedule).map_err(stage)?
+                node_key(children, family.complete, NODE_FLOOR, &family.schedule())
+                    .map_err(stage)?
             }
             level => {
                 let below = if level == Level::Second { Level::First } else { Level::Upper };
@@ -553,7 +582,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         )
                     })
                     .collect();
-                node_key(children, family.complete, UPPER_NODE_FLOOR, schedule).map_err(stage)?
+                node_key(children, family.complete, UPPER_NODE_FLOOR, &family.schedule())
+                    .map_err(stage)?
             }
         };
         store.put_key("node", &family.name(), &key).map_err(stage)?;
@@ -672,7 +702,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
         expected_root: Option<VkDigest>,
     ) -> Result<(), ZKMRecursionProverError> {
-        let digest = proof.root.verify(&BinarySchedule::default()).map_err(stage)?;
+        let digest = proof.root.verify(&root_schedule()).map_err(stage)?;
         let values = &proof.root.public_values;
         if values.len() < zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
             return Err(stage("the root's public values are short"));
@@ -726,7 +756,7 @@ mod tests {
         assert_eq!(families.len(), 3);
         assert_eq!(families[0][2].classes, vec![2]);
         assert!(families[2][0].complete && !families[1][0].complete);
-        assert_eq!(families[2][0].name(), "upper-2-any-complete");
+        assert_eq!(families[2][0].name(), "upper-2-any-root");
         assert_eq!(families[1][1].name(), "second-1-any-open");
     }
 }
