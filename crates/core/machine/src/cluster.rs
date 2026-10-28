@@ -15,9 +15,9 @@ use crate::mips::MipsAir;
 /// The chip clusters of the core machine, with each chip's trace width.
 ///
 /// A core shard commits the smallest cluster that contains every chip it
-/// includes. The cluster chips it lacks are committed as empty traces, so the
-/// committed chip set, and with it the recursion normalize program, is a
-/// function of the cluster alone.
+/// includes. Cluster chips that exist in the machine but lack events in the
+/// shard are committed as empty traces, so the committed chip set is determined
+/// by the cluster and the machine's chip inventory.
 pub struct ShardClusters<F: PrimeField32> {
     airs: Vec<MipsAir<F>>,
     shape: MachineShape,
@@ -32,17 +32,19 @@ impl<F: PrimeField32> ShardClusters<F> {
         Self { airs, shape: build_mips_machine_shape(), widths }
     }
 
-    /// Chip name -> trace width for the smallest cluster that contains every
-    /// chip `record` includes, or `None` when no cluster contains them.
+    /// Maps chip names to trace widths for the smallest cluster that contains
+    /// every chip `record` includes, restricted to the machine's chip inventory.
+    /// Returns `None` when no cluster contains them.
     #[must_use]
     pub fn cluster_widths(&self, record: &ExecutionRecord) -> Option<BTreeMap<String, usize>> {
         let present: BTreeSet<String> =
             self.airs.iter().filter(|air| air.included(record)).map(MachineAir::name).collect();
         let cluster = self.shape.smallest_cluster(&present)?;
+        // The catalog retains names such as `Cpu` that have no AIR in the machine.
         Some(
             cluster
                 .iter()
-                .filter_map(|name| Some((name.clone(), *self.widths.get(name)?)))
+                .filter_map(|name| self.widths.get(name).map(|&width| (name.clone(), width)))
                 .collect(),
         )
     }

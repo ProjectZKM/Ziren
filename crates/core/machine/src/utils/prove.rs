@@ -152,165 +152,154 @@ where
             let handle = s.spawn(move || {
                 let _span = span.enter();
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
-                    let _: () = loop {
-                        let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, execution_state, done, num_cycles)) = received {
-                            tracing::trace!(
-                                target = "checkpoint_pin",
-                                event = "consume",
-                                index = index,
-                                done = done,
-                                num_cycles = num_cycles,
-                            );
-                            let mut batch_index = index;
-                            let mut process_batch =
-                                |mut records: Vec<ExecutionRecord>,
-                                 report: ExecutionReport,
-                                 done: bool,
-                                 num_cycles: u64|
-                                 -> Result<(), ZKMCoreProverError> {
-                                    let index = batch_index;
-                                    batch_index += 1;
-                                    log::debug!("generated {} records", records.len());
-                                    *report_aggregate.lock().unwrap() += report;
+                    while let Ok((index, execution_state, done, num_cycles)) = {
+                        let receiver = checkpoints_rx.lock().unwrap();
+                        receiver.recv()
+                    } {
+                        tracing::trace!(
+                            target = "checkpoint_pin",
+                            event = "consume",
+                            index = index,
+                            done = done,
+                            num_cycles = num_cycles,
+                        );
+                        let mut batch_index = index;
+                        let mut process_batch =
+                            |mut records: Vec<ExecutionRecord>,
+                             report: ExecutionReport,
+                             done: bool,
+                             num_cycles: u64|
+                             -> Result<(), ZKMCoreProverError> {
+                                let index = batch_index;
+                                batch_index += 1;
+                                log::debug!("generated {} records", records.len());
+                                *report_aggregate.lock().unwrap() += report;
 
-                                    record_gen_sync.wait_for_turn(index);
+                                record_gen_sync.wait_for_turn(index);
 
-                                    let mut state = state.lock().unwrap();
-                                    for record in records.iter_mut() {
-                                        state.shard += 1;
-                                        state.execution_shard =
-                                            record.public_values.execution_shard;
-                                        state.start_pc = record.public_values.start_pc;
-                                        state.next_pc = record.public_values.next_pc;
-                                        state.start_next_pc = record.public_values.start_next_pc;
-                                        state.next_next_pc = record.public_values.next_next_pc;
-                                        state.initial_timestamp =
-                                            record.public_values.initial_timestamp;
-                                        state.last_timestamp = record.public_values.last_timestamp;
-                                        state.committed_value_digest =
-                                            record.public_values.committed_value_digest;
-                                        state.deferred_proofs_digest =
-                                            record.public_values.deferred_proofs_digest;
-                                        record.public_values = *state;
-                                    }
+                                let mut state = state.lock().unwrap();
+                                for record in records.iter_mut() {
+                                    state.shard += 1;
+                                    state.execution_shard = record.public_values.execution_shard;
+                                    state.start_pc = record.public_values.start_pc;
+                                    state.next_pc = record.public_values.next_pc;
+                                    state.start_next_pc = record.public_values.start_next_pc;
+                                    state.next_next_pc = record.public_values.next_next_pc;
+                                    state.initial_timestamp =
+                                        record.public_values.initial_timestamp;
+                                    state.last_timestamp = record.public_values.last_timestamp;
+                                    state.committed_value_digest =
+                                        record.public_values.committed_value_digest;
+                                    state.deferred_proofs_digest =
+                                        record.public_values.deferred_proofs_digest;
+                                    record.public_values = *state;
+                                }
 
-                                    let mut deferred = deferred.lock().unwrap();
-                                    for record in records.iter_mut() {
-                                        deferred.append(&mut record.defer());
-                                    }
+                                let mut deferred = deferred.lock().unwrap();
+                                for record in records.iter_mut() {
+                                    deferred.append(&mut record.defer());
+                                }
 
-                                    let pack = done
-                                        && num_cycles < 1 << 21
-                                        && deferred.global_memory_initialize_events.len()
-                                            < opts.split_opts.combine_memory_threshold
-                                        && deferred.global_memory_finalize_events.len()
-                                            < opts.split_opts.combine_memory_threshold;
-                                    let last_record = if pack { records.last_mut() } else { None };
-                                    let mut deferred =
-                                        deferred.split(done, last_record, opts.split_opts);
-                                    tracing::debug!("deferred {} records", deferred.len());
+                                let pack = done
+                                    && num_cycles < 1 << 21
+                                    && deferred.global_memory_initialize_events.len()
+                                        < opts.split_opts.combine_memory_threshold
+                                    && deferred.global_memory_finalize_events.len()
+                                        < opts.split_opts.combine_memory_threshold;
+                                let last_record = if pack { records.last_mut() } else { None };
+                                let mut deferred =
+                                    deferred.split(done, last_record, opts.split_opts);
+                                tracing::debug!("deferred {} records", deferred.len());
 
-                                    if !done {
-                                        state.execution_shard += 1;
-                                    }
-                                    for record in deferred.iter_mut() {
-                                        state.shard += 1;
-                                        state.previous_init_addr_bits =
-                                            record.public_values.previous_init_addr_bits;
-                                        state.last_init_addr_bits =
-                                            record.public_values.last_init_addr_bits;
-                                        state.previous_finalize_addr_bits =
-                                            record.public_values.previous_finalize_addr_bits;
-                                        state.last_finalize_addr_bits =
-                                            record.public_values.last_finalize_addr_bits;
-                                        state.start_pc = state.next_pc;
-                                        state.start_next_pc = state.next_next_pc;
-                                        state.last_timestamp = state.initial_timestamp;
-                                        record.public_values = *state;
-                                    }
-                                    records.append(&mut deferred);
+                                if !done {
+                                    state.execution_shard += 1;
+                                }
+                                for record in deferred.iter_mut() {
+                                    state.shard += 1;
+                                    state.previous_init_addr_bits =
+                                        record.public_values.previous_init_addr_bits;
+                                    state.last_init_addr_bits =
+                                        record.public_values.last_init_addr_bits;
+                                    state.previous_finalize_addr_bits =
+                                        record.public_values.previous_finalize_addr_bits;
+                                    state.last_finalize_addr_bits =
+                                        record.public_values.last_finalize_addr_bits;
+                                    state.start_pc = state.next_pc;
+                                    state.start_next_pc = state.next_next_pc;
+                                    state.last_timestamp = state.initial_timestamp;
+                                    record.public_values = *state;
+                                }
+                                records.append(&mut deferred);
 
-                                    tracing::debug_span!("generate dependencies", index).in_scope(
-                                || -> Result<(), ZKMCoreProverError> {
-                                    match prover.machine().generate_dependencies(
-                                        &mut records,
-                                        &opts,
-                                        None,
-                                    ) {
-                                        Ok(()) => Ok(()),
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "Error generating dependencies: {:?}",
-                                                e
-                                            );
-                                            Err(ZKMCoreProverError::DependenciesGenerationError)
-                                        }
-                                    }
-                                },
-                            )?;
-
-                                    record_gen_sync.advance_turn();
-
-                                    #[cfg(feature = "debug")]
-                                    all_records_tx.send(records.clone()).unwrap();
-
-                                    let main_traces_results: Vec<Result<_, _>> =
-                                        tracing::debug_span!("generate main traces", index)
-                                            .in_scope(|| {
-                                                records
-                                                    .par_iter()
-                                                    .map(|record| prover.generate_traces(record))
-                                                    .collect()
-                                            });
-                                    let (successes, errors): (Vec<_>, Vec<_>) =
-                                        main_traces_results.into_iter().partition(Result::is_ok);
-                                    let main_traces =
-                                        successes.into_iter().map(Result::unwrap).collect();
-                                    if !errors.is_empty() {
-                                        tracing::error!(
-                                            "Failed to generate {} traces",
-                                            errors.len()
-                                        );
-                                        for error in errors {
-                                            if let Err(e) = error {
-                                                tracing::error!("Trace generation error: {:?}", e);
-                                                return Err(
-                                                    ZKMCoreProverError::TracesGenerationError,
+                                tracing::debug_span!("generate dependencies", index).in_scope(
+                                    || {
+                                        prover
+                                            .machine()
+                                            .generate_dependencies(&mut records, &opts, None)
+                                            .map_err(|error| {
+                                                tracing::error!(
+                                                    "Error generating dependencies: {:?}",
+                                                    error
                                                 );
-                                            }
-                                        }
-                                    }
+                                                ZKMCoreProverError::DependenciesGenerationError
+                                            })
+                                    },
+                                )?;
 
-                                    trace_gen_sync.wait_for_turn(index);
+                                record_gen_sync.advance_turn();
 
-                                    let chunked_records = chunk_vec(records, opts.shard_batch_size);
-                                    let chunked_main_traces =
-                                        chunk_vec(main_traces, opts.shard_batch_size);
-                                    chunked_records.into_iter().zip(chunked_main_traces).for_each(
-                                        |(records, main_traces)| {
-                                            records_and_traces_tx
-                                                .lock()
-                                                .unwrap()
-                                                .send((records, main_traces))
-                                                .unwrap();
+                                #[cfg(feature = "debug")]
+                                all_records_tx.send(records.clone()).unwrap();
+
+                                let main_traces_results: Vec<Result<_, _>> =
+                                    tracing::debug_span!("generate main traces", index).in_scope(
+                                        || {
+                                            records
+                                                .par_iter()
+                                                .map(|record| prover.generate_traces(record))
+                                                .collect()
                                         },
                                     );
+                                let (successes, errors): (Vec<_>, Vec<_>) =
+                                    main_traces_results.into_iter().partition(Result::is_ok);
+                                let main_traces =
+                                    successes.into_iter().map(Result::unwrap).collect();
+                                if !errors.is_empty() {
+                                    tracing::error!("Failed to generate {} traces", errors.len());
+                                    for error in errors {
+                                        if let Err(e) = error {
+                                            tracing::error!("Trace generation error: {:?}", e);
+                                            return Err(ZKMCoreProverError::TracesGenerationError);
+                                        }
+                                    }
+                                }
 
-                                    trace_gen_sync.advance_turn();
-                                    Ok(())
-                                };
+                                trace_gen_sync.wait_for_turn(index);
 
-                            trace_checkpoint_to_completion::<SC, _>(
-                                program.clone(),
-                                execution_state,
-                                opts,
-                                &mut process_batch,
-                            )?;
-                        } else {
-                            break;
-                        }
-                    };
+                                let chunked_records = chunk_vec(records, opts.shard_batch_size);
+                                let chunked_main_traces =
+                                    chunk_vec(main_traces, opts.shard_batch_size);
+                                chunked_records.into_iter().zip(chunked_main_traces).for_each(
+                                    |(records, main_traces)| {
+                                        records_and_traces_tx
+                                            .lock()
+                                            .unwrap()
+                                            .send((records, main_traces))
+                                            .unwrap();
+                                    },
+                                );
+
+                                trace_gen_sync.advance_turn();
+                                Ok(())
+                            };
+
+                        trace_checkpoint_to_completion(
+                            program.clone(),
+                            execution_state,
+                            opts,
+                            &mut process_batch,
+                        )?;
+                    }
                     Ok(())
                 })
             });
@@ -453,14 +442,13 @@ where
 /// finalization stamps `execution_shard = start_shard + i` and broadcasts the
 /// batch's terminal public values over that batch's records either way, and
 /// `execute_record` takes the executor's records each call.
-pub fn trace_checkpoint_to_completion<SC: StarkGenericConfig, F>(
+pub fn trace_checkpoint_to_completion<F>(
     program: Program,
     state: ExecutionState,
     opts: ZKMCoreOpts,
     mut on_batch: F,
 ) -> Result<(), ZKMCoreProverError>
 where
-    <SC as StarkGenericConfig>::Val: PrimeField32,
     F: FnMut(Vec<ExecutionRecord>, ExecutionReport, bool, u64) -> Result<(), ZKMCoreProverError>,
 {
     let noop = NoOpSubproofVerifier;
@@ -483,14 +471,11 @@ where
     Ok(())
 }
 
-pub fn trace_checkpoint<SC: StarkGenericConfig>(
+pub fn trace_checkpoint(
     program: Program,
     state: ExecutionState,
     opts: ZKMCoreOpts,
-) -> (Vec<ExecutionRecord>, ExecutionReport)
-where
-    <SC as StarkGenericConfig>::Val: PrimeField32,
-{
+) -> (Vec<ExecutionRecord>, ExecutionReport) {
     let noop = NoOpSubproofVerifier;
 
     let mut runtime = Executor::recover(program, state, opts);
