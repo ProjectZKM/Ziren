@@ -398,12 +398,9 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    // WHIR-over-BN254 wrap port: the inner (default core / compress /
-    // shrink) config proves via the WHIR jagged-PCS over the
-    // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `whir_mmcs()` reproduces
-    // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
-    // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
-    // generic WHIR cores can be driven through this trait.
+    // The inner (core / compress / shrink) configs prove via the WHIR
+    // jagged-PCS over the Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`), so
+    // the generic WHIR cores can be driven through this trait.
     impl<const P: u8> crate::config::WhirRing for KoalaBearPoseidon2Ring<P> {
         const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
             crate::whir::jagged::WhirProfile::Compress
@@ -422,10 +419,7 @@ pub mod koala_bear_poseidon2 {
         type WhirMmcs = crate::jagged_pcs::JaggedMmcs;
 
         fn whir_mmcs() -> Self::WhirMmcs {
-            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-            let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-            let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-            crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0)
+            crate::jagged_pcs::jagged_mmcs()
         }
 
         fn digest_felts(

@@ -491,10 +491,10 @@ impl SizeTunedParams {
             round0_folding: env("ZIREN_WRAP_ROUND0_FOLDING", defaults.round0_folding),
             johnson_m: env("ZIREN_WRAP_JOHNSON_M", defaults.johnson_m),
             query_pow: env("ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS", defaults.query_pow),
-            fold_pow: std::env::var("ZIREN_WRAP_FOLD_GRINDING_BITS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .or(defaults.fold_pow),
+            fold_pow: crate::params::env_opt_usize(
+                "ZIREN_WRAP_FOLD_GRINDING_BITS",
+                defaults.fold_pow,
+            ),
             batch_pow: env("ZIREN_WRAP_BATCH_GRINDING_BITS", defaults.batch_pow),
         }
     }

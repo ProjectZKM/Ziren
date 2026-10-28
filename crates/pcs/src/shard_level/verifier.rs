@@ -189,15 +189,10 @@ impl JaggedShardVerifier {
             + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-        SC::Challenger:
-            'static
-                + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-                + p3_challenger::CanObserve<
-                    <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                        crate::jagged_pcs::JaggedVal,
-                    >>::Commitment,
-                >,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         if proof.public_values.len() != num_pv_elts {
             return Err(JaggedShardVerifyError::PublicValuesLengthMismatch {
@@ -434,15 +429,10 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::jagged::JaggedChipInfo;
     use crate::jagged_pcs::jagged::JaggedPcsProof;
@@ -1017,7 +1007,6 @@ where
         &r_row_per_chip,
         &z_row_inner,
         &prep_rounds,
-        n_prep_infos,
         &bundle,
         &opened_main,
         lb_challenger,

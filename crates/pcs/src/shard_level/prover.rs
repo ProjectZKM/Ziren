@@ -138,15 +138,10 @@ where
     A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let ShardData {
         chips,
@@ -956,15 +951,10 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal, WhirRing};
     use core::any::TypeId;

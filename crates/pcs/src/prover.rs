@@ -323,11 +323,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     where
         SC: WhirRing,
         A: crate::shard_level::constraint_folder::ShardProvableAir<SC>,
-        SC::Challenger: p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-        >,
+        SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
         Self: Sized,
-{
+    {
         None
     }
 
@@ -409,9 +407,7 @@ where
     // OUTER generic WHIR open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-        >,
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     <SC as WhirRing>::WhirMmcs:
         p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
     <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
@@ -623,7 +619,9 @@ impl Error for CpuProverError {}
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::whir::mle::Mle<Val<SC>>>],
-    pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::WhirMmcs>,
+    pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        SC::WhirMmcs,
+    >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
     pk_main_pin: Option<crate::jagged::AreaPin>,
     public_values: Vec<Val<SC>>,
@@ -638,10 +636,7 @@ fn prove_shard_with_data_boxed<SC, A>(
 where
     SC: StarkGenericConfig + WhirRing,
     A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
-    SC::Challenger: Clone
-        + p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-        >,
+    SC::Challenger: Clone + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal};
     use core::any::TypeId;

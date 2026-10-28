@@ -1057,15 +1057,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 >,
             >,
         SC: crate::WhirRing,
-        SC::Challenger:
-            'static
-                + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-                + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-                + p3_challenger::CanObserve<
-                    <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                        crate::jagged_pcs::JaggedVal,
-                    >>::Commitment,
-                >,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         vk.observe_into(challenger);
 
