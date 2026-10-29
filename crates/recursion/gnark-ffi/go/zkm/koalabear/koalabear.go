@@ -25,6 +25,7 @@ func init() {
 	solver.RegisterHint(InvEHint)
 	solver.RegisterHint(ReduceHint)
 	solver.RegisterHint(SplitLimbsHint)
+	solver.RegisterHint(FieldOrderLimbsHint)
 }
 
 type Variable struct {
@@ -363,12 +364,23 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	quotient := result[0]
 	remainder := result[1]
 
-	if os.Getenv("GROTH16") != "1" {
-		p.RangeChecker.Check(quotient, int(maxNbBits-30))
-	} else {
-		p.api.ToBinary(quotient, int(maxNbBits-30))
-	}
+	p.rangeCheck(quotient, int(maxNbBits-30))
+	p.assertLessThanModulus(remainder)
 
+	p.api.AssertIsEqual(x, p.api.Add(p.api.Mul(quotient, modulus), remainder))
+
+	return remainder
+}
+
+func (p *Chip) rangeCheck(x frontend.Variable, nbBits int) {
+	if os.Getenv("GROTH16") != "1" {
+		p.RangeChecker.Check(x, nbBits)
+	} else {
+		p.api.ToBinary(x, nbBits)
+	}
+}
+
+func (p *Chip) assertLessThanModulus(remainder frontend.Variable) {
 	// Check that the remainder has size less than the KoalaBear modulus, by decomposing it into a 24
 	// bit limb and a 7 bit limb.
 	new_result, new_err := p.api.Compiler().NewHint(SplitLimbsHint, 2, remainder)
@@ -387,13 +399,8 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		),
 		remainder,
 	)
-	if os.Getenv("GROTH16") != "1" {
-		p.RangeChecker.Check(highLimb, 7)
-		p.RangeChecker.Check(lowLimb, 24)
-	} else {
-		p.api.ToBinary(highLimb, 7)
-		p.api.ToBinary(lowLimb, 24)
-	}
+	p.rangeCheck(highLimb, 7)
+	p.rangeCheck(lowLimb, 24)
 
 	// If the most significant bits are all 1, then we need to check that the least significant bits
 	// are all zero in order for element to be less than the KoalaBear modulus. Otherwise, we don't
@@ -406,10 +413,59 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		),
 		frontend.Variable(0),
 	)
+}
 
-	p.api.AssertIsEqual(x, p.api.Add(p.api.Mul(quotient, modulus), remainder))
+// Var2FieldOrderLimbs returns the numLimbs least significant digits of the base-modulus expansion
+// of x, and constrains that expansion to be the canonical one of x as an integer below the native
+// field order.
+func (p *Chip) Var2FieldOrderLimbs(x frontend.Variable, numLimbs int) []Variable {
+	result, err := p.api.Compiler().NewHint(FieldOrderLimbsHint, numLimbs+1, x)
+	if err != nil {
+		panic(err)
+	}
 
-	return remainder
+	nativeMax := new(big.Int).Sub(p.api.Compiler().Field(), big.NewInt(1))
+	limbsOrder := new(big.Int).Exp(modulus, big.NewInt(int64(numLimbs)), nil)
+	highMax := new(big.Int).Div(nativeMax, limbsOrder)
+	lowMaxAtHighMax := new(big.Int).Mod(nativeMax, limbsOrder)
+
+	limbs := make([]Variable, numLimbs)
+	low := frontend.Variable(0)
+	weight := big.NewInt(1)
+	for i := 0; i < numLimbs; i++ {
+		p.assertLessThanModulus(result[i])
+		limbs[i] = Variable{Value: result[i], UpperBound: modulus_sub_1}
+		low = p.api.Add(low, p.api.Mul(result[i], new(big.Int).Set(weight)))
+		weight.Mul(weight, modulus)
+	}
+
+	// 0 <= high <= highMax, and low <= lowMaxAtHighMax whenever high == highMax, so that
+	// low + high * limbsOrder is below the native field order and the equality below holds over
+	// the integers.
+	high := result[numLimbs]
+	p.rangeCheck(high, highMax.BitLen())
+	p.rangeCheck(p.api.Sub(highMax, high), highMax.BitLen())
+	atHighMax := p.api.IsZero(p.api.Sub(highMax, high))
+	p.rangeCheck(p.api.Select(atHighMax, p.api.Sub(lowMaxAtHighMax, low), 0), limbsOrder.BitLen())
+
+	p.api.AssertIsEqual(x, p.api.Add(low, p.api.Mul(high, limbsOrder)))
+
+	return limbs
+}
+
+// The hint used to compute Var2FieldOrderLimbs: the base-modulus digits of the input followed by
+// the remaining high part.
+func FieldOrderLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
+	if len(inputs) != 1 {
+		panic("FieldOrderLimbsHint expects 1 input operand")
+	}
+	rem := new(big.Int).Set(inputs[0])
+	for i := 0; i < len(results)-1; i++ {
+		results[i].Mod(rem, modulus)
+		rem.Div(rem, modulus)
+	}
+	results[len(results)-1].Set(rem)
+	return nil
 }
 
 // The hint used to compute Reduce.

@@ -545,6 +545,18 @@ impl<C: Config> Builder<C> {
         var
     }
 
+    /// The `num_limbs` least significant digits of the canonical base-`|F|` expansion of `var`,
+    /// little-endian.
+    pub fn var2field_order_limbs_circuit(
+        &mut self,
+        var: Var<C::N>,
+        num_limbs: usize,
+    ) -> Vec<Felt<C::F>> {
+        let limbs: Vec<Felt<C::F>> = (0..num_limbs).map(|_| self.uninit()).collect();
+        self.push_op(DslIr::CircuitVar2FieldOrderLimbs(var, limbs.clone()));
+        limbs
+    }
+
     pub fn cycle_tracker(&mut self, name: &str) {
         self.push_op(DslIr::CycleTracker(name.to_string()));
     }

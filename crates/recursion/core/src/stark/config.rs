@@ -23,7 +23,14 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 pub type OuterVal = KoalaBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
 pub type OuterPerm = Poseidon2Bn254<3>;
-pub type OuterHash = MultiField32PaddingFreeSponge<OuterVal, Bn254, OuterPerm, 3, 16, DIGEST_SIZE>;
+pub type OuterHash = MultiField32PaddingFreeSponge<
+    OuterVal,
+    Bn254,
+    OuterPerm,
+    OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
+    OUTER_MULTI_FIELD_CHALLENGER_RATE,
+    DIGEST_SIZE,
+>;
 pub type OuterDigestHash = Hash<OuterVal, Bn254, DIGEST_SIZE>;
 pub type OuterDigest = [Bn254; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;

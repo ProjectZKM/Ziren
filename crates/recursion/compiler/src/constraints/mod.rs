@@ -430,6 +430,10 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::CircuitFelt2Var,
                     args: vec![vec![b.id()], vec![a.id()]],
                 }),
+                DslIr::CircuitVar2FieldOrderLimbs(a, limbs) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::CircuitVar2FieldOrderLimbs,
+                    args: vec![limbs.iter().map(|x| x.id()).collect(), vec![a.id()]],
+                }),
 
                 DslIr::CircuitV2CommitPublicValues(_) => {}
                 DslIr::Parallel(blocks) => {
