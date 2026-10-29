@@ -40,7 +40,6 @@
 //! the API once the lifter lands.
 
 use crate::{
-    air::MaximalShapes,
     minimal_trace::{MinimalTrace, TraceChunk},
     subproof::NoOpSubproofVerifier,
     ExecutionError, ExecutionRecord, ExecutionState, Executor, Program,
@@ -64,31 +63,13 @@ pub struct TracingVM<'a> {
     /// `ExecutionRecord::new_preallocated` sized for the
     /// chunk's cycle count.
     pub record: &'a mut ExecutionRecord,
-    /// The producer's maximal shapes, mirrored onto every replay
-    /// sub-executor.  `trace_checkpoint` sets this from the shape config and
-    /// the executor consults it in `inc_shard_if_need`, so a replay without it
-    /// can pick a different shard boundary than the pass that emitted the
-    /// chunk.  `None` matches the production path, where the shape config is
-    /// itself `None`.
-    pub maximal_shapes: Option<MaximalShapes>,
 }
 
 impl<'a> TracingVM<'a> {
     /// Construct a new TracingVM bound to the given record.
     #[must_use]
     pub fn new(program: Arc<Program>, opts: ZKMCoreOpts, record: &'a mut ExecutionRecord) -> Self {
-        Self { program, opts, record, maximal_shapes: None }
-    }
-
-    /// Same, with the producer's maximal shapes carried onto the replay.
-    #[must_use]
-    pub fn new_with_shapes(
-        program: Arc<Program>,
-        opts: ZKMCoreOpts,
-        record: &'a mut ExecutionRecord,
-        maximal_shapes: Option<MaximalShapes>,
-    ) -> Self {
-        Self { program, opts, record, maximal_shapes }
+        Self { program, opts, record }
     }
 
     /// Re-execute the program from `chunk.pc_start` / `chunk.clk_start` up
@@ -172,7 +153,6 @@ impl<'a> TracingVM<'a> {
         state.public_values_stream_ptr = chunk.public_values_stream_ptr as usize;
 
         let mut sub = Executor::recover_shared(self.program.clone(), state, self.opts);
-        sub.maximal_shapes = self.maximal_shapes.clone();
         const NOOP: &NoOpSubproofVerifier = &NoOpSubproofVerifier;
         sub.subproof_verifier = Some(NOOP);
 
@@ -245,8 +225,6 @@ impl<'a> TracingVM<'a> {
         if sub.records.len() == 1 && self.record.cpu_events.is_empty() {
             let mut only = sub.records.pop().expect("one record");
             only.public_values = self.record.public_values;
-            only.shape = None;
-            only.counts = None;
             only.global_cumulative_sum.clear();
             only.global_digests.clear();
             only.global_byte_lookups.clear();
@@ -339,10 +317,9 @@ pub fn trace_chunk(
     program: Arc<Program>,
     opts: ZKMCoreOpts,
     chunk: &TraceChunk,
-    maximal_shapes: Option<MaximalShapes>,
 ) -> Result<ExecutionRecord, ExecutionError> {
     let mut record = ExecutionRecord::new_preallocated(program.clone(), 0);
-    let mut vm = TracingVM::new_with_shapes(program, opts, &mut record, maximal_shapes);
+    let mut vm = TracingVM::new(program, opts, &mut record);
     vm.execute_from_chunk(chunk)?;
     Ok(record)
 }
@@ -375,23 +352,6 @@ pub fn drive_tracing_vm_parallel_with_streams(
         zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
     )],
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
-    drive_tracing_vm_parallel_with_shapes(program, opts, trace, input_stream, proof_stream, None)
-}
-
-/// As [`drive_tracing_vm_parallel_with_streams`], with the producer's maximal
-/// shapes carried onto every replay worker.
-#[allow(clippy::type_complexity)]
-pub fn drive_tracing_vm_parallel_with_shapes(
-    program: Arc<Program>,
-    opts: ZKMCoreOpts,
-    trace: &MinimalTrace,
-    input_stream: &[Vec<u8>],
-    proof_stream: &[(
-        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
-        zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
-    )],
-    maximal_shapes: Option<MaximalShapes>,
-) -> Result<Vec<ExecutionRecord>, ExecutionError> {
     use p3_maybe_rayon::prelude::*;
 
     let mut records: Vec<ExecutionRecord> = trace
@@ -408,8 +368,7 @@ pub fn drive_tracing_vm_parallel_with_shapes(
         .par_iter()
         .zip(records.par_iter_mut())
         .map(|(chunk, record)| {
-            let mut vm =
-                TracingVM::new_with_shapes(program.clone(), opts, record, maximal_shapes.clone());
+            let mut vm = TracingVM::new(program.clone(), opts, record);
             vm.execute_from_chunk_with_streams(chunk, input_stream, proof_stream)
         })
         .collect();
@@ -525,7 +484,7 @@ mod tests {
 
         let program = Arc::new(program);
         for (i, c) in chunks.iter().enumerate() {
-            let r = trace_chunk(program.clone(), opts, c, None).expect("trace_chunk");
+            let r = trace_chunk(program.clone(), opts, c).expect("trace_chunk");
             assert!(
                 !r.cpu_events.is_empty(),
                 "chunk {i} ({} cycles) replayed to an EMPTY record — the bound fired \
@@ -579,7 +538,7 @@ mod tests {
         let program = Arc::new(program);
         let one_at_a_time: Vec<_> = chunks
             .iter()
-            .map(|c| trace_chunk(program.clone(), opts, c, None).expect("trace_chunk"))
+            .map(|c| trace_chunk(program.clone(), opts, c).expect("trace_chunk"))
             .collect();
 
         let trace = MinimalTrace { chunks, ..Default::default() };

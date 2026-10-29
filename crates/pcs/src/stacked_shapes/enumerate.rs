@@ -2,8 +2,8 @@
 //!
 //! Produces the concrete list of `CoreProofShape`s that index the VK map.
 //! Shapes are quantized to a few size-class bands per chip cluster, giving
-//! ~10^3 representative shapes instead of the ~1.25·10^6 per-chip cartesian
-//! product of [`crate::shape::CoreShapeConfig::all_shapes`].
+//! ~10^3 representative shapes instead of a per-chip cartesian product of
+//! heights.
 //!
 //! Depending on `zkm_core_machine` would be circular, so chip names are
 //! string literals matching the MIPS chip inventory of `zkm_core_machine::mips`.

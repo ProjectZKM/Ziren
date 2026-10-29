@@ -271,7 +271,6 @@ fn main() {
             let mut dense_hist: std::collections::BTreeMap<usize, usize> = Default::default();
             let mut dense_cols: Vec<(usize, u128)> = vec![];
             let mut grid_cells_raw: u128 = 0;
-            let shape_config = zkm_core_machine::shape::CoreShapeConfig::<KoalaBear>::default();
             let mut deferred =
                 zkm_core_executor::ExecutionRecord::new(std::sync::Arc::new(resolve(&name)));
             let split_opts = ZKMCoreOpts::default().split_opts;
@@ -282,11 +281,6 @@ fn main() {
                 }
                 let mut deferred_shards = deferred.split(done, None, split_opts);
                 records.append(&mut deferred_shards);
-                for rec in records.iter_mut() {
-                    if shape_config.fix_shape(rec).is_ok() {
-                        zkm_core_machine::shape::canonicalize_shape_to_cluster(rec);
-                    }
-                }
                 for rec in &records {
                     num_shards += 1;
                     let mut total_padded = 0usize;
@@ -294,23 +288,9 @@ fn main() {
                     let mut total_values: u128 = 0;
                     let mut max_h = 0usize;
                     let mut per_shard: Vec<(String, usize, usize, usize)> = vec![];
-                    let heights: std::collections::HashMap<String, usize> =
-                        MipsAir::<KoalaBear>::core_heights(rec)
-                            .into_iter()
-                            .map(|(id, h)| (id.as_str().to_string(), h))
-                            .collect();
                     for c in machine.shard_chips(rec) {
                         let name = MachineAir::<KoalaBear>::name(c);
-                        let h = heights.get(&name).copied().unwrap_or(0).max(
-                            rec.shape
-                                .as_ref()
-                                .and_then(|s| {
-                                    std::str::FromStr::from_str(&name)
-                                        .ok()
-                                        .and_then(|id| s.height(&id))
-                                })
-                                .unwrap_or(0),
-                        );
+                        let h = MachineAir::<KoalaBear>::num_rows(&c.air, rec).unwrap_or(0);
                         let h = if h > 0 {
                             h
                         } else {

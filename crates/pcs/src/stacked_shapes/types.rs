@@ -89,8 +89,7 @@ impl CoreProofShape {
 /// The shape of the machine — a curated list of "chip clusters": sets
 /// of chip-name strings known to co-occur in practice.  Shape
 /// enumeration iterates over cluster × area × padding tuples instead of
-/// the full cartesian product of per-chip heights (~1.25M) that
-/// [`crate::shape::CoreShapeConfig`] uses.
+/// the full cartesian product of per-chip heights.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineShape {
     /// The chip clusters — curated combinations of chip names that

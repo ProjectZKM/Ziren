@@ -244,8 +244,6 @@ fn eligible(exec: &Executor<'_>) -> bool {
         && !exec.skip_replay_bookkeeping
         && !exec.force_interpreter
         && exec.max_cycles.is_none()
-        && exec.maximal_shapes.is_none()
-        && !exec.lde_size_check
         && exec.shard_batch_size > 0
         && exec.split_acct.cost(MipsAirId::Cpu) == 0
         && !exec.unconstrained
