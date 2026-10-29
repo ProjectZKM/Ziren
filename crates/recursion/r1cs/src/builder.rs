@@ -150,6 +150,12 @@ impl Built {
         for word in self.public.iter().chain(&self.witness) {
             out.write_all(&word.get().to_le_bytes())?;
         }
+        self.write_relations(out)
+    }
+
+    /// Writes every operand of every relation as [`Self::write`] does.
+    pub fn write_relations(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        let system = &self.system;
         let zero = system.zero_constraints().iter().map(|c| vec![c.value()]);
         let and = system.and_constraints().iter().map(|c| vec![c.left(), c.right(), c.output()]);
         let mul = system

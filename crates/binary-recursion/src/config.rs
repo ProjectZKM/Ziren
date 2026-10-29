@@ -31,6 +31,9 @@ use crate::traced::Traced;
 pub type TracedPcs =
     BooleanWhirTracePcs<Traced, Traced, TracedDomain, TracedMmcs, TracedChallenger>;
 
+/// The Boolean WHIR commitment of one bit witness, over traced values.
+pub type TracedBitPcs = BooleanWhirPcs<Traced, Traced, TracedDomain, TracedMmcs, TracedChallenger>;
+
 /// The binary stage's machine configuration, over traced values.
 pub struct TracedConfig {
     pcs: TracedPcs,
@@ -56,6 +59,17 @@ impl TracedConfig {
 
 /// The commitment `MachineConfig` builds at `arity`, over traced values.
 fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<TracedPcs, MachineConfigError> {
+    Ok(BooleanWhirTracePcs::from_commitment(bit_commitment(arity, schedule)?))
+}
+
+/// The commitment `bit_commitment` builds at `arity`, over traced values.
+///
+/// # Errors
+/// As `zkm_binary_stark::config::bit_commitment`.
+pub fn bit_commitment(
+    arity: usize,
+    schedule: &BinarySchedule,
+) -> Result<TracedBitPcs, MachineConfigError> {
     let absorbed = BitRingSwitch::<F>::ABSORBED;
     let packed = arity
         .checked_sub(absorbed)
@@ -72,8 +86,7 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<TracedPcs, Mach
         cap_height,
     ));
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);
-    let pcs = BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)?;
-    Ok(BooleanWhirTracePcs::from_commitment(pcs))
+    BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)
 }
 
 impl MultiStarkConfig for TracedConfig {

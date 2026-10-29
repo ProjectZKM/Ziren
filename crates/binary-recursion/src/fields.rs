@@ -29,8 +29,10 @@ impl TranscriptField for Traced {
         F::algebra_tag(degree, basis)
     }
 
-    /// The native seeding, whose elements are constants: a seed is a
-    /// label, never a proof value.
+    /// The native seeding, whose elements are constants: a seed is a label,
+    /// never a proof value, except the statement's public input words a
+    /// word proof's seeds end with, which [`crate::word::seed_inputs`] makes
+    /// the program's.
     fn observe_seed<C: CanObserve<Self>>(challenger: &mut C, bytes: &[u8]) {
         const WIDTH: usize = 16;
         let element = |chunk: &[u8]| {
@@ -41,8 +43,19 @@ impl TranscriptField for Traced {
         for chunk in (bytes.len() as u64).to_le_bytes().chunks(WIDTH) {
             challenger.observe(element(chunk));
         }
-        for chunk in bytes.chunks(WIDTH) {
-            challenger.observe(element(chunk));
+        match crate::word::seed_inputs(bytes) {
+            Some(pieces) => {
+                for chunk in pieces.chunks(WIDTH) {
+                    let mut padded = [crate::bytes::constant_byte(0); WIDTH];
+                    padded[..chunk.len()].copy_from_slice(chunk);
+                    challenger.observe(crate::bytes::from_bytes(&padded));
+                }
+            }
+            None => {
+                for chunk in bytes.chunks(WIDTH) {
+                    challenger.observe(element(chunk));
+                }
+            }
         }
     }
 

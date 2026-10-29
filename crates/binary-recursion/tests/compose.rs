@@ -152,7 +152,13 @@ fn composes_leaves() {
     mark("leaf machines built");
     let honest = |i: usize| leaves[i].public_values.clone();
     let node =
-        Compose { children: children(&honest), is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+        Compose {
+        children: children(&honest),
+        is_complete: false,
+        max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
+    };
 
     mark("children built");
     let started = std::time::Instant::now();
@@ -186,6 +192,8 @@ fn composes_leaves() {
             children: children(&broken),
             is_complete: false,
             max_log_shards: MAX_LOG_SHARDS,
+            check_keys: true,
+            claims_start: [0; DIGEST_SIZE],
         };
         let refused = match record_compose(&node) {
             (Err(_), _) => true,
@@ -243,7 +251,7 @@ fn prove_node(
     children: Vec<Child<'_>>,
     schedule: &BinarySchedule,
 ) -> (TapeMachine, zkm_binary_stark::config::MachineProof, Composed) {
-    let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+    let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS, check_keys: true, claims_start: [0; DIGEST_SIZE] };
     let (composed, tape) = record_compose(&node);
     let composed = composed.expect("the children compose");
     census(label, &tape);
@@ -316,7 +324,13 @@ fn composes_nodes() {
     };
     let honest = |i: usize| nodes[i].2.public_values.clone();
     let node =
-        Compose { children: children(&honest), is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+        Compose {
+        children: children(&honest),
+        is_complete: false,
+        max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
+    };
     let started = std::time::Instant::now();
     let (composed, tape) = record_compose(&node);
     let composed = composed.expect("the nodes compose");
@@ -343,6 +357,8 @@ fn composes_nodes() {
         children: children(&broken),
         is_complete: false,
         max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
     }) {
         (Err(_), _) => true,
         (Ok(_), tape) => tape.run(&tape.inputs).is_err(),
@@ -367,6 +383,8 @@ fn composes_nodes() {
         children: misplaced,
         is_complete: false,
         max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
     }) {
         (Err(_), _) => true,
         (Ok(_), tape) => tape.run(&tape.inputs).is_err(),
@@ -415,6 +433,8 @@ fn composes_nodes() {
         children: upper,
         is_complete: false,
         max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
     });
     let own = TapeMachine::table_shapes(&Program::new(&tape, DIGEST_SIZE));
     println!(
@@ -470,7 +490,7 @@ fn binary_key_digests() {
                 leaf_child(&machines[i], &leaves[i], leaves[i].public_values.clone(), &schedule)
             })
             .collect();
-        let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+        let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS, check_keys: true, claims_start: [0; DIGEST_SIZE] };
         let (_, tape) = record_compose(&node);
         let machine = TapeMachine::verifier_with_floor(
             Program::new(&tape, DIGEST_SIZE),
@@ -529,7 +549,7 @@ fn node_shape_census() {
                 })
                 .into_iter()
                 .collect();
-            let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS };
+            let node = Compose { children, is_complete: false, max_log_shards: MAX_LOG_SHARDS, check_keys: true, claims_start: [0; DIGEST_SIZE] };
             let (_, tape) = record_compose(&node);
             let program = Program::new(&tape, DIGEST_SIZE);
             let tables = TapeMachine::table_shapes(&program);

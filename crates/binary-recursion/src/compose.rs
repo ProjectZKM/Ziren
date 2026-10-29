@@ -37,7 +37,12 @@ use zkm_binary_stark::config::MachineProof;
 use zkm_binary_stark::machine::RecursionMachine;
 use zkm_binary_stark::{BinarySchedule, TRANSCRIPT_DOMAIN};
 
+use p3_word::Word64;
+use p3_word_backend::{Deferred, WiringQuery, WordProofKey};
+
 use crate::bytes::{blake3, byte_bits, digest_bytes, merkle_node, to_bytes, Piece};
+use crate::tape::digest_elements;
+use crate::word::{verify_word, DeferredClaim};
 use crate::challenger::TracedChallenger;
 use crate::config::{reread, TracedConfig, TracedProof};
 use crate::machine::{TapeAir, TapeMachine};
@@ -47,9 +52,16 @@ use crate::Traced;
 
 /// The recorded verification of a child's proof against the digest its
 /// public values hash to, which the proof commits to as its public values,
-/// returning the child's key digest.
+/// returning the child's key digest and the claims it deferred.
 pub type ChildVerifier<'a> =
-    Box<dyn Fn(&[Traced; DIGEST_SIZE]) -> Result<[Traced; 2], String> + Send + Sync + 'a>;
+    Box<dyn Fn(&[Traced; DIGEST_SIZE]) -> Result<Verified, String> + Send + Sync + 'a>;
+
+/// What a child's recorded verification leaves: its key digest, and, for a
+/// word proof, the claims its verification deferred to the root.
+pub struct Verified {
+    pub key: [Traced; 2],
+    pub claims: Option<Vec<DeferredClaim>>,
+}
 
 /// A child of a compose node.
 pub struct Child<'a> {
@@ -197,7 +209,7 @@ impl<'a> Child<'a> {
                 let verdict = verify(&config, instances, &proof, 0, &mut challenger)
                     .map_err(|e| format!("{e:?}"));
                 crate::queries::take();
-                verdict.map(|()| digest)
+                verdict.map(|()| Verified { key: digest, claims: None })
             }),
         }
     }
@@ -242,9 +254,124 @@ impl<'a> Child<'a> {
                 let verdict = verify(&config, instances, &proof, 0, &mut challenger)
                     .map_err(|e| format!("{e:?}"));
                 crate::queries::take();
-                verdict.map(|()| digest)
+                verdict.map(|()| Verified { key: digest, claims: None })
             }),
         }
+    }
+}
+
+impl<'a> Child<'a> {
+    /// A leaf proved as a word proof of a normalize program's relations,
+    /// whose public input words are its digest; `key_digest` names the key
+    /// in the key tree.  The key is a constant of the program, and the
+    /// verification's deferred claims, read from `hints` when the prover
+    /// supplied them, advance the node's claims chain.
+    ///
+    /// # Panics
+    /// Panics if called during a recording.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn word_leaf(
+        key: &'a WordProofKey<Word64>,
+        key_digest: [u8; 32],
+        public: &'a [Word64],
+        commitment: &'a crate::word::Commitment,
+        proof: &'a crate::word::Proof,
+        public_values: Vec<u32>,
+        membership: VkMembership,
+        schedule: &BinarySchedule,
+        hints: Option<&'a crate::word::Hints>,
+    ) -> Self {
+        assert!(!crate::tape::recording(), "a child is made outside a recording");
+        let schedule = *schedule;
+        Self {
+            public_values,
+            membership,
+            verify: Box::new(move |digest: &[Traced; DIGEST_SIZE]| {
+                let claims =
+                    verify_word(key, &schedule, commitment, public, digest, proof, hints)?;
+                let key = digest_elements(key_digest).map(Traced::constant);
+                Ok(Verified { key, claims: Some(claims) })
+            }),
+        }
+    }
+}
+
+/// The claims chain advanced by a word proof's deferred claims under the key
+/// `key`: the low 30 bits of each word of the Blake3 hash of a tag, the
+/// chain's words, the key and each claim.  A claim is its kind, the number
+/// of its query's values, those values and its value.
+fn advance_claims(chain: &[Traced], key: [Traced; 2], claims: &[DeferredClaim]) -> Vec<Traced> {
+    let mut pieces: Vec<Piece> =
+        CLAIMS_TAG.iter().map(|&b| Piece::Byte(crate::bytes::constant_byte(b))).collect();
+    pieces.extend(chain.iter().flat_map(|&word| element_bytes(word).map(Piece::Byte)));
+    pieces.extend(key.map(Piece::Element));
+    for claim in claims {
+        let values: Vec<Traced> = claim.query.values().copied().collect();
+        pieces.push(Piece::Byte(crate::bytes::constant_byte(claim_kind(claim.kind))));
+        pieces.extend(
+            (values.len() as u32).to_le_bytes().map(|b| Piece::Byte(crate::bytes::constant_byte(b))),
+        );
+        pieces.extend(values.into_iter().chain([claim.value]).map(Piece::Element));
+    }
+    let digest = digest_bytes(blake3(&pieces));
+    (0..DIGEST_SIZE)
+        .map(|w| {
+            let word = Traced::input(kb_value(digest_word(&digest, w)));
+            assert_digest_word(word, &digest, w);
+            word
+        })
+        .collect()
+}
+
+/// The tag the claims chain hashes first.
+const CLAIMS_TAG: &[u8] = b"ziren word claims";
+
+fn claim_kind(kind: Deferred) -> u8 {
+    match kind {
+        Deferred::Inputs => 0,
+        Deferred::Constants => 1,
+        Deferred::Wiring => 2,
+    }
+}
+
+/// [`advance_claims`] outside a recording: the chain's words after a word
+/// proof's claims under the key `key`.
+#[must_use]
+pub fn advance_claims_native(
+    chain: [u32; DIGEST_SIZE],
+    key: [u8; 32],
+    claims: &[NativeClaim],
+) -> [u32; DIGEST_SIZE] {
+    let mut message: Vec<u8> = CLAIMS_TAG.to_vec();
+    message.extend(chain.iter().flat_map(|word| word.to_le_bytes()));
+    message.extend(key);
+    for claim in claims {
+        let values: Vec<crate::tape::F> = claim.query.values().copied().collect();
+        message.push(claim_kind(claim.kind));
+        message.extend((values.len() as u32).to_le_bytes());
+        for value in values.into_iter().chain([claim.value]) {
+            message.extend(value.to_repr().to_le_bytes());
+        }
+    }
+    let hash = ::blake3::hash(&message);
+    let bytes = hash.as_bytes();
+    core::array::from_fn(|w| {
+        u32::from_le_bytes(core::array::from_fn(|k| bytes[4 * w + k])) & ((1 << 30) - 1)
+    })
+}
+
+/// A deferred claim outside a recording.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeClaim {
+    pub kind: Deferred,
+    pub query: WiringQuery<crate::tape::F>,
+    pub value: crate::tape::F,
+}
+
+impl From<&DeferredClaim> for NativeClaim {
+    fn from(claim: &DeferredClaim) -> Self {
+        Self { kind: claim.kind, query: claim.query.map(Traced::value), value: claim.value.value() }
     }
 }
 
@@ -255,6 +382,13 @@ pub struct Compose<'a> {
     pub is_complete: bool,
     /// Shard numbers are below `2^max_log_shards`.
     pub max_log_shards: usize,
+    /// Whether each child's key is shown a leaf of the key tree.  Off only
+    /// to measure a tree whose keys are not all known before its leaves.
+    pub check_keys: bool,
+    /// The claims chain the node continues when its first child is a word
+    /// proof, read as inputs: the chain the nodes before it in execution
+    /// order end with.  Zero for the first node.
+    pub claims_start: [u32; DIGEST_SIZE],
 }
 
 /// What a compose node commits to.
@@ -262,6 +396,8 @@ pub struct Compose<'a> {
 pub struct Composed {
     pub public_values: Vec<u32>,
     pub digest: [u32; DIGEST_SIZE],
+    /// The key digest and claims of each word-proof child, in order.
+    pub claims: Vec<([u8; 32], Vec<NativeClaim>)>,
 }
 
 /// The node's verification, recorded: the public values it commits to, and
@@ -513,6 +649,7 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
     let mut deferred_proofs_digest: Vec<Traced> = Vec::new();
     let mut reconstruct_deferred_digest: Vec<Traced> = Vec::new();
     let mut zkm_vk_digest: Vec<Traced> = Vec::new();
+    let mut composed_claims: Vec<([u8; 32], Vec<NativeClaim>)> = Vec::new();
 
     for (i, child) in node.children.iter().enumerate() {
         if child.public_values.len() != RECURSIVE_PROOF_NUM_PV_ELTS {
@@ -526,12 +663,18 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         for (w, &word) in current.digest.iter().enumerate() {
             assert_digest_word(word, &digest, w);
         }
-        let key = (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?;
-        check_membership(key, &child.membership, &current.vk_root);
+        let verified = (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?;
+        if node.check_keys {
+            check_membership(verified.key, &child.membership, &current.vk_root);
+        }
 
         if i == 0 {
             vk_root = current.vk_root;
-            reconstruct_deferred_digest = current.start_reconstruct_deferred_digest.to_vec();
+            reconstruct_deferred_digest = if verified.claims.is_some() {
+                node.claims_start.iter().map(|&w| Traced::input(kb_value(w))).collect()
+            } else {
+                current.start_reconstruct_deferred_digest.to_vec()
+            };
             zkm_vk_digest = current.zkm_vk_digest.to_vec();
             pc = current.start_pc;
             shard = current.start_shard;
@@ -543,7 +686,8 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
                 current.committed_value_digest.iter().flat_map(|word| word.0).collect();
             deferred_proofs_digest = current.deferred_proofs_digest.to_vec();
             let parent: &mut RecursionPublicValues<Traced> = out.as_mut_slice().borrow_mut();
-            parent.start_reconstruct_deferred_digest = current.start_reconstruct_deferred_digest;
+            parent.start_reconstruct_deferred_digest =
+                core::array::from_fn(|k| reconstruct_deferred_digest[k]);
             parent.start_pc = current.start_pc;
             parent.start_shard = current.start_shard;
             parent.previous_init_addr_bits = current.previous_init_addr_bits;
@@ -554,11 +698,31 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
             expected.assert_eq(actual);
         }
         exit_code = current.exit_code;
-        for (digest, current) in
-            reconstruct_deferred_digest.iter().zip(&current.start_reconstruct_deferred_digest)
-        {
-            digest.assert_eq(current);
-        }
+        let end_reconstruct = match &verified.claims {
+            Some(claims) => {
+                for (start, end) in current
+                    .start_reconstruct_deferred_digest
+                    .iter()
+                    .zip(&current.end_reconstruct_deferred_digest)
+                {
+                    start.assert_eq(end);
+                }
+                let [lo, hi] = verified.key.map(|half| half.value().to_repr().to_le_bytes());
+                let key: [u8; 32] =
+                    core::array::from_fn(|k| if k < 16 { lo[k] } else { hi[k - 16] });
+                composed_claims.push((key, claims.iter().map(NativeClaim::from).collect()));
+                advance_claims(&reconstruct_deferred_digest, verified.key, claims)
+            }
+            None => {
+                for (digest, current) in reconstruct_deferred_digest
+                    .iter()
+                    .zip(&current.start_reconstruct_deferred_digest)
+                {
+                    digest.assert_eq(current);
+                }
+                current.end_reconstruct_deferred_digest.to_vec()
+            }
+        };
         for (digest, current) in zkm_vk_digest.iter().zip(&current.zkm_vk_digest) {
             digest.assert_eq(current);
         }
@@ -613,7 +777,7 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
             mul(current.next_execution_shard, contains),
             mul(execution_shard, sub(constant(1), contains)),
         );
-        reconstruct_deferred_digest = current.end_reconstruct_deferred_digest.to_vec();
+        reconstruct_deferred_digest = end_reconstruct;
         pc = current.next_pc;
         shard = current.next_shard;
         init_addr_bits = current.last_init_addr_bits;
@@ -667,7 +831,7 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         .iter()
         .map(|x| as_kb(x.value()).expect("a public value is a canonical element"))
         .collect();
-    Ok(Composed { public_values, digest: words })
+    Ok(Composed { public_values, digest: words, claims: composed_claims })
 }
 
 /// The boundary conditions of a proof of the whole execution, as the field
@@ -682,9 +846,8 @@ fn assert_complete(values: &[Traced]) {
     for &word in &pv.start_reconstruct_deferred_digest {
         assert_zero(word);
     }
-    for (end, deferred) in pv.end_reconstruct_deferred_digest.iter().zip(&pv.deferred_proofs_digest)
-    {
-        end.assert_eq(deferred);
+    for &word in &pv.deferred_proofs_digest {
+        assert_zero(word);
     }
     let zero = SepticDigest::<KoalaBear>::zero().0;
     let expected = Point::constant(zero).values();

@@ -10,6 +10,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
+blake3 = { workspace = true, features = ["std"] }
 p3-binary-pcs = { workspace = true }
 p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }

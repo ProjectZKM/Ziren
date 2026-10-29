@@ -139,7 +139,7 @@ impl Family {
 /// The tree over `n` leaves: each level pairs the one below in order, an
 /// odd last one alone, until one node is left, which closes the execution.
 /// Each level lists its nodes as ranges of the level below.
-fn plan(n: usize) -> Vec<Vec<std::ops::Range<usize>>> {
+pub(crate) fn plan(n: usize) -> Vec<Vec<std::ops::Range<usize>>> {
     let mut levels = Vec::new();
     let mut width = n;
     loop {

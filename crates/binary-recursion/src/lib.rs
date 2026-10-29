@@ -22,6 +22,7 @@ pub mod node;
 pub mod queries;
 pub mod tape;
 pub mod traced;
+pub mod word;
 
 pub use tape::{record, KbOp, Op, Operand, Tape, F};
 pub use traced::Traced;

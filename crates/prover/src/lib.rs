@@ -12,6 +12,7 @@
 #![allow(clippy::collapsible_else_if)]
 
 pub mod binary_tree;
+pub mod word_tree;
 pub mod build;
 pub mod components;
 pub mod program_cache;
@@ -979,6 +980,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> Result<zkm_recursion_r1cs::Lowered, ZKMRecursionProverError> {
+        self.leaf_word_values(input).map(|(lowered, _)| lowered)
+    }
+
+    /// [`Self::leaf_word`], with the public values the program commits to,
+    /// as canonical elements.
+    pub fn leaf_word_values(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+    ) -> Result<(zkm_recursion_r1cs::Lowered, Vec<u32>), ZKMRecursionProverError> {
         let program = self.recursion_program_basefold(input).0;
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -998,8 +1008,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     .val
             })
             .collect();
-        zkm_recursion_r1cs::lower(&program, Some(&memory))
-            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))
+        let public_values = PublicValuesAir::public_values(&runtime.record);
+        let lowered = zkm_recursion_r1cs::lower(&program, Some(&memory))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        Ok((lowered, public_values))
     }
 
     /// The binary machine of `program`, every table at least as tall as
@@ -1862,7 +1874,7 @@ pub mod tests {
                 started.elapsed().as_secs_f64()
             );
             let started = std::time::Instant::now();
-            let (commitment, proof) = key.prove(built).map_err(|e| anyhow::anyhow!(e))?;
+            let (commitment, proof, _) = key.prove(built).map_err(|e| anyhow::anyhow!(e))?;
             tracing::info!(
                 "word leaf proved in {:.1} s, {} bytes",
                 started.elapsed().as_secs_f64(),
@@ -1872,6 +1884,46 @@ pub mod tests {
             key.verify(&commitment, &built.public, &proof).map_err(|e| anyhow::anyhow!(e))?;
             tracing::info!("word leaf verified in {:.2} s", started.elapsed().as_secs_f64());
         }
+        Ok(())
+    }
+
+    /// A fibonacci proof compressed over word proofs: its leaves proved by
+    /// the word backend, a tree of compose nodes over them, and the root
+    /// verified with the claims its leaves deferred.  `ZIREN_WORD_FIB_N`
+    /// sets the guest's `n` (with a small `SHARD_SIZE`, a tree of several
+    /// levels).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_word_compress_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let n: u32 = std::env::var("ZIREN_WORD_FIB_N").map_or(10, |n| n.parse().unwrap());
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = prover.prove_core(
+            &pk_d,
+            program,
+            &fib_stdin(n),
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        let mut keys = Vec::new();
+        let compressed = prover.compress_word(&vk, &core_proof, &mut keys)?;
+        let claims: usize = compressed.claims.iter().map(|(_, claims)| claims.len()).sum();
+        tracing::info!(
+            "word compressed: root {} bytes, {} leaves, {claims} claims, {} keys",
+            compressed.root.proof.len(),
+            compressed.claims.len(),
+            keys.len()
+        );
+        let mut forged = compressed.clone();
+        let claim = &mut forged.claims[0].1[0];
+        claim.value += zkm_binary_recursion::F::ONE;
+        assert!(
+            ZKMProver::<DefaultProverComponents>::verify_word_compressed(&forged, &keys).is_err(),
+            "a changed claim is refused"
+        );
         Ok(())
     }
 

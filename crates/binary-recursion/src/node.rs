@@ -89,7 +89,13 @@ pub fn node_key_digest(machine: &TapeMachine) -> [u8; 32] {
 /// # Errors
 /// Returns why the children do not compose.
 pub fn record_node(children: Vec<Child<'_>>, is_complete: bool) -> Result<Program, String> {
-    let node = Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS };
+    let node = Compose {
+        children,
+        is_complete,
+        max_log_shards: MAX_LOG_SHARDS,
+        check_keys: true,
+        claims_start: [0; DIGEST_SIZE],
+    };
     let (composed, tape) = record_compose(&node);
     if tape.ops.is_empty() {
         return Err(composed.err().unwrap_or_else(|| "the node records nothing".into()));
@@ -125,20 +131,43 @@ pub fn prove_node(
     floor: &[(&str, usize)],
     schedule: &BinarySchedule,
 ) -> Result<ProvedNode, String> {
-    let node = Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS };
-    let (composed, tape) = record_compose(&node);
+    prove_node_with(children, is_complete, floor, schedule, true, [0; DIGEST_SIZE])
+}
+
+/// [`prove_node`], the children's keys shown in the key tree only if
+/// `check_keys`, and the claims chain continued from `claims_start` when
+/// the children are word proofs.
+///
+/// # Errors
+/// As [`prove_node`].
+pub fn prove_node_with(
+    children: Vec<Child<'_>>,
+    is_complete: bool,
+    floor: &[(&str, usize)],
+    schedule: &BinarySchedule,
+    check_keys: bool,
+    claims_start: [u32; DIGEST_SIZE],
+) -> Result<ProvedNode, String> {
+    let node =
+        Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS, check_keys, claims_start };
+    let (composed, tape) = tracing::info_span!("node record").in_scope(|| record_compose(&node));
     let composed = composed?;
-    let program = Program::new(&tape, DIGEST_SIZE);
-    let mut machine =
-        TapeMachine::new_with_floor(program, schedule, floor).map_err(|e| format!("{e:?}"))?;
-    let proof = machine.prove(&tape, &tape.inputs).map_err(|e| format!("{e:?}"))?;
+    let program = tracing::info_span!("node program").in_scope(|| Program::new(&tape, DIGEST_SIZE));
+    let mut machine = tracing::info_span!("node setup")
+        .in_scope(|| TapeMachine::new_with_floor(program, schedule, floor))
+        .map_err(|e| format!("{e:?}"))?;
+    let proof = tracing::info_span!("node prove")
+        .in_scope(|| machine.prove(&tape, &tape.inputs))
+        .map_err(|e| format!("{e:?}"))?;
     let public = machine.public_values(&tape.inputs);
     if public != digest_public(&composed.digest)
         || crate::compose::public_values_digest(&composed.public_values) != composed.digest
     {
         return Err("the node's public inputs are not its digest".into());
     }
-    machine.verify(&proof, &public).map_err(|e| format!("{e:?}"))?;
+    tracing::info_span!("node verify")
+        .in_scope(|| machine.verify(&proof, &public))
+        .map_err(|e| format!("{e:?}"))?;
     machine.drop_proving_key();
     Ok(ProvedNode { machine, proof, composed })
 }

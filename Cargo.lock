@@ -6445,14 +6445,19 @@ dependencies = [
  "p3-sumcheck",
  "p3-symmetric",
  "p3-whir",
+ "p3-word",
+ "p3-word-backend",
  "postcard",
+ "rand 0.8.6",
  "rayon",
  "serde",
+ "tracing",
  "tracing-subscriber 0.3.23",
  "zkm-binary-stark",
  "zkm-derive",
  "zkm-pcs",
  "zkm-recursion-core",
+ "zkm-recursion-r1cs",
 ]
 
 [[package]]
@@ -6800,6 +6805,7 @@ dependencies = [
  "p3-symmetric",
  "p3-uni-stark",
  "p3-util",
+ "p3-word",
  "rayon",
  "serde",
  "serde_json",
@@ -6963,6 +6969,7 @@ dependencies = [
 name = "zkm-recursion-r1cs"
 version = "2.0.0"
 dependencies = [
+ "blake3",
  "p3-binary-pcs",
  "p3-field",
  "p3-koala-bear",
