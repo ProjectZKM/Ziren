@@ -2975,6 +2975,7 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "hashbrown 0.17.1",
  "p3-field",
@@ -2987,6 +2988,7 @@ dependencies = [
 [[package]]
 name = "p3-bn254"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "num-bigint 0.5.1",
  "p3-field",
@@ -3000,6 +3002,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-field",
  "p3-keccak",
@@ -3013,6 +3016,7 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-challenger",
@@ -3031,6 +3035,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-dft",
@@ -3045,6 +3050,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-field",
@@ -3058,6 +3064,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "num-bigint 0.5.1",
@@ -3072,6 +3079,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-challenger",
@@ -3092,6 +3100,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "cpufeatures 0.3.0",
  "p3-symmetric",
@@ -3102,6 +3111,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -3115,6 +3125,7 @@ dependencies = [
 [[package]]
 name = "p3-koala-bear"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -3128,6 +3139,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-field",
@@ -3141,6 +3153,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "rayon",
 ]
@@ -3148,6 +3161,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -3159,6 +3173,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-commit",
@@ -3177,6 +3192,7 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "num-bigint 0.5.1",
@@ -3195,6 +3211,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "num-bigint 0.5.1",
@@ -3216,6 +3233,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon1"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -3226,6 +3244,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -3238,6 +3257,7 @@ dependencies = [
 [[package]]
 name = "p3-security"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "libm",
  "p3-air",
@@ -3250,6 +3270,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-field",
@@ -3261,6 +3282,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "itertools 0.15.0",
  "p3-air",
@@ -3279,6 +3301,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.8.0"
+source = "git+https://github.com/ProjectZKM/Plonky3#5ccd557f5f1a21f5a4c4b0bad83da8729ba2f091"
 dependencies = [
  "p3-maybe-rayon",
  "serde",
@@ -6504,7 +6527,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "p3-multilinear-util"
-version = "0.8.0"
