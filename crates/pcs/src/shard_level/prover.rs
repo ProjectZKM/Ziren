@@ -141,8 +141,6 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + Clone
-        + Sync
         + CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let ShardData {
@@ -956,8 +954,6 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + Clone
-        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal, WhirRing};

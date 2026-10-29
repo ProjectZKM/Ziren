@@ -192,8 +192,6 @@ impl JaggedShardVerifier {
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + Clone
-            + Sync
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         if proof.public_values.len() != num_pv_elts {
@@ -434,8 +432,6 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + Clone
-        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::jagged::JaggedChipInfo;

@@ -82,7 +82,7 @@ where
 pub fn gkr_check_witness<F, C>(challenger: &mut C, bits: usize, witness: F) -> bool
 where
     F: p3_field::Field + 'static,
-    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + Clone + Sync + 'static,
+    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static,
 {
     challenger.check_witness(bits, from_f(witness))
 }

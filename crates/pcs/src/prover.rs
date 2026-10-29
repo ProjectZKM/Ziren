@@ -402,13 +402,10 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
-    SC::Challenger: Clone,
     // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic WHIR open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + Clone
-        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     <SC as WhirRing>::WhirMmcs:
         p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
@@ -638,7 +635,7 @@ fn prove_shard_with_data_boxed<SC, A>(
 where
     SC: StarkGenericConfig + WhirRing,
     A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
-    SC::Challenger: Clone + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
+    SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal};
     use core::any::TypeId;

@@ -1,14 +1,38 @@
 use std::error::Error;
 
-use p3_air::BaseAir;
+use p3_air::{
+    capture_symbolic_constraints, Air, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicConstraints,
+};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{septic_digest::SepticDigest, MachineRecord, PicusInfo};
+use crate::{septic_digest::SepticDigest, MachineRecord, PicusInfo, PROOF_MAX_NUM_PVS};
 
 pub use zkm_derive::MachineAir;
 
 use super::LookupScope;
+
+/// Capture a machine AIR's constraints using the shared public-values buffer layout.
+///
+/// Machine AIRs receive `PROOF_MAX_NUM_PVS` public-value slots, independently of
+/// `BaseAir::num_public_values` (which they may leave at its default of zero). We therefore
+/// use `capture_symbolic_constraints` without validating the layout against that metadata.
+/// Keep this layout shared by degree inference, constraint counts, and the soundness census.
+pub fn capture_machine_constraints<F, A>(air: &A) -> SymbolicConstraints<F>
+where
+    F: Field,
+    A: MachineAir<F> + Air<SymbolicAirBuilder<F>>,
+{
+    capture_symbolic_constraints(
+        AirLayout {
+            preprocessed_width: air.preprocessed_width(),
+            main_width: air.width(),
+            num_public_values: PROOF_MAX_NUM_PVS,
+            ..Default::default()
+        },
+        |builder| air.eval(builder),
+    )
+}
 
 /// An AIR that is part of a multi table AIR arithmetization.
 pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {

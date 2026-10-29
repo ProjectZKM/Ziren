@@ -50,8 +50,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + Clone
-            + Sync
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         let jagged_whir_proof = &proof.jagged_shard_proof;

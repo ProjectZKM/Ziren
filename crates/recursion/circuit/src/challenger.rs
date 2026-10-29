@@ -539,8 +539,8 @@ pub(crate) mod tests {
         CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger,
     };
     use p3_field::{
-        split_pf_to_field_order_limbs, squeeze_field_order_num_limbs, Field,
-        PrimeCharacteristicRing, PrimeField32,
+        max_shifted_absorb_injective_limbs, split_pf_to_field_order_limbs,
+        squeeze_field_order_num_limbs, Field, PrimeCharacteristicRing, PrimeField32,
     };
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
@@ -553,7 +553,9 @@ pub(crate) mod tests {
     };
     use zkm_recursion_core::stark::{
         outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
+        OUTER_MULTI_FIELD_CHALLENGER_RATE,
     };
+    use zkm_recursion_core::HASH_RATE;
     use zkm_recursion_gnark_ffi::PlonkBn254Prover;
 
     use crate::{
@@ -608,7 +610,17 @@ pub(crate) mod tests {
 
     #[test]
     fn test_compiler_challenger_buffer_boundaries() {
-        let lengths = [0usize, 1, 7, 8, 9, 15, 16, 17];
+        // Empty input, then just below, at, and above one and two absorb blocks.
+        let lengths = [
+            0,
+            1,
+            HASH_RATE - 1,
+            HASH_RATE,
+            HASH_RATE + 1,
+            2 * HASH_RATE - 1,
+            2 * HASH_RATE,
+            2 * HASH_RATE + 1,
+        ];
         let value = |k: usize, j: usize| F::from_usize(k * 31 + j + 1);
         let bits = 8;
 
@@ -717,34 +729,43 @@ pub(crate) mod tests {
         type F = <SC as StarkGenericConfig>::Val;
         type N = <C as Config>::N;
 
-        let inputs: Vec<F> = (0..37u32).map(|i| F::from_u32(i * 0x0101_0101 + 7)).collect();
+        let absorb_capacity = MultiField32ChallengerVariable::<C>::absorb_num_f_elms()
+            * OUTER_MULTI_FIELD_CHALLENGER_RATE;
+        let squeeze_capacity = MultiField32ChallengerVariable::<C>::squeeze_num_f_elms()
+            * OUTER_MULTI_FIELD_CHALLENGER_RATE;
+        // Two full absorb blocks and a partial tail exercise automatic and sample-time flushes.
+        let input_len = 2 * absorb_capacity + 5;
+        // Consume beyond one squeeze block, then beyond two, to force fresh permutations.
+        let first_sample_count = squeeze_capacity + 1;
+        let second_sample_count = 2 * squeeze_capacity + 2;
+        let inputs: Vec<F> = (0..input_len).map(|i| F::from_usize(i * 0x0101_0101 + 7)).collect();
         let commits = [N::from_u64(3), -N::ONE];
 
         let config = SC::default();
         let mut challenger = config.challenger();
         let mut expected: Vec<F> = vec![];
-        challenger.observe_slice(&inputs[..16]);
+        challenger.observe_slice(&inputs[..absorb_capacity]);
         challenger.observe(Hash::from([commits[0]]));
-        expected.extend((0..15).map(|_| CanSample::<F>::sample(&mut challenger)));
-        challenger.observe_slice(&inputs[16..]);
+        expected.extend((0..first_sample_count).map(|_| CanSample::<F>::sample(&mut challenger)));
+        challenger.observe_slice(&inputs[absorb_capacity..]);
         expected.push(challenger.sample());
         challenger.observe(Hash::from([commits[1]]));
         challenger.observe(inputs[0]);
-        expected.extend((0..30).map(|_| CanSample::<F>::sample(&mut challenger)));
+        expected.extend((0..second_sample_count).map(|_| CanSample::<F>::sample(&mut challenger)));
 
         let mut builder = Builder::<C>::default();
         let inputs: Vec<Felt<_>> = inputs.iter().map(|x| builder.eval(*x)).collect();
         let commits: Vec<Var<_>> = commits.iter().map(|x| builder.eval(*x)).collect();
         let mut challenger = MultiField32ChallengerVariable::<C>::new(&mut builder);
         let mut actual: Vec<Felt<_>> = vec![];
-        challenger.observe_slice(&mut builder, inputs[..16].iter().copied());
+        challenger.observe_slice(&mut builder, inputs[..absorb_capacity].iter().copied());
         challenger.observe_commitment(&mut builder, [commits[0]]);
-        actual.extend((0..15).map(|_| challenger.sample(&mut builder)));
-        challenger.observe_slice(&mut builder, inputs[16..].iter().copied());
+        actual.extend((0..first_sample_count).map(|_| challenger.sample(&mut builder)));
+        challenger.observe_slice(&mut builder, inputs[absorb_capacity..].iter().copied());
         actual.push(challenger.sample(&mut builder));
         challenger.observe_commitment(&mut builder, [commits[1]]);
         challenger.observe(&mut builder, inputs[0]);
-        actual.extend((0..30).map(|_| challenger.sample(&mut builder)));
+        actual.extend((0..second_sample_count).map(|_| challenger.sample(&mut builder)));
 
         for (expected, actual) in zip(expected, actual) {
             let expected: Felt<_> = builder.eval(expected);
@@ -854,9 +875,14 @@ pub(crate) mod tests {
     #[test]
     fn test_p2_hash_multi_block() {
         let hasher = OuterHash::new(outer_perm()).unwrap();
+        let limbs_per_element = max_shifted_absorb_injective_limbs::<KoalaBear, Bn254>();
+        let absorb_capacity = OUTER_MULTI_FIELD_CHALLENGER_RATE * limbs_per_element;
+        // One packed element, one full block, and partial tails after one or two full blocks.
+        let lengths =
+            [limbs_per_element, absorb_capacity, absorb_capacity + 1, 2 * absorb_capacity + 5];
 
         let mut builder = Builder::<C>::default();
-        for len in [8, 16, 17, 37] {
+        for len in lengths {
             let input: Vec<KoalaBear> = (0..len as u32)
                 .map(|i| if i % 3 == 0 { -KoalaBear::ONE } else { KoalaBear::from_u32(i) })
                 .collect();
