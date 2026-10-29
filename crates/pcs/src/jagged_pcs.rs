@@ -781,6 +781,8 @@ pub mod jagged {
         D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
         Challenger: p3_challenger::FieldChallenger<JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + Clone
+            + Sync
             + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
             + 'static,
     {
@@ -989,6 +991,8 @@ pub mod jagged {
         D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
         Challenger: p3_challenger::FieldChallenger<JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + Clone
+            + Sync
             + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
             + 'static,
     {
@@ -1377,6 +1381,8 @@ pub mod jagged {
         MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
         Challenger: p3_challenger::FieldChallenger<JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + Clone
+            + Sync
             + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
             + 'static,
     {

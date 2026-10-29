@@ -192,6 +192,8 @@ impl JaggedShardVerifier {
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + Clone
+            + Sync
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         if proof.public_values.len() != num_pv_elts {
@@ -218,7 +220,7 @@ impl JaggedShardVerifier {
                     got: opening.main.local.len(),
                 });
             }
-            let expected_prep = chip.preprocessed_width();
+            let expected_prep = p3_air::BaseAir::<Val<SC>>::preprocessed_width(*chip);
             if opening.preprocessed.local.len() != expected_prep {
                 return Err(JaggedShardVerifyError::OpeningWidthMismatch {
                     chip: chip.name(),
@@ -432,6 +434,8 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::jagged::JaggedChipInfo;
@@ -686,7 +690,7 @@ where
 
     let n_prep = chips
         .iter()
-        .filter(|c| <_ as crate::air::MachineAir<Val<SC>>>::preprocessed_width(**c) > 0)
+        .filter(|c| <_ as p3_air::BaseAir<Val<SC>>>::preprocessed_width(**c) > 0)
         .count();
     let combined_packing = &bundle.packing;
     let log_stack = bundle.commit.log_stacking_height as usize;
@@ -1136,7 +1140,7 @@ where
             .iter()
             .map(|chip| {
                 <_ as BaseAir<Val<SC>>>::width(*chip)
-                    + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
+                    + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&chip.air)
             })
             .max()
             .unwrap_or(0);
@@ -1247,7 +1251,7 @@ where
         .iter()
         .map(|chip| {
             <_ as BaseAir<Val<SC>>>::width(*chip)
-                + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
+                + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&chip.air)
         })
         .max()
         .unwrap_or(0);

@@ -131,11 +131,24 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
+            let preprocessed_width_arms = variants.iter().map(|(variant_name, field)| {
+                let field_ty = &field.ty;
+                quote! {
+                    #name::#variant_name(x) => <#field_ty as p3_air::BaseAir<F>>::preprocessed_width(x)
+                }
+            });
+
             let base_air = quote! {
                 impl #impl_generics p3_air::BaseAir<F> for #name #ty_generics #where_clause {
                     fn width(&self) -> usize {
                         match self {
                             #(#width_arms,)*
+                        }
+                    }
+
+                    fn preprocessed_width(&self) -> usize {
+                        match self {
+                            #(#preprocessed_width_arms,)*
                         }
                     }
 
@@ -149,13 +162,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 let field_ty = &field.ty;
                 quote! {
                     #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::name(x)
-                }
-            });
-
-            let preprocessed_width_arms = variants.iter().map(|(variant_name, field)| {
-                let field_ty = &field.ty;
-                quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::preprocessed_width(x)
                 }
             });
 
@@ -226,12 +232,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                     fn name(&self) -> String {
                         match self {
                             #(#name_arms,)*
-                        }
-                    }
-
-                    fn preprocessed_width(&self) -> usize {
-                        match self {
-                            #(#preprocessed_width_arms,)*
                         }
                     }
 

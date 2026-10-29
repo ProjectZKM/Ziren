@@ -246,10 +246,21 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
     }
 
     fn duplexing(&mut self, builder: &mut Builder<C>) {
-        assert!(self.input_buffer.len() <= HASH_RATE);
+        let num_absorbed = self.input_buffer.len();
+        assert!(num_absorbed <= HASH_RATE);
 
-        self.sponge_state[0..self.input_buffer.len()].copy_from_slice(self.input_buffer.as_slice());
+        self.sponge_state[0..num_absorbed].copy_from_slice(self.input_buffer.as_slice());
         self.input_buffer.clear();
+
+        // An absorb zeroes the rate slots it did not fill and binds its length into the first
+        // capacity element; a squeeze permutes the state as it is.
+        if num_absorbed > 0 {
+            for slot in &mut self.sponge_state[num_absorbed..HASH_RATE] {
+                *slot = builder.eval(C::F::ZERO);
+            }
+            self.sponge_state[HASH_RATE] =
+                builder.eval(self.sponge_state[HASH_RATE] + C::F::from_usize(num_absorbed));
+        }
 
         self.sponge_state = builder.poseidon2_permute_v2(self.sponge_state);
 
@@ -524,7 +535,9 @@ pub(crate) mod tests {
     };
     use num_bigint::BigUint;
     use p3_bn254_fr::Bn254;
-    use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger};
+    use p3_challenger::{
+        CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger,
+    };
     use p3_field::{
         split_pf_to_field_order_limbs, squeeze_field_order_num_limbs, Field,
         PrimeCharacteristicRing, PrimeField32,
@@ -589,6 +602,49 @@ pub(crate) mod tests {
         builder.assert_felt_eq(expected_result, element);
         builder.print_e(element_ef);
         builder.assert_ext_eq(expected_result_ef, element_ef);
+
+        run_test_recursion(builder.into_operations(), None);
+    }
+
+    #[test]
+    fn test_compiler_challenger_buffer_boundaries() {
+        let lengths = [0usize, 1, 7, 8, 9, 15, 16, 17];
+        let value = |k: usize, j: usize| F::from_usize(k * 31 + j + 1);
+        let bits = 8;
+
+        let config = SC::default();
+        let mut challenger = config.challenger();
+        let mut expected = Vec::new();
+        for k in lengths {
+            for j in 0..k {
+                challenger.observe(value(k, j));
+            }
+            expected.push(CanSample::<F>::sample(&mut challenger));
+        }
+        let expected_ef: EF = challenger.sample_algebra_element();
+        challenger.observe(F::from_u32(5));
+        let witness = challenger.grind(bits);
+        let expected_after_grind: F = challenger.sample();
+
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let mut challenger = DuplexChallengerVariable::<AsmConfig<F, EF>>::new(&mut builder);
+        for (k, expected) in lengths.into_iter().zip(expected) {
+            for j in 0..k {
+                let v: Felt<_> = builder.eval(value(k, j));
+                challenger.observe(&mut builder, v);
+            }
+            let element = challenger.sample(&mut builder);
+            builder.assert_felt_eq(element, expected);
+        }
+        let element_ef = challenger.sample_ext(&mut builder);
+        let expected_ef: Ext<_, _> = builder.eval(expected_ef.cons());
+        builder.assert_ext_eq(expected_ef, element_ef);
+        let five: Felt<_> = builder.eval(F::from_u32(5));
+        challenger.observe(&mut builder, five);
+        let witness: Felt<_> = builder.eval(witness);
+        challenger.check_witness(&mut builder, bits, witness);
+        let element = challenger.sample(&mut builder);
+        builder.assert_felt_eq(element, expected_after_grind);
 
         run_test_recursion(builder.into_operations(), None);
     }

@@ -704,6 +704,8 @@ where
     EFD: TwoAdicSubgroupDft<JaggedChallenge>,
     Challenger: FieldChallenger<JaggedVal>
         + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {
@@ -733,6 +735,8 @@ where
     EFD: TwoAdicSubgroupDft<JaggedChallenge>,
     Challenger: FieldChallenger<JaggedVal>
         + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {
@@ -768,6 +772,8 @@ where
     MT: Mmcs<JaggedVal, Commitment: Clone> + Clone,
     Challenger: FieldChallenger<JaggedVal>
         + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {

@@ -65,7 +65,7 @@ where
 /// effectively serially.  Both return the smallest passing witness.
 pub(crate) fn accelerated_grind<C>(challenger: &mut C, bits: usize) -> C::Witness
 where
-    C: GrindingChallenger + 'static,
+    C: GrindingChallenger + Clone + Sync + 'static,
 {
     if let Some(accelerated) = grind_accelerator_for::<C>() {
         return accelerated(challenger, bits);
@@ -104,7 +104,7 @@ where
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + Send + Sync,
-    C: GrindingChallenger<Witness = F> + 'static,
+    C: GrindingChallenger<Witness = F> + Clone + Sync + 'static,
 {
     if bits == 0 {
         return F::ZERO;
@@ -133,7 +133,7 @@ where
 /// bounded there.
 fn windowed_host_grind<C>(challenger: &mut C, bits: usize) -> C::Witness
 where
-    C: GrindingChallenger,
+    C: GrindingChallenger + Clone + Sync,
 {
     use p3_field::PrimeCharacteristicRing;
     use p3_maybe_rayon::prelude::*;

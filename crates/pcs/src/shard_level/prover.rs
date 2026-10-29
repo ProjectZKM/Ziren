@@ -141,6 +141,8 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let ShardData {
@@ -533,7 +535,7 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
         chips.len(),
         name_sorted.iter().map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
             let evals: &[Challenge<SC>] =
                 trace_at_z.get(&name).map(|v| v.as_slice()).unwrap_or(&[]);
             let split = prep_width.min(evals.len());
@@ -725,7 +727,7 @@ where
         .iter()
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
             let mut prep_local: Vec<Challenge<SC>> = trace_at_z.remove(&name).unwrap_or_default();
             let split = prep_width.min(prep_local.len());
             let main_local = prep_local.split_off(split);
@@ -954,6 +956,8 @@ where
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal, WhirRing};

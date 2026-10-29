@@ -74,6 +74,10 @@ impl<F: Send + Sync> BaseAir<F> for PrefixSumChecksChip {
     fn width(&self) -> usize {
         NUM_PREFIX_SUM_CHECKS_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_PREFIX_SUM_CHECKS_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for PrefixSumChecksChip {
@@ -85,10 +89,6 @@ impl<F: PrimeField32> MachineAir<F> for PrefixSumChecksChip {
 
     fn name(&self) -> String {
         "PrefixSumChecks".to_string()
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_PREFIX_SUM_CHECKS_PREPROCESSED_COLS
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

@@ -65,6 +65,10 @@ impl<F: Send + Sync> BaseAir<F> for Ext2FeltChip<F> {
     fn width(&self) -> usize {
         NUM_EXT2FELT_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_EXT2FELT_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
@@ -76,10 +80,6 @@ impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
 
     fn name(&self) -> String {
         "Ext2Felt".to_string()
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_EXT2FELT_PREPROCESSED_COLS
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {

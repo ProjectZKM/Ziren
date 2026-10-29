@@ -72,6 +72,8 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         + CanSample<Self::Challenge>
         + FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + 'static;
 
     /// Get the PCS used by this configuration.
@@ -380,7 +382,11 @@ pub type WhirRingCommitment<SC> =
 #[derive(Clone)]
 pub struct UniConfig<SC>(pub SC);
 
-impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC> {
+impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC>
+where
+    SC::Pcs: p3_commit::UnivariateStarkPcs<SC::Challenge, SC::Challenger>,
+    Val<SC>: p3_field::PrimeField64,
+{
     type Pcs = SC::Pcs;
 
     type Challenge = SC::Challenge;

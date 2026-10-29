@@ -53,11 +53,6 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     /// Whether this execution record contains events for this air.
     fn included(&self, shard: &Self::Record) -> bool;
 
-    /// The width of the preprocessed trace.
-    fn preprocessed_width(&self) -> usize {
-        0
-    }
-
     /// The number of rows in the preprocessed trace
     fn preprocessed_num_rows(&self, _program: &Self::Program, _instrs_len: usize) -> Option<usize> {
         None

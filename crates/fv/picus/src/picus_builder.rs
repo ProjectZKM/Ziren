@@ -139,6 +139,7 @@ impl AirBuilder for PicusBuilder {
     type PreprocessedWindow = RowMajorMatrix<Self::Var>;
     type MainWindow = RowMajorMatrix<Self::Var>;
     type PublicVar = SymbolicVariable<Felt>;
+    type PeriodicVar = SymbolicVariable<Felt>;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -156,8 +157,7 @@ impl AirBuilder for PicusBuilder {
         SymbolicExpression::Leaf(BaseLeaf::IsLastRow)
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "PicusBuilder only supports a transition window of size 2");
+    fn is_transition(&self) -> Self::Expr {
         SymbolicExpression::Leaf(BaseLeaf::IsTransition)
     }
 

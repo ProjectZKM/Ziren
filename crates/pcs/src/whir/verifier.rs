@@ -62,8 +62,11 @@ where
         proof: &RoundedProof<F, EF, MT>,
     ) -> Result<(), WhirVerifierError>
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + Clone
+            + Sync
+            + CanObserve<MT::Commitment>,
     {
         let n = point.len();
         let num_rounds = self.config.round_parameters.len();

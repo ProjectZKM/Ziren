@@ -399,7 +399,7 @@ fn core_chip_dims(machine: &CoreMachine) -> Vec<CoreChipDims> {
         .map(|c| CoreChipDims {
             name: <_ as MachineAir<KoalaBear>>::name(c),
             main_width: <_ as BaseAir<KoalaBear>>::width(&c.air),
-            prep_width: <_ as MachineAir<KoalaBear>>::preprocessed_width(c),
+            prep_width: <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(c),
         })
         .collect()
 }
@@ -808,7 +808,7 @@ mod tests {
             for c in prover.compress_prover.machine().chips() {
                 let name = <_ as MachineAir<KoalaBear>>::name(c);
                 let main = <_ as BaseAir<KoalaBear>>::width(&c.air);
-                w.insert(name, main + <_ as MachineAir<KoalaBear>>::preprocessed_width(c));
+                w.insert(name, main + <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(c));
             }
             w
         };

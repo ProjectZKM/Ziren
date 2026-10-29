@@ -60,6 +60,7 @@ where
     type PreprocessedWindow = PairWindow<'a, K>;
     type MainWindow = PairWindow<'a, K>;
     type PublicVar = F;
+    type PeriodicVar = F;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -77,7 +78,7 @@ where
         unimplemented!("ShardConstraintFolder has no row selectors")
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         unimplemented!("ShardConstraintFolder has no transition window")
     }
 
@@ -206,7 +207,7 @@ where
     use p3_air::BaseAir;
 
     let main_width = <Chip<F, A> as BaseAir<F>>::width(chip);
-    let preproc_width = <A as MachineAir<F>>::preprocessed_width(&chip.air);
+    let preproc_width = <A as p3_air::BaseAir<F>>::preprocessed_width(&chip.air);
     let preproc_row: Vec<EF> = vec![EF::ZERO; preproc_width];
     let main_row: Vec<EF> = vec![EF::ZERO; main_width];
     let mut folder = ShardConstraintFolder::<F, EF, EF> {

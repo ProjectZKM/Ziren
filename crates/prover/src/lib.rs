@@ -2837,7 +2837,7 @@ pub mod tests {
         let prep_chips: Vec<_> = core_machine
             .chips()
             .iter()
-            .filter(|c| <_ as MachineAir<KoalaBear>>::preprocessed_width(*c) > 0)
+            .filter(|c| <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(*c) > 0)
             .collect();
         assert!(!prep_chips.is_empty(), "the core machine has no preprocessed chip");
         for chip in &prep_chips {
@@ -2884,7 +2884,7 @@ pub mod tests {
         let mut inner: Vec<(String, usize)> = core_machine
             .chips()
             .iter()
-            .filter(|c| <_ as MachineAir<KoalaBear>>::preprocessed_width(*c) > 0)
+            .filter(|c| <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(*c) > 0)
             .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), 16usize))
             .collect();
         inner.push(("AddSub".to_string(), 18));
@@ -2940,7 +2940,7 @@ pub mod tests {
             let trace = chip.generate_preprocessed_trace(&program).unwrap();
             assert_eq!(trace.height(), rows, "wrap preprocessed height for {}", chip.name());
             main += rows * <_ as BaseAir<KoalaBear>>::width(chip);
-            prep += rows * <_ as MachineAir<KoalaBear>>::preprocessed_width(chip);
+            prep += rows * <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(chip);
         }
         let stripes =
             |cells: usize| zkm_pcs::jagged::committed_dense_len(cells, log_stack) >> log_stack;
@@ -3901,7 +3901,6 @@ pub mod tests {
             machine.chips().iter().map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c)).collect()
         };
         let blocks_of = |os: &OrderedShape| -> (usize, usize) {
-            use zkm_pcs::air::MachineAir;
             let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
             let cells = |prep: bool| -> usize {
                 os.inner
@@ -3911,7 +3910,7 @@ pub mod tests {
                             .get(name)
                             .map(|c| {
                                 if prep {
-                                    MachineAir::<KoalaBear>::preprocessed_width(*c)
+                                    p3_air::BaseAir::<KoalaBear>::preprocessed_width(*c)
                                 } else {
                                     p3_air::BaseAir::<KoalaBear>::width(*c).max(1)
                                 }
@@ -4588,7 +4587,7 @@ pub mod tests {
             tracing::info!(
                 "[PREPROBE] compress chip {} preprocessed_width={}",
                 <_ as MachineAir<KoalaBear>>::name(c),
-                c.preprocessed_width(),
+                p3_air::BaseAir::<KoalaBear>::preprocessed_width(c),
             );
         }
 
@@ -4672,7 +4671,7 @@ pub mod tests {
             .map(|c| {
                 let name = <_ as MachineAir<KoalaBear>>::name(c);
                 let rows = band.get(&name).copied().unwrap_or(0);
-                c.preprocessed_width() * rows
+                p3_air::BaseAir::<KoalaBear>::preprocessed_width(c) * rows
             })
             .sum();
         let dummy_area = zkm_pcs::jagged::committed_dense_len(

@@ -642,7 +642,7 @@ pub mod tests {
                 .chips()
                 .iter()
                 .find(|c| <_ as MachineAir<KoalaBear>>::name(*c) == name)
-                .map(<_ as MachineAir<KoalaBear>>::preprocessed_width)
+                .map(<_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width)
                 .unwrap_or_else(|| panic!("{name} is not a chip of the core machine"))
         };
 

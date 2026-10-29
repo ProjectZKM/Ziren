@@ -407,6 +407,8 @@ where
     // OUTER generic WHIR open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     <SC as WhirRing>::WhirMmcs:
         p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,

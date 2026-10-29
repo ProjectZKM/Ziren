@@ -72,7 +72,7 @@ fn from_f<F: p3_field::Field + 'static>(w: F) -> crate::jagged_pcs::JaggedVal {
 pub fn gkr_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::Field + 'static,
-    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static,
+    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + Clone + Sync + 'static,
 {
     as_jagged_val(crate::whir::grind::deterministic_grind(challenger, bits))
 }
@@ -82,7 +82,7 @@ where
 pub fn gkr_check_witness<F, C>(challenger: &mut C, bits: usize, witness: F) -> bool
 where
     F: p3_field::Field + 'static,
-    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + 'static,
+    C: GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal> + Clone + Sync + 'static,
 {
     challenger.check_witness(bits, from_f(witness))
 }

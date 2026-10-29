@@ -166,7 +166,7 @@ fn main() {
                     (
                         MachineAir::<KoalaBear>::name(c),
                         p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                        MachineAir::<KoalaBear>::preprocessed_width(c),
+                        p3_air::BaseAir::<KoalaBear>::preprocessed_width(c),
                     )
                 })
                 .collect();
@@ -216,7 +216,7 @@ fn main() {
                 static_rows.push((
                     name,
                     p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                    MachineAir::<KoalaBear>::preprocessed_width(c),
+                    p3_air::BaseAir::<KoalaBear>::preprocessed_width(c),
                     sends,
                     recvs,
                     padded,

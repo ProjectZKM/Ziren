@@ -123,7 +123,7 @@ impl<EF: Field> WhirFolder<EF> {
     where
         F: Field,
         EF: ExtensionField<F>,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + Clone + Sync + 'static,
     {
         let mut polys = Vec::with_capacity(k);
         for round in 0..k {
@@ -193,7 +193,7 @@ pub fn prove_fold<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + Clone + Sync + 'static,
 {
     let n = f.num_variables() as usize;
     debug_assert_eq!(query_point.len(), n);

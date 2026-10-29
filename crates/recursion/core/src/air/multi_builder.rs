@@ -34,6 +34,7 @@ impl<AB: AirBuilder> AirBuilder for MultiBuilder<'_, AB> {
     type PreprocessedWindow = AB::PreprocessedWindow;
     type MainWindow = AB::MainWindow;
     type PublicVar = AB::PublicVar;
+    type PeriodicVar = AB::PeriodicVar;
 
     fn main(&self) -> Self::MainWindow {
         self.inner.main()
@@ -51,8 +52,16 @@ impl<AB: AirBuilder> AirBuilder for MultiBuilder<'_, AB> {
         self.is_last_row.clone()
     }
 
+    fn is_transition(&self) -> Self::Expr {
+        self.next_condition.clone() * self.inner.is_transition()
+    }
+
     fn is_transition_window(&self, size: usize) -> Self::Expr {
         self.next_condition.clone() * self.inner.is_transition_window(size)
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        self.inner.periodic_values()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

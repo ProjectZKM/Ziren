@@ -62,6 +62,8 @@ where
     crate::ShardProof<SC>: Sync,
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let mut challenger = prover.machine().config().challenger();
@@ -121,6 +123,8 @@ where
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let prover = CpuProver::new(machine);
