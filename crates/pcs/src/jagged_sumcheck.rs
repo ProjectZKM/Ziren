@@ -354,7 +354,7 @@ mod closing_identity {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     crate::multilinear::PaddedMle::padded_with_zeros(
-                        std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                        std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(
                             p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
                         )),
                         log_h,
@@ -416,11 +416,11 @@ mod closing_identity {
         let weights_ref = build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
         let hp = crate::jagged_long::HadamardProduct {
             base: crate::jagged_long::LongMle::from_components(
-                vec![crate::basefold::Mle::from_values(dense_q.clone())],
+                vec![crate::whir::mle::Mle::from_values(dense_q.clone())],
                 packing.log_dense_size() as u32,
             ),
             ext: crate::jagged_long::LongMle::from_components(
-                vec![crate::basefold::Mle::from_values(weights_ref)],
+                vec![crate::whir::mle::Mle::from_values(weights_ref)],
                 packing.log_dense_size() as u32,
             ),
         };

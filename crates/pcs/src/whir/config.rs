@@ -2,12 +2,12 @@
 //! `RoundConfig` on Ziren's field types.
 //!
 //! WHIR (Weighted-sumcheck Hadamard Interactive Reed-Solomon) is a
-//! multilinear PCS.  It shares BaseFold's RS-encode + Merkle-commit + FRI-fold
-//! skeleton, and adds, at each round: out-of-domain (OOD) sample points whose
+//! multilinear PCS.  On an RS-encode + Merkle-commit + fold skeleton it
+//! adds, at each round: out-of-domain (OOD) sample points whose
 //! answers are folded into the sumcheck, an explicit per-round query count and
 //! rate, and proof-of-work grinding on both the folding challenges and the
 //! queries.  The OOD samples are what let WHIR run fewer in-domain Merkle
-//! queries than BaseFold at equal soundness.
+//! queries at equal soundness.
 //!
 //! This module holds the round parameters; the wire types are in `proof` and
 //! the OOD commitment in `prover`.  See `mod.rs` for how the pieces fit.

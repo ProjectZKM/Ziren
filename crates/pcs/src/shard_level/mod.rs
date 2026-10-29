@@ -1,13 +1,12 @@
 //! Shard-level proof pipeline: one `LogupGkrProof` + one
 //! `PartialSumcheckProof` per shard.
 //!
-//! The dense polynomial commitment is a PARAMETER of this pipeline, not a
-//! property of it: the jagged opening it emits carries WHIR on the inner ring
-//! and BaseFold on the outer one, selected per proof.  So the types here are
-//! named for the jagged layer, which does not vary, rather than for whichever
-//! dense scheme a given proof happens to close over.
+//! The jagged opening this pipeline emits closes over stacked WHIR on every
+//! ring; only the Merkle hash (Poseidon2-KoalaBear inner, Poseidon2-BN254
+//! wrap) and the WHIR schedule vary.  The types here are named for the jagged
+//! layer rather than for the dense scheme under it.
 
-pub mod basefold_constraint_folder;
+pub mod constraint_folder;
 pub mod logup_gkr_prover;
 pub mod prover;
 pub mod row_gkr;

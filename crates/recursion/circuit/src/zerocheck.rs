@@ -1,6 +1,6 @@
 //! In-circuit zerocheck verifier helpers.
 //!
-//! Hosts the small, self-contained helpers used by the BaseFold-
+//! Hosts the small, self-contained helpers used by the WHIR-
 //! pipeline shard verifier's zerocheck phase:
 //!
 //!   - [`full_geq`]: in-circuit "≥" indicator for one boolean point
@@ -24,9 +24,9 @@ use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
-use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
-use crate::basefold_constraint_folder::ShardConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
+use crate::chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::constraint_folder::ShardConstraintFolder;
 use crate::logup_proof::LogUpEvaluations;
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::sumcheck::verify_sumcheck;
@@ -48,7 +48,7 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 /// for in-range positions.
 ///
 /// Iterates MSB-first — note this differs from the LSB-first
-/// `partial_lagrange` convention used elsewhere in Ziren's BaseFold
+/// `partial_lagrange` convention used elsewhere in Ziren's WHIR
 /// port.
 pub fn full_geq<C: CircuitConfig>(
     threshold: &[SymbolicExt<C::F, C::EF>],
@@ -114,12 +114,12 @@ where
     Ok(())
 }
 
-/// Verify a chip's BaseFold-pipeline opening has the expected
+/// Verify a chip's jagged-pipeline opening has the expected
 /// per-batch widths.  Mirrors [`verify_opening_shape`] but
-/// consumes the BaseFold-shape opening type.
-pub fn verify_opening_shape_basefold<C, SC, A>(
+/// consumes the jagged-shape opening type.
+pub fn verify_opening_shape_jagged<C, SC, A>(
     chip: &MachineChip<SC, A>,
-    opening: &crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+    opening: &crate::chip_opened_values::JaggedChipOpenedValuesVariable<C>,
 ) -> Result<(), OpeningShapeError>
 where
     C: CircuitConfig<F = SC::Val>,
@@ -173,16 +173,16 @@ where
     /// `local_cumulative_sum` and `global_cumulative_sum` thread
     /// through to the `MultiTableAirBuilder` impl on the folder so
     /// chips that read them via that trait see consistent values
-    /// (in the BaseFold pipeline these come from the LogUp-GKR
+    /// (in the jagged pipeline these come from the LogUp-GKR
     /// sumcheck output, not a per-chip permutation column).
     /// Variant of [`Self::eval_constraints`] consuming a
     /// [`JaggedChipOpenedValuesVariable`] (with the cumulative
     /// sums and degree bundled into the opening).
     #[allow(clippy::too_many_arguments)]
-    pub fn eval_constraints_basefold<'a>(
+    pub fn eval_constraints_jagged<'a>(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
-        opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+        opening: &'a crate::chip_opened_values::JaggedChipOpenedValuesVariable<C>,
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
@@ -229,10 +229,10 @@ where
     /// per-chip cumulative-sum references come from the opening
     /// rather than parallel slices).
     #[allow(clippy::too_many_arguments)]
-    pub fn compute_padded_row_adjustment_basefold<'a>(
+    pub fn compute_padded_row_adjustment_jagged<'a>(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
-        _opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+        _opening: &'a crate::chip_opened_values::JaggedChipOpenedValuesVariable<C>,
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
@@ -322,7 +322,7 @@ where
 
     /// Full zerocheck-phase verifier for a single shard.
     ///
-    /// Replays the BaseFold zerocheck IOP on the in-circuit
+    /// Replays the jagged zerocheck IOP on the in-circuit
     /// transcript: samples the per-chip constraint-folding scalar,
     /// the GKR-batch-open challenge, and the chip-RLC scalar; for
     /// each chip, batches the constraint accumulator with the
@@ -425,7 +425,7 @@ where
             .ir_par_map_collect(builder, |builder, (chip, opening)| {
                 let degree = &opening.degree;
 
-                verify_opening_shape_basefold::<C, SC, A>(chip, opening)
+                verify_opening_shape_jagged::<C, SC, A>(chip, opening)
                     .expect("verify_zerocheck: chip opening shape mismatch");
 
                 let dimension = zerocheck_proof.point_and_eval.0.len();
@@ -451,7 +451,7 @@ where
                 }
 
                 let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
-                let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
+                let padded_row_adjustment = Self::compute_padded_row_adjustment_jagged(
                     builder,
                     chip,
                     opening,
@@ -460,7 +460,7 @@ where
                 );
 
                 let constraint_eval_ext =
-                    Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
+                    Self::eval_constraints_jagged(builder, chip, opening, alpha, public_values);
                 let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
                 let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
                 let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
@@ -773,9 +773,7 @@ mod padded_row_tests {
     ) -> usize
     where
         A: zkm_pcs::air::MachineAir<F>
-            + for<'b> p3_air::Air<
-                crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
-            >,
+            + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, InnerConfig>>,
     {
         let (main_row, prep_row) = if runtime_row {
             let z: SymbolicExt<F, EF> = builder.eval::<Ext<F, EF>, _>(SymbolicExt::ZERO).into();
@@ -787,7 +785,7 @@ mod padded_row_tests {
             )
         };
         let before = builder.get_mut_operations().vec.len();
-        let mut folder = crate::basefold_constraint_folder::ShardConstraintFolder::<InnerConfig> {
+        let mut folder = crate::constraint_folder::ShardConstraintFolder::<InnerConfig> {
             preprocessed: PairWindow { local: &prep_row, next: &prep_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,

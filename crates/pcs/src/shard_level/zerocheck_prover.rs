@@ -79,7 +79,7 @@ pub fn prove_shard_zerocheck<SC, A>(
 ) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
     SC: StarkGenericConfig,
-    A: super::basefold_constraint_folder::ShardProvableAir<SC>,
+    A: super::constraint_folder::ShardProvableAir<SC>,
 {
     let n_chips = chips.len();
 

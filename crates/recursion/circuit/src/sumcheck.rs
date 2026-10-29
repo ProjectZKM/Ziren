@@ -5,7 +5,7 @@
 //! interaction with the challenger + final point/eval consistency
 //! check.
 //!
-//! Used by the BaseFold-pipeline shard verifier as the soundness
+//! Used by the jagged-pipeline shard verifier as the soundness
 //! engine for the zerocheck IOP and the LogUp-GKR sumcheck
 //! reductions.
 

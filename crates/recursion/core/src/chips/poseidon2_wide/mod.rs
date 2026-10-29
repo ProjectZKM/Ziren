@@ -32,8 +32,7 @@ pub struct Poseidon2WideChip<const DEGREE: usize>;
 impl<'a, const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     /// Transmute a row it to an immutable Poseidon2 instance.
     ///
-    /// Promoted to `pub` so the GPU prover's `BlockAir` impl (in
-    /// `ziren-gpu/core/src/basefold/air_block.rs`) can convert the
+    /// Promoted to `pub` so a GPU prover's `BlockAir` impl can convert the
     /// `main` window into a `Poseidon2` view from outside this crate
     /// before dispatching to [`Self::eval_external_round`] /
     /// [`Self::eval_internal_rounds`].

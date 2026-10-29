@@ -21,7 +21,7 @@
 //!
 //!   * MLE fold: adjacent pairs `(2i, 2i+1)` → `i`, last odd row
 //!     paired with the `ZERO` padding constant (LSB-first, identical to
-//!     `crate::basefold::Mle`).  The
+//!     `crate::whir::mle::Mle`).  The
 //!     "last variable" fixed each round is the least-significant bit of
 //!     the row index; `zeta`'s last coordinate.
 //!   * `partial_lagrange`: big-endian, `point[0]` is the MSB.
@@ -51,7 +51,7 @@ use crate::folder::PairWindow;
 use crate::septic_curve::SepticCurve;
 use crate::septic_digest::SepticDigest;
 use crate::septic_extension::SepticExtension;
-use crate::shard_level::basefold_constraint_folder::ShardConstraintFolder;
+use crate::shard_level::constraint_folder::ShardConstraintFolder;
 use crate::shard_level::sumcheck_poly::{
     ComponentPoly, SumcheckPoly, SumcheckPolyBase, SumcheckPolyFirstRound,
 };

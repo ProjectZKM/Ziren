@@ -198,7 +198,7 @@ fn main() {
 
     // Core shards open under the core profile, the root compose (the
     // published compressed proof) under the compress profile; every other
-    // recursion node shares the core one.
+    // recursion node shares the core one.  The wrap opens under its own.
     let lsh = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
     whir_schedule(
         "core",
@@ -207,30 +207,31 @@ fn main() {
         "unique_decoding",
         zkm_pcs::whir::jagged::bits_per_query,
     );
-    let m = zkm_pcs::whir::jagged::compress_johnson_m();
-    whir_schedule(
+    let size_tuned = |name: &str, config: &zkm_pcs::whir::config::WhirConfig, m: usize| {
+        whir_schedule(
+            name,
+            config,
+            lsh,
+            &if m == 0 { "unique_decoding".to_string() } else { format!("johnson_m{m}") },
+            |rate| {
+                if m == 0 {
+                    zkm_pcs::whir::jagged::bits_per_query(rate)
+                } else {
+                    zkm_pcs::whir::jagged::bits_per_query_johnson(rate, m)
+                }
+            },
+        )
+    };
+    size_tuned(
         "compress",
         &zkm_pcs::whir::jagged::compress_whir_config(lsh),
-        lsh,
-        &if m == 0 { "unique_decoding".to_string() } else { format!("johnson_m{m}") },
-        |rate| {
-            if m == 0 {
-                zkm_pcs::whir::jagged::bits_per_query(rate)
-            } else {
-                zkm_pcs::whir::jagged::bits_per_query_johnson(rate, m)
-            }
-        },
+        zkm_pcs::whir::jagged::compress_johnson_m(),
     );
-
-    let wrap_fri =
-        zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config();
-    println!("[wrap.schedule]");
-    println!("log_blowup = {}", wrap_fri.log_blowup);
-    println!("num_queries = {}", wrap_fri.num_queries);
-    println!("grinding_query_phase = {}", wrap_fri.proof_of_work_bits);
-    println!("fri_folding_factor = {}", 1 << wrap_fri.log_folding_arity());
-    println!("grinding_batching_phase = {}", zkm_pcs::basefold::config::batch_grinding_bits());
-    println!();
+    size_tuned(
+        "wrap",
+        &zkm_pcs::whir::jagged::wrap_whir_config(lsh),
+        zkm_pcs::whir::jagged::SizeTunedParams::wrap().johnson_m,
+    );
 
     println!("[all_rings]");
     println!("grinding_bits_lookup = {}", zkm_pcs::logup_gkr::gkr_grinding_bits());

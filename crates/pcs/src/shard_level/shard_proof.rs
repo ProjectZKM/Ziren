@@ -1,5 +1,5 @@
 //! Host-side row-reduction shard proof; counterpart variable type
-//! lives in `recursion/circuit/src/shard_basefold.rs`.
+//! lives in `recursion/circuit/src/shard.rs`.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ pub enum EvaluationProof {
     Bundle(crate::jagged_pcs::jagged::JaggedPcsProof),
 }
 
-/// Host-side BaseFold-pipeline shard proof. No `Debug` derive: the
+/// Host-side jagged-pipeline shard proof. No `Debug` derive: the
 /// embedded `JaggedPcsProof::MT::Proof` has no `Debug` bound.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(
@@ -69,7 +69,7 @@ pub struct JaggedShardProof<F, EF> {
     /// `compress([raw_root, hash(once(len) ++ row_counts ++ column_counts)])`
     /// — the value the Fiat-Shamir transcript observes (so the per-chip
     /// geometry is cryptographically tied to the commitment).  The RAW
-    /// BaseFold root (the value the BaseFold opening binds against) is carried
+    /// WHIR root (the value the WHIR opening binds against) is carried
     /// separately in [`Self::jagged_original_commitment`].  With hash-bind
     /// off this equals the raw root and `jagged_original_commitment` is empty.
     pub main_commitment: [F; 8],
@@ -109,13 +109,13 @@ pub struct JaggedShardProof<F, EF> {
     pub row_counts: Vec<Vec<usize>>,
     /// Height-agnostic groundwork: witnessed per-round
     /// **padding-column count** -- the number of artificial columns the
-    /// BaseFold stacking quantization rounds the real total column
+    /// WHIR stacking quantization rounds the real total column
     /// count up to the next power of two.  PURE DATA; empty on older
     /// proof bytes.
     #[serde(default)]
     pub padding_column_counts: Vec<usize>,
-    /// Jagged hash-bind: the **RAW** BaseFold cap root
-    /// (pre-hash-bind) — the value the BaseFold opening binds against and
+    /// Jagged hash-bind: the **RAW** WHIR cap root
+    /// (pre-hash-bind) — the value the WHIR opening binds against and
     /// the recursion lift populates `original_commitments` from.  The
     /// FS-observed [`Self::main_commitment`] is the MODIFIED digest
     /// `compress([raw_root, hash(counts)])`.  Zero/absent with hash-bind off
@@ -123,7 +123,7 @@ pub struct JaggedShardProof<F, EF> {
     /// `#[serde(default)]` makes the field optional in proof bytes.
     #[serde(default = "default_zero_digest")]
     pub jagged_original_commitment: [F; 8],
-    /// The PREPROCESSED opening round's **RAW** BaseFold cap root — the same
+    /// The PREPROCESSED opening round's **RAW** WHIR cap root — the same
     /// role [`Self::jagged_original_commitment`] plays for the main round.  The
     /// verifying key holds that round's HASH-BOUND digest, so the opening binds
     /// against this and the verifier re-derives the bound form to check it.
@@ -224,7 +224,7 @@ mod tests {
     #[serde(
         bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>"
     )]
-    struct OldBasefoldShardProof<F, EF> {
+    struct OldJaggedShardProof<F, EF> {
         public_values: Vec<F>,
         main_commitment: [F; 8],
         logup_gkr_proof: LogupGkrProof<F, EF>,
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn jagged_shard_proof_old_format_deserializes() {
-        let old: OldBasefoldShardProof<F, EF> = OldBasefoldShardProof {
+        let old: OldJaggedShardProof<F, EF> = OldJaggedShardProof {
             public_values: vec![F::ZERO; 7],
             main_commitment: std::array::from_fn(|_| F::ZERO),
             logup_gkr_proof: LogupGkrProof::dummy(),

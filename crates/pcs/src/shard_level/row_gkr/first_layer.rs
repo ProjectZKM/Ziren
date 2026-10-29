@@ -65,7 +65,7 @@ pub fn build_chip_interaction_tables<
     interactions: &[(&Lookup<F>, bool)],
     main_values: &[F],
     main_width: usize,
-    preprocessed_trace: Option<crate::basefold::TraceRef<'_, F>>,
+    preprocessed_trace: Option<crate::whir::mle::TraceRef<'_, F>>,
     alpha: EF,
     betas: &[EF],
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {

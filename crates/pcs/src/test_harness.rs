@@ -37,14 +37,14 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
         + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
                 <SC as StarkGenericConfig>::Challenge,
             >,
         > + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 Val<SC>,
@@ -52,7 +52,7 @@ where
             >,
         > + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     SC::Val: PrimeField32,
     SC::Challenger: Clone + Sync,
     SC: Sync,
@@ -62,7 +62,7 @@ where
     crate::ShardProof<SC>: Sync,
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<crate::BfCommitment<SC>>,
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let mut challenger = prover.machine().config().challenger();
     let prove_span = tracing::debug_span!("prove").entered();
@@ -98,14 +98,14 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
         + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
                 <SC as StarkGenericConfig>::Challenge,
             >,
         > + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 Val<SC>,
@@ -113,7 +113,7 @@ where
             >,
         > + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + crate::BasefoldRing,
+    SC: StarkGenericConfig + crate::WhirRing,
     SC::Val: PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,
@@ -121,7 +121,7 @@ where
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<crate::BfCommitment<SC>>,
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let prover = CpuProver::new(machine);
     run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)

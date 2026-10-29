@@ -47,8 +47,8 @@ use zkm_primitives::{io::ZKMPublicValues, types::RecursionProgramType};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
-        basefold_programs::build_normalize_basefold_program,
-        core_basefold::ZKMCoreBasefoldWitnessValues, wrap_basefold::ZKMWrapBasefoldWitnessValues,
+        programs::build_normalize_program,
+        core_jagged::ZKMCoreWitnessValues, wrap::ZKMWrapWitnessValues,
         PublicValuesOutputDigest, ZKMMerkleProofWitnessValues,
     },
     merkle_tree::MerkleTree,
@@ -116,6 +116,15 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     CoreSC,
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
+
+/// The wrap prover's proving and verifying keys, held by [`ZKMProver::wrap_keys_cache`].
+pub type WrapKeys<C> = (
+    <<C as ZKMProverComponents>::WrapProver as MachineProver<
+        OuterSC,
+        WrapAir<KoalaBear>,
+    >>::DeviceProvingKey,
+    StarkVerifyingKey<OuterSC>,
+);
 
 /// Fixed height of the allowed-vk Merkle tree (capacity 2^14 = 16,384 vks).
 ///
@@ -245,14 +254,28 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
 
+    /// The wrap's `(pk, vk)`, with the setup digest of the program they were
+    /// built from.
+    ///
+    /// The outer circuit pins the wrap verifying key, so every wrap builds
+    /// the same program and one entry serves the whole process: a long-lived
+    /// prover (the server, a multi-block run) pays the wrap setup once rather
+    /// than per proof.  A program with another digest replaces the entry.
+    pub wrap_keys_cache: Mutex<Option<([u8; 32], Arc<WrapKeys<C>>)>>,
+
+    /// Cache for the wrap program, keyed by
+    /// [`ZKMWrapWitnessValues::shape_key`].  The shrink proof's shape
+    /// is frozen, so a process reaches one entry.
+    pub wrap_programs_cache: Mutex<RecursionProgramCache>,
+
     /// Whether to verify verification keys.
     pub vk_verification: bool,
 
     /// Per-shape cache for the basefold Normalize recursion program — the
     /// leaf stage, one node per core shard.
     ///
-    /// **Key**: [`ZKMCoreBasefoldWitnessValues::shape_key`].
-    pub normalize_programs_basefold_cache: Mutex<RecursionProgramCache>,
+    /// **Key**: [`ZKMCoreWitnessValues::shape_key`].
+    pub normalize_programs_cache: Mutex<RecursionProgramCache>,
 
     /// Built-but-unsnapped Normalize programs, keyed by input shape.
     pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
@@ -469,7 +492,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
-            normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
+            wrap_keys_cache: Mutex::new(None),
+            wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
+            normalize_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
         }
     }
@@ -578,32 +603,32 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
     }
 
-    /// Build the Normalize (basefold) recursion program and its
+    /// Build the Normalize recursion program and its
     /// `setup_digest` (the proving-key cache key).
     ///
     /// The program is snapped through [`Self::fix_recursion_shape`], which
     /// keeps its verifying key inside `ZKMProofShape::generate`'s enumerated
     /// space.  Programs are cached by shape (see
-    /// [`Self::normalize_programs_basefold_cache`]): many core shards share
+    /// [`Self::normalize_programs_cache`]): many core shards share
     /// one program.  The digest is cached with it, since hashing a
     /// multi-million-instruction program is expensive.
-    pub fn recursion_program_basefold(
+    pub fn recursion_program(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        self.recursion_program_basefold_at(input, None)
+        self.recursion_program_at(input, None)
     }
 
-    /// [`Self::recursion_program_basefold`], snapped onto a CALLER-CHOSEN band.
+    /// [`Self::recursion_program`], snapped onto a band the caller chooses.
     ///
     /// `None` keeps the program's own choice (the cheapest band it fits).
     /// `Some(i)` overrides it, which is how a node is made to agree with its
     /// siblings: a compose program is traced over its children's proof shapes,
     /// so its verifying key is enumerable only when those shapes agree, and a
     /// child cannot know what its siblings need.
-    pub fn recursion_program_basefold_at(
+    pub fn recursion_program_at(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if normalize_key_census_enabled() {
@@ -647,7 +672,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
                         format!(
                             "stripes={:?}",
-                            b.basefold_proof
+                            b.whir_proof
                                 .batch_evaluations
                                 .iter()
                                 .map(|r| r.len())
@@ -686,7 +711,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
         self.cached_program(
-            &self.normalize_programs_basefold_cache,
+            &self.normalize_programs_cache,
             self.band_keyed(input.shape_key(), band),
             "normalize",
             || {
@@ -741,31 +766,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     fn normalize_program_unsnapped(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let key = self.verification_keyed(input.shape_key());
         if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
             return p;
         }
         let max_log_row_count = Self::pcs_max_log_row_count();
-        let program = Arc::new(build_normalize_basefold_program(
-            self.core_prover.machine(),
-            input,
-            max_log_row_count,
-        ));
+        let program =
+            Arc::new(build_normalize_program(self.core_prover.machine(), input, max_log_row_count));
         self.normalize_programs_unsnapped_cache.lock().unwrap().insert(key, program)
     }
 
-    /// Uncached body of [`Self::recursion_program_basefold`] — separate so the
+    /// Uncached body of [`Self::recursion_program`] — separate so the
     /// cache audit can rebuild and assert byte-equality.
     #[cfg(test)]
-    fn build_normalize_program_basefold_uncached(
+    fn build_normalize_program_uncached(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program =
-            build_normalize_basefold_program(self.core_prover.machine(), input, max_log_row_count);
+            build_normalize_program(self.core_prover.machine(), input, max_log_row_count);
         self.fix_recursion_shape_kind(
             &mut program,
             if input.is_complete { "normalize-root" } else { "normalize" },
@@ -835,7 +857,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// provable on the OuterSC (BN254-friendly) ring via [`Self::wrap_prover`],
     /// and verifies a proof of the Poseidon2 shrink machine.
     ///
-    /// The `verify_wrap_basefold` body is generic over `C: CircuitConfig`
+    /// The `verify_wrap_jagged` body is generic over `C: CircuitConfig`
     /// with `F=InnerVal` / `EF=InnerChallenge` / `Bit=Felt<KoalaBear>`,
     /// and `WrapConfig` satisfies these bounds (its `CircuitConfig` impl in
     /// `zkm_recursion_circuit`), so the same verifier function works
@@ -846,19 +868,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// per end-to-end proof, so the per-call build cost is acceptable.
     pub fn wrap_bn254_program_basefold(
         &self,
-        input: &ZKMWrapBasefoldWitnessValues<Poseidon2ShrinkSC>,
+        input: &ZKMWrapWitnessValues<Poseidon2ShrinkSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         use zkm_pcs::air::MachineAir;
-        use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
+        use zkm_recursion_circuit::machine::wrap::verify_wrap_jagged;
 
         let max_log_row_count = Self::pcs_max_log_row_count();
         let shrink_machine = ShrinkAir::shrink_machine(Poseidon2ShrinkSC::compressed());
 
-        let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
+        let builder_span = tracing::debug_span!("build wrap program").entered();
         let mut builder = Builder::<WrapConfig>::new(RecursionProgramType::Wrap);
         let input_var = input.read(&mut builder);
 
-        verify_wrap_basefold::<WrapConfig, Poseidon2ShrinkSC, _>(
+        verify_wrap_jagged::<WrapConfig, Poseidon2ShrinkSC, _>(
             &mut builder,
             input_var,
             &shrink_machine,
@@ -869,7 +891,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let operations = builder.into_operations();
         builder_span.exit();
 
-        let compiler_span = tracing::debug_span!("compile wrap-bn254-basefold program").entered();
+        let compiler_span = tracing::debug_span!("compile wrap program").entered();
         let mut compiler = AsmCompiler::<WrapConfig>::default();
         let mut program = compiler.compile(operations);
         compiler_span.exit();
@@ -891,30 +913,30 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Wrap each batch of `ShardProof`s into a
-    /// `ZKMCoreBasefoldWitnessValues`, taking the `JaggedShardProof` each
+    /// `ZKMCoreWitnessValues`, taking the `JaggedShardProof` each
     /// one carries.
-    pub fn get_recursion_core_inputs_basefold(
+    pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
         batch_size: usize,
         is_complete: bool,
-    ) -> Vec<ZKMCoreBasefoldWitnessValues<CoreSC>> {
+    ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
                 batch.len(),
                 1,
-                "normalize is single-shard: get_recursion_core_inputs_basefold \
+                "normalize is single-shard: get_recursion_core_inputs \
                  must be called with batch_size=1 (one core shard per normalize); \
                  got a batch of {} shards",
                 batch.len()
             );
-            let bf_proofs =
+            let jagged_proofs =
                 batch.iter().map(|sp| (*sp.jagged_shard_proof).clone()).collect::<Vec<_>>();
-            core_inputs.push(ZKMCoreBasefoldWitnessValues {
+            core_inputs.push(ZKMCoreWitnessValues {
                 vk: vk.clone(),
-                shard_proofs: bf_proofs,
+                shard_proofs: jagged_proofs,
                 is_complete,
                 is_first_shard: batch_idx == 0,
                 vk_root: self.vk_root_felts(),
@@ -929,7 +951,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     #[instrument(name = "leaf_binary", level = "info", skip_all)]
     pub fn leaf_binary(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<BinaryLeafProof, ZKMRecursionProverError> {
         self.leaf_binary_with_machine(input).map(|(_, proof)| proof)
     }
@@ -937,9 +959,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// [`Self::leaf_binary`], with the machine that verifies the leaf.
     pub fn leaf_binary_with_machine(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<(RecursionMachine, BinaryLeafProof), ZKMRecursionProverError> {
-        let program = self.recursion_program_basefold(input).0;
+        let program = self.recursion_program(input).0;
         let floor = zkm_binary_stark::machine::leaf_floor(&program)
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         let mut machine = self.binary_machine(&program, floor)?;
@@ -954,7 +976,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         machine: &RecursionMachine,
         program: Arc<RecursionProgram<KoalaBear>>,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<BinaryLeafProof, ZKMRecursionProverError> {
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
@@ -978,7 +1000,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// and checks every value the relations compute.
     pub fn leaf_word(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<zkm_recursion_r1cs::Lowered, ZKMRecursionProverError> {
         self.leaf_word_values(input).map(|(lowered, _)| lowered)
     }
@@ -987,9 +1009,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// as canonical elements.
     pub fn leaf_word_values(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<(zkm_recursion_r1cs::Lowered, Vec<u32>), ZKMRecursionProverError> {
-        let program = self.recursion_program_basefold(input).0;
+        let program = self.recursion_program(input).0;
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
             zkm_pcs::inner_perm(),
@@ -1098,10 +1120,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> PlonkBn254Proof {
-        let basefold_proof = (*proof.proof.jagged_shard_proof).clone();
+        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapBasefoldWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+        let input = ZKMWrapWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
             vk_merkle_data,
         };
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
@@ -1137,10 +1159,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> Groth16Bn254Proof {
-        let basefold_proof = (*proof.proof.jagged_shard_proof).clone();
+        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapBasefoldWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+        let input = ZKMWrapWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
             vk_merkle_data,
         };
         let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
@@ -1182,10 +1204,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         build_dir: &Path,
         store_dir: &Path,
     ) -> DvSnarkBn254Proof {
-        let basefold_proof = (*proof.proof.jagged_shard_proof).clone();
+        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapBasefoldWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+        let input = ZKMWrapWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
             vk_merkle_data,
         };
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
@@ -1279,10 +1301,10 @@ pub mod tests {
     }
 
     /// The NORMALIZE program-cache key
-    /// (`ZKMCoreBasefoldWitnessValues::shape_key`) carries the same single
+    /// (`ZKMCoreWitnessValues::shape_key`) carries the same single
     /// invariant as the compose one — **equal `shape_key` implies a
     /// byte-identical normalize program** — since
-    /// `recursion_program_basefold` hands back the cached program on a hit.
+    /// `recursion_program` hands back the cached program on a hit.
     ///
     /// The leaf layer is where this matters most: one node per core shard, and
     /// core shards differ from one another only in their per-chip heights,
@@ -1295,13 +1317,13 @@ pub mod tests {
     fn normalize_program_cache_key_implies_identical_program() {
         use zkm_core_machine::shape::CoreShapeConfig;
         use zkm_pcs::shape::OrderedShape;
-        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
 
-        let prog_bytes = |w: &ZKMCoreBasefoldWitnessValues<CoreSC>| -> Vec<u8> {
-            bincode::serialize(&*prover.build_normalize_program_basefold_uncached(w))
+        let prog_bytes = |w: &ZKMCoreWitnessValues<CoreSC>| -> Vec<u8> {
+            bincode::serialize(&*prover.build_normalize_program_uncached(w))
                 .expect("serialize normalize program")
         };
 
@@ -1316,13 +1338,13 @@ pub mod tests {
             .expect("the shape config admits at least one maximal core shape");
         let base: Vec<(String, usize)> = base_os.inner.clone();
 
-        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<CoreSC> {
+        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreWitnessValues<CoreSC> {
             let os = OrderedShape { inner: hs.to_vec() };
             let shape = zkm_recursion_circuit::machine::ZKMRecursionShape {
                 proof_shapes: vec![os],
                 is_complete: false,
             };
-            ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
+            ZKMCoreWitnessValues::dummy(machine, &shape)
         };
 
         let shrink_one = |idx: usize| -> Vec<(String, usize)> {
@@ -1378,7 +1400,7 @@ pub mod tests {
     /// The normalize dummy core VK is faithful in its `chip_information`.
     ///
     /// `StarkMachine::setup` records one entry per chip with a preprocessed
-    /// trace, in name order; the dummy (`dummy_basefold_vk_and_shard_proof`)
+    /// trace, in name order; the dummy (`dummy_vk_and_shard_proof`)
     /// records the chips OF THE SHAPE that have one.  The two agree on every
     /// reachable shape because every preprocessed chip of the core machine is
     /// included in every shard, so its name is in every shard's chip set.
@@ -1418,7 +1440,7 @@ pub mod tests {
         inner.push(("AddSub".to_string(), 18));
         inner.push(("Branch".to_string(), 18));
         let shape = OrderedShape::from_log2_heights(&inner);
-        let (dummy_vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+        let (dummy_vk, _proof) = zkm_recursion_circuit::stark::dummy_vk_and_shard_proof::<
             _,
             MipsAir<KoalaBear>,
         >(core_machine, &shape);
@@ -1617,11 +1639,11 @@ pub mod tests {
             started.elapsed().as_secs_f64()
         );
         let inputs =
-            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let mut floor: Vec<(&'static str, usize)> = Vec::new();
         let mut shapes: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
         for (i, input) in inputs.iter().enumerate() {
-            let program = prover.recursion_program_basefold(input).0;
+            let program = prover.recursion_program(input).0;
             let heights = RecursionMachine::table_heights(&program).expect("a binary machine");
             tracing::info!(
                 "shard {i}: {} instructions, heights {:?}",
@@ -1709,13 +1731,13 @@ pub mod tests {
                         .map(|(name, rows)| (name.to_string(), rows.parse().expect("a row count")))
                         .collect();
                     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let mut input = ZKMCoreBasefoldWitnessValues::dummy_rows(
+                        let mut input = ZKMCoreWitnessValues::dummy_rows(
                             prover.core_prover.machine(),
                             &rows,
                             false,
                         );
                         input.is_first_shard = *first;
-                        prover.recursion_program_basefold(&input).0
+                        prover.recursion_program(&input).0
                     }));
                     let Ok(program) = built else {
                         failed.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
@@ -1778,7 +1800,7 @@ pub mod tests {
             started.elapsed().as_secs_f64()
         );
         let inputs =
-            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
             .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
         let from: usize = std::env::var("ZIREN_BINARY_LEAF_FROM")
@@ -1835,7 +1857,7 @@ pub mod tests {
             ZKMContext::default(),
         )?;
         let inputs =
-            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let started = std::time::Instant::now();
         let lowered = prover.leaf_word(&inputs[0])?;
         tracing::info!("word leaf lowered in {:.1} s", started.elapsed().as_secs_f64());
@@ -1944,7 +1966,7 @@ pub mod tests {
         let core_proof =
             prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
         let inputs =
-            prover.get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, 1, false);
+            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
             .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
         let all = count > 1;
@@ -2179,11 +2201,11 @@ pub mod tests {
 
         let accepts = |proof: &ZKMCoreProofData| -> bool {
             let input = prover
-                .get_recursion_core_inputs_basefold(&vk.vk, &proof.0[..1], 1, n == 1)
+                .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, n == 1)
                 .into_iter()
                 .next()
                 .unwrap();
-            let (program, _) = prover.recursion_program_basefold(&input);
+            let (program, _) = prover.recursion_program(&input);
             let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
                 program,
                 zkm_pcs::inner_perm(),
@@ -2202,7 +2224,7 @@ pub mod tests {
     /// keccak-sponge ELF.  Multi-shard sha-cluster workload — exercises
     /// the jagged shard prover in `prove_shard_with_data` without invoking
     /// the compose tree.
-    /// Use to capture per-shard basefold prove perf for keccak vs fib-1k.
+    /// Use to capture per-shard whir prove perf for keccak vs fib-1k.
     #[test]
     #[serial]
     #[ignore]

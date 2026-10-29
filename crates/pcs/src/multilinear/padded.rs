@@ -10,7 +10,7 @@
 //! [`CpuBackend`] — which makes every existing `PaddedMle<T>` annotation
 //! keep compiling unchanged.
 //!
-//! The impl split mirrors [`crate::basefold::Mle`]'s:
+//! The impl split mirrors [`crate::whir::mle::Mle`]'s:
 //!   * `impl<T: Field, A: Backend> PaddedMle<T, A>` — the structural /
 //!     metadata surface (constructors and shape accessors).  These rest
 //!     entirely on backend-generic `Mle` accessors and host-side
@@ -56,8 +56,8 @@ use alloc::vec::Vec;
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::basefold::Mle;
 use crate::tensor::{Backend, CpuBackend};
+use crate::whir::mle::Mle;
 
 /// Analytic padding descriptor for a [`PaddedMle`].  Rows in
 /// `[num_real_entries, 2^num_variables)` carry these value(s) without
@@ -228,7 +228,7 @@ impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
 /// above they cannot be backend-generic.
 impl<T: Field> PaddedMle<T, CpuBackend> {
     /// Borrow the REAL (unpadded) rows as a zero-copy
-    /// [`crate::basefold::TraceRef`], or `None` when this is a
+    /// [`crate::whir::mle::TraceRef`], or `None` when this is a
     /// fully-virtual (`dummy`) padded MLE (a device-resident /
     /// unexercised chip).  `Some(view)` iff [`Self::inner`] is `Some` —
     /// the storage invariant, independent of the padding's declared
@@ -236,7 +236,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
     /// the trace width — byte-identical to the `RowMajorMatrix` the inner
     /// `Mle` was built from.  Additive (the unified main-trace store).
     #[inline]
-    pub fn real_trace_ref(&self) -> Option<crate::basefold::TraceRef<'_, T>> {
+    pub fn real_trace_ref(&self) -> Option<crate::whir::mle::TraceRef<'_, T>> {
         self.inner.as_ref().map(|m| m.as_trace_ref())
     }
 

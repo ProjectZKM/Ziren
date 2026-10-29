@@ -7,7 +7,7 @@
 //! a device stores it transposed, `[num_polynomials, num_non_zero_entries]`,
 //! because that is the layout its kernels want.
 //!
-//! [`Mle`](crate::basefold::Mle) therefore cannot read its own dimensions
+//! [`Mle`](crate::whir::mle::Mle) therefore cannot read its own dimensions
 //! directly. It asks the backend, which is what lets one `Mle<F, A>` describe
 //! both a host trace and a column-major device trace without a conversion at
 //! the boundary.

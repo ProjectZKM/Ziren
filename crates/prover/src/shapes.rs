@@ -4,7 +4,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::{shape::OrderedShape, MachineProver};
-use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
 use zkm_recursion_core::RecursionProgram;
 
 use crate::{components::ZKMProverComponents, ZKMProver};
@@ -230,12 +230,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
             ZKMCompressProgramShape::Normalize(shape) => {
-                let input = ZKMCoreBasefoldWitnessValues::dummy_rows(
+                let input = ZKMCoreWitnessValues::dummy_rows(
                     self.core_prover.machine(),
                     &shape.rows,
                     false,
                 );
-                self.recursion_program_basefold(&input).0
+                self.recursion_program(&input).0
             }
         }
     }
@@ -382,15 +382,14 @@ mod normalize_enumeration_tests {
                 s.spawn(|| loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some((leaf, rep)) = jobs.get(i) else { break };
-                    let mut real =
-                        ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &leaf.rows, false);
+                    let mut real = ZKMCoreWitnessValues::dummy_rows(machine, &leaf.rows, false);
                     real.is_first_shard = leaf.first;
-                    let (_, real_digest) = prover.recursion_program_basefold(&real);
+                    let (_, real_digest) = prover.recursion_program(&real);
                     real.is_first_shard = !leaf.first;
-                    let (_, flipped_digest) = prover.recursion_program_basefold(&real);
+                    let (_, flipped_digest) = prover.recursion_program(&real);
                     let rep_input =
-                        ZKMCoreBasefoldWitnessValues::dummy_rows(machine, &shape_rows(rep), false);
-                    let (_, rep_digest) = prover.recursion_program_basefold(&rep_input);
+                        ZKMCoreWitnessValues::dummy_rows(machine, &shape_rows(rep), false);
+                    let (_, rep_digest) = prover.recursion_program(&rep_input);
                     if real_digest != rep_digest {
                         mismatched.fetch_add(1, Ordering::Relaxed);
                         tracing::error!(

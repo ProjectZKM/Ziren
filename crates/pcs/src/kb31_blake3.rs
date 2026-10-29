@@ -31,8 +31,8 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, Hash, MerkleCap};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BasefoldRing, PrepCommitRoot, StarkGenericConfig, ZeroCommitment};
-use crate::jagged_pcs::jagged::{PrecomputedJaggedCommitGeneric, WhirDenseOpen};
+use crate::config::{PrepCommitRoot, StarkGenericConfig, WhirRing, ZeroCommitment};
+use crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric;
 use crate::jagged_pcs::{JaggedDft, JaggedVal};
 use crate::Com;
 
@@ -396,7 +396,7 @@ impl StarkGenericConfig for KoalaBearBlake3 {
     ) -> Self::PrepPrecomputed {
         let views =
             crate::jagged_pcs::jagged::views_over_traces(named_preprocessed_traces.to_vec());
-        <Self as BasefoldRing>::commit_multilinears(&views, pin)
+        <Self as WhirRing>::commit_multilinears(&views, pin)
     }
 }
 
@@ -415,63 +415,54 @@ impl ZeroCommitment<KoalaBearBlake3> for Blake3Pcs {
     }
 }
 
-impl BasefoldRing for KoalaBearBlake3 {
-    const WHIR_INNER_PCS: bool = true;
-
+impl crate::config::WhirRing for KoalaBearBlake3 {
     const WHIR_PROFILE: crate::whir::jagged::WhirProfile = crate::whir::jagged::WhirProfile::Blake3;
 
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
-    ) -> &PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+    ) -> &PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
         prep
     }
 
-    type BfMmcs = Blake3Mmcs;
+    type WhirMmcs = Blake3Mmcs;
 
-    fn bf_mmcs() -> Self::BfMmcs {
+    fn whir_mmcs() -> Self::WhirMmcs {
         blake3_mmcs()
     }
 
     fn vk_commit_is_preceding_root(
         vk_commit: &Com<Self>,
-        raw: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+        raw: &<Self::WhirMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     ) -> Option<bool> {
         Some(vk_commit == raw)
     }
 
     fn digest_felts(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+        commit: &<Self::WhirMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     ) -> [JaggedVal; BLAKE3_DIGEST_FELTS] {
         let roots = commit.roots();
         assert!(!roots.is_empty(), "a Blake3 commitment carries a root");
         root_felts(&roots[0])
     }
 
-    fn whir_committed_bf_prover_data(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
-    ) -> Option<<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::ProverData<RowMajorMatrix<JaggedVal>>>
-    {
-        let root = commit.roots()[0];
-        Some(p3_merkle_tree::MerkleTree::from_parts(Vec::new(), vec![vec![root]], Vec::new()))
-    }
-
+    /// The Blake3 ring's jagged WHIR open, carried as the bundle's bytes:
+    /// the inner rings' structured bundle names their eight-element roots,
+    /// and this ring's roots are thirty-two bytes.
     fn prove_jagged_open(
         z_row: &[crate::InnerChallenge],
-        rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
-            Self::BfMmcs,
+            Self::WhirMmcs,
             JaggedDft,
-            WhirDenseOpen,
         >(
             &rounds,
             z_row,
             challenger,
-            Self::bf_mmcs(),
+            Self::whir_mmcs(),
             alloc::sync::Arc::new(JaggedDft::default()),
-            Self::fri_config(),
             Self::WHIR_PROFILE,
         );
         crate::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
@@ -484,7 +475,7 @@ mod tests {
 
     use super::*;
     use crate::jagged_pcs::jagged::{
-        build_jagged_verify_inputs, verify_jagged_inner_generic_with_profile, JaggedOpenRound,
+        build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedOpenRound,
     };
     use crate::jagged_pcs::JaggedChallenge;
 
@@ -595,8 +586,8 @@ mod tests {
         let prep_views = views(&prep_traces);
         let main_views = views(&main_traces);
 
-        let prep = <KoalaBearBlake3 as BasefoldRing>::commit_multilinears(&prep_views, None);
-        let main = <KoalaBearBlake3 as BasefoldRing>::commit_multilinears(&main_views, None);
+        let prep = <KoalaBearBlake3 as WhirRing>::commit_multilinears(&prep_views, None);
+        let main = <KoalaBearBlake3 as WhirRing>::commit_multilinears(&main_views, None);
         let prep_root = prep.commit.original_commitment.clone();
         let main_root = main.commit.original_commitment.clone();
         assert_ne!(prep_root, main_root);
@@ -654,7 +645,7 @@ mod tests {
                 precomputed: &main,
             },
         ];
-        let proof = <KoalaBearBlake3 as BasefoldRing>::prove_jagged_open(
+        let proof = <KoalaBearBlake3 as WhirRing>::prove_jagged_open(
             &z_row,
             rounds,
             &mut prover_challenger,
@@ -666,7 +657,6 @@ mod tests {
         let bundle =
             crate::jagged_pcs::jagged::JaggedPcsProofGeneric::<Blake3Mmcs>::from_bytes(&bytes)
                 .expect("the bundle decodes");
-        assert!(bundle.whir_proof.is_some(), "the Blake3 ring opens under WHIR");
 
         let chip_widths: Vec<usize> =
             prep_traces.iter().chain(main_traces.iter()).map(|(_, t)| t.width).collect();
@@ -676,7 +666,7 @@ mod tests {
             let mut challenger = blake3_challenger();
             challenger.observe(prep_root.clone());
             challenger.observe(main_root.clone());
-            verify_jagged_inner_generic_with_profile::<Blake3Challenger, Blake3Mmcs>(
+            verify_jagged_inner_generic::<Blake3Challenger, Blake3Mmcs>(
                 &chip_infos,
                 &r_row_v,
                 &z_row_v,
@@ -684,10 +674,11 @@ mod tests {
                 &mut challenger,
                 blake3_mmcs(),
                 true,
-                <KoalaBearBlake3 as BasefoldRing>::fri_config(),
+                <KoalaBearBlake3 as WhirRing>::whir_config(
+                    bundle.commit.log_stacking_height as usize,
+                ),
                 &[(prep_root.clone(), prep.prover_data.area)],
                 opened,
-                crate::whir::jagged::WhirProfile::Blake3,
             )
         };
         let honest = bundle.y_per_chip.clone();

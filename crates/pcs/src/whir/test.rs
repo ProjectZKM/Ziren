@@ -1,6 +1,6 @@
 //! Tests for the WHIR building blocks and provers/verifiers.
 //!
-//! Uses the same KoalaBear + Poseidon2-Merkle harness as the BaseFold tests.
+//! Uses a KoalaBear + Poseidon2-Merkle harness.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -12,11 +12,11 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use zkm_primitives::poseidon2_init;
 
-use crate::basefold::mle::Mle;
 use crate::kb31_poseidon2::{
     InnerChallenge, InnerChallenger, InnerCompress, InnerHash, InnerPerm, InnerVal, InnerValMmcs,
 };
 use crate::whir::config::WhirConfig;
+use crate::whir::mle::Mle;
 use crate::whir::prover::WhirProver;
 
 fn rand_kb<R: Rng>(rng: &mut R) -> InnerVal {
@@ -244,128 +244,6 @@ fn tower_round_ood_correct() {
         }
     }
     assert_eq!(proof.rounds.len(), 2);
-}
-
-// ---------------------------------------------------------------------------
-// Performance: WHIR prover vs BaseFold prover, identical inputs.
-// ---------------------------------------------------------------------------
-
-/// Build a WHIR config for `n` variables, uniform folding factor `ff`, a
-/// per-round query schedule, and OOD samples — folding down to a
-/// `final`-variable polynomial.
-fn whir_config_for(
-    n: usize,
-    ff: usize,
-    queries: &[usize],
-    ood: usize,
-    rate: usize,
-    pow: usize,
-) -> WhirConfig {
-    use crate::whir::config::RoundConfig;
-    let final_log = n - ff * queries.len();
-    let mut config = WhirConfig::default_whir_config();
-    config.starting_ood_samples = ood;
-    config.starting_log_inv_rate = rate;
-    config.round_parameters = queries
-        .iter()
-        .map(|&nq| RoundConfig {
-            folding_factor: ff,
-            evaluation_domain_log_size: 0,
-            queries_pow_bits: pow,
-            pow_bits: alloc::vec![0usize; ff],
-            num_queries: nq,
-            ood_samples: ood,
-            log_inv_rate: rate,
-        })
-        .collect();
-    config.final_poly_log_degree = final_log;
-    config.final_queries = *queries.last().unwrap();
-    config.final_pow_bits = pow;
-    config
-}
-
-/// Median wall time of `iters` runs of `f`, in milliseconds.
-fn median_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    use std::time::Instant;
-    let mut ts: Vec<f64> = (0..iters)
-        .map(|_| {
-            let t = Instant::now();
-            f();
-            t.elapsed().as_secs_f64() * 1e3
-        })
-        .collect();
-    ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    ts[ts.len() / 2]
-}
-
-#[test]
-#[ignore = "perf benchmark; run with --ignored --nocapture"]
-fn bench_whir_vs_basefold() {
-    use crate::basefold::{BasefoldProver, FriConfig};
-
-    type F = InnerVal;
-    type EF = InnerChallenge;
-
-    let iters = 5usize;
-    for &n in &[18usize, 20] {
-        let ff = 4usize;
-        let n_rounds = (n - 2) / ff;
-        let queries: Vec<usize> = (0..n_rounds).map(|i| 124usize >> i).collect();
-
-        let mut rng = StdRng::seed_from_u64(0x5EED ^ n as u64);
-        let values: Vec<F> = (0..(1usize << n)).map(|_| rand_kb(&mut rng)).collect();
-        let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, 1)));
-        let point: Vec<EF> = (0..n)
-            .map(|_| {
-                use p3_field::BasedVectorSpace;
-                <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                    (0..4).map(|_| rand_kb(&mut rng)),
-                )
-                .unwrap()
-            })
-            .collect();
-        let eval = mle.eval_at::<EF>(&point)[0];
-
-        let bf_cfg = FriConfig::<F>::default_fri_config();
-        let bf_mmcs = build_mmcs();
-        let bf_dft = Arc::new(Radix2DitParallel::<F>::default());
-        let bf_prover = BasefoldProver::<F, EF, _, _>::new(bf_cfg, bf_dft, bf_mmcs, 1);
-        let bf_ms = median_ms(iters, || {
-            let mut ch = build_challenger();
-            let (_bc, bf_data) = bf_prover.commit_mles(vec![Arc::clone(&mle)]);
-            let _ = bf_prover.prove_trusted_mle_evaluations(
-                point.clone(),
-                vec![vec![Arc::clone(&mle)]],
-                vec![vec![eval]],
-                &[&bf_data],
-                &mut ch,
-            );
-        });
-
-        let whir_cfg = whir_config_for(n, ff, &queries, 2, 2, 16);
-        let whir_mmcs = build_mmcs();
-        let base_dft = Arc::new(Radix2DitParallel::<F>::default());
-        let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
-        let whir_prover = WhirProver::<F, EF, _, _>::new(base_dft, whir_mmcs, whir_cfg);
-        let whir_ms = median_ms(iters, || {
-            let mut ch = build_challenger();
-            let _ = whir_prover.prove(
-                Arc::clone(&ef_dft),
-                &mut ch,
-                Arc::clone(&mle),
-                point.clone(),
-                eval,
-            );
-        });
-
-        println!(
-            "n={n:2} ({} pts): BaseFold {bf_ms:8.2} ms  |  WHIR {whir_ms:8.2} ms  |  ratio {:.3}x  ({} WHIR rounds, queries {:?})",
-            1usize << n,
-            whir_ms / bf_ms,
-            n_rounds,
-            queries,
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -671,18 +549,18 @@ fn stacked_roundtrip_verifies() {
 // ---------------------------------------------------------------------------
 
 /// Commit the production-shaped input (one width-1 dense polynomial) under
-/// both the BaseFold stacked layer and the jagged-WHIR wiring; the flat
-/// per-polynomial evaluation lists must be IDENTICAL (layout parity — the
-/// jagged reduction's claim is built for BaseFold's layout), and the WHIR
-/// open must verify against the claim interpolated at the batch coordinates.
+/// the jagged-WHIR wiring; its per-stripe evaluations must be IDENTICAL to
+/// those of the `interleave_multilinears_with_fixed_rate` stacking (layout
+/// parity — the jagged reduction's claim is built for that layout), and the
+/// WHIR open must verify against the claim interpolated at the batch coordinates.
 #[test]
-fn jagged_whir_roundtrip_matches_basefold_layout() {
-    use crate::basefold::{BasefoldProver, FriConfig, StackedPcsProver};
+fn jagged_whir_roundtrip_matches_layout() {
     use crate::jagged_pcs::DEFAULT_BATCH_SIZE;
     use crate::whir::jagged::{
         commit_jagged_whir_generic, open_jagged_whir_rounds_generic, verify_jagged_whir_rounds,
         whir_config_for_stack,
     };
+    use crate::whir::stripes::interleave_multilinears_with_fixed_rate;
 
     type F = InnerVal;
     type EF = InnerChallenge;
@@ -717,23 +595,17 @@ fn jagged_whir_roundtrip_matches_basefold_layout() {
     let stack_point = &point[..lsh];
     let batch_point = &point[lsh..];
 
-    let bf_prover = StackedPcsProver::new(
-        BasefoldProver::<F, EF, InnerValMmcs, Radix2DitParallel<F>>::new(
-            FriConfig::<F>::new(1, 0, 0),
-            Arc::new(Radix2DitParallel::<F>::default()),
-            build_mmcs(),
-            1,
-        ),
-        lsh as u32,
+    let ref_flat: Vec<EF> = interleave_multilinears_with_fixed_rate(
         DEFAULT_BATCH_SIZE,
-    );
-    let (_bfc, bf_data) = bf_prover.commit_multilinears(vec![Arc::new(Mle::from_row_major(
-        RowMajorMatrix::new(dense.clone(), 1),
-    ))]);
-    let bf_flat: Vec<EF> = bf_prover.round_batch_evaluations(stack_point, &bf_data);
+        vec![Arc::new(Mle::from_row_major(RowMajorMatrix::new(dense.clone(), 1)))],
+        lsh as u32,
+    )
+    .iter()
+    .flat_map(|mle| mle.eval_at::<EF>(stack_point))
+    .collect();
     let whir_flat: Vec<EF> =
         prover_data.stacked_data.stripes.iter().map(|s| s.eval_at::<EF>(stack_point)[0]).collect();
-    assert_eq!(bf_flat, whir_flat, "stacked layout parity broken");
+    assert_eq!(ref_flat, whir_flat, "stacked layout parity broken");
 
     let mut current = whir_flat.clone();
     current.resize(1usize << batch_dim, EF::ZERO);
@@ -791,12 +663,12 @@ fn jagged_whir_roundtrip_matches_basefold_layout() {
 
 #[test]
 fn jagged_whir_roundtrip_mixed_fold_schedule() {
-    use crate::basefold::{BasefoldProver, FriConfig, StackedPcsProver};
     use crate::jagged_pcs::DEFAULT_BATCH_SIZE;
     use crate::whir::jagged::{
         commit_jagged_whir_generic, open_jagged_whir_rounds_generic, verify_jagged_whir_rounds,
         whir_config_for_fold_schedule,
     };
+    use crate::whir::stripes::interleave_multilinears_with_fixed_rate;
 
     type F = InnerVal;
     type EF = InnerChallenge;
@@ -831,23 +703,17 @@ fn jagged_whir_roundtrip_mixed_fold_schedule() {
     let stack_point = &point[..lsh];
     let batch_point = &point[lsh..];
 
-    let bf_prover = StackedPcsProver::new(
-        BasefoldProver::<F, EF, InnerValMmcs, Radix2DitParallel<F>>::new(
-            FriConfig::<F>::new(1, 0, 0),
-            Arc::new(Radix2DitParallel::<F>::default()),
-            build_mmcs(),
-            1,
-        ),
-        lsh as u32,
+    let ref_flat: Vec<EF> = interleave_multilinears_with_fixed_rate(
         DEFAULT_BATCH_SIZE,
-    );
-    let (_bfc, bf_data) = bf_prover.commit_multilinears(vec![Arc::new(Mle::from_row_major(
-        RowMajorMatrix::new(dense.clone(), 1),
-    ))]);
-    let bf_flat: Vec<EF> = bf_prover.round_batch_evaluations(stack_point, &bf_data);
+        vec![Arc::new(Mle::from_row_major(RowMajorMatrix::new(dense.clone(), 1)))],
+        lsh as u32,
+    )
+    .iter()
+    .flat_map(|mle| mle.eval_at::<EF>(stack_point))
+    .collect();
     let whir_flat: Vec<EF> =
         prover_data.stacked_data.stripes.iter().map(|s| s.eval_at::<EF>(stack_point)[0]).collect();
-    assert_eq!(bf_flat, whir_flat, "stacked layout parity broken");
+    assert_eq!(ref_flat, whir_flat, "stacked layout parity broken");
 
     let mut current = whir_flat.clone();
     current.resize(1usize << batch_dim, EF::ZERO);
@@ -909,12 +775,12 @@ fn jagged_whir_roundtrip_mixed_fold_schedule() {
 /// the interleaves it keeps for the reduction reproduce that dense.
 #[test]
 fn ring_whir_commit_matches_standalone_commit() {
-    use crate::basefold::stacked::dense_from_interleaved_mles;
-    use crate::config::BasefoldRing;
+    use crate::config::WhirRing;
     use crate::jagged::{compute_jagged_metadata, materialize_dense_jagged};
     use crate::jagged_pcs::jagged::views_over_traces;
     use crate::kb31_poseidon2::koala_bear_poseidon2::KoalaBearPoseidon2;
     use crate::whir::jagged::{commit_jagged_whir_generic, core_whir_config};
+    use crate::whir::stripes::dense_from_interleaved_mles;
 
     type F = InnerVal;
     let lsh = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
@@ -930,7 +796,7 @@ fn ring_whir_commit_matches_standalone_commit() {
             .collect();
     let views = views_over_traces(traces);
 
-    let ring = <KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(&views, None);
+    let ring = <KoalaBearPoseidon2 as WhirRing>::commit_multilinears(&views, None);
     let packing = compute_jagged_metadata::<F>(&views);
     assert_eq!(ring.packing.dense_len, packing.dense_len);
     assert_eq!(ring.packing.offsets, packing.offsets);
@@ -945,7 +811,7 @@ fn ring_whir_commit_matches_standalone_commit() {
     );
     assert_eq!(ring.commit.original_commitment, standalone.original_commitment);
     assert_eq!(ring.commit.area, standalone.area);
-    let ring_whir = ring.whir_data.as_ref().expect("the inner ring commits under WHIR");
+    let ring_whir = &ring.whir_data;
     assert_eq!(ring_whir.stacked_data.commitment, standalone_data.stacked_data.commitment);
     assert_eq!(ring_whir.stacked_data.stripes.len(), standalone_data.stacked_data.stripes.len());
     for (a, b) in
@@ -953,12 +819,9 @@ fn ring_whir_commit_matches_standalone_commit() {
     {
         assert_eq!(a.guts().as_slice(), b.guts().as_slice());
     }
-    let rebuilt = dense_from_interleaved_mles::<F>(
-        &ring.prover_data.stacked_data.interleaved_mles,
-        ring.prover_data.area,
-    );
+    let rebuilt =
+        dense_from_interleaved_mles::<F>(&ring.prover_data.interleaved_mles, ring.prover_data.area);
     assert_eq!(rebuilt[..dense.len()], dense[..]);
-    assert!(ring.prover_data.stacked_data.pcs_batch_data.encoded_codewords.is_empty());
 }
 
 /// The tiled stripe passes of the stacked open reproduce the fold-based

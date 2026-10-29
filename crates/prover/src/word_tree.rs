@@ -83,7 +83,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(stage("deferred proofs are not supported by the word compress"));
         }
         let started = std::time::Instant::now();
-        let inputs = self.get_recursion_core_inputs_basefold(&vk.vk, &proof.proof.0, 1, false);
+        let inputs = self.get_recursion_core_inputs(&vk.vk, &proof.proof.0, 1, false);
         tracing::info!("word compress: {} leaves", inputs.len());
         let mut leaves = Vec::with_capacity(inputs.len());
         for (shard, input) in inputs.iter().enumerate() {

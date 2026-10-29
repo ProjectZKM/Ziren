@@ -1,5 +1,5 @@
 //! Minimal `Mle<F, A>` (Multilinear Extension) wrapper used throughout
-//! the Ziren basefold port.
+//! the Ziren whir port.
 //!
 //! This type
 //! is **backend-generic** over a [`Backend`]: it holds a
@@ -149,7 +149,7 @@ impl<F: Field> Mle<F, CpuBackend> {
 
     /// Standard multilinear evaluation at an extension-field point.
     /// Folds via adjacent-pair (`v[2i], v[2i+1]`) to match
-    /// [`Self::fold`] and the rest of the BaseFold module — `point[i]`
+    /// [`Self::fold`] and the rest of the WHIR module — `point[i]`
     /// substitutes for var `i` (first-var-first convention).  Note
     /// this is the *Lagrange* combination `(1-r)·lo + r·hi`, not the
     /// monomial fold used by [`Self::fold`].
@@ -179,18 +179,12 @@ impl<F: Field> Mle<F, CpuBackend> {
         current
     }
 
-    /// Basefold-style fold by `beta`: pairs adjacent rows (index `2i`
-    /// and `2i+1`) into `v[2i] + beta * v[2i+1]`.  This must mirror
-    /// the FRI codeword fold used in
-    /// [`super::fri::fold_even_odd_ext`] — same pairing scheme, same
-    /// monomial-basis reduction — so the K-round constants match
-    /// (the BaseFold key invariant).
+    /// Monomial fold by `beta`: pairs adjacent rows (index `2i`
+    /// and `2i+1`) into `v[2i] + beta * v[2i+1]`.
     ///
     /// Performance optimization: parallelize the per-row pair
     /// fold. Each row pair `(2i, 2i+1)` is independent → write into
-    /// separate slots of the pre-allocated output. Called per round
-    /// in `commit_phase_round`; total work across rounds is ~2N
-    /// elements (geometric sum).
+    /// separate slots of the pre-allocated output.
     pub fn fold<EF: ExtensionField<F> + Send + Sync>(self, beta: EF) -> Mle<EF, CpuBackend>
     where
         F: Sync,
@@ -218,7 +212,7 @@ impl<F: Field> Mle<F, CpuBackend> {
 }
 
 /// `Message<T>` is an Arc-
-/// shared sequence of items used in basefold's per-round flows,
+/// shared sequence of items used in whir's per-round flows,
 /// aliased to a plain `Vec<Arc<T>>`.
 pub type Message<T> = Vec<Arc<T>>;
 
@@ -236,11 +230,11 @@ impl<F: Field> Mle<F, CpuBackend> {
     /// minus the padding tail (an `Mle`'s hypercube height is a power of two,
     /// so there is never a missing odd row).
     ///
-    /// NOT the same operation as [`Mle::fold`], which applies the BASEFOLD rule
+    /// NOT the same operation as [`Mle::fold`], which applies the monomial rule
     /// `lo + beta·hi` on the same variable.  The two differ by the `(1-beta)`
     /// weight on `lo`; substituting one for the other changes the polynomial
     /// being proved, and does so silently -- shapes and types match.  Use this
-    /// one for sumcheck / multilinear folding, `fold` for BaseFold rounds.
+    /// one for sumcheck / multilinear folding.
     pub fn fix_last_variable<EF>(&self, alpha: EF) -> Mle<EF, CpuBackend>
     where
         EF: ExtensionField<F> + Send + Sync,

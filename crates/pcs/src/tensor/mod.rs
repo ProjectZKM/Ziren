@@ -1,4 +1,4 @@
-//! Backend-generic **tensor** primitives for the Ziren basefold stack.
+//! Backend-generic **tensor** primitives for the Ziren whir stack.
 //!
 //! Layering:
 //!   * [`Allocator`] / [`AllocError`] — the raw allocate/deallocate contract.
@@ -8,7 +8,7 @@
 //!     (+ [`GlobalBackend`] / [`HasBackend`] and the `io` cross-backend copy traits).
 //!   * [`RawBuffer`] — allocator-backed raw storage (ptr + cap).
 //!   * [`Slice`] / [`Init`] — allocator-tagged slice / element views.
-//!   * [`Buffer`] — fixed-capacity `RawBuffer` + `len`; the storage for [`crate::basefold::Mle`].
+//!   * [`Buffer`] — fixed-capacity `RawBuffer` + `len`; the storage for [`crate::whir::mle::Mle`].
 //!   * [`Dimensions`] — a 2D `[rows, cols]` row-major shape (Ziren-specific).
 //!   * [`Tensor`] — `Buffer` + `Dimensions` (Ziren-specific).
 //!

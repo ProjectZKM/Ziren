@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
-use crate::basefold::mle::Mle;
+use crate::whir::mle::Mle;
 use crate::whir::proof::{ProofOfWork, SumcheckPoly};
 
 /// The eq table `eq(point, ·)` over the `2^n` hypercube: index `x`'s bit `j`
@@ -123,7 +123,7 @@ impl<EF: Field> WhirFolder<EF> {
     where
         F: Field,
         EF: ExtensionField<F>,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + Clone + Sync + 'static,
     {
         let mut polys = Vec::with_capacity(k);
         for round in 0..k {
@@ -142,7 +142,7 @@ impl<EF: Field> WhirFolder<EF> {
             challenger.observe_algebra_element(c0);
             challenger.observe_algebra_element(c1);
             challenger.observe_algebra_element(c2);
-            let pow = crate::basefold::prover::accelerated_grind(
+            let pow = crate::whir::grind::accelerated_grind(
                 challenger,
                 pow_bits.get(round).copied().unwrap_or(0),
             );
@@ -193,7 +193,7 @@ pub fn prove_fold<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + Clone + Sync + 'static,
 {
     let n = f.num_variables() as usize;
     debug_assert_eq!(query_point.len(), n);

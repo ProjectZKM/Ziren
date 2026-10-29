@@ -5,7 +5,6 @@
 extern crate alloc;
 
 pub mod air;
-pub mod basefold;
 mod chip;
 mod config;
 mod debug;

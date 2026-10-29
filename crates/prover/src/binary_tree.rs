@@ -28,7 +28,7 @@ use zkm_binary_stark::machine::{leaf_class, ProvedProgram, RecursionMachine, LEA
 use zkm_binary_stark::BinarySchedule;
 use zkm_recursion_circuit::blake3_circuit::{digest_limbs, limbs_digest};
 use zkm_recursion_circuit::hash::FieldHasher;
-use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
 use zkm_recursion_circuit::merkle_tree::MerkleTree;
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
@@ -375,12 +375,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(stage("deferred proofs are not supported by the binary compress"));
         }
         let schedule = BinarySchedule::default();
-        let mut inputs = self.get_recursion_core_inputs_basefold(&vk.vk, &proof.proof.0, 1, false);
+        let mut inputs = self.get_recursion_core_inputs(&vk.vk, &proof.proof.0, 1, false);
         let started = std::time::Instant::now();
         let mut programs: BTreeMap<[u8; 32], LeafProgram> = BTreeMap::new();
         let mut of_shard = Vec::with_capacity(inputs.len());
         for (shard, input) in inputs.iter().enumerate() {
-            let (program, digest) = self.recursion_program_basefold(input);
+            let (program, digest) = self.recursion_program(input);
             if let Some(known) = programs.get_mut(&digest) {
                 known.last = shard;
             } else {
@@ -603,7 +603,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     fn binary_samples(
         &self,
         store: &BinaryKeyStore,
-        inputs: &mut [ZKMCoreBasefoldWitnessValues<CoreSC>],
+        inputs: &mut [ZKMCoreWitnessValues<CoreSC>],
         classes: &[usize],
         families: &[Vec<Family>],
     ) -> Result<(), ZKMRecursionProverError> {

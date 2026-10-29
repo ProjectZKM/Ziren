@@ -21,8 +21,6 @@
 //! `prefix_sum_checks` recursion-compiler primitive to caller-
 //! supplied callbacks.
 
-use std::marker::PhantomData;
-
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
@@ -112,24 +110,21 @@ impl<C: CircuitConfig> RecursiveJaggedEvalConfig<C, ()> for RecursiveTrivialJagg
 ///
 /// Both closures fire once per jagged-eval call.
 #[derive(Clone, Debug)]
-pub struct RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
+pub struct RecursiveJaggedEvalSumcheckConfig<BP, PSC> {
     /// Branching-program evaluator closure.
     pub branching_program_eval: BP,
     /// Prefix-sum check closure.
     pub prefix_sum_check: PSC,
-    /// Phantom for the stark-config parameter (the body doesn't
-    /// reference SC directly).
-    pub _marker: PhantomData<SC>,
 }
 
-impl<SC, BP, PSC> RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
+impl<BP, PSC> RecursiveJaggedEvalSumcheckConfig<BP, PSC> {
     pub fn new(branching_program_eval: BP, prefix_sum_check: PSC) -> Self {
-        Self { branching_program_eval, prefix_sum_check, _marker: PhantomData }
+        Self { branching_program_eval, prefix_sum_check }
     }
 }
 
-impl<C, SC, Chal, BP, PSC> RecursiveJaggedEvalConfig<C, Chal>
-    for RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC>
+impl<C, Chal, BP, PSC> RecursiveJaggedEvalConfig<C, Chal>
+    for RecursiveJaggedEvalSumcheckConfig<BP, PSC>
 where
     C: CircuitConfig,
     Chal: crate::challenger::FieldChallengerVariable<C, C::Bit>,

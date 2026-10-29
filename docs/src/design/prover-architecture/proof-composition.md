@@ -32,7 +32,7 @@ During execution, each `VERIFY_ZKM_PROOF` call takes the next proof from this li
 
 ## How the recursion checks it
 
-`compress` passes the inner proofs to the *deferred* program in batches (`get_recursion_deferred_inputs_basefold`). For each batch, the deferred program:
+`compress` passes the inner proofs to the *deferred* program in batches (`get_recursion_deferred_inputs`). For each batch, the deferred program:
 
 1. verifies each inner compressed proof, including the Merkle proof that its verifying key is in the recursion key set;
 2. requires each proof to be complete;

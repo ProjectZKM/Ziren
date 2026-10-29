@@ -16,6 +16,12 @@ pub fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+/// [`env_usize`] for an optional parameter: `default` when unset or
+/// unparsable.
+pub fn env_opt_usize(name: &str, default: Option<usize>) -> Option<usize> {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).or(default)
+}
+
 /// Read an `f64` parameter, falling back to `default` if unset or unparsable.
 pub fn env_f64(name: &str, default: f64) -> f64 {
     std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)

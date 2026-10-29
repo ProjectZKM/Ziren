@@ -17,6 +17,10 @@
 //! the eq-weighted, OOD-batched degree-2 folding sumcheck whose invariant
 //! `claim = Σ_x weight[x]·f[x]` threads every round, and [`monomial`] the
 //! coset point-map that turns an opened coset into a STIR constraint.
+//! Around them sit the Reed-Solomon codeword ([`code`]) and its DFT encoder
+//! ([`encoder`]), the multilinear type ([`mle`]), Merkle opening types
+//! ([`merkle`]), proof-of-work grinding ([`grind`]) and the stripe layout of
+//! the stacked dense polynomial ([`stripes`]).
 //!
 //! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
 //! the earlier single-polynomial (non-stacked) prover and verifier variants.
@@ -24,13 +28,18 @@
 //! module's tests, so they compile only with them; the verdict type they
 //! share with the production verifier lives in [`error`].
 
+pub mod code;
 pub mod config;
+pub mod encoder;
 pub mod error;
 #[cfg(test)]
 pub mod full_prover;
+pub mod grind;
 #[cfg(test)]
 pub mod interleaved;
 pub mod jagged;
+pub mod merkle;
+pub mod mle;
 pub mod monomial;
 pub mod proof;
 #[cfg(test)]
@@ -38,6 +47,7 @@ pub mod prover;
 #[cfg(test)]
 pub mod round_prover;
 pub mod stacked;
+pub mod stripes;
 pub mod sumcheck;
 #[cfg(test)]
 pub mod verifier;

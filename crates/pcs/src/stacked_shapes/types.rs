@@ -161,11 +161,6 @@ pub mod consts {
     /// is rounded up to a multiple of `2^LOG_STACKING_HEIGHT`.
     pub const LOG_STACKING_HEIGHT: u32 = 21;
 
-    /// Log2 of the FRI blowup factor used by the core commit.  Must
-    /// match the prover's BaseFold config
-    /// (`crate::basefold::config::FriConfig::default_fri_config`).
-    pub const LOG_BLOWUP: usize = 1;
-
     /// Max log-height allowed for any single chip in a shard (the
     /// upper bound that size-class bands are measured against).
     pub const CORE_MAX_LOG_ROW_COUNT: usize = 22;

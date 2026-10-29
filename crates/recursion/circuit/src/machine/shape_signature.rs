@@ -150,75 +150,35 @@ pub fn describe_shard_proof_structure(
             for (name, hgt) in chips {
                 v.push((format!("h.{name}"), *hgt));
             }
-            let bf = &bundle.basefold_proof.basefold_proof;
-            v.push(("bf_uni".into(), bf.univariate_messages.len()));
-            v.push(("bf_fri".into(), bf.fri_commitments.len()));
-            for (tag, openings) in [
-                ("bf_cq", &bf.component_polynomials_query_openings_and_proofs),
-                ("bf_q", &bf.query_phase_openings_and_proofs),
-            ] {
-                v.push((format!("{tag}_rounds"), openings.len()));
-                if let Some(round) = openings.first() {
-                    v.push((format!("{tag}_leaves"), round.leaves.len()));
-                    if let Some(leaf) = round.leaves.first() {
-                        v.push((format!("{tag}_vals"), leaf.values.len()));
-                        v.push((format!("{tag}_val0"), leaf.values.first().map_or(0, |x| x.len())));
-                        v.push((format!("{tag}_path"), leaf.proof.len()));
+            let wp = &bundle.whir_proof;
+            let whir = &wp.whir_proof;
+            v.push(("whir_rounds".into(), whir.round_sumcheck_polys.len()));
+            v.push(("whir_commits".into(), whir.round_commitments.len()));
+            v.push(("whir_qrounds".into(), whir.round_query_openings.len()));
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for op in whir.round_query_openings.iter() {
+                op.leaves.len().hash(&mut h);
+                for leaf in op.leaves.iter() {
+                    leaf.values.len().hash(&mut h);
+                    for x in leaf.values.iter() {
+                        x.len().hash(&mut h);
                     }
-                }
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                for round in openings.iter() {
-                    round.leaves.len().hash(&mut h);
-                    for leaf in round.leaves.iter() {
-                        leaf.values.len().hash(&mut h);
-                        for x in leaf.values.iter() {
-                            x.len().hash(&mut h);
-                        }
-                        leaf.proof.len().hash(&mut h);
-                    }
-                }
-                v.push((format!("{tag}_hash"), (h.finish() & 0xffff_ffff) as usize));
-            }
-            let be = &bundle.basefold_proof.batch_evaluations;
-            v.push(("bf_batch_rounds".into(), be.len()));
-            v.push(("bf_batch_stripes".into(), be.first().map_or(0, |r| r.len())));
-            match &bundle.whir_proof {
-                None => v.push(("whir".into(), 0)),
-                Some(wp) => {
-                    let whir = &wp.whir_proof;
-                    v.push(("whir".into(), 1));
-                    v.push(("whir_rounds".into(), whir.round_sumcheck_polys.len()));
-                    v.push(("whir_commits".into(), whir.round_commitments.len()));
-                    v.push(("whir_qrounds".into(), whir.round_query_openings.len()));
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    for op in whir.round_query_openings.iter() {
-                        op.leaves.len().hash(&mut h);
-                        for leaf in op.leaves.iter() {
-                            leaf.values.len().hash(&mut h);
-                            for x in leaf.values.iter() {
-                                x.len().hash(&mut h);
-                            }
-                            leaf.proof.len().hash(&mut h);
-                        }
-                    }
-                    v.push(("whir_q_hash".into(), (h.finish() & 0xffff_ffff) as usize));
-                    if let Some(op) = whir.round_query_openings.first() {
-                        v.push(("whir_q0_leaves".into(), op.leaves.len()));
-                        v.push((
-                            "whir_q0_path".into(),
-                            op.leaves.first().map_or(0, |l| l.proof.len()),
-                        ));
-                    }
-                    v.push(("whir_final_poly".into(), whir.final_poly.len()));
-                    v.push(("whir_final_sc".into(), whir.final_sumcheck_polys.len()));
-                    v.push(("whir_pow".into(), whir.folding_pow.len()));
-                    v.push(("whir_batch_rounds".into(), wp.batch_evaluations.len()));
-                    v.push((
-                        "whir_batch_stripes".into(),
-                        wp.batch_evaluations.first().map_or(0, |r| r.len()),
-                    ));
+                    leaf.proof.len().hash(&mut h);
                 }
             }
+            v.push(("whir_q_hash".into(), (h.finish() & 0xffff_ffff) as usize));
+            if let Some(op) = whir.round_query_openings.first() {
+                v.push(("whir_q0_leaves".into(), op.leaves.len()));
+                v.push(("whir_q0_path".into(), op.leaves.first().map_or(0, |l| l.proof.len())));
+            }
+            v.push(("whir_final_poly".into(), whir.final_poly.len()));
+            v.push(("whir_final_sc".into(), whir.final_sumcheck_polys.len()));
+            v.push(("whir_pow".into(), whir.folding_pow.len()));
+            v.push(("whir_batch_rounds".into(), wp.batch_evaluations.len()));
+            v.push((
+                "whir_batch_stripes".into(),
+                wp.batch_evaluations.first().map_or(0, |r| r.len()),
+            ));
             v.push(("red_rounds".into(), bundle.reduction.rounds.len()));
             v.push(("red_point".into(), bundle.reduction.eval_point.len()));
             let je = &bundle.jagged_eval.partial_sumcheck_proof;
@@ -226,17 +186,13 @@ pub fn describe_shard_proof_structure(
             v.push(("je_point".into(), je.point_and_eval.0.len()));
             v.push(("y_chips".into(), bundle.y_per_chip.len()));
             v.push(("y_total".into(), bundle.y_per_chip.iter().map(|y| y.len()).sum()));
-            v.push(("extra_groups".into(), bundle.extra_packing.len()));
         }
     }
     v
 }
 
-/// Hash the structural dimensions of a shard proof's jagged-BaseFold
+/// Hash the structural dimensions of a shard proof's jagged-WHIR
 /// evaluation proof, in `Witnessable::write` order.
-///
-/// Split out so the per-group (`G >= 2`) split bundle and the group-0 bundle
-/// share one traversal.
 fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
     match proof {
         EvaluationProof::Empty => 0u8.hash(h),
@@ -250,15 +206,7 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
             bundle.packing.offsets.len().hash(h);
             bundle.packing.column_counts.hash(h);
 
-            hash_stacked_basefold(&bundle.basefold_proof, h);
-
-            match &bundle.whir_proof {
-                None => 0u8.hash(h),
-                Some(wp) => {
-                    3u8.hash(h);
-                    hash_stacked_whir(wp, h);
-                }
-            }
+            hash_stacked_whir(&bundle.whir_proof, h);
 
             bundle.reduction.rounds.len().hash(h);
             bundle.reduction.eval_point.len().hash(h);
@@ -274,58 +222,7 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
             for y in bundle.y_per_chip.iter() {
                 y.len().hash(h);
             }
-
-            bundle.extra_reduction.len().hash(h);
-            for r in bundle.extra_reduction.iter() {
-                r.rounds.len().hash(h);
-                r.eval_point.len().hash(h);
-            }
-            bundle.extra_basefold_proof.len().hash(h);
-            for bp in bundle.extra_basefold_proof.iter() {
-                hash_stacked_basefold(bp, h);
-            }
-            bundle.extra_packing.len().hash(h);
-            for p in bundle.extra_packing.iter() {
-                p.log_dense_size.hash(h);
-                p.offsets.len().hash(h);
-                p.column_counts.hash(h);
-            }
         }
-    }
-}
-
-/// Structural dimensions of a `StackedBasefoldProof` — the BaseFold round
-/// count, query/Merkle path lengths and stacked batch widths, all of which
-/// are inline-witnessed by `read_basefold_proof_from_stream`.
-fn hash_stacked_basefold<H: Hasher>(
-    stacked: &zkm_pcs::basefold::stacked::StackedBasefoldProof<
-        InnerVal,
-        InnerChallenge,
-        zkm_pcs::jagged_pcs::JaggedMmcs,
-    >,
-    h: &mut H,
-) {
-    let bf = &stacked.basefold_proof;
-    bf.univariate_messages.len().hash(h);
-    bf.fri_commitments.len().hash(h);
-    for openings in
-        [&bf.component_polynomials_query_openings_and_proofs, &bf.query_phase_openings_and_proofs]
-    {
-        openings.len().hash(h);
-        for round in openings.iter() {
-            round.leaves.len().hash(h);
-            for leaf in round.leaves.iter() {
-                leaf.values.len().hash(h);
-                for v in leaf.values.iter() {
-                    v.len().hash(h);
-                }
-                leaf.proof.len().hash(h);
-            }
-        }
-    }
-    stacked.batch_evaluations.len().hash(h);
-    for row in stacked.batch_evaluations.iter() {
-        row.len().hash(h);
     }
 }
 

@@ -132,9 +132,9 @@ fn reject_tag(res: &Result<(), MachineVerificationError<SC>>) -> String {
 fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) {
     let mut fallback: Option<(usize, usize, String, usize)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
-        let bf = sp.jagged_shard_proof.as_ref();
-        let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
-        for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
+        let jagged = sp.jagged_shard_proof.as_ref();
+        let sorted_names: Vec<String> = jagged.chip_heights.keys().cloned().collect();
+        for (ci, opening) in jagged.opened_values.chips.iter().enumerate() {
             if !opening.quotient.first().map(|q| !q.is_empty()).unwrap_or(false) {
                 continue;
             }
@@ -265,8 +265,8 @@ fn run_forgery(
 /// transcript `chip_heights` consistently so the lie is a coherent
 /// "this chip is 2x taller" claim.
 fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let opening = &mut bf.opened_values.chips[ci];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
@@ -283,7 +283,7 @@ fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
-    bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
+    jagged.chip_heights.insert(name.to_string(), 1usize << new_shift);
     tracing::info!(
         "[forgery] OVER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
@@ -293,8 +293,8 @@ fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// UNDER-CLAIM the degree bits: clear the real top set bit (claim a
 /// SHORTER chip than the real trace).
 fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let opening = &mut bf.opened_values.chips[ci];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
@@ -311,7 +311,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
-    bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
+    jagged.chip_heights.insert(name.to_string(), 1usize << new_shift);
     tracing::info!(
         "[forgery] UNDER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
@@ -327,8 +327,8 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// transcript framing.  If THIS rejects, the degree-bit binding is
 /// load-bearing on its own.  Over-claim: set a higher bit (taller chip).
 fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let opening = &mut bf.opened_values.chips[ci];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
@@ -354,8 +354,8 @@ fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// Degree-only UNDER-claim (clear the real top degree bit; transcript
 /// left honest).
 fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let opening = &mut bf.opened_values.chips[ci];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
@@ -381,10 +381,10 @@ fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) 
 /// Forge ONLY the transcript `chip_heights` (leave the degree bits
 /// honest) — isolates whether the transcript observe alone binds height.
 fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let cur = bf.chip_heights.get(name).copied().unwrap_or(0);
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let cur = jagged.chip_heights.get(name).copied().unwrap_or(0);
     let lie = cur.wrapping_add(1);
-    bf.chip_heights.insert(name.to_string(), lie);
+    jagged.chip_heights.insert(name.to_string(), lie);
     tracing::info!("[forgery] TRANSCRIPT-only chip='{name}': height {cur} -> {lie}");
 }
 
@@ -569,8 +569,8 @@ fn forge_degree_only_overclaim_keccak() {
 /// main_commitment → reject.
 fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
     use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-    let bf = sp.jagged_shard_proof.as_mut();
-    match &mut bf.evaluation_proof {
+    let jagged = sp.jagged_shard_proof.as_mut();
+    match &mut jagged.evaluation_proof {
         EvaluationProof::Bundle(bundle) => {
             let idx = bundle
                 .packing
@@ -594,8 +594,8 @@ fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
 /// the (now different) row_counts diverges from the observed main_commitment.
 fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
     use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-    let bf = sp.jagged_shard_proof.as_mut();
-    match &mut bf.evaluation_proof {
+    let jagged = sp.jagged_shard_proof.as_mut();
+    match &mut jagged.evaluation_proof {
         EvaluationProof::Bundle(bundle) => {
             let n = bundle.packing.offsets.len();
             assert!(n >= 3, "need >=3 offsets to tamper an interior boundary");
@@ -667,9 +667,9 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
     let mut found: Vec<(usize, String)> = Vec::new();
     let mut first: Option<(usize, usize, String)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
-        let bf = sp.jagged_shard_proof.as_ref();
-        let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
-        for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
+        let jagged = sp.jagged_shard_proof.as_ref();
+        let sorted_names: Vec<String> = jagged.chip_heights.keys().cloned().collect();
+        for (ci, opening) in jagged.opened_values.chips.iter().enumerate() {
             let Some(degree) = opening.quotient.first() else { continue };
             if degree.is_empty() {
                 continue;
@@ -696,8 +696,8 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
 /// forged to CLAIM ACTIVITY: set a single degree bit non-zero (claim height
 /// 2^1).  Transcript LEFT HONEST.
 fn forge_height0_claim_active(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let degree = &mut bf.opened_values.chips[ci].quotient[0];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let degree = &mut jagged.opened_values.chips[ci].quotient[0];
     let bit_len = degree.len();
     for b in degree.iter_mut() {
         *b = Challenge::ZERO;
@@ -714,8 +714,8 @@ fn forge_height0_claim_active(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// (b) A real PRESENT active chip forged to CLAIM IT IS MISSING: zero ALL its
 /// degree bits (claim height 0).  Transcript LEFT HONEST.
 fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
-    let bf = sp.jagged_shard_proof.as_mut();
-    let degree = &mut bf.opened_values.chips[ci].quotient[0];
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let degree = &mut jagged.opened_values.chips[ci].quotient[0];
     let real_h = degree_bits_to_height(degree);
     for b in degree.iter_mut() {
         *b = Challenge::ZERO;

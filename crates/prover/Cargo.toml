@@ -112,7 +112,7 @@ debug = ["zkm-core-machine/debug"]
 imm-wrap-vk = ["zkm-recursion-core/imm-wrap-vk"]
 
 [lints.clippy]
-# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# The jagged/WHIR generics (`Challenger` x `Mmcs` x `Dft` over two rings)
 # make the honest signatures wide; factoring them behind aliases hides which
 # ring a function is instantiated for, which is exactly what the soundness
 # review needs to read off the signature.
