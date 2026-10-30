@@ -56,18 +56,13 @@ impl<'a, AB: AirBuilder, SubAir: BaseAir<T>, T> SubAirBuilder<'a, AB, SubAir, T>
 
 /// Implement `AirBuilder` for `SubAirBuilder`.
 impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB, SubAir, F> {
-    type PeriodicVar = Self::Var;
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition_window(2)
-    }
-
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;
     type PreprocessedWindow = AB::PreprocessedWindow;
     type MainWindow = SubWindow<AB::MainWindow, Self::Var>;
     type PublicVar = AB::PublicVar;
+    type PeriodicVar = AB::PeriodicVar;
 
     fn main(&self) -> Self::MainWindow {
         let matrix = self.inner.main();
@@ -86,8 +81,16 @@ impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB,
         self.inner.is_last_row()
     }
 
+    fn is_transition(&self) -> Self::Expr {
+        self.inner.is_transition()
+    }
+
     fn is_transition_window(&self, size: usize) -> Self::Expr {
         self.inner.is_transition_window(size)
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        self.inner.periodic_values()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

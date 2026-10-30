@@ -364,7 +364,9 @@ where
     where
         EFDft: TwoAdicSubgroupDft<EF>,
         Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F> + Clone + Sync
+            + GrindingChallenger<Witness = F>
+            + Clone
+            + Sync
             + CanObserve<MT::Commitment>
             + 'static,
     {
@@ -393,7 +395,9 @@ where
     where
         EFDft: TwoAdicSubgroupDft<EF>,
         Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F> + Clone + Sync
+            + GrindingChallenger<Witness = F>
+            + Clone
+            + Sync
             + CanObserve<MT::Commitment>
             + 'static,
     {
@@ -888,7 +892,9 @@ where
     ) -> Result<(), WhirVerifierError>
     where
         Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F> + Clone + Sync
+            + GrindingChallenger<Witness = F>
+            + Clone
+            + Sync
             + CanObserve<MT::Commitment>
             + 'static,
     {

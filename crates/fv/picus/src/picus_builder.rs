@@ -133,18 +133,13 @@ impl PicusBuilder {
 }
 
 impl AirBuilder for PicusBuilder {
-    type PeriodicVar = Self::Var;
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition_window(2)
-    }
-
     type F = Felt;
     type Expr = SymbolicExpression<Felt>;
     type Var = SymbolicVariable<Felt>;
     type PreprocessedWindow = RowMajorMatrix<Self::Var>;
     type MainWindow = RowMajorMatrix<Self::Var>;
     type PublicVar = SymbolicVariable<Felt>;
+    type PeriodicVar = SymbolicVariable<Felt>;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -162,8 +157,7 @@ impl AirBuilder for PicusBuilder {
         SymbolicExpression::Leaf(BaseLeaf::IsLastRow)
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "PicusBuilder only supports a transition window of size 2");
+    fn is_transition(&self) -> Self::Expr {
         SymbolicExpression::Leaf(BaseLeaf::IsTransition)
     }
 
@@ -808,8 +802,7 @@ pub fn extract_module<A>(
 where
     A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder>,
 {
-    let mut builder =
-        PicusBuilder::new(chip.air.width(), zkm_pcs::air::MachineAir::preprocessed_width(chip));
+    let mut builder = PicusBuilder::new(chip.air.width(), chip.preprocessed_width());
     chip.air.eval(&mut builder);
 
     let mut lowerer = Lowerer::new(&builder.layout, cfg.reify_threshold);

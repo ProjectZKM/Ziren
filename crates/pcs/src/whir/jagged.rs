@@ -761,7 +761,9 @@ where
     D: TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
     EFD: TwoAdicSubgroupDft<JaggedChallenge>,
     Challenger: FieldChallenger<JaggedVal>
-        + GrindingChallenger<Witness = JaggedVal> + Clone + Sync
+        + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {
@@ -790,7 +792,9 @@ where
     D: TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
     EFD: TwoAdicSubgroupDft<JaggedChallenge>,
     Challenger: FieldChallenger<JaggedVal>
-        + GrindingChallenger<Witness = JaggedVal> + Clone + Sync
+        + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {
@@ -825,7 +829,9 @@ pub fn verify_jagged_whir_rounds<Challenger, MT>(
 where
     MT: Mmcs<JaggedVal, Commitment: Clone> + Clone,
     Challenger: FieldChallenger<JaggedVal>
-        + GrindingChallenger<Witness = JaggedVal> + Clone + Sync
+        + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {

@@ -170,14 +170,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for i := 0; i < len(cs.Args[0]); i++ {
 				vars[cs.Args[0][i]] = bits[i]
 			}
-		case "Var2FeltLimbs":
-			limbs := fieldAPI.SplitFieldOrderLimbs(vars[cs.Args[1][0]])
-			if len(cs.Args[0]) != len(limbs) {
-				return fmt.Errorf("Var2FeltLimbs expects %d outputs, got %d", len(limbs), len(cs.Args[0]))
-			}
-			for i := 0; i < len(cs.Args[0]); i++ {
-				felts[cs.Args[0][i]] = limbs[i]
-			}
 		case "Permute":
 			state := [3]frontend.Variable{vars[cs.Args[0][0]], vars[cs.Args[1][0]], vars[cs.Args[2][0]]}
 			hashAPI.PermuteMut(&state)
@@ -261,6 +253,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			ext5s[cs.Args[0][0]] = koalabear.Felts2Ext5(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]], felts[cs.Args[5][0]])
 		case "CircuitFelt2Var":
 			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
+		case "CircuitVar2FieldOrderLimbs":
+			limbs := fieldAPI.Var2FieldOrderLimbs(vars[cs.Args[1][0]], len(cs.Args[0]))
+			for i := 0; i < len(cs.Args[0]); i++ {
+				felts[cs.Args[0][i]] = limbs[i]
+			}
 		case "ReduceE":
 			exts[cs.Args[0][0]] = fieldAPI.ReduceE(exts[cs.Args[0][0]])
 		default:

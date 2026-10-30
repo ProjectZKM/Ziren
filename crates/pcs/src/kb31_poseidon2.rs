@@ -96,8 +96,8 @@ pub mod koala_bear_poseidon2 {
             log_final_poly_len: 0,
             max_log_arity: 1,
             num_queries,
-            commit_proof_of_work_bits: 0,
             batch_proof_of_work_bits: 0,
+            commit_proof_of_work_bits: 0,
             query_proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         }
@@ -119,8 +119,8 @@ pub mod koala_bear_poseidon2 {
             log_final_poly_len: 0,
             max_log_arity: 1,
             num_queries,
-            commit_proof_of_work_bits: 0,
             batch_proof_of_work_bits: 0,
+            commit_proof_of_work_bits: 0,
             query_proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         }
@@ -142,8 +142,8 @@ pub mod koala_bear_poseidon2 {
             log_final_poly_len: 0,
             max_log_arity: 1,
             num_queries,
-            commit_proof_of_work_bits: 0,
             batch_proof_of_work_bits: 0,
+            commit_proof_of_work_bits: 0,
             query_proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         }

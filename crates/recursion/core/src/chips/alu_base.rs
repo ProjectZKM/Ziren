@@ -73,6 +73,10 @@ impl<F: Field> BaseAir<F> for BaseAluChip {
     fn width(&self) -> usize {
         NUM_BASE_ALU_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_BASE_ALU_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
@@ -84,10 +88,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
     fn name(&self) -> String {
         "BaseAlu".to_string()
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_BASE_ALU_PREPROCESSED_COLS
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {

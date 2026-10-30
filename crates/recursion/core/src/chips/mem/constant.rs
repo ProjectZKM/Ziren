@@ -40,6 +40,10 @@ impl<F: Send + Sync> BaseAir<F> for MemoryChip<F> {
     fn width(&self) -> usize {
         NUM_MEM_INIT_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_MEM_PREPROCESSED_INIT_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
@@ -51,9 +55,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
     fn name(&self) -> String {
         "MemoryConst".to_string()
-    }
-    fn preprocessed_width(&self) -> usize {
-        NUM_MEM_PREPROCESSED_INIT_COLS
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {

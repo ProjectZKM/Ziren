@@ -328,6 +328,10 @@ impl<F: Field> BaseAir<F> for Blake3CompressChip {
     fn width(&self) -> usize {
         NUM_BLAKE3_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_BLAKE3_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for Blake3CompressChip {
@@ -382,10 +386,6 @@ impl<F: PrimeField32> MachineAir<F> for Blake3CompressChip {
 
     fn included(&self, _record: &Self::Record) -> bool {
         true
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_BLAKE3_PREPROCESSED_COLS
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {

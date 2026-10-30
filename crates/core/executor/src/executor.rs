@@ -13,7 +13,6 @@ use zkm_pcs::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
-    estimate_mips_lde_size,
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
         MemoryAccessPosition, MemoryBumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
@@ -22,14 +21,13 @@ use crate::{
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, Memory},
-    pad_mips_event_counts,
     record::{ExecutionRecord, MemoryAccessRecord},
     sign_extend,
     state::{ExecutionState, ForkState},
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
-    ExecutionReport, Instruction, MaximalShapes, MipsAirId, Opcode, Program, Register,
-    ShardSplitAccumulator, NUM_REGISTERS,
+    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register, ShardSplitAccumulator,
+    NUM_REGISTERS,
 };
 
 /// The maximum number of instructions in a program.
@@ -72,8 +70,8 @@ const CORE_MAX_LOG_ROW_COUNT: usize =
 /// exactly the cube the base-cube recursion (and hence vk_map / the gnark ceremony) is pinned
 /// to verify. The `CORE_SHARD_HEIGHT_HEADROOM` band below the cube keeps the tallest chip
 /// strictly under it (>= 1 padding row) and absorbs the coarseness of the mid-shard height
-/// estimate, which is refreshed only every `shape_check_frequency` cycles and omits some
-/// dependency rows, so the real trace height cannot overshoot the cube between checks.
+/// estimate, which omits some dependency rows, so the real trace height cannot overshoot the
+/// cube.
 const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
 pub(crate) const CORE_SHARD_HEIGHT_THRESHOLD: u64 =
     (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
@@ -155,16 +153,6 @@ fn shard_close_census_enabled() -> bool {
         )
     })
 }
-
-/// How often the offline shape-search tooling (`lde_size_check` / `maximal_shapes`) samples the
-/// live chip heights.
-///
-/// This is NOT a production knob. The two limits that actually close shards — trace area and
-/// per-chip height — are exact on every cycle and have no frequency at all; this constant only
-/// bounds the cost of the O(shapes x chips) scan that a populated `core_shape_config` and the
-/// `find_maximal_shapes` script enable, neither of which runs on the prove path. It is the
-/// former `SHAPE_CHECK_FREQUENCY` default, kept so that tooling behaves exactly as before.
-const SHAPE_SEARCH_CHECK_FREQUENCY: u64 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Whether to verify deferred proofs during execution.
@@ -306,32 +294,10 @@ pub struct Executor<'a> {
     /// Registry of hooks, to be invoked by writing to certain file descriptors.
     pub hook_registry: HookRegistry<'a>,
 
-    /// The maximal shapes for the program.
-    ///
-    /// `None` on the production prove path — it is set from
-    /// `prover.core_shape_config`, which only the offline shape tooling
-    /// populates.  See the `shape_match_found` note in `inc_shard_if_need`.
-    pub maximal_shapes: Option<MaximalShapes>,
-
     /// How many of a block's first shards the cutting pass closes early, at
     /// `1 / 2^RAMP_AREA_SHIFT` of the area budget.  Defaults to `RAMP_SHARDS`;
     /// a caller with only one card to keep busy sets 0.
     pub ramp_shards: u32,
-
-    /// The costs of the program.
-    pub costs: HashMap<MipsAirId, u64>,
-
-    /// Early exit if the estimate LDE size is too big.
-    ///
-    /// `false` everywhere except the offline `find_maximal_shapes` script.
-    pub lde_size_check: bool,
-
-    /// The maximum LDE size to allow.
-    ///
-    /// Defaults to `0`, so [`Self::lde_size_check`] must never be enabled without
-    /// also setting this — otherwise `padded_lde_size > 0` holds on every check and
-    /// the executor closes a shard at every `SHAPE_SEARCH_CHECK_FREQUENCY` boundary.
-    pub lde_size_threshold: u64,
 
     /// optional MinimalTrace collector. When `Some`,
     /// each `bump_record()` push also stamps a `TraceChunk` capturing
@@ -681,11 +647,7 @@ impl<'a> Executor<'a> {
             uninitialized_memory_checkpoint: Memory::default(),
             local_memory_access: nohash_hasher::IntMap::default(),
             local_reg_access: std::array::from_fn(|_| None),
-            maximal_shapes: None,
             ramp_shards: RAMP_SHARDS,
-            costs,
-            lde_size_check: false,
-            lde_size_threshold: 0,
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
             force_interpreter: false,
@@ -3500,9 +3462,7 @@ impl<'a> Executor<'a> {
 
     #[inline]
     /// Whether [`Self::inc_shard_if_need`] would close the shard right now,
-    /// without closing it. Mirrors the four production limits it tests; the
-    /// offline shape block cannot fire here because the producer only runs
-    /// with `lde_size_check` off and `maximal_shapes` unset.
+    /// without closing it. Mirrors the limits it tests.
     pub(crate) fn shard_fence_due(&self) -> bool {
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
         let clk_exit = self.state.clk + self.max_syscall_cycles + MemoryAccessPosition::HI as u32
@@ -3550,83 +3510,7 @@ impl<'a> Executor<'a> {
 
         let ramp_split = self.ramp_split_due();
 
-        let mut shape_match_found = true;
-        if (self.lde_size_check || self.maximal_shapes.is_some())
-            && self.state.global_clk.is_multiple_of(SHAPE_SEARCH_CHECK_FREQUENCY)
-        {
-            let event_counts = self.split_acct.event_counts(cpu_cycles);
-
-            if self.lde_size_check {
-                let padded_event_counts =
-                    pad_mips_event_counts(event_counts, SHAPE_SEARCH_CHECK_FREQUENCY);
-                let padded_lde_size = estimate_mips_lde_size(padded_event_counts, &self.costs);
-                if padded_lde_size > self.lde_size_threshold {
-                    tracing::warn!(
-                        "stopping shard early due to lde size: {} Gib",
-                        (padded_lde_size as f64) / (1 << 9) as f64,
-                    );
-                    shape_match_found = false;
-                }
-            } else if let Some(maximal_shapes) = &self.maximal_shapes {
-                let distance = |threshold: usize, count: usize| {
-                    if count != 0 {
-                        threshold - count
-                    } else {
-                        usize::MAX
-                    }
-                };
-
-                shape_match_found = false;
-
-                for shape in maximal_shapes.iter() {
-                    let cpu_threshold = shape[MipsAirId::Cpu];
-                    if self.state.clk > ((1 << cpu_threshold) << 2) {
-                        continue;
-                    }
-
-                    let mut l_infinity = usize::MAX;
-                    let mut shape_too_small = false;
-                    for air in MipsAirId::core() {
-                        if air == MipsAirId::Cpu {
-                            continue;
-                        }
-
-                        let threshold = 1 << shape[air];
-                        let count = event_counts[air] as usize;
-                        if count > threshold {
-                            shape_too_small = true;
-                            break;
-                        }
-
-                        if distance(threshold, count) < l_infinity {
-                            l_infinity = distance(threshold, count);
-                        }
-                    }
-
-                    if shape_too_small {
-                        continue;
-                    }
-
-                    if l_infinity >= 32 * (SHAPE_SEARCH_CHECK_FREQUENCY as usize) {
-                        shape_match_found = true;
-                        break;
-                    }
-                }
-
-                if !shape_match_found {
-                    self.record.counts = Some(event_counts);
-                    tracing::debug!(
-                        "stopping shard early due to no shapes fitting: \
-                        clk: {},
-                        clk_usage: {}",
-                        (self.state.clk / 5).next_power_of_two().ilog2(),
-                        ((self.state.clk / 5) as f64).log2(),
-                    );
-                }
-            }
-        }
-
-        if cpu_exit || clk_exit || !shape_match_found || height_split || area_split || ramp_split {
+        if cpu_exit || clk_exit || height_split || area_split || ramp_split {
             if shard_close_census_enabled() {
                 let reason = if clk_exit {
                     "clk"
@@ -3636,10 +3520,8 @@ impl<'a> Executor<'a> {
                     "area"
                 } else if cpu_exit {
                     "cpu"
-                } else if ramp_split {
-                    "ramp"
                 } else {
-                    "shape"
+                    "ramp"
                 };
                 let counts = self.split_acct.event_counts(cpu_cycles);
                 let mut census: Vec<String> = counts

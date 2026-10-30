@@ -191,11 +191,8 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             CurveType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_DOUBLE).len(),
             _ => panic!("Unsupported curve"),
         };
-        let nb_rows = next_multiple_of_32(
-            events_len,
-            input.fixed_log2_rows::<F, _>(self),
-            <Self as MachineAir<F>>::name(self).as_str(),
-        );
+        let nb_rows =
+            next_multiple_of_32(events_len, None, <Self as MachineAir<F>>::name(self).as_str());
         Some(nb_rows)
     }
 
@@ -301,24 +298,18 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            match E::CURVE_TYPE {
-                CurveType::Secp256k1 => {
-                    !shard.get_precompile_events(SyscallCode::SECP256K1_DOUBLE).is_empty()
-                }
-                CurveType::Secp256r1 => {
-                    !shard.get_precompile_events(SyscallCode::SECP256R1_DOUBLE).is_empty()
-                }
-                CurveType::Bn254 => {
-                    !shard.get_precompile_events(SyscallCode::BN254_DOUBLE).is_empty()
-                }
-                CurveType::Bls12381 => {
-                    !shard.get_precompile_events(SyscallCode::BLS12381_DOUBLE).is_empty()
-                }
-                _ => panic!("Unsupported curve"),
+        match E::CURVE_TYPE {
+            CurveType::Secp256k1 => {
+                !shard.get_precompile_events(SyscallCode::SECP256K1_DOUBLE).is_empty()
             }
+            CurveType::Secp256r1 => {
+                !shard.get_precompile_events(SyscallCode::SECP256R1_DOUBLE).is_empty()
+            }
+            CurveType::Bn254 => !shard.get_precompile_events(SyscallCode::BN254_DOUBLE).is_empty(),
+            CurveType::Bls12381 => {
+                !shard.get_precompile_events(SyscallCode::BLS12381_DOUBLE).is_empty()
+            }
+            _ => panic!("Unsupported curve"),
         }
     }
 }

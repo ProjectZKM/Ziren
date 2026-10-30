@@ -65,7 +65,7 @@ fn spec_vectors_prove_and_verify() {
         let started = std::time::Instant::now();
         let runtime = Executor::new(program, ZKMCoreOpts::default());
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None)
+            run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new())
         }));
         match outcome {
             Ok(Ok(_)) => {
@@ -154,7 +154,7 @@ fn cannon_programs_prove_and_verify() {
         let started = std::time::Instant::now();
         let runtime = Executor::new(program, ZKMCoreOpts::default());
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None)
+            run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new())
         }));
         match outcome {
             Ok(Ok(_)) => {

@@ -102,9 +102,9 @@ where
     SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<C::F>,
 {
-    if opening.preprocessed.local.len() != zkm_pcs::air::MachineAir::preprocessed_width(chip) {
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
         return Err(OpeningShapeError::PreprocessedWidthMismatch(
-            zkm_pcs::air::MachineAir::preprocessed_width(chip),
+            chip.preprocessed_width(),
             opening.preprocessed.local.len(),
         ));
     }
@@ -126,9 +126,9 @@ where
     SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<C::F>,
 {
-    if opening.preprocessed.local.len() != zkm_pcs::air::MachineAir::preprocessed_width(chip) {
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
         return Err(OpeningShapeError::PreprocessedWidthMismatch(
-            zkm_pcs::air::MachineAir::preprocessed_width(chip),
+            chip.preprocessed_width(),
             opening.preprocessed.local.len(),
         ));
     }
@@ -237,7 +237,7 @@ where
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
-        let preproc_width = zkm_pcs::air::MachineAir::preprocessed_width(chip);
+        let preproc_width = chip.preprocessed_width();
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
@@ -303,7 +303,7 @@ where
         global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
-        let preproc_width = zkm_pcs::air::MachineAir::preprocessed_width(chip);
+        let preproc_width = chip.preprocessed_width();
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         let mut folder = ShardConstraintFolder::<C> {
@@ -406,7 +406,7 @@ where
 
         let max_elements = shard_chips
             .iter()
-            .map(|chip| chip.width() + zkm_pcs::air::MachineAir::preprocessed_width(*chip))
+            .map(|chip| chip.width() + chip.preprocessed_width())
             .max()
             .unwrap_or(0);
         let gkr_batch_open_challenge_powers: Vec<SymbolicExt<C::F, C::EF>> =
@@ -777,11 +777,11 @@ mod padded_row_tests {
     {
         let (main_row, prep_row) = if runtime_row {
             let z: SymbolicExt<F, EF> = builder.eval::<Ext<F, EF>, _>(SymbolicExt::ZERO).into();
-            (vec![z; chip.width()], vec![z; zkm_pcs::air::MachineAir::preprocessed_width(chip)])
+            (vec![z; chip.width()], vec![z; chip.preprocessed_width()])
         } else {
             (
                 vec![SymbolicExt::ZERO; chip.width()],
-                vec![SymbolicExt::ZERO; zkm_pcs::air::MachineAir::preprocessed_width(chip)],
+                vec![SymbolicExt::ZERO; chip.preprocessed_width()],
             )
         };
         let before = builder.get_mut_operations().vec.len();

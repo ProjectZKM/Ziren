@@ -72,11 +72,8 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
                 _ => unreachable!(),
             })
             .sum();
-        let nb_rows = next_multiple_of_32(
-            nb_real,
-            input.fixed_log2_rows::<F, _>(self),
-            <Self as MachineAir<F>>::name(self).as_str(),
-        );
+        let nb_rows =
+            next_multiple_of_32(nb_real, None, <Self as MachineAir<F>>::name(self).as_str());
         Some(nb_rows)
     }
 
@@ -139,10 +136,6 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.get_precompile_events(SyscallCode::KECCAK_SPONGE).is_empty()
-        }
+        !shard.get_precompile_events(SyscallCode::KECCAK_SPONGE).is_empty()
     }
 }

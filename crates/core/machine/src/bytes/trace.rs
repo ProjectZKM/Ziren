@@ -8,7 +8,7 @@ use zkm_pcs::air::MachineAir;
 use crate::{utils::zeroed_f_vec, CoreChipError};
 
 use super::{
-    columns::{ByteMultCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
+    columns::{ByteMultCols, NUM_BYTE_MULT_COLS},
     ByteChip,
 };
 
@@ -23,10 +23,6 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
 
     fn name(&self) -> String {
         "Byte".to_string()
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_BYTE_PREPROCESSED_COLS
     }
 
     fn generate_preprocessed_trace(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {

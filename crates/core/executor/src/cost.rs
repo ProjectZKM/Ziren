@@ -1,94 +1,8 @@
 use enum_map::EnumMap;
 use hashbrown::HashMap;
-use p3_koala_bear::KoalaBear;
 
 use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, MipsAirId, Opcode, NUM_REGISTERS};
 
-const BYTE_NUM_ROWS: u64 = 1 << 16;
-const MAX_PROGRAM_SIZE: u64 = 1 << 22;
-
-/// Estimates the LDE area.
-#[must_use]
-pub fn estimate_mips_lde_size(
-    num_events_per_air: EnumMap<MipsAirId, u64>,
-    costs_per_air: &HashMap<MipsAirId, u64>,
-) -> u64 {
-    let mut cells = BYTE_NUM_ROWS * costs_per_air[&MipsAirId::Byte];
-
-    cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::Program];
-
-    cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
-        * costs_per_air[&MipsAirId::AddSub];
-
-    cells += (num_events_per_air[MipsAirId::AddSubImm]).next_power_of_two()
-        * costs_per_air[&MipsAirId::AddSubImm];
-
-    cells += (num_events_per_air[MipsAirId::BitwiseImm]).next_power_of_two()
-        * costs_per_air[&MipsAirId::BitwiseImm];
-
-    for air in [MipsAirId::ShiftLeftImm, MipsAirId::ShiftRightImm, MipsAirId::LtImm] {
-        cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
-    }
-
-    cells +=
-        (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
-
-    cells += (num_events_per_air[MipsAirId::Bitwise]).next_power_of_two()
-        * costs_per_air[&MipsAirId::Bitwise];
-
-    cells += (num_events_per_air[MipsAirId::ShiftLeft]).next_power_of_two()
-        * costs_per_air[&MipsAirId::ShiftLeft];
-
-    cells += (num_events_per_air[MipsAirId::ShiftRight]).next_power_of_two()
-        * costs_per_air[&MipsAirId::ShiftRight];
-
-    cells += (num_events_per_air[MipsAirId::DivRem]).next_power_of_two()
-        * costs_per_air[&MipsAirId::DivRem];
-
-    cells +=
-        (num_events_per_air[MipsAirId::Lt]).next_power_of_two() * costs_per_air[&MipsAirId::Lt];
-
-    cells += (num_events_per_air[MipsAirId::MemoryLocal]).next_power_of_two()
-        * costs_per_air[&MipsAirId::MemoryLocal];
-
-    cells += (num_events_per_air[MipsAirId::MemoryBump]).next_power_of_two()
-        * costs_per_air[&MipsAirId::MemoryBump];
-
-    cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
-        * costs_per_air[&MipsAirId::Branch];
-
-    cells +=
-        (num_events_per_air[MipsAirId::Jump]).next_power_of_two() * costs_per_air[&MipsAirId::Jump];
-
-    cells += (num_events_per_air[MipsAirId::SyscallInstrs]).next_power_of_two()
-        * costs_per_air[&MipsAirId::SyscallInstrs];
-
-    for air in [
-        MipsAirId::LoadNarrow,
-        MipsAirId::LoadWord,
-        MipsAirId::StoreNarrow,
-        MipsAirId::StoreWord,
-        MipsAirId::MemoryUnaligned,
-    ] {
-        cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
-    }
-
-    cells += (num_events_per_air[MipsAirId::MiscInstrs]).next_power_of_two()
-        * costs_per_air[&MipsAirId::MiscInstrs];
-
-    cells += (num_events_per_air[MipsAirId::CloClz]).next_power_of_two()
-        * costs_per_air[&MipsAirId::CloClz];
-
-    cells += (num_events_per_air[MipsAirId::SyscallCore]).next_power_of_two()
-        * costs_per_air[&MipsAirId::SyscallCore];
-
-    cells += (num_events_per_air[MipsAirId::Global]).next_power_of_two()
-        * costs_per_air[&MipsAirId::Global];
-
-    cells * ((core::mem::size_of::<KoalaBear>() << 1) as u64)
-}
-
-/// Estimate
 /// Maps the opcode counts to the number of events in each air.
 #[must_use]
 pub fn estimate_mips_event_counts(
@@ -441,46 +355,6 @@ impl ShardSplitAccumulator {
         }
         self.touched_addresses = touched;
     }
-}
-
-/// Pads the event counts to account for the worst case jump in events across N cycles.
-#[must_use]
-#[allow(clippy::match_same_arms)]
-pub fn pad_mips_event_counts(
-    mut event_counts: EnumMap<MipsAirId, u64>,
-    num_cycles: u64,
-) -> EnumMap<MipsAirId, u64> {
-    event_counts.iter_mut().for_each(|(k, v)| match k {
-        MipsAirId::Cpu => *v += num_cycles,
-        MipsAirId::AddSub => *v += 5 * num_cycles,
-        MipsAirId::AddSubImm => *v += num_cycles,
-        MipsAirId::BitwiseImm => *v += num_cycles,
-        MipsAirId::ShiftLeftImm => *v += num_cycles,
-        MipsAirId::ShiftRightImm => *v += num_cycles,
-        MipsAirId::LtImm => *v += num_cycles,
-        MipsAirId::Mul => *v += 4 * num_cycles,
-        MipsAirId::Bitwise => *v += 3 * num_cycles,
-        MipsAirId::ShiftLeft => *v += num_cycles,
-        MipsAirId::ShiftRight => *v += num_cycles,
-        MipsAirId::DivRem => *v += 4 * num_cycles,
-        MipsAirId::Lt => *v += 2 * num_cycles,
-        MipsAirId::MemoryLocal => *v += 64 * num_cycles,
-        MipsAirId::MemoryBump => *v += NUM_REGISTERS as u64,
-        MipsAirId::Branch => *v += 8 * num_cycles,
-        MipsAirId::Jump => *v += 2 * num_cycles,
-        MipsAirId::SyscallInstrs => *v += num_cycles,
-        MipsAirId::LoadNarrow => *v += 8 * num_cycles,
-        MipsAirId::LoadWord => *v += 8 * num_cycles,
-        MipsAirId::StoreNarrow => *v += 8 * num_cycles,
-        MipsAirId::StoreWord => *v += 8 * num_cycles,
-        MipsAirId::MemoryUnaligned => *v += 8 * num_cycles,
-        MipsAirId::MiscInstrs => *v += 8 * num_cycles,
-        MipsAirId::CloClz => *v += 3 * num_cycles,
-        MipsAirId::SyscallCore => *v += 2 * num_cycles,
-        MipsAirId::Global => *v += 64 * num_cycles,
-        _ => (),
-    });
-    event_counts
 }
 
 #[cfg(test)]

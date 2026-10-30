@@ -99,6 +99,8 @@ pub trait KoalaBearFriParameters:
     type FriChallenger: CanObserve<<Self::ValMmcs as Mmcs<KoalaBear>>::Commitment>
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
+        + Clone
+        + Sync
         + FieldChallenger<KoalaBear>;
 
     /// The WHIR schedule the proofs of this ring were opened under, which

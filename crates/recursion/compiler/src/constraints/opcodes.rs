@@ -52,6 +52,7 @@ pub enum ConstraintOpcode {
     CircuitFelts2Ext,
     CircuitFelts2Ext5,
     CircuitFelt2Var,
+    CircuitVar2FieldOrderLimbs,
     PermuteKoalaBear,
     ReduceE,
 }

@@ -134,10 +134,10 @@ pub struct TraceChunk {
     pub shard_index: u32,
     /// The closed shard's per-chip height classes, hashed: `ilog2(next_pow2(
     /// rows))` per air with rows > 0, the cycle count included as the `Cpu`
-    /// axis.  Under FIX_CORE_SHAPES=off that is what fixes the shard's padded
-    /// shape and hence which recursion program — which (pk, vk) — proves its
-    /// leaf, so two chunks with equal fingerprints almost always want the
-    /// same proving key.  A PLACEMENT HINT for the multi-GPU parent, nothing
+    /// axis.  That is what fixes the shard's padded shape and hence which
+    /// recursion program — which (pk, vk) — proves its leaf, so two chunks
+    /// with equal fingerprints almost always want the same proving key.  A
+    /// PLACEMENT HINT for the multi-GPU parent, nothing
     /// more: the worker derives the real shape from the replayed record and
     /// never reads this, and a wrong guess costs one cache miss, exactly what
     /// every node paid before it existed.

@@ -61,18 +61,13 @@ impl<F: Field> LookupBuilder<F> {
 }
 
 impl<F: Field> AirBuilder for LookupBuilder<F> {
-    type PeriodicVar = Self::Var;
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition_window(2)
-    }
-
     type F = F;
     type Expr = SymbolicExpression<F>;
     type Var = SymbolicVariable<F>;
     type PreprocessedWindow = RowMajorMatrix<Self::Var>;
     type MainWindow = RowMajorMatrix<Self::Var>;
     type PublicVar = SymbolicVariable<F>;
+    type PeriodicVar = SymbolicVariable<F>;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -90,12 +85,8 @@ impl<F: Field> AirBuilder for LookupBuilder<F> {
         SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsLastRow)
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        if size == 2 {
-            SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsTransition)
-        } else {
-            panic!("uni-stark only supports a window size of 2")
-        }
+    fn is_transition(&self) -> Self::Expr {
+        SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsTransition)
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {}

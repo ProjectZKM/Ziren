@@ -1,5 +1,5 @@
-//! Dump the tendermint workload as `find_maximal_shapes --list` input:
-//! <out>/{program.bin,stdin.bin} with the SAME stdin the host proves.
+//! Dump the tendermint workload to <out>/{program.bin,stdin.bin}, with the
+//! SAME stdin the host proves.
 
 use tendermint_light_client_verifier::types::LightBlock;
 use zkm_sdk::{include_elf, utils, ZKMStdin};

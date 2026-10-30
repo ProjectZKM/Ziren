@@ -2459,9 +2459,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
 dependencies = [
  "either",
 ]
@@ -3038,6 +3038,7 @@ name = "p3-air"
 version = "0.8.0"
 source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
 dependencies = [
+ "hashbrown 0.17.1",
  "p3-field",
  "p3-matrix",
  "serde",
@@ -3320,6 +3321,7 @@ name = "p3-keccak"
 version = "0.8.0"
 source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
 dependencies = [
+ "cpufeatures 0.3.0",
  "p3-symmetric",
  "p3-util",
  "tiny-keccak",
@@ -4061,7 +4063,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -4094,7 +4096,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5074,7 +5076,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6590,6 +6592,7 @@ dependencies = [
  "p256",
  "p3-air",
  "p3-challenger",
+ "p3-commit",
  "p3-field",
  "p3-keccak-air",
  "p3-koala-bear",
@@ -6834,6 +6837,7 @@ dependencies = [
  "ff 0.13.1",
  "hashbrown 0.14.5",
  "itertools 0.13.0",
+ "num-bigint 0.5.1",
  "p3-air",
  "p3-blake3",
  "p3-bn254",
@@ -6998,7 +7002,7 @@ dependencies = [
  "indicatif",
  "itertools 0.13.0",
  "log",
- "num-bigint 0.4.6",
+ "num-bigint 0.5.1",
  "p3-field",
  "p3-fri",
  "p3-koala-bear",

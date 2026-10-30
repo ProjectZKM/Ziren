@@ -204,7 +204,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         use p3_air::BaseAir as _Base1;
         let _preprocessed_widths_pre: Vec<usize> = shard_chips_pre
             .iter()
-            .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
         let main_widths_pre: Vec<usize> = shard_chips_pre
             .iter()
@@ -215,7 +215,7 @@ pub fn verify_compress_jagged<C, SC, A>(
                 .chips()
                 .iter()
                 .filter_map(|c| {
-                    let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                    let w = p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
                     (w > 0).then(|| {
                         (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
                     })
@@ -346,7 +346,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         use p3_air::BaseAir;
         let _preprocessed_widths: Vec<usize> = _shard_chips
             .iter()
-            .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
         let main_widths: Vec<usize> = _shard_chips
             .iter()

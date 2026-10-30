@@ -6,13 +6,17 @@ use zkm_core_executor::ByteOpcode;
 use zkm_pcs::air::ZKMAirBuilder;
 
 use super::{
-    columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS},
+    columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
     ByteChip,
 };
 
 impl<F: Field> BaseAir<F> for ByteChip<F> {
     fn width(&self) -> usize {
         NUM_BYTE_MULT_COLS
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_BYTE_PREPROCESSED_COLS
     }
 }
 

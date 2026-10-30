@@ -82,12 +82,6 @@ where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
 {
-    type PeriodicVar = Self::Var;
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition_window(2)
-    }
-
     type F = C::F;
     type Expr = SymbolicExt<C::F, C::EF>;
     // The trace window carries SYMBOLIC values, not `Ext` handles.  For a real
@@ -103,6 +97,7 @@ where
     type PreprocessedWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type MainWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type PublicVar = Felt<C::F>;
+    type PeriodicVar = Felt<C::F>;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -122,7 +117,7 @@ where
         SymbolicExt::<C::F, C::EF>::ZERO
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         use p3_field::PrimeCharacteristicRing;
         SymbolicExt::<C::F, C::EF>::ZERO
     }

@@ -52,6 +52,10 @@ impl<F> BaseAir<F> for PublicValuesChip {
     fn width(&self) -> usize {
         NUM_PUBLIC_VALUES_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_PUBLIC_VALUES_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
@@ -71,10 +75,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
         Ok(())
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_PUBLIC_VALUES_PREPROCESSED_COLS
     }
 
     #[cfg(not(feature = "sys"))]

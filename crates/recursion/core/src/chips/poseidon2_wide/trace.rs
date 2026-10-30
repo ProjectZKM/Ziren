@@ -42,7 +42,8 @@ use crate::{
 
 use super::columns::preprocessed::Poseidon2PreprocessedColsWide;
 
-const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedColsWide<u8>>();
+pub(super) const PREPROCESSED_POSEIDON2_WIDTH: usize =
+    size_of::<Poseidon2PreprocessedColsWide<u8>>();
 
 impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<DEGREE> {
     type Record = ExecutionRecord<F>;
@@ -166,10 +167,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
     fn included(&self, _record: &Self::Record) -> bool {
         true
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        PREPROCESSED_POSEIDON2_WIDTH
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {

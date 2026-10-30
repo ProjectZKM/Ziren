@@ -40,7 +40,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
         let nb_rows = next_multiple_of_32(
             input.get_precompile_events(SyscallCode::SHA_COMPRESS).len()
                 * SHA_COMPRESS_ROWS_PER_EVENT,
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <Self as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
@@ -127,11 +127,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.get_precompile_events(SyscallCode::SHA_COMPRESS).is_empty()
-        }
+        !shard.get_precompile_events(SyscallCode::SHA_COMPRESS).is_empty()
     }
 }
 

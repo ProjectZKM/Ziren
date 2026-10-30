@@ -8,7 +8,7 @@
 //!     reconstruction and in the zerocheck;
 //!   * the jagged reduction.
 //!
-//! Proofs here are unshaped (`shape_config = None`, raw heights).
+//! Proofs here commit every chip at its raw height.
 //!
 //! Where a height lives in a host shard proof (`JaggedShardProof<F, EF>`):
 //!   * `chip_heights[name]`: observed into the transcript prologue.
@@ -40,7 +40,7 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use zkm_core_executor::{Executor, Program, ZKMContext};
+use zkm_core_executor::{Program, ZKMContext};
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, MachineProof, MachineProver,
     MachineVerificationError, ShardProof, StarkGenericConfig, StarkMachine, ZKMCoreOpts,
@@ -65,8 +65,7 @@ fn fib_stdin() -> ZKMStdin {
     stdin
 }
 
-/// Prove `program` on `stdin` unshaped (`shape_config = None`, raw
-/// heights).  Returns the `MachineProof` and a
+/// Prove `program` on `stdin` at raw heights.  Returns the `MachineProof` and a
 /// freshly-built machine+vk so the caller can verify (and re-verify
 /// mutated copies) honestly.
 fn prove_raw_heights(
@@ -86,9 +85,8 @@ fn prove_raw_heights(
         &stdin,
         ZKMCoreOpts::default(),
         ZKMContext::default(),
-        None,
     )
-    .expect("unshaped prove_with_context");
+    .expect("prove_with_context");
 
     let config = KoalaBearPoseidon2::new();
     let machine = MipsAir::machine(config);
@@ -171,42 +169,22 @@ fn degree_bits_to_height(degree: &[Challenge]) -> Option<usize> {
 
 // CONTROL
 
-/// Control: an honest unshaped proof verifies.  Proves the harness's
+/// Control: an honest proof verifies.  Proves the harness's
 /// verify path is REAL (not trivially rejecting everything), so a later
 /// rejection in the forgery tests is meaningful.
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
-fn control_unshaped_honest_verifies() {
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn control_honest_verifies() {
     setup_logger();
     let (proof, machine, vk) = prove_raw_heights(fibonacci_program(), fib_stdin());
     let res = verify(&machine, &vk, &proof);
-    tracing::info!("[control][fibonacci unshaped] honest verify = {}", reject_tag(&res));
-    assert!(res.is_ok(), "honest unshaped proof must verify (control)");
-}
-
-/// Control: an honest shaped proof verifies.
-#[test]
-#[ignore = "proves a real shaped core proof (multi-second); run with --ignored"]
-fn control_shaped_honest_verifies() {
-    setup_logger();
-    let mut program = fibonacci_program();
-    let shape_config = crate::shape::CoreShapeConfig::<Val>::default();
-    shape_config.fix_preprocessed_shape(&mut program).unwrap();
-    let mut runtime = Executor::new(program.clone(), ZKMCoreOpts::default());
-    runtime.write_vecs(&fib_stdin().buffer);
-    runtime.run().unwrap();
-    let res =
-        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config));
-    tracing::info!(
-        "[control][fibonacci shaped] honest verify = {}",
-        if res.is_ok() { "ACCEPTED" } else { "REJECTED" }
-    );
-    assert!(res.is_ok(), "honest shaped proof must verify (control)");
+    tracing::info!("[control][fibonacci] honest verify = {}", reject_tag(&res));
+    assert!(res.is_ok(), "honest proof must verify (control)");
 }
 
 // FORGERY
 
-/// Core forgery driver.  Proves an unshaped proof, confirms it verifies
+/// Core forgery driver.  Proves a proof, confirms it verifies
 /// honestly, then for the chosen target chip applies the supplied
 /// `mutate` to the proof copy and re-verifies.  Asserts the outcome
 /// matches `expect_reject`.  Returns the reject tag so the caller can
@@ -231,7 +209,7 @@ fn run_forgery(
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
-        "[{label}] honest unshaped proof must verify before forging (got {})",
+        "[{label}] honest proof must verify before forging (got {})",
         reject_tag(&honest)
     );
 
@@ -404,7 +382,7 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 // (A) Transcript-coupled forgeries: rejected by the transcript bind alone.
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_overclaim_fibonacci() {
     setup_logger();
     let tag = run_forgery("fibonacci/overclaim", fibonacci_program(), fib_stdin(), true, overclaim);
@@ -412,7 +390,7 @@ fn forge_overclaim_fibonacci() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_underclaim_fibonacci() {
     setup_logger();
     let tag =
@@ -421,7 +399,7 @@ fn forge_underclaim_fibonacci() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_transcript_only_fibonacci() {
     setup_logger();
     let tag = run_forgery(
@@ -438,7 +416,7 @@ fn forge_transcript_only_fibonacci() {
 //     `full_geq` reconstruction alone binds height.
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_degree_only_overclaim_fibonacci() {
     setup_logger();
     let tag = run_forgery(
@@ -452,7 +430,7 @@ fn forge_degree_only_overclaim_fibonacci() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_degree_only_underclaim_fibonacci() {
     setup_logger();
     let tag = run_forgery(
@@ -469,7 +447,7 @@ fn forge_degree_only_underclaim_fibonacci() {
 //      degree-only over-claim is rejected on the default verify path.
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn degree_only_overclaim_fibonacci_rejected_unconditionally() {
     setup_logger();
     let tag = run_forgery(
@@ -486,14 +464,14 @@ fn degree_only_overclaim_fibonacci_rejected_unconditionally() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn degree_only_overclaim_fibonacci_rejected_on_default() {
     setup_logger();
     let (proof, machine, vk) = prove_raw_heights(fibonacci_program(), fib_stdin());
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
-        "[degree-only-default] honest unshaped proof must verify (got {})",
+        "[degree-only-default] honest proof must verify (got {})",
         reject_tag(&honest)
     );
     let (si, ci, name, log_h) = pick_forge_target(&proof);
@@ -520,7 +498,7 @@ fn degree_only_overclaim_fibonacci_rejected_on_default() {
 // keccak / sha3 (precompile-uniform shards)
 
 #[test]
-#[ignore = "proves a real unshaped keccak core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real keccak core proof (multi-second); run with --ignored"]
 fn forge_overclaim_keccak() {
     setup_logger();
     let tag =
@@ -529,7 +507,7 @@ fn forge_overclaim_keccak() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped keccak core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real keccak core proof (multi-second); run with --ignored"]
 fn forge_underclaim_keccak() {
     setup_logger();
     let tag =
@@ -538,7 +516,7 @@ fn forge_underclaim_keccak() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped keccak core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real keccak core proof (multi-second); run with --ignored"]
 fn forge_degree_only_overclaim_keccak() {
     setup_logger();
     let tag = run_forgery(
@@ -613,7 +591,7 @@ fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_count_tamper_column_fibonacci() {
     setup_logger();
     let tag = run_forgery(
@@ -627,7 +605,7 @@ fn forge_count_tamper_column_fibonacci() {
 }
 
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_count_tamper_row_fibonacci() {
     setup_logger();
     let tag = run_forgery(
@@ -643,7 +621,7 @@ fn forge_count_tamper_row_fibonacci() {
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
-// commit: a canonical-cluster chip an unshaped shard lacks is committed
+// commit: a cluster chip a shard lacks is committed
 // with `row_count = 0`, so its `degree` bits (`quotient[0]`) are ALL ZERO
 // (=> `full_geq == 1` => identity fraction (0,1) => excluded from the
 // LogUp-GKR sum).  These two forgeries PROVE that model is sound — that the
@@ -656,12 +634,12 @@ fn forge_count_tamper_row_fibonacci() {
 // bind.
 
 /// Find the first shard+chip committed at genuine HEIGHT 0 — a missing
-/// canonical-cluster chip: its `degree` bits (`quotient[0]`) are a NON-EMPTY
+/// cluster chip: its `degree` bits (`quotient[0]`) are a NON-EMPTY
 /// vector of ALL ZEROS (height 0 => every big-endian bit clear; a present
 /// height-1 chip instead has the LSB set, and taller chips have a higher bit
 /// set).  Returns `(shard_idx, chip_idx, chip_name)`.  Reports every height-0
-/// chip it sees (the direct evidence that the band-cap injects missing chips
-/// at h=0/degree=0).  Panics if NONE exist (which would itself mean the
+/// chip it sees (the direct evidence that the commit injects missing cluster
+/// chips at h=0/degree=0).  Panics if NONE exist (which would itself mean the
 /// injection is not firing — a validation failure).
 fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, String) {
     let mut found: Vec<(usize, String)> = Vec::new();
@@ -682,12 +660,12 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
         }
     }
     tracing::warn!(
-        "[forgery] HEIGHT-0/degree-0 missing chips in unshaped proof: {} -> {:?}",
+        "[forgery] HEIGHT-0/degree-0 missing chips in proof: {} -> {:?}",
         found.len(),
         found,
     );
     first.expect(
-        "no HEIGHT-0 missing chip in unshaped proof — band-cap injection is NOT firing \
+        "no HEIGHT-0 missing chip in proof — missing-chip injection is NOT firing \
          (the whole zero-degree model is untested)",
     )
 }
@@ -729,14 +707,14 @@ fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// Forgery (a): a genuinely-missing HEIGHT-0 chip forged to claim
 /// activity MUST be rejected by the degree-masked substrate.
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_height0_missing_claims_active_rejected() {
     setup_logger();
     let (proof, machine, vk) = prove_raw_heights(fibonacci_program(), fib_stdin());
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
-        "[height0-claims-active] honest unshaped proof must verify before forging (got {})",
+        "[height0-claims-active] honest proof must verify before forging (got {})",
         reject_tag(&honest)
     );
     let (si, ci, name) = pick_height0_missing_target(&proof);
@@ -760,7 +738,7 @@ fn forge_height0_missing_claims_active_rejected() {
 /// missing (degree=0) MUST be rejected.  Uses `run_forgery` (which picks a
 /// present, height-varied chip).
 #[test]
-#[ignore = "proves a real unshaped core proof (multi-second); run with --ignored"]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
 fn forge_present_active_claims_missing_rejected() {
     setup_logger();
     let tag = run_forgery(
@@ -793,7 +771,7 @@ fn forge_present_active_claims_missing_rejected() {
 // which check caught it.
 
 #[test]
-#[ignore = "proves two real unshaped core proofs (multi-second); run with --ignored"]
+#[ignore = "proves two real core proofs (multi-second); run with --ignored"]
 fn preprocessed_binding_cross_vk_probe() {
     use crate::programs::tests::{fibonacci_program, simple_program};
     setup_logger();
@@ -822,10 +800,10 @@ fn preprocessed_binding_cross_vk_probe() {
     );
 }
 
-/// Control (memory chips): honest unshaped proofs of memory-heavy programs verify.
+/// Control (memory chips): honest proofs of memory-heavy programs verify.
 #[test]
-#[ignore = "proves three real unshaped core proofs; run with --ignored"]
-fn control_unshaped_memory_programs_verify() {
+#[ignore = "proves three real core proofs; run with --ignored"]
+fn control_memory_programs_verify() {
     setup_logger();
     for (name, program) in [
         ("simple_memory", simple_memory_program()),
@@ -835,10 +813,10 @@ fn control_unshaped_memory_programs_verify() {
         let (proof, machine, vk) = prove_raw_heights(program, ZKMStdin::new());
         let res = verify(&machine, &vk, &proof);
         tracing::info!(
-            "[control][{name} unshaped] shards={} honest verify = {}",
+            "[control][{name}] shards={} honest verify = {}",
             proof.shard_proofs.len(),
             reject_tag(&res)
         );
-        assert!(res.is_ok(), "honest unshaped proof of {name} must verify");
+        assert!(res.is_ok(), "honest proof of {name} must verify");
     }
 }

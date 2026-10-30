@@ -82,6 +82,10 @@ impl<F: Field> BaseAir<F> for FeltLimbsChip {
     fn width(&self) -> usize {
         NUM_FELT_LIMBS_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_FELT_LIMBS_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for FeltLimbsChip {
@@ -101,10 +105,6 @@ impl<F: PrimeField32> MachineAir<F> for FeltLimbsChip {
             input.fixed_rows(self),
             <Self as MachineAir<F>>::name(self).as_str(),
         ))
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_FELT_LIMBS_PREPROCESSED_COLS
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {

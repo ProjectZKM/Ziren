@@ -212,18 +212,13 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type PeriodicVar = Self::Var;
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition_window(2)
-    }
-
     type F = F;
     type Expr = F;
     type Var = F;
     type PreprocessedWindow = PairWindow<'a, F>;
     type MainWindow = PairWindow<'a, F>;
     type PublicVar = F;
+    type PeriodicVar = F;
 
     fn is_first_row(&self) -> Self::Expr {
         self.is_first_row
@@ -233,12 +228,8 @@ where
         self.is_last_row
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        if size == 2 {
-            self.is_transition
-        } else {
-            panic!("only supports a window size of 2")
-        }
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition
     }
 
     fn main(&self) -> Self::MainWindow {

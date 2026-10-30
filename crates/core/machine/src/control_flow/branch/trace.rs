@@ -36,7 +36,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
             input.branch_events.len(),
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <BranchChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
@@ -82,11 +82,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.branch_events.is_empty()
-        }
+        !shard.branch_events.is_empty()
     }
 }
 

@@ -14,10 +14,11 @@
 //!   cargo run --release -p zkm-prover --bin soundcalc_census
 
 use p3_air::BaseAir;
-use p3_uni_stark::{get_symbolic_constraints, AirLayout};
 use zkm_core_machine::mips::MipsAir;
-use zkm_pcs::PROOF_MAX_NUM_PVS;
-use zkm_pcs::{air::MachineAir, StarkGenericConfig, Val};
+use zkm_pcs::{
+    air::{capture_machine_constraints, MachineAir},
+    StarkGenericConfig, Val,
+};
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
 
 fn census<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
@@ -64,24 +65,15 @@ where
                 "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
                 chip.name(),
                 BaseAir::width(&chip.air),
-                zkm_pcs::air::MachineAir::preprocessed_width(chip),
+                chip.preprocessed_width(),
                 chip.sends().len(),
                 chip.receives().len(),
                 fields
             );
         }
         main_width += BaseAir::width(&chip.air);
-        pre_width += zkm_pcs::air::MachineAir::preprocessed_width(chip);
-        let n = get_symbolic_constraints(
-            &chip.air,
-            AirLayout {
-                preprocessed_width: zkm_pcs::air::MachineAir::preprocessed_width(chip),
-                main_width: BaseAir::width(&chip.air),
-                num_public_values: PROOF_MAX_NUM_PVS,
-                ..Default::default()
-            },
-        )
-        .len();
+        pre_width += chip.preprocessed_width();
+        let n = capture_machine_constraints(&chip.air).constraint_counts().base;
         constraints += n;
         // log_quotient_degree = log2(max_constraint_degree - 1)
         let degree = (1usize << chip.log_quotient_degree()) + 1;
@@ -245,9 +237,7 @@ fn main() {
     let log_rows =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     let width = |name: &str| {
-        zkm_pcs::air::MachineAir::<Val<CoreSC>>::preprocessed_width(
-            core.chips().iter().find(|chip| chip.name() == name).unwrap(),
-        )
+        core.chips().iter().find(|chip| chip.name() == name).unwrap().preprocessed_width()
     };
     let prep_cells = (1usize << log_rows) * width("Program")
         + (1usize << 16) * width("Byte")

@@ -433,7 +433,13 @@ mod tests {
                     let profile = build(security, rate, fold);
                     match profile.config::<F, F, Challenger, _>(packed, &domain) {
                         Ok(config) => {
-                            let shape = ProofShape::of(&config, 1);
+                            let mmcs = super::MerkleMmcs::new(
+                                super::SerializingHasher::new(super::Blake3),
+                                super::CompressionFunctionFromHasher::new(super::Blake3),
+                                super::recommended_cap_height(&config),
+                            );
+                            let shape = ProofShape::of(&config, &mmcs, 1)
+                                .expect("a built schedule has a shape");
                             println!(
                                 "{name} security {security} rate 2^-{rate} fold {fold} packed {packed}: pow {} bits, {} queries, {} digests, {} opened base",
                                 config.max_pow_bits(),

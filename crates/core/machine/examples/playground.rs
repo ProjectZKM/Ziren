@@ -32,7 +32,7 @@ use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
-    utils::{run_test, run_test_io, setup_cli_logger},
+    utils::{run_test_io, setup_cli_logger},
 };
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineRecord;
@@ -71,6 +71,15 @@ const REPRO_ENV: &[&str] = &[
     "RAYON_NUM_THREADS",
     "ZKM_SKIP_PROGRAM_BUILD",
 ];
+
+/// Input the built-in fixtures read from stdin; empty for every other program.
+fn fixture_stdin(name: &str) -> ZKMStdin {
+    let mut stdin = ZKMStdin::new();
+    if name == "fibonacci" {
+        stdin.write(&10u32);
+    }
+    stdin
+}
 
 /// Accepts a built-in fixture name or a path to any guest ELF, so the same
 /// harness works for a one-line repro and for a real workload.
@@ -114,6 +123,7 @@ fn main() {
     match cmd.as_str() {
         "execute" => {
             let mut rt = Executor::new(program(), ZKMCoreOpts::default());
+            rt.write_vecs(&fixture_stdin(&name).buffer);
             rt.run().expect("execution failed");
             tracing::info!("shards       = {}", rt.records.len());
             tracing::info!("global_clk   = {}", rt.state.global_clk);
@@ -153,7 +163,8 @@ fn main() {
             }
         }
         "prove" => {
-            run_test::<CpuProver<_, _>>(program()).expect("prove + verify failed");
+            run_test_io::<CpuProver<_, _>>(program(), fixture_stdin(&name))
+                .expect("prove + verify failed");
             tracing::info!("prove + verify OK");
         }
         "widths" => {
@@ -166,7 +177,7 @@ fn main() {
                     (
                         MachineAir::<KoalaBear>::name(c),
                         p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                        MachineAir::<KoalaBear>::preprocessed_width(c),
+                        p3_air::BaseAir::<KoalaBear>::preprocessed_width(c),
                     )
                 })
                 .collect();
@@ -216,7 +227,7 @@ fn main() {
                 static_rows.push((
                     name,
                     p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                    MachineAir::<KoalaBear>::preprocessed_width(c),
+                    p3_air::BaseAir::<KoalaBear>::preprocessed_width(c),
                     sends,
                     recvs,
                     padded,
@@ -271,7 +282,6 @@ fn main() {
             let mut dense_hist: std::collections::BTreeMap<usize, usize> = Default::default();
             let mut dense_cols: Vec<(usize, u128)> = vec![];
             let mut grid_cells_raw: u128 = 0;
-            let shape_config = zkm_core_machine::shape::CoreShapeConfig::<KoalaBear>::default();
             let mut deferred =
                 zkm_core_executor::ExecutionRecord::new(std::sync::Arc::new(resolve(&name)));
             let split_opts = ZKMCoreOpts::default().split_opts;
@@ -282,11 +292,6 @@ fn main() {
                 }
                 let mut deferred_shards = deferred.split(done, None, split_opts);
                 records.append(&mut deferred_shards);
-                for rec in records.iter_mut() {
-                    if shape_config.fix_shape(rec).is_ok() {
-                        zkm_core_machine::shape::canonicalize_shape_to_cluster(rec);
-                    }
-                }
                 for rec in &records {
                     num_shards += 1;
                     let mut total_padded = 0usize;
@@ -294,23 +299,9 @@ fn main() {
                     let mut total_values: u128 = 0;
                     let mut max_h = 0usize;
                     let mut per_shard: Vec<(String, usize, usize, usize)> = vec![];
-                    let heights: std::collections::HashMap<String, usize> =
-                        MipsAir::<KoalaBear>::core_heights(rec)
-                            .into_iter()
-                            .map(|(id, h)| (id.as_str().to_string(), h))
-                            .collect();
                     for c in machine.shard_chips(rec) {
                         let name = MachineAir::<KoalaBear>::name(c);
-                        let h = heights.get(&name).copied().unwrap_or(0).max(
-                            rec.shape
-                                .as_ref()
-                                .and_then(|s| {
-                                    std::str::FromStr::from_str(&name)
-                                        .ok()
-                                        .and_then(|id| s.height(&id))
-                                })
-                                .unwrap_or(0),
-                        );
+                        let h = MachineAir::<KoalaBear>::num_rows(&c.air, rec).unwrap_or(0);
                         let h = if h > 0 {
                             h
                         } else {

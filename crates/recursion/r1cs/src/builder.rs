@@ -377,6 +377,7 @@ impl Builder {
                     _ => Err(()),
                 }
             }
+            Err(_) => Err(()),
         }
     }
 

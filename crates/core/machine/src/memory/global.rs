@@ -106,10 +106,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             MemoryChipType::Finalize => &input.global_memory_finalize_events,
         };
         let nb_rows = events.len();
-        let size_log2 = input.fixed_log2_rows::<F, Self>(self);
         let padded_nb_rows = next_multiple_of_32(
             nb_rows,
-            size_log2,
+            None,
             <MemoryGlobalChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(padded_nb_rows)
@@ -194,13 +193,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            match self.kind {
-                MemoryChipType::Initialize => !shard.global_memory_initialize_events.is_empty(),
-                MemoryChipType::Finalize => !shard.global_memory_finalize_events.is_empty(),
-            }
+        match self.kind {
+            MemoryChipType::Initialize => !shard.global_memory_initialize_events.is_empty(),
+            MemoryChipType::Finalize => !shard.global_memory_finalize_events.is_empty(),
         }
     }
 

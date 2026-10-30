@@ -70,10 +70,6 @@ impl<F: PrimeField32> MachineAir<F> for RangeChip<F> {
         "Range".to_string()
     }
 
-    fn preprocessed_width(&self) -> usize {
-        NUM_RANGE_PREPROCESSED_COLS
-    }
-
     fn generate_preprocessed_trace(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         Some(Self::preprocessed_trace())
     }
@@ -114,6 +110,10 @@ impl<F: PrimeField32> MachineAir<F> for RangeChip<F> {
 impl<F: Field> BaseAir<F> for RangeChip<F> {
     fn width(&self) -> usize {
         NUM_RANGE_MULT_COLS
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_RANGE_PREPROCESSED_COLS
     }
 }
 

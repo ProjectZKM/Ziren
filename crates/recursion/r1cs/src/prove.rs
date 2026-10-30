@@ -173,12 +173,14 @@ mod tests {
                         BinarySchedule { regime, log_inv_rate, folding, ..Default::default() };
                     match bit_commitment(arity, &schedule) {
                         Ok(pcs) => {
-                            let shape = pcs.proof_shape(1, false);
+                            let shape = pcs
+                                .proof_shape(1, false)
+                                .expect("a built schedule has a shape");
                             println!(
                                 "{regime:?} rate 2^-{log_inv_rate} fold {folding}: {} queries, {} grind bits, {} bytes",
                                 shape.stir_queries,
                                 shape.grinding_bits,
-                                shape.max_bytes(19, 19, 32)
+                                shape.max_bytes(19, 19, 32).expect("the shape fits a usize")
                             );
                         }
                         Err(e) => println!("{regime:?} rate 2^-{log_inv_rate} fold {folding}: {e}"),

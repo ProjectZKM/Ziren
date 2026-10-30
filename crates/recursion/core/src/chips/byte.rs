@@ -161,6 +161,10 @@ impl<F: Field> BaseAir<F> for ByteChip {
     fn width(&self) -> usize {
         NUM_RECURSION_BYTE_MULT_COLS
     }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_RECURSION_BYTE_PREPROCESSED_COLS
+    }
 }
 
 impl<F: PrimeField32> MachineAir<F> for ByteChip {
@@ -178,10 +182,6 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip {
 
     fn num_rows(&self, _input: &Self::Record) -> Option<usize> {
         Some(NUM_BYTE_ROWS)
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_RECURSION_BYTE_PREPROCESSED_COLS
     }
 
     fn preprocessed_num_rows(&self, _program: &Self::Program, _instrs_len: usize) -> Option<usize> {

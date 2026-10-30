@@ -95,15 +95,6 @@ name = "check_vk_coverage"
 path = "scripts/check_vk_coverage.rs"
 
 
-[[bin]]
-name = "find_maximal_shapes"
-path = "scripts/find_maximal_shapes.rs"
-
-[[bin]]
-name = "find_small_shapes"
-path = "scripts/find_small_shapes.rs"
-
-
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]

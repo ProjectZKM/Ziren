@@ -130,10 +130,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = input.bump_memory_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
         Some(next_multiple_of_32(
             nb_rows,
-            size_log2,
+            None,
             <MemoryBumpChip as MachineAir<F>>::name(self).as_str(),
         ))
     }
@@ -168,11 +167,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        if let Some(shape) = shard.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            !shard.bump_memory_events.is_empty()
-        }
+        !shard.bump_memory_events.is_empty()
     }
 
     fn commit_scope(&self) -> LookupScope {

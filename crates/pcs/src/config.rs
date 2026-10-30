@@ -72,9 +72,9 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         + CanSample<Self::Challenge>
         + FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + 'static
         + Clone
-        + Sync;
+        + Sync
+        + 'static;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;

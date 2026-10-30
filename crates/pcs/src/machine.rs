@@ -7,7 +7,7 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
+use p3_uni_stark::SymbolicAirBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -15,9 +15,8 @@ use std::{fmt::Debug, iter::once, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
-use crate::PROOF_MAX_NUM_PVS;
 use crate::{
-    air::{LookupScope, MachineAir, MachineProgram},
+    air::{capture_machine_constraints, LookupScope, MachineAir, MachineProgram},
     config::PrepCommitRoot,
     count_permutation_constraints,
     lookup::{debug_lookups_with_all_chips, LookupKind},
@@ -431,7 +430,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         for (name, r) in rows {
             if let Some(chip) = self.chips().iter().find(|c| c.name() == *name) {
                 main += r * <A as BaseAir<Val<SC>>>::width(&chip.air);
-                prep += r * MachineAir::preprocessed_width(chip);
+                prep += r * chip.preprocessed_width();
             }
         }
         let main_c = crate::jagged::committed_dense_len(main, log_stack);
@@ -684,20 +683,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
                         assert_eq!(
                             expected_width,
-                            MachineAir::preprocessed_width(chip),
+                            chip.preprocessed_width(),
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
-                        let num_main_constraints = get_symbolic_constraints(
-                            &chip.air,
-                            AirLayout {
-                                preprocessed_width: MachineAir::preprocessed_width(chip),
-                                main_width: chip.width(),
-                                num_public_values: PROOF_MAX_NUM_PVS,
-                                ..Default::default()
-                            },
-                        )
-                        .len();
+                        let num_main_constraints =
+                            capture_machine_constraints(&chip.air).constraint_counts().base;
 
                         let num_permutation_constraints = count_permutation_constraints(
                             &chip.sends,
@@ -805,20 +796,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             prep_trace.as_ref().map_or(0, p3_matrix::Matrix::width);
                         assert_eq!(
                             expected_width,
-                            MachineAir::preprocessed_width(chip),
+                            chip.preprocessed_width(),
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
-                        let num_main_constraints = get_symbolic_constraints(
-                            &chip.air,
-                            AirLayout {
-                                preprocessed_width: MachineAir::preprocessed_width(chip),
-                                main_width: chip.width(),
-                                num_public_values: PROOF_MAX_NUM_PVS,
-                                ..Default::default()
-                            },
-                        )
-                        .len();
+                        let num_main_constraints =
+                            capture_machine_constraints(&chip.air).constraint_counts().base;
 
                         let num_permutation_constraints = count_permutation_constraints(
                             &chip.sends,
@@ -913,7 +896,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .chips()
             .iter()
             .filter_map(|c| {
-                let w = <A as MachineAir<Val<SC>>>::preprocessed_width(&c.air);
+                let w = <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&c.air);
                 (w > 0).then(|| (<A as MachineAir<Val<SC>>>::name(&c.air), w))
             })
             .collect();
