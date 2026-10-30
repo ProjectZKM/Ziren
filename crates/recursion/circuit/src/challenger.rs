@@ -309,7 +309,7 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
             self.sponge_state[..OUTER_MULTI_FIELD_CHALLENGER_RATE].iter_mut().enumerate()
         {
             *slot = match values.get(i) {
-                Some(&value) => value,
+                Some(&value) => builder.eval(value),
                 None => builder.eval(C::N::ZERO),
             };
         }
@@ -933,5 +933,23 @@ pub(crate) mod tests {
         let mut backend = ConstraintCompiler::<C>::default();
         let constraints = backend.emit(builder.into_operations());
         PlonkBn254Prover::test::<C>(constraints.clone(), OuterWitness::default());
+    }
+
+    #[test]
+    fn test_outer_absorb_does_not_alias_inputs() {
+        type C = OuterConfig;
+        type N = <C as Config>::N;
+        let mut builder = Builder::<C>::default();
+        let mut challenger = MultiField32ChallengerVariable::<C>::new(&mut builder);
+        let values: Vec<Var<N>> = (0..OUTER_MULTI_FIELD_CHALLENGER_RATE)
+            .map(|i| builder.eval(N::from_usize(i + 1)))
+            .collect();
+        challenger.absorb_rate_padded_with_tag(&mut builder, &values, 1);
+        for (i, value) in values.iter().enumerate() {
+            assert_ne!(
+                challenger.sponge_state[i].idx, value.idx,
+                "sponge slot {i} shares a variable with its input"
+            );
+        }
     }
 }
