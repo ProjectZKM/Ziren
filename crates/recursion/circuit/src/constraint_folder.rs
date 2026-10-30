@@ -97,6 +97,7 @@ where
     type PreprocessedWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type MainWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type PublicVar = Felt<C::F>;
+    type PeriodicVar = Felt<C::F>;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -116,7 +117,7 @@ where
         SymbolicExt::<C::F, C::EF>::ZERO
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         use p3_field::PrimeCharacteristicRing;
         SymbolicExt::<C::F, C::EF>::ZERO
     }

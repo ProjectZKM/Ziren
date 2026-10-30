@@ -202,6 +202,9 @@ pub enum DslIr<C: Config> {
     CircuitNum2BitsF(Felt<C::F>, Vec<Var<C::N>>),
     /// Convert a Felt to a Var in a circuit. Avoids decomposing to bits and then reconstructing.
     CircuitFelt2Var(Felt<C::F>, Var<C::N>),
+    /// Decompose a variable into its least significant base-`|F|` digits, little-endian. The
+    /// circuit constrains the digits to be the canonical base-`|F|` expansion of the variable.
+    CircuitVar2FieldOrderLimbs(Var<C::N>, Vec<Felt<C::F>>),
 
     // Hashing.
     /// Permutes an array of koala bear elements using Poseidon2 (output = p2_permute(array)).

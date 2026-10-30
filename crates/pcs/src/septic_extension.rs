@@ -3,8 +3,8 @@ use num_bigint::BigUint;
 use num_traits::One;
 use p3_field::PrimeField32;
 use p3_field::{
-    Algebra, BasedVectorSpace, ExtensionField, Field, Packable, PackedFieldExtension,
-    PrimeCharacteristicRing,
+    Algebra, AlgebraIdentity, BasedVectorSpace, ExtensionField, Field, Packable,
+    PackedFieldExtension, PrimeCharacteristicRing,
 };
 use serde::{Deserialize, Serialize};
 use std::array;
@@ -106,6 +106,12 @@ impl<F: PrimeCharacteristicRing> BasedVectorSpace<F> for SepticExtension<F> {
 }
 
 impl<F: PrimeCharacteristicRing + Copy> Algebra<F> for SepticExtension<F> {}
+
+impl<F: PrimeCharacteristicRing> AlgebraIdentity<F> for SepticExtension<F> {
+    fn algebra_id() -> Vec<u8> {
+        b"zkm-power-basis-v1:X^7+2X-8".to_vec()
+    }
+}
 
 impl<F: Field<Packing = F>> PackedFieldExtension<F, SepticExtension<F>> for SepticExtension<F> {
     fn from_ext_slice(ext_slice: &[SepticExtension<F>]) -> Self {

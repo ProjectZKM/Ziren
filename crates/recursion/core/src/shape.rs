@@ -129,7 +129,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         ];
         let main = airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::width(a))).collect();
         let prep =
-            airs.iter().map(|a| (a.name(), MachineAir::<F>::preprocessed_width(a))).collect();
+            airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::preprocessed_width(a))).collect();
         (main, prep)
     }
 

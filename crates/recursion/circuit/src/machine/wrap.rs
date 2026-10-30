@@ -210,7 +210,9 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
             .iter()
             .filter_map(|c| {
                 let w =
-                    MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                    p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(
+                        c,
+                    );
                 (w > 0)
                     .then(|| (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w))
             })

@@ -2,7 +2,9 @@ use std::fmt::Debug;
 use std::iter::{repeat, zip};
 
 use itertools::Itertools;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{
+    absorb_radix_bits, max_shifted_absorb_injective_limbs, Field, PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 
 use p3_bn254_fr::Bn254;
@@ -13,14 +15,13 @@ use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, DslIr, Ext, Felt, Var},
 };
-use zkm_recursion_core::stark::{outer_perm, OUTER_MULTI_FIELD_CHALLENGER_WIDTH};
+use zkm_recursion_core::stark::{
+    outer_perm, OUTER_MULTI_FIELD_CHALLENGER_RATE, OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
+};
 use zkm_recursion_core::{stark::KoalaBearPoseidon2Outer, DIGEST_SIZE};
 use zkm_recursion_core::{HASH_RATE, PERMUTATION_WIDTH};
 
-use crate::{
-    challenger::{reduce_32, POSEIDON_2_BB_RATE},
-    CircuitConfig,
-};
+use crate::{challenger::reduce_packed, CircuitConfig};
 
 pub trait FieldHasher<F: Field> {
     type Digest: Copy + Default + Eq + Ord + Copy + Debug + Send + Sync;
@@ -492,13 +493,14 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
         assert!(C::N::bits() == p3_bn254_fr::Bn254::bits());
         assert!(C::F::bits() == p3_koala_bear::KoalaBear::bits());
-        let num_f_elms = C::N::bits() / C::F::bits();
+        let num_f_elms = max_shifted_absorb_injective_limbs::<C::F, C::N>();
+        let radix_bits = absorb_radix_bits::<C::F>();
         let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
             [builder.eval(C::N::ZERO), builder.eval(C::N::ZERO), builder.eval(C::N::ZERO)];
-        for block_chunk in &input.iter().chunks(POSEIDON_2_BB_RATE) {
+        for block_chunk in &input.iter().chunks(OUTER_MULTI_FIELD_CHALLENGER_RATE * num_f_elms) {
             for (chunk_id, chunk) in (&block_chunk.chunks(num_f_elms)).into_iter().enumerate() {
                 let chunk = chunk.copied().collect::<Vec<_>>();
-                state[chunk_id] = reduce_32(builder, chunk.as_slice());
+                state[chunk_id] = reduce_packed(builder, chunk.as_slice(), radix_bits, 1);
             }
             builder.push_op(DslIr::CircuitPoseidon2Permute(state))
         }

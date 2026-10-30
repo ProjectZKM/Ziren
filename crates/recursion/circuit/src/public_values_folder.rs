@@ -72,6 +72,7 @@ where
     type PreprocessedWindow = PairWindow<'a, Ext<C::F, C::EF>>;
     type MainWindow = PairWindow<'a, Ext<C::F, C::EF>>;
     type PublicVar = Felt<C::F>;
+    type PeriodicVar = Felt<C::F>;
 
     fn main(&self) -> Self::MainWindow {
         unimplemented!("public-values folder has no main matrix")
@@ -89,7 +90,7 @@ where
         unimplemented!("public-values folder has no row selectors")
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         unimplemented!("public-values folder has no transition window")
     }
 

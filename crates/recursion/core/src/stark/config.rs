@@ -23,7 +23,14 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 pub type OuterVal = KoalaBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
 pub type OuterPerm = Poseidon2Bn254<3>;
-pub type OuterHash = MultiField32PaddingFreeSponge<OuterVal, Bn254, OuterPerm, 3, 16, DIGEST_SIZE>;
+pub type OuterHash = MultiField32PaddingFreeSponge<
+    OuterVal,
+    Bn254,
+    OuterPerm,
+    OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
+    OUTER_MULTI_FIELD_CHALLENGER_RATE,
+    DIGEST_SIZE,
+>;
 pub type OuterDigestHash = Hash<OuterVal, Bn254, DIGEST_SIZE>;
 pub type OuterDigest = [Bn254; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;
@@ -76,6 +83,7 @@ pub fn outer_fri_config() -> FriParameters<OuterChallengeMmcs> {
         log_final_poly_len: 0,
         max_log_arity: 1,
         num_queries,
+        batch_proof_of_work_bits: 0,
         commit_proof_of_work_bits: 16,
         query_proof_of_work_bits: 16,
         mmcs: challenge_mmcs,
@@ -176,7 +184,7 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
 
 impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
     fn zero_commitment(&self) -> Com<KoalaBearPoseidon2Outer> {
-        Com::<KoalaBearPoseidon2Outer>::default()
+        Com::<KoalaBearPoseidon2Outer>::new(vec![Default::default()])
     }
 }
 
@@ -707,7 +715,7 @@ mod whir_over_bn254_roundtrip_test {
             RowMajorMatrix::new(v, 4)
         })];
         let real = crate::stark::config::outer_jagged_hooks::outer_prep_commit(&traces, None);
-        let other = zkm_pcs::Com::<R>::default();
+        let other = zkm_pcs::Com::<R>::new(vec![Default::default()]);
         assert_ne!(real, other, "fixture precondition: a real commit differs from the default");
         assert_eq!(
             <R as WhirRing>::vk_commit_is_preceding_root(&real, &real),

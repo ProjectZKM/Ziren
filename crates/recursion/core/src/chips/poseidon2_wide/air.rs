@@ -27,6 +27,10 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2WideChip<DEGREE> {
             panic!("Unsupported degree: {DEGREE}");
         }
     }
+
+    fn preprocessed_width(&self) -> usize {
+        super::trace::PREPROCESSED_POSEIDON2_WIDTH
+    }
 }
 
 impl<AB, const DEGREE: usize> Air<AB> for Poseidon2WideChip<DEGREE>

@@ -52,6 +52,7 @@ impl<'a, F: Field, EF: ExtensionField<F>> AirBuilder for PublicValuesConstraintF
     type PreprocessedWindow = PairWindow<'a, EF>;
     type MainWindow = PairWindow<'a, EF>;
     type PublicVar = F;
+    type PeriodicVar = F;
 
     fn main(&self) -> Self::MainWindow {
         unimplemented!("public-values folder has no main matrix")
@@ -69,7 +70,7 @@ impl<'a, F: Field, EF: ExtensionField<F>> AirBuilder for PublicValuesConstraintF
         unimplemented!("public-values folder has no row selectors")
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         unimplemented!("public-values folder has no transition window")
     }
 

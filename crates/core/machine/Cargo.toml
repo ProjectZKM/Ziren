@@ -20,6 +20,7 @@ num = { version = "0.4.3" }
 p3-air = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-challenger = { workspace = true }
+p3-commit = { workspace = true }
 p3-field = { workspace = true }
 p3-keccak-air = { workspace = true }
 p3-matrix = { workspace = true }

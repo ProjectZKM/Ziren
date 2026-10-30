@@ -588,8 +588,8 @@ where
 // to the outer digest type (`KoalaBearPoseidon2Outer::Digest = [Bn254; 1]`,
 // `DigestVariable = [Var<Bn254>; 1]`), so the in-circuit challenger
 // observes the same BN254 digests the host `verify_jagged_inner_generic`
-// absorbs (via `split_32` per BN254 element) — matching the Fiat-Shamir
-// transcript exactly.
+// absorbs. Both absorb the BN254 elements directly, with rate padding and a
+// length tag, so their Fiat-Shamir transcripts match.
 
 use p3_bn254_fr::Bn254;
 use zkm_recursion_core::stark::OuterValMmcs;

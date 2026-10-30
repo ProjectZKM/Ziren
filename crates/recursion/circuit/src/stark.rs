@@ -111,7 +111,7 @@ where
             .iter()
             .filter_map(|(name, rows)| {
                 let chip = chips.iter().find(|c| c.name() == name.as_str())?;
-                let pw = MachineAir::<KoalaBear>::preprocessed_width(*chip);
+                let pw = p3_air::BaseAir::<KoalaBear>::preprocessed_width(*chip);
                 if pw > 0 {
                     Some((name.clone(), pw, *rows))
                 } else {

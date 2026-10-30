@@ -425,7 +425,9 @@ impl<P> JaggedShardVerifier<P> {
         let prep_positions: Vec<usize> = shard_chips
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.preprocessed_width() > 0)
+            .filter(|(_, c)| {
+                p3_air::BaseAir::<p3_koala_bear::KoalaBear>::preprocessed_width(**c) > 0
+            })
             .map(|(i, _)| i)
             .collect();
         let two_round = insertion_points.len() >= 2;

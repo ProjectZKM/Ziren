@@ -45,6 +45,8 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
         + 'static,
 {
     let witness: F = crate::logup_gkr::gkr_grind(challenger, gkr_grinding_bits());

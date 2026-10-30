@@ -61,10 +61,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         "Program".to_string()
     }
 
-    fn preprocessed_width(&self) -> usize {
-        NUM_PROGRAM_PREPROCESSED_COLS
-    }
-
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         debug_assert!(!program.instructions.is_empty(), "empty program");
         let nb_rows = program.instructions.len();
@@ -149,6 +145,10 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
 impl<F> BaseAir<F> for ProgramChip {
     fn width(&self) -> usize {
         NUM_PROGRAM_MULT_COLS
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_PROGRAM_PREPROCESSED_COLS
     }
 }
 

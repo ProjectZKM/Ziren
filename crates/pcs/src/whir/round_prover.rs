@@ -88,6 +88,8 @@ where
         EFDft: TwoAdicSubgroupDft<EF>,
         Challenger: FieldChallenger<F>
             + GrindingChallenger<Witness = F>
+            + Clone
+            + Sync
             + CanObserve<MT::Commitment>
             + 'static,
     {

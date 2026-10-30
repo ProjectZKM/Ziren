@@ -63,6 +63,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     type PreprocessedWindow = PairWindow<'a, PackedVal<SC>>;
     type MainWindow = PairWindow<'a, PackedVal<SC>>;
     type PublicVar = Val<SC>;
+    type PeriodicVar = Val<SC>;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -80,12 +81,8 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
         self.is_last_row
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        if size == 2 {
-            self.is_transition
-        } else {
-            panic!("uni-stark only supports a window size of 2")
-        }
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -227,6 +224,7 @@ where
     type PreprocessedWindow = PairWindow<'a, Var>;
     type MainWindow = PairWindow<'a, Var>;
     type PublicVar = PubVar;
+    type PeriodicVar = PubVar;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -244,12 +242,8 @@ where
         self.is_last_row.into()
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        if size == 2 {
-            self.is_transition.into()
-        } else {
-            panic!("uni-stark only supports a window size of 2")
-        }
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition.into()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

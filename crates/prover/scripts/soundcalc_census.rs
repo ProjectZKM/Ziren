@@ -14,10 +14,12 @@
 //!   cargo run --release -p zkm-prover --bin soundcalc_census
 
 use p3_air::BaseAir;
-use p3_uni_stark::{get_symbolic_constraints, AirLayout};
 use zkm_core_machine::mips::MipsAir;
-use zkm_pcs::PROOF_MAX_NUM_PVS;
-use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig, Val};
+use zkm_pcs::{
+    air::{capture_machine_constraints, MachineAir},
+    koala_bear_poseidon2::KoalaBearPoseidon2,
+    StarkGenericConfig, Val,
+};
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
 
 fn census<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
@@ -72,16 +74,7 @@ where
         }
         main_width += BaseAir::width(&chip.air);
         pre_width += chip.preprocessed_width();
-        let n = get_symbolic_constraints(
-            &chip.air,
-            AirLayout {
-                preprocessed_width: chip.preprocessed_width(),
-                main_width: BaseAir::width(&chip.air),
-                num_public_values: PROOF_MAX_NUM_PVS,
-                ..Default::default()
-            },
-        )
-        .len();
+        let n = capture_machine_constraints(&chip.air).constraint_counts().base;
         constraints += n;
         // log_quotient_degree = log2(max_constraint_degree - 1)
         let degree = (1usize << chip.log_quotient_degree()) + 1;

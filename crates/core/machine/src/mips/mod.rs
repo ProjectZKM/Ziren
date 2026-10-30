@@ -642,7 +642,7 @@ pub mod tests {
                 .chips()
                 .iter()
                 .find(|c| <_ as MachineAir<KoalaBear>>::name(*c) == name)
-                .map(<_ as MachineAir<KoalaBear>>::preprocessed_width)
+                .map(<_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width)
                 .unwrap_or_else(|| panic!("{name} is not a chip of the core machine"))
         };
 
@@ -1632,5 +1632,21 @@ pub mod tests {
         setup_logger();
         let program = fibonacci_program();
         run_test_with_stdin::<CpuProver<_, _>>(program, fib_stdin()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod preprocessed_width_tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+    use zkm_core_executor::Program;
+    use zkm_pcs::air::assert_preprocessed_widths_match;
+
+    #[test]
+    fn preprocessed_widths_match_generated_traces() {
+        assert_preprocessed_widths_match::<KoalaBear, _>(
+            MipsAir::<KoalaBear>::chips(),
+            &Program::default(),
+        );
     }
 }

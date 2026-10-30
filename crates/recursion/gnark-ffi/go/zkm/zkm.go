@@ -253,6 +253,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			ext5s[cs.Args[0][0]] = koalabear.Felts2Ext5(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]], felts[cs.Args[5][0]])
 		case "CircuitFelt2Var":
 			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
+		case "CircuitVar2FieldOrderLimbs":
+			limbs := fieldAPI.Var2FieldOrderLimbs(vars[cs.Args[1][0]], len(cs.Args[0]))
+			for i := 0; i < len(cs.Args[0]); i++ {
+				felts[cs.Args[0][i]] = limbs[i]
+			}
 		case "ReduceE":
 			exts[cs.Args[0][0]] = fieldAPI.ReduceE(exts[cs.Args[0][0]])
 		default:

@@ -99,7 +99,7 @@ where
             .map(|chip| {
                 let name = MachineAir::<F>::name(*chip);
                 let main_width = <_ as BaseAir<F>>::width(&chip.air);
-                let preprocessed_width = MachineAir::<F>::preprocessed_width(*chip);
+                let preprocessed_width = p3_air::BaseAir::<F>::preprocessed_width(*chip);
                 (
                     name,
                     ChipEvaluation {
@@ -176,7 +176,7 @@ where
         let chips_ov: Vec<ChipOpenedValues<F, EF>> = name_sorted
             .iter()
             .map(|chip| {
-                let prep_w = MachineAir::<F>::preprocessed_width(**chip);
+                let prep_w = p3_air::BaseAir::<F>::preprocessed_width(**chip);
                 let main_w = <_ as BaseAir<F>>::width(&chip.air);
                 let name = MachineAir::<F>::name(**chip);
                 let rows = heights_map.get(&name).copied().unwrap_or(0);
@@ -239,7 +239,7 @@ where
         let prep_dims: Vec<(usize, usize)> = name_sorted
             .iter()
             .filter_map(|chip| {
-                let w = MachineAir::<F>::preprocessed_width(**chip);
+                let w = p3_air::BaseAir::<F>::preprocessed_width(**chip);
                 if w == 0 {
                     return None;
                 }
@@ -271,7 +271,7 @@ where
     };
 
     let n_prep =
-        chips.iter().filter(|c| <A as MachineAir<F>>::preprocessed_width(&c.air) > 0).count();
+        chips.iter().filter(|c| <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air) > 0).count();
     let preprocessed_row_counts: Vec<F> =
         if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep] };
     let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
@@ -289,7 +289,7 @@ where
             .iter()
             .map(|c| {
                 let w = if preprocessed {
-                    <A as MachineAir<F>>::preprocessed_width(&c.air)
+                    <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air)
                 } else {
                     <_ as BaseAir<F>>::width(&c.air)
                 };

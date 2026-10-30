@@ -126,12 +126,13 @@ pub fn uni_stark_prove<SC, A>(
     trace: RowMajorMatrix<SC::Val>,
 ) -> Proof<UniConfig<SC>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig<Val = p3_koala_bear::KoalaBear>,
+    SC::Pcs: p3_commit::UnivariateStarkPcs<SC::Challenge, SC::Challenger>,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &[])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &[]).unwrap()
 }
 
 /// `p3_uni_stark::verify` over a single hand-built AIR fixture.
@@ -145,7 +146,8 @@ pub fn uni_stark_verify<SC, A>(
     proof: &Proof<UniConfig<SC>>,
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig<Val = p3_koala_bear::KoalaBear>,
+    SC::Pcs: p3_commit::UnivariateStarkPcs<SC::Challenge, SC::Challenger>,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,

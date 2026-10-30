@@ -227,7 +227,7 @@ pub fn verify_core_jagged<C, SC, A>(
                     .chips()
                     .iter()
                     .filter_map(|c| {
-                        let w = MachineAir::<
+                        let w = p3_air::BaseAir::<
                             <SC as zkm_pcs::StarkGenericConfig>::Val,
                         >::preprocessed_width(c);
                         (w > 0).then(|| {
@@ -327,7 +327,7 @@ pub fn verify_core_jagged<C, SC, A>(
             use p3_air::BaseAir;
             let _preprocessed_widths: Vec<usize> = shard_chips
                 .iter()
-                .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
+                .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
                 .collect();
             let main_widths: Vec<usize> = shard_chips
                 .iter()
