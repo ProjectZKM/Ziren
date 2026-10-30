@@ -428,3 +428,26 @@ pub mod tests {
         test_instructions(instructions);
     }
 }
+
+#[cfg(test)]
+mod preprocessed_width_tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+    use zkm_pcs::air::assert_preprocessed_widths_match;
+
+    #[test]
+    fn preprocessed_widths_match_generated_traces() {
+        let airs: Vec<RecursionAir<KoalaBear, 3>> = vec![
+            RecursionAir::MemoryConst(MemoryConstChip::default()),
+            RecursionAir::MemoryVar(MemoryVarChip::default()),
+            RecursionAir::BaseAlu(BaseAluChip),
+            RecursionAir::ExtAlu(ExtAluChip),
+            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<3>),
+            RecursionAir::Select(SelectChip),
+            RecursionAir::Ext2Felt(Ext2FeltChip::default()),
+            RecursionAir::PrefixSumChecks(PrefixSumChecksChip),
+            RecursionAir::PublicValues(PublicValuesChip),
+        ];
+        assert_preprocessed_widths_match(airs, &crate::RecursionProgram::<KoalaBear>::default());
+    }
+}

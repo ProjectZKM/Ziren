@@ -1634,3 +1634,19 @@ pub mod tests {
         run_test_with_stdin::<CpuProver<_, _>>(program, fib_stdin()).unwrap();
     }
 }
+
+#[cfg(test)]
+mod preprocessed_width_tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+    use zkm_core_executor::Program;
+    use zkm_pcs::air::assert_preprocessed_widths_match;
+
+    #[test]
+    fn preprocessed_widths_match_generated_traces() {
+        assert_preprocessed_widths_match::<KoalaBear, _>(
+            MipsAir::<KoalaBear>::chips(),
+            &Program::default(),
+        );
+    }
+}
