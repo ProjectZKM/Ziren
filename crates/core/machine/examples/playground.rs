@@ -32,7 +32,7 @@ use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
-    utils::{run_test, run_test_io, setup_cli_logger},
+    utils::{run_test_io, setup_cli_logger},
 };
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineRecord;
@@ -71,6 +71,15 @@ const REPRO_ENV: &[&str] = &[
     "RAYON_NUM_THREADS",
     "ZKM_SKIP_PROGRAM_BUILD",
 ];
+
+/// Input the built-in fixtures read from stdin; empty for every other program.
+fn fixture_stdin(name: &str) -> ZKMStdin {
+    let mut stdin = ZKMStdin::new();
+    if name == "fibonacci" {
+        stdin.write(&10u32);
+    }
+    stdin
+}
 
 /// Accepts a built-in fixture name or a path to any guest ELF, so the same
 /// harness works for a one-line repro and for a real workload.
@@ -114,6 +123,7 @@ fn main() {
     match cmd.as_str() {
         "execute" => {
             let mut rt = Executor::new(program(), ZKMCoreOpts::default());
+            rt.write_vecs(&fixture_stdin(&name).buffer);
             rt.run().expect("execution failed");
             tracing::info!("shards       = {}", rt.records.len());
             tracing::info!("global_clk   = {}", rt.state.global_clk);
@@ -153,7 +163,8 @@ fn main() {
             }
         }
         "prove" => {
-            run_test::<CpuProver<_, _>>(program()).expect("prove + verify failed");
+            run_test_io::<CpuProver<_, _>>(program(), fixture_stdin(&name))
+                .expect("prove + verify failed");
             tracing::info!("prove + verify OK");
         }
         "widths" => {
