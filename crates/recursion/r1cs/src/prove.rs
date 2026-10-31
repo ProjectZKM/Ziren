@@ -19,6 +19,9 @@ pub type Commitment = <BitPcs as BooleanBackend<F>>::Commitment;
 /// Where a key's commitment opens on a device.
 pub type OpeningDevice = <BitPcs as BooleanMultilinearPcs<F, Challenger>>::OpeningDevice;
 
+/// What the commitment to a composed key's routing words keeps for its openings.
+pub type RoutingData = <BitPcs as BooleanBackend<F>>::ProverData;
+
 /// A word proof.
 pub type Proof = WordProof<F, F, <BitPcs as BooleanBackend<F>>::Proof>;
 
@@ -64,6 +67,8 @@ pub struct ComposedLayout {
     pub public_of: Vec<u32>,
     /// The commitment to the statement's routing words.
     pub routing: Commitment,
+    /// The routing commitment's prover data, opened by every proof of the key.
+    pub routing_data: RoutingData,
     /// The lowering's public words past the outputs, which its tape reads.
     pub tape_constants: Vec<Word64>,
 }
@@ -124,8 +129,8 @@ impl WordKey {
             .in_scope(|| WordProofKey::with_ports(composed.composition, composed.routing))
             .map_err(|e| format!("key: {e:?}"))?;
         let pcs = bit_commitment(key.trace_variables(), schedule).map_err(|e| e.to_string())?;
-        let routing = tracing::info_span!("commit routing")
-            .in_scope(|| key.port_commitment::<F, _, _>(&pcs, &mut challenger()))
+        let (routing, routing_data) = tracing::info_span!("commit routing")
+            .in_scope(|| key.port_routing::<F, _, _>(&pcs, &mut challenger()))
             .map_err(|e| format!("routing: {e:?}"))?
             .ok_or("the composed key routes no ports")?;
         let constants = composed.public[outputs..].to_vec();
@@ -142,6 +147,7 @@ impl WordKey {
             witness_of: composed.witness_of,
             public_of: composed.public_of,
             routing,
+            routing_data,
             tape_constants: lowered.built.public[outputs.min(lowered.built.public.len())..].to_vec(),
         };
         Ok(Self { key, pcs, constants, outputs, digest, layout: Some(layout) })
@@ -214,11 +220,18 @@ impl WordKey {
         let values = tracing::info_span!("pack witness")
             .in_scope(|| PackedWitness::new(self.key.statement(), public, witness))
             .map_err(|e| format!("witness: {e:?}"))?;
-        match devices {
-            Some((device, opening)) => self
+        match (&self.layout, devices) {
+            (Some(layout), devices) => self.key.prove_routed::<F, F, _, _>(
+                &self.pcs,
+                &values,
+                (&layout.routing, &layout.routing_data),
+                devices,
+                challenger,
+            ),
+            (None, Some((device, opening))) => self
                 .key
                 .prove_with_hints_on::<F, F, _, _>(&self.pcs, &values, device, opening, challenger),
-            None => self.key.prove_with_hints::<F, F, _, _>(&self.pcs, &values, challenger),
+            (None, None) => self.key.prove_with_hints::<F, F, _, _>(&self.pcs, &values, challenger),
         }
         .map_err(|e| format!("prove: {e:?}"))
     }
@@ -499,6 +512,17 @@ pub fn relations_digest(built: &Built, outputs: usize) -> [u8; 32] {
 /// The serialized size of a proof, in bytes.
 pub fn proof_size(proof: &Proof) -> usize {
     postcard::to_allocvec(proof).map_or(0, |bytes| bytes.len())
+}
+
+/// The bytes of `proof`'s trace opening, its routing opening and its port reduction.
+#[must_use]
+pub fn proof_parts(proof: &Proof) -> [usize; 3] {
+    let size = |part: Option<Vec<u8>>| part.map_or(0, |bytes| bytes.len());
+    [
+        size(postcard::to_allocvec(proof.opening()).ok()),
+        size(proof.port_opening().and_then(|opening| postcard::to_allocvec(opening).ok())),
+        size(proof.ports().and_then(|ports| postcard::to_allocvec(ports).ok())),
+    ]
 }
 
 #[cfg(test)]

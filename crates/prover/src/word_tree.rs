@@ -234,11 +234,13 @@ fn prove_leaf(
         .map_err(stage)?;
     tracing::info!(
         "word compress: leaf {shard}: {} words, key {index}{}, run {ran:.1} s, lower and key \
-         {keyed:.1} s, witness {evaluated:.2} s, prove {:.2} s, {} bytes",
+         {keyed:.1} s, witness {evaluated:.2} s, prove {:.2} s, {} bytes (openings {:?} \
+         and ports)",
         witness.len(),
         if new { " (new program)" } else { "" },
         begun.elapsed().as_secs_f64() - evaluated,
-        proof_size(&proof)
+        proof_size(&proof),
+        zkm_recursion_r1cs::prove::proof_parts(&proof)
     );
     Ok(WordLeaf { key, public: statement, public_values, commitment, proof, hints })
 }
