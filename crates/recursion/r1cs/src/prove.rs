@@ -220,6 +220,38 @@ impl WordKey {
         self.prove_statement(public, witness, devices, challenger)
     }
 
+    /// [`Self::prove_words`] for the `witness_len` committed words `devices` hold, which never
+    /// reach the host: the statement's committed words, gathered on the device for a
+    /// composed key.
+    pub fn prove_held(
+        &self,
+        public: &[Word64],
+        witness_len: usize,
+        devices: (&dyn WordDevice, &OpeningDevice),
+        challenger: &mut Challenger,
+    ) -> Result<(Commitment, Proof, Hints), String> {
+        let Some(layout) = &self.layout else {
+            return Err("only a composed key opens held words".into());
+        };
+        let public: Vec<Word64> = layout.public_of.iter().map(|&p| public[p as usize]).collect();
+        let gathered = tracing::info_span!("gather composed words on device")
+            .in_scope(|| devices.0.gather_witness(&layout.witness_of));
+        if !gathered {
+            return Err(format!("the device holds no {witness_len} committed words to gather"));
+        }
+        let values = PackedWitness::held(self.key.statement(), &public, layout.witness_of.len())
+            .map_err(|e| format!("witness: {e:?}"))?;
+        self.key
+            .prove_routed::<F, F, _, _>(
+                &self.pcs,
+                &values,
+                (&layout.routing, &layout.routing_data),
+                Some(devices),
+                challenger,
+            )
+            .map_err(|e| format!("prove: {e:?}"))
+    }
+
     /// [`Self::prove_words`] for the statement's own public and committed words.
     fn prove_statement(
         &self,

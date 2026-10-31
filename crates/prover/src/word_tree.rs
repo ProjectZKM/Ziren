@@ -23,7 +23,7 @@ use p3_koala_bear::KoalaBear;
 use p3_word::Word64;
 use serde::{Deserialize, Serialize};
 use zkm_binary_recursion::compose::{advance_claims_native, Child, NativeClaim, VkMembership};
-use zkm_binary_recursion::machine::TapeBackend;
+use zkm_binary_recursion::machine::{LeafWitness, TapeBackend};
 use zkm_binary_recursion::node::{record_node_with, BinaryRootProof, ProvedNode};
 use zkm_binary_stark::BinarySchedule;
 use zkm_recursion_core::air::RecursionPublicValues;
@@ -214,29 +214,39 @@ fn prove_leaf(
         leaf;
     let constants: Vec<u64> = key.tape_constants().iter().map(|w| w.get()).collect();
     let public = tape.public(&constants, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]));
-    let witness = backend.witness(&tape, &public, &memory);
+    let devices = backend.word_devices(key.cap_height());
+    let held = devices.is_some() && key.routing().is_some();
+    let witness = backend.witness(&tape, &public, &memory, held);
     if let (true, Some(lowered)) = (check, &lowered) {
-        check_tape(shard, &tape, lowered, &public, &witness)?;
+        let words = match &witness {
+            LeafWitness::Host(words) => words.clone(),
+            LeafWitness::Held(_) => {
+                tape.evaluate(&public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]))
+            }
+        };
+        check_tape(shard, &tape, lowered, &public, &words)?;
     }
     drop(lowered);
     let public: Vec<Word64> = public.into_iter().map(Word64::new).collect();
-    let witness: Vec<Word64> = witness.into_iter().map(Word64::new).collect();
     let evaluated = begun.elapsed().as_secs_f64();
-    let devices = backend.word_devices(key.cap_height());
     let statement = key.statement_public(&public);
-    let (commitment, proof, hints) = key
-        .prove_words(
-            &public,
-            &witness,
-            devices.as_ref().map(|d| (d.words, &*d.opening)),
-            &mut backend.challenger(),
-        )
-        .map_err(stage)?;
+    let devices = devices.as_ref().map(|d| (d.words, &*d.opening));
+    let (words, (commitment, proof, hints)) = match witness {
+        LeafWitness::Held(len) => {
+            let devices = devices.expect("held words are proved on their device");
+            (len, key.prove_held(&public, len, devices, &mut backend.challenger()).map_err(stage)?)
+        }
+        LeafWitness::Host(witness) => {
+            let witness: Vec<Word64> = witness.into_iter().map(Word64::new).collect();
+            let proved = key.prove_words(&public, &witness, devices, &mut backend.challenger()).map_err(stage)?;
+            (witness.len(), proved)
+        }
+    };
     tracing::info!(
         "word compress: leaf {shard}: {} words, key {index}{}, run {ran:.1} s, lower and key \
          {keyed:.1} s, witness {evaluated:.2} s, prove {:.2} s, {} bytes (openings {:?} \
          and ports)",
-        witness.len(),
+        words,
         if new { " (new program)" } else { "" },
         begun.elapsed().as_secs_f64() - evaluated,
         proof_size(&proof),

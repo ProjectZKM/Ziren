@@ -318,8 +318,9 @@ pub trait TapeBackend: ProverBackend<MachineConfig, TapeAir> {
     fn word_devices(&self, cap_height: usize) -> Option<WordDevices<'_>>;
 
     /// The committed words `tape` computes over the public words `public` and `memory`,
-    /// the runtime's memory as four canonical coefficients per address.
-    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32]) -> Vec<u64>;
+    /// the runtime's memory as four canonical coefficients per address: `held`, they stay on
+    /// the device its word devices prove from, the host told how many there are.
+    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32], held: bool) -> LeafWitness;
 
     /// Makes the backend's device the calling thread's, before the thread proves on it.
     fn bind(&self) {}
@@ -340,6 +341,13 @@ pub trait TapeBackend: ProverBackend<MachineConfig, TapeAir> {
 
     /// The table of `rows`, transposed into the packed layout.
     fn bit_table(&self, rows: RowBits) -> Table<F>;
+}
+
+/// A word leaf's committed words: on the host, or held on a device, the host knowing how
+/// many there are.
+pub enum LeafWitness {
+    Host(Vec<u64>),
+    Held(usize),
 }
 
 /// The devices of a word leaf: its trees, relations and shifts, and its commitment's opening.
@@ -364,8 +372,9 @@ impl TapeBackend for HostProver {
         None
     }
 
-    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32]) -> Vec<u64> {
-        tape.evaluate(public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]))
+    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32], held: bool) -> LeafWitness {
+        assert!(!held, "the host holds no device words");
+        LeafWitness::Host(tape.evaluate(public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient])))
     }
 
     fn rounds_table(
