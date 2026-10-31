@@ -204,6 +204,13 @@ impl WordKey {
                     layout.witness_of.par_iter().map(|&w| witness[w as usize]).collect();
                 (public, witness)
             });
+            if let Some((device, _)) = devices {
+                let gathered = tracing::info_span!("gather composed words on device")
+                    .in_scope(|| device.gather_witness(&layout.witness_of));
+                if !gathered {
+                    return Err("the device holds no committed words to gather".into());
+                }
+            }
             return self.prove_statement(&public, &witness, devices, challenger);
         }
         self.prove_statement(public, witness, devices, challenger)
