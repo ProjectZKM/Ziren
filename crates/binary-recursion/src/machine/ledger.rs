@@ -20,7 +20,7 @@ use p3_bus::{BusActivation, BusDirection, BusName};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, MEMORY, WRITE};
+use zkm_binary_stark::machine::bits::{dense, log_height_for, packed, BitRows, MEMORY, WRITE};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
@@ -141,6 +141,14 @@ impl LedgerAir {
             }
         }
         rows.into_table()
+    }
+}
+
+impl LedgerAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed(&self.preprocessed, NUM_LEDGER_PREP_COLS)
     }
 }
 

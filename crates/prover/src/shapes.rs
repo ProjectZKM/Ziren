@@ -74,19 +74,6 @@ fn table_log_rows(name: &str, program_log_rows: usize) -> Option<usize> {
     }
 }
 
-/// The committed-block buckets of `zkm_pcs::jagged::committed_dense_len` up
-/// to the one holding `max_blocks`: `1, 2, 3, 4, 8, 16, 24, …`.
-fn main_buckets(max_blocks: usize) -> Vec<usize> {
-    let top = zkm_pcs::jagged::committed_dense_len(max_blocks << LOG_STACK, LOG_STACK) >> LOG_STACK;
-    let mut out: Vec<usize> = (1..=4).filter(|b| *b <= top).collect();
-    let mut b = 8;
-    while b <= top {
-        out.push(b);
-        b += 8;
-    }
-    out
-}
-
 impl ZKMProofShape {
     /// Every shape the binary compress runs a program of.
     pub fn generate_all(machine: &CoreMachine) -> Vec<Self> {
@@ -94,22 +81,20 @@ impl ZKMProofShape {
     }
 
     /// The normalize (leaf) shapes: one representative per
-    /// `(chip cluster, preprocessed bucket, main bucket)` of the core machine —
+    /// `(chip cluster, preprocessed bucket, main pin)` of the core machine —
     /// the three quantities a core shard's proof geometry, hence the normalize
     /// program verifying it, hence its verifying key, are a function of.
     ///
     /// A shard's chip set is one of the machine's clusters
-    /// (`zkm_pcs::stacked_shapes::build_mips_machine_shape`); each of its two
-    /// committed rounds lands on a block bucket of
-    /// `zkm_pcs::jagged::committed_dense_len`; and under
-    /// `zkm_pcs::jagged::unpinned_pad_columns` the padding-column count is a
-    /// function of the bucket.  Heights themselves are witnessed, so every
-    /// height vector inside one class yields the same program.  The
-    /// representative keeps the preprocessed chips at their table sizes
-    /// (`Program` at `2^k` rows, `Byte` at `2^16`, `Range` at `2^11`) and fills
-    /// the rest of the bucket with the cluster's other chips, widest first,
-    /// each up to the row cube; a bucket the cluster cannot fill (or cannot
-    /// stay under) has no shard and is skipped.
+    /// (`zkm_pcs::stacked_shapes::build_mips_machine_shape`); its preprocessed
+    /// round lands on a block bucket of `zkm_pcs::jagged::committed_dense_len`
+    /// and its main round on a pin of `zkm_pcs::jagged::CORE_MAIN_PIN_CLASSES`.
+    /// Heights themselves are witnessed, so every height vector inside one
+    /// class yields the same program.  The representative keeps the
+    /// preprocessed chips at their table sizes (`Program` at `2^k` rows, `Byte`
+    /// at `2^16`, `Range` at `2^11`) and fills the rest of the pin with the
+    /// cluster's other chips, widest first, each up to the row cube; a pin the
+    /// cluster cannot reach (or cannot stay under) has no shard and is skipped.
     pub fn generate_normalize(machine: &CoreMachine) -> Vec<Self> {
         let dims = core_chip_dims(machine);
         let block = 1usize << zkm_pcs::stacked_shapes::consts::LOG_STACKING_HEIGHT;
@@ -144,13 +129,8 @@ impl ZKMProofShape {
                     .collect();
                 fill.sort_by(|a, b| b.main_width.cmp(&a.main_width).then(a.name.cmp(&b.name)));
                 let one_row_each: usize = fill.iter().map(|d| d.main_width).sum();
-                // The executor's area budget counts unpadded events. Trace padding,
-                // especially Keccak's power-of-two rows, can exceed that budget.
-                // Enumerate through the jagged verifier's round-area ceiling.
-                let max_main = 1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA;
-                for blocks in main_buckets(max_main.div_ceil(block)) {
-                    let hi = blocks * block;
-                    let lo = zkm_pcs::jagged::previous_bucket_blocks(blocks) * block;
+                for pin in zkm_pcs::jagged::CORE_MAIN_PIN_CLASSES {
+                    let hi = pin.area;
                     if fixed_main + one_row_each > hi {
                         continue;
                     }
@@ -163,7 +143,7 @@ impl ZKMProofShape {
                         rows.push((d.name.clone(), 1 + extra));
                     }
                     let total = hi - remaining;
-                    if total <= lo || zkm_pcs::jagged::committed_dense_len(total, LOG_STACK) != hi {
+                    if zkm_pcs::jagged::core_main_pin(total) != pin {
                         continue;
                     }
                     out.push(Self::Normalize(OrderedShape { inner: rows }));
@@ -174,8 +154,8 @@ impl ZKMProofShape {
     }
 
     /// The class of a real core shard at `rows` (name, row count): its chip
-    /// set and the committed block counts of its preprocessed and main
-    /// rounds — the key [`Self::generate_normalize`] enumerates on.
+    /// set, the committed blocks of its preprocessed round and the blocks of
+    /// its main round's pin — the key [`Self::generate_normalize`] enumerates on.
     pub fn normalize_class(
         machine: &CoreMachine,
         rows: &[(String, usize)],
@@ -192,7 +172,7 @@ impl ZKMProofShape {
         (
             rows.iter().map(|(n, _)| n.clone()).collect(),
             zkm_pcs::jagged::committed_dense_len(prep, LOG_STACK) / block,
-            zkm_pcs::jagged::committed_dense_len(main, LOG_STACK) / block,
+            zkm_pcs::jagged::core_main_pin(main).area / block,
         )
     }
 
@@ -279,6 +259,22 @@ mod normalize_enumeration_tests {
         out
     }
 
+    /// `rows` with the chips of the smallest cluster holding them added empty,
+    /// as a real shard commits them (`ShardClusters::cluster_widths`).
+    fn clustered(machine: &CoreMachine, rows: &[(String, usize)]) -> Vec<(String, usize)> {
+        use zkm_pcs::air::MachineAir;
+        let present: BTreeSet<String> = rows.iter().map(|(name, _)| name.clone()).collect();
+        let shape = zkm_pcs::stacked_shapes::build_mips_machine_shape();
+        let cluster = shape.smallest_cluster(&present).expect("a cluster holds the shard");
+        let mut out: BTreeMap<String, usize> = rows.iter().cloned().collect();
+        for chip in machine.chips() {
+            if cluster.contains(&chip.name()) {
+                out.entry(chip.name()).or_insert(0);
+            }
+        }
+        out.into_iter().collect()
+    }
+
     fn shape_rows(shape: &ZKMProofShape) -> Vec<(String, usize)> {
         let ZKMProofShape::Normalize(os) = shape;
         os.inner.clone()
@@ -319,11 +315,15 @@ mod normalize_enumeration_tests {
         .into_iter()
         .map(|(name, height)| (name.to_owned(), height))
         .collect();
-        let class = ZKMProofShape::normalize_class(machine, &rows);
-        assert_eq!((class.1, class.2), (8, 336));
-        assert!(ZKMProofShape::generate_normalize(machine)
+        let class = ZKMProofShape::normalize_class(machine, &clustered(machine, &rows));
+        assert_eq!((class.1, class.2), (8, 504));
+        let same_chips: Vec<(usize, usize)> = ZKMProofShape::generate_normalize(machine)
             .iter()
-            .any(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)) == class));
+            .map(|shape| ZKMProofShape::normalize_class(machine, &shape_rows(shape)))
+            .filter(|c| c.0 == class.0)
+            .map(|c| (c.1, c.2))
+            .collect();
+        assert!(same_chips.contains(&(class.1, class.2)), "enumerated for these chips: {same_chips:?}");
     }
 
     /// Every leaf the production census recorded (`ZIREN_CENSUS_FILE`, lines
@@ -342,9 +342,15 @@ mod normalize_enumeration_tests {
             std::env::var("ZIREN_CENSUS_PER_CLASS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
         let threads: usize =
             std::env::var("ZIREN_CENSUS_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
-        let leaves = parse_census(&path);
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
+        let leaves: Vec<CensusLeaf> = parse_census(&path)
+            .into_iter()
+            .map(|leaf| CensusLeaf {
+                rows: clustered(machine, &leaf.rows.iter().filter(|(_, h)| *h > 0).cloned().collect::<Vec<_>>()),
+                ..leaf
+            })
+            .collect();
         let representatives: BTreeMap<_, ZKMProofShape> =
             ZKMProofShape::generate_normalize(machine)
                 .into_iter()

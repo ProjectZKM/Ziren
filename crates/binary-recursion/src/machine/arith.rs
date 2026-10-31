@@ -10,11 +10,12 @@
 use core::borrow::{Borrow, BorrowMut};
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_binary_field::TowerLevel;
 use p3_bus::{BusActivation, BusDirection};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, MEMORY, WRITE};
+use zkm_binary_stark::machine::bits::{dense, log_height_for, packed, BitRows, MEMORY, WRITE};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
@@ -125,6 +126,32 @@ impl ArithAir {
     }
 }
 
+impl ArithAir {
+    /// What a device builds the table from: each row's kind, as [`ArithAir::kind_code`] numbers
+    /// it, and its operands `a` and `b`, zero where the row reads none.
+    #[must_use]
+    pub fn row_operands(program: &Program, values: &[F]) -> (Vec<u8>, Vec<[u128; 2]>) {
+        let value = |read: Option<Read>| read.map_or(0, |r| Program::value(values, r.cell).to_repr());
+        arith_rows(program)
+            .map(|op| (Self::kind_code(op.kind), [value(op.a), value(op.b)]))
+            .unzip()
+    }
+
+    /// A row kind's number on the device: what its `c` holds is `a + b`, `a * b`, `a * a`,
+    /// `a`'s inverse, zero, or `a`.
+    #[must_use]
+    pub const fn kind_code(kind: ArithKind) -> u8 {
+        match kind {
+            ArithKind::Add => 0,
+            ArithKind::Mul => 1,
+            ArithKind::Square => 2,
+            ArithKind::Inv => 3,
+            ArithKind::Eq | ArithKind::Select => 4,
+            ArithKind::Copy => 5,
+        }
+    }
+}
+
 /// The rows of `program` the table holds: all but the selects, in order.
 fn arith_rows(program: &Program) -> impl Iterator<Item = &ArithRow> {
     program.arith.iter().filter(|row| row.kind != ArithKind::Select)
@@ -139,6 +166,14 @@ fn result(op: &ArithRow, a: F, b: F) -> F {
         ArithKind::Inv => a.try_inverse().expect("the run inverts only nonzero values"),
         ArithKind::Eq | ArithKind::Select => F::ZERO,
         ArithKind::Copy => a,
+    }
+}
+
+impl ArithAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed(&self.preprocessed, NUM_ARITH_PREP_COLS)
     }
 }
 

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
-use p3_word::SystemError;
+use p3_word::{Segment, SystemError};
 use thiserror::Error;
 use zkm_recursion_core::{
     air::Block,
@@ -28,7 +28,8 @@ use zkm_recursion_core::{
 
 use crate::{
     builder::{Builder, Built, Cost, Val},
-    kb::Ext,
+    kb::{memory_imm, Ext},
+    tape::{Op, Tape},
 };
 
 type F = KoalaBear;
@@ -57,6 +58,9 @@ pub enum LowerError {
     /// The relations do not form a system.
     #[error("system: {0}")]
     System(#[from] SystemError),
+    /// A committed word has no computation from the memory and the words before it.
+    #[error("committed word {0} is not computed")]
+    Uncomputed(usize),
 }
 
 /// A lowered program.
@@ -67,6 +71,40 @@ pub struct Lowered {
     pub digest: [u32; DIGEST_SIZE],
     /// What each kind of instruction cost.
     pub census: BTreeMap<&'static str, (usize, Cost)>,
+    /// How each committed word is computed from the runtime's memory.
+    pub tape: Tape,
+}
+
+/// The spread of one kind's instances, for the census.
+struct Shape {
+    words: (usize, usize),
+    relations: (usize, usize),
+    imported: usize,
+    reads: usize,
+    histogram: BTreeMap<(usize, usize, usize, usize), usize>,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self {
+            words: (usize::MAX, 0),
+            relations: (usize::MAX, 0),
+            imported: 0,
+            reads: 0,
+            histogram: BTreeMap::new(),
+        }
+    }
+}
+
+impl Shape {
+    fn add(&mut self, cost: &Cost, imported: usize, reads: usize) {
+        let relations = cost.and + cost.mul + cost.zero;
+        self.words = (self.words.0.min(cost.words), self.words.1.max(cost.words));
+        self.relations = (self.relations.0.min(relations), self.relations.1.max(relations));
+        self.imported += imported;
+        self.reads += reads;
+        *self.histogram.entry((cost.words, cost.and, cost.mul, cost.zero)).or_default() += 1;
+    }
 }
 
 #[derive(Clone)]
@@ -86,6 +124,95 @@ struct Lowering<'a> {
     kind: &'static str,
     commits: usize,
     digest: [u32; DIGEST_SIZE],
+    /// The first committed word of the instruction being lowered.
+    mark: usize,
+}
+
+/// Lowers `program` again as gadgets, composes them, and proves and verifies the composition
+/// on the host, logging its size and times beside the flat lowering's `flat` words.
+fn compose_experiment(program: &RecursionProgram<F>, memory: Option<&[Block<F>]>, flat: (usize, usize)) {
+    use p3_word_backend::{PackedWitness, WordProofKey};
+    use zkm_binary_stark::{challenger, config::bit_commitment, F as Gf};
+
+    let started = std::time::Instant::now();
+    let mut lowering = Lowering {
+        builder: Builder::new(DIGEST_SIZE),
+        slots: vec![Slot::Unset; program.total_memory],
+        is_ext: ext_addresses(program),
+        memory,
+        index: 0,
+        kind: "",
+        commits: 0,
+        digest: [0; DIGEST_SIZE],
+        mark: 0,
+    };
+    lowering.builder.track_gadgets();
+    for (index, instruction) in program.iter_instructions().enumerate() {
+        lowering.index = index;
+        lowering.kind = kind_of(instruction);
+        lowering.mark = lowering.builder.witness_len();
+        lowering.builder.begin_gadget(lowering.kind);
+        if let Err(error) = lowering.lower(instruction) {
+            tracing::warn!("compose experiment: lowering failed: {error}");
+            return;
+        }
+        lowering.builder.end_gadget();
+    }
+    let composed = match lowering.builder.compose(DIGEST_SIZE) {
+        Ok(composed) => composed,
+        Err(error) => {
+            tracing::warn!("compose experiment: {error}");
+            return;
+        }
+    };
+    let composition = &composed.composition;
+    tracing::info!(
+        "compose experiment: flat {} words + {} public; composed {} words + {} public in {} calls, {} blocks, 2^{} port cells; lowered and composed in {:.1} s",
+        flat.0, flat.1, composition.witness_len(), composition.public_len(), composition.calls().len(),
+        composition.blocks().len(), composed.routing.cell_variables(), started.elapsed().as_secs_f64()
+    );
+    let started = std::time::Instant::now();
+    let key = match WordProofKey::with_ports(composition.clone(), composed.routing.clone()) {
+        Ok(key) => key,
+        Err(error) => {
+            tracing::warn!("compose experiment: key: {error:?}");
+            return;
+        }
+    };
+    let pcs = bit_commitment(key.trace_variables(), &crate::prove::schedule()).expect("a commitment");
+    let routing = key
+        .port_commitment::<Gf, _, _>(&pcs, &mut challenger())
+        .expect("the routing commits")
+        .expect("the key routes ports");
+    let keyed = started.elapsed().as_secs_f64();
+    let started = std::time::Instant::now();
+    let values = PackedWitness::new(key.statement(), &composed.public, &composed.witness)
+        .expect("the composed words fit the statement");
+    let proved = key.prove::<Gf, Gf, _, _>(&pcs, &values, &mut challenger());
+    let (commitment, proof) = match proved {
+        Ok(proved) => proved,
+        Err(error) => {
+            tracing::warn!("compose experiment: prove: {error:?}");
+            return;
+        }
+    };
+    let prove = started.elapsed().as_secs_f64();
+    let started = std::time::Instant::now();
+    let verdict = key.verify_routed::<Gf, Gf, _, _>(
+        &pcs,
+        &commitment,
+        &routing,
+        &composed.public,
+        &proof,
+        &mut challenger(),
+    );
+    tracing::info!(
+        "compose experiment: trace 2^{}, key + routing commitment {keyed:.1} s, host prove {prove:.1} s, verify {:.2} s: {verdict:?}; proof {} bytes, key {} bytes",
+        key.trace_variables(),
+        started.elapsed().as_secs_f64(),
+        crate::prove::proof_size(&proof),
+        postcard::to_allocvec(&key).map_or(0, |bytes| bytes.len()),
+    );
 }
 
 fn kind_of(instruction: &Instruction<F>) -> &'static str {
@@ -188,10 +315,23 @@ impl Lowering<'_> {
         Ok(())
     }
 
+    /// Reads `value` from coefficient `coefficient` at `addr` if the instruction committed
+    /// it: the runtime left it there, so it depends on no other word.
+    fn from_memory(&mut self, value: Val, addr: usize, coefficient: usize) {
+        if let Some(term) = value.plain() {
+            let index = term.index();
+            let position = index.position() as usize;
+            if index.segment() == Segment::Witness && position >= self.mark {
+                self.builder.tape.redefine(position, Op::Memory, memory_imm(addr, coefficient));
+            }
+        }
+    }
+
     fn set_felt(&mut self, addr: usize, value: Val) -> Result<(), LowerError> {
         let mut computed = self.memory(addr);
         computed[0] = value.value;
         self.check(addr, computed)?;
+        self.from_memory(value, addr, 0);
         self.slots[addr] = if self.is_ext[addr] {
             Slot::Ext(Box::new(Builder::embed(value)))
         } else {
@@ -202,6 +342,9 @@ impl Lowering<'_> {
 
     fn set_ext(&mut self, addr: usize, value: Ext) -> Result<(), LowerError> {
         self.check(addr, value.map(|v| v.value))?;
+        for (coefficient, value) in value.into_iter().enumerate() {
+            self.from_memory(value, addr, coefficient);
+        }
         self.slots[addr] = Slot::Ext(Box::new(value));
         Ok(())
     }
@@ -209,10 +352,10 @@ impl Lowering<'_> {
     fn hint_felt(&mut self, addr: usize) -> Result<(), LowerError> {
         if self.is_ext[addr] {
             let values = self.memory(addr);
-            let value: Ext = std::array::from_fn(|i| self.builder.hint(values[i]));
+            let value: Ext = std::array::from_fn(|i| self.builder.hint_at(values[i], addr, i));
             self.set_ext(addr, value)
         } else {
-            let value = self.builder.hint(self.memory(addr)[0]);
+            let value = self.builder.hint_at(self.memory(addr)[0], addr, 0);
             self.set_felt(addr, value)
         }
     }
@@ -299,6 +442,9 @@ impl Lowering<'_> {
             instr.flags.as_canonical_u32(),
         );
         for (word, pair) in out.into_iter().zip(addrs.output.chunks(2)) {
+            let position = word.plain().expect("a compression's output is a fresh word").index().position();
+            let limbs = pair[0].as_usize() as u64 | ((pair[1].as_usize() as u64) << 32);
+            self.builder.tape.redefine(position as usize, Op::Limbs, limbs);
             let [low, high] = self.builder.word_to_limbs(word);
             self.set_felt(pair[0].as_usize(), low)?;
             self.set_felt(pair[1].as_usize(), high)?;
@@ -341,6 +487,7 @@ impl Lowering<'_> {
         self.commits += 1;
         for (i, addr) in instr.pv_addrs.digest.iter().enumerate() {
             let value = self.felt(addr.as_usize())?;
+            self.builder.tape.outputs.push(addr.as_usize() as u32);
             let output = self.builder.output(i, value.value);
             self.builder.assert_zero(value.terms().chain([output]));
             self.digest[i] = value.value as u32;
@@ -361,7 +508,7 @@ impl Lowering<'_> {
             Instruction::HintBits(HintBitsInstr { output_addrs_mults, .. }) => {
                 for (addr, _) in output_addrs_mults {
                     let addr = addr.as_usize();
-                    let bit = self.builder.hint_bit(self.memory(addr)[0]);
+                    let bit = self.builder.hint_bit_at(self.memory(addr)[0], addr);
                     self.set_felt(addr, bit)?;
                 }
                 Ok(())
@@ -418,27 +565,95 @@ pub fn lower(
         kind: "",
         commits: 0,
         digest: [0; DIGEST_SIZE],
+        mark: 0,
     };
     let mut census: BTreeMap<&'static str, (usize, Cost)> = BTreeMap::new();
+    let sizes = std::env::var_os("ZIREN_LOWER_CENSUS").is_some();
+    let templates = std::env::var_os("ZIREN_LOWER_TEMPLATES");
+    if templates.is_some() {
+        lowering.builder.track_gadgets();
+    }
+    let mut shapes: BTreeMap<&'static str, Shape> = BTreeMap::new();
     for (index, instruction) in program.iter_instructions().enumerate() {
         lowering.index = index;
         lowering.kind = kind_of(instruction);
+        lowering.mark = lowering.builder.witness_len();
         let before = lowering.builder.cost();
+        let marks = lowering.builder.term_marks();
+        lowering.builder.begin_gadget(lowering.kind);
         lowering.lower(instruction)?;
+        lowering.builder.end_gadget();
+        let cost = lowering.builder.cost() - before;
+        if sizes {
+            let (words, reads) = lowering.builder.imports(marks, lowering.mark);
+            shapes.entry(lowering.kind).or_default().add(&cost, words, reads);
+        }
         let entry = census.entry(lowering.kind).or_default();
         entry.0 += 1;
-        entry.1 += lowering.builder.cost() - before;
+        entry.1 += cost;
+    }
+    if sizes {
+        for (kind, shape) in &shapes {
+            let (count, cost) = &census[kind];
+            tracing::info!(
+                "lower census: {kind}: {count} instances, {} words, {} and, {} mul, {} zero; words per instance {}..={}, relations per instance {}..={}; imports {} words in {} reads",
+                cost.words, cost.and, cost.mul, cost.zero, shape.words.0, shape.words.1, shape.relations.0, shape.relations.1, shape.imported, shape.reads
+            );
+            let mut variants: Vec<_> = shape.histogram.iter().collect();
+            variants.sort_by(|a, b| b.1.cmp(a.1));
+            let top: Vec<String> = variants
+                .iter()
+                .take(8)
+                .map(|((w, a, m, z), n)| format!("{n}x(w{w} a{a} m{m} z{z})"))
+                .collect();
+            tracing::info!("lower census: {kind} variants {}: {}", variants.len(), top.join(" "));
+        }
     }
     lowering.kind = "Blake3Compress";
     let before = lowering.builder.cost();
+    let (marks, mark) = (lowering.builder.term_marks(), lowering.builder.witness_len());
     lowering.builder.flush_compressions();
     census.entry(lowering.kind).or_default().1 += lowering.builder.cost() - before;
+    if sizes {
+        let (words, reads) = lowering.builder.imports(marks, mark);
+        tracing::info!("lower census: compression flush imports {words} words in {reads} reads");
+    }
     lowering.kind = "Range";
     let before = lowering.builder.cost();
+    let (marks, mark) = (lowering.builder.term_marks(), lowering.builder.witness_len());
     lowering.builder.flush_ranges();
-    census.entry(lowering.kind).or_default().1 += lowering.builder.cost() - before;
+    let cost = lowering.builder.cost() - before;
+    census.entry(lowering.kind).or_default().1 += cost;
+    if sizes {
+        let (words, reads) = lowering.builder.imports(marks, mark);
+        tracing::info!(
+            "lower census: range flush: {} words, {} and, {} mul, {} zero; imports {words} words in {reads} reads",
+            cost.words, cost.and, cost.mul, cost.zero
+        );
+    }
     if lowering.commits != 1 {
         return Err(LowerError::Commits(lowering.commits));
     }
-    Ok(Lowered { built: lowering.builder.build()?, digest: lowering.digest, census })
+    if let Some(dump) = &templates {
+        let dump = (dump != "1").then(|| std::path::Path::new(dump));
+        tracing::info_span!("template census")
+            .in_scope(|| {
+                lowering.builder.template_census(DIGEST_SIZE, dump, false);
+                lowering.builder.template_census(DIGEST_SIZE, dump, true);
+            });
+    }
+    let (built, tape) = lowering.builder.build_with_tape()?;
+    if let Some(word) = tape.ops.iter().position(|&op| op == Op::Constant as u8) {
+        return Err(LowerError::Uncomputed(word));
+    }
+    static COMPOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if std::env::var_os("ZIREN_LOWER_COMPOSE").is_some()
+        && memory.is_some()
+        && !COMPOSED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        let flat = (built.witness.len(), built.public.len());
+        tracing::info_span!("compose experiment")
+            .in_scope(|| compose_experiment(program, memory, flat));
+    }
+    Ok(Lowered { built, digest: lowering.digest, census, tape })
 }

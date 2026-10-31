@@ -7,19 +7,23 @@
 //! A compression's output words are committed when it is met, from their
 //! native values, so its relations can be emitted later, together with
 //! any other compression, whatever the dependencies between them.
+//!
+//! Every input of a compression is one committed word, constants read from
+//! their pool words, and a compression left without a partner runs beside a
+//! constant one: every pair of compressions is then the same relations over
+//! different words.
 
 use p3_word::ShiftKind;
 use zkm_recursion_core::runtime::blake3::{compress, IV, MSG_PERMUTATION};
 
 use crate::builder::{lane_add, Builder, Val};
 
-/// A compression whose relations are not emitted yet.
+/// A compression whose relations are not emitted yet: its inputs, the counter, block length
+/// and flags last, and its outputs, each one committed word.
 pub(crate) struct Compression {
     chaining_value: [Val; 8],
     block: [Val; 16],
-    counter: u32,
-    block_len: u32,
-    flags: u32,
+    parameters: [Val; 3],
     out: [Val; 8],
 }
 
@@ -84,27 +88,40 @@ impl Builder {
             self.below_bits(term, 32);
             word
         });
-        self.compressions.push(Compression {
-            chaining_value,
-            block,
-            counter,
-            block_len,
-            flags,
-            out,
-        });
-        if self.compressions.len() == 2 {
-            let second = self.compressions.pop().expect("two compressions");
-            let first = self.compressions.pop().expect("two compressions");
-            self.emit_compressions(&first, Some(&second));
-        }
+        let chaining_value = chaining_value.map(|value| self.port(value));
+        let block = block.map(|value| self.port(value));
+        let parameters = [counter, block_len, flags].map(|value| self.pool_word(u64::from(value)));
+        self.push_compression(Compression { chaining_value, block, parameters, out });
         out
     }
 
-    /// Emits the relations of a compression still waiting for a partner.
-    pub fn flush_compressions(&mut self) {
-        if let Some(last) = self.compressions.pop() {
-            self.emit_compressions(&last, None);
+    fn push_compression(&mut self, compression: Compression) {
+        self.compressions.push(compression);
+        if self.compressions.len() == 2 {
+            let second = self.compressions.pop().expect("two compressions");
+            let first = self.compressions.pop().expect("two compressions");
+            self.emit_compressions(&first, &second);
         }
+    }
+
+    /// Emits the relations of a compression still waiting for a partner, beside the
+    /// compression of zeros, whose outputs are constants.
+    pub fn flush_compressions(&mut self) {
+        if self.compressions.is_empty() {
+            return;
+        }
+        self.begin_gadget("Blake3Pad");
+        let native = compress(&[0; 8], &[0; 16], 0, 0, 0);
+        let zero = self.pool_word(0);
+        let parameters = [zero; 3];
+        let out = std::array::from_fn(|i| self.pool_word(u64::from(native[i])));
+        self.end_gadget();
+        self.push_compression(Compression {
+            chaining_value: [zero; 8],
+            block: [zero; 16],
+            parameters,
+            out,
+        });
     }
 
     /// `low` in the low lane and `high` in the high lane, both below `2^32`.
@@ -124,19 +141,26 @@ impl Builder {
         self.constant(u64::from(low) | (u64::from(high.unwrap_or(0)) << 32))
     }
 
-    fn emit_compressions(&mut self, first: &Compression, second: Option<&Compression>) {
+    fn emit_compressions(&mut self, first: &Compression, second: &Compression) {
+        self.begin_gadget("Blake3Compress");
+        let [first, second] = [first, second].map(|compression| Compression {
+            chaining_value: compression.chaining_value.map(|value| self.port_copy(value)),
+            block: compression.block.map(|value| self.port_copy(value)),
+            parameters: compression.parameters.map(|value| self.port_copy(value)),
+            out: compression.out.map(|value| self.port_copy(value)),
+        });
         let chaining_value: [Val; 8] = std::array::from_fn(|i| {
-            self.lanes(first.chaining_value[i], second.map(|c| c.chaining_value[i]))
+            self.lanes(first.chaining_value[i], Some(second.chaining_value[i]))
         });
         let mut message: [Val; 16] =
-            std::array::from_fn(|i| self.lanes(first.block[i], second.map(|c| c.block[i])));
+            std::array::from_fn(|i| self.lanes(first.block[i], Some(second.block[i])));
         let mut state: [Val; 16] = std::array::from_fn(|i| match i {
             0..=7 => chaining_value[i],
-            8..=11 => self.lane_constant(IV[i - 8], second.map(|_| IV[i - 8])),
-            12 => self.lane_constant(first.counter, second.map(|c| c.counter)),
+            8..=11 => self.lane_constant(IV[i - 8], Some(IV[i - 8])),
+            12 => self.lanes(first.parameters[0], Some(second.parameters[0])),
             13 => Val::ZERO,
-            14 => self.lane_constant(first.block_len, second.map(|c| c.block_len)),
-            _ => self.lane_constant(first.flags, second.map(|c| c.flags)),
+            14 => self.lanes(first.parameters[1], Some(second.parameters[1])),
+            _ => self.lanes(first.parameters[2], Some(second.parameters[2])),
         });
         for round in 0..7 {
             let m = message;
@@ -154,10 +178,11 @@ impl Builder {
         }
         for i in 0..8 {
             let mixed = self.xor(state[i], state[i + 8]);
-            let out = self.lanes(first.out[i], second.map(|c| c.out[i]));
+            let out = self.lanes(first.out[i], Some(second.out[i]));
             debug_assert_eq!(mixed.value, out.value, "the lanes compute the committed outputs");
             self.assert_zero(mixed.terms().chain(out.terms()));
         }
+        self.end_gadget();
     }
 
     /// The 32-bit word of two 16-bit limbs, low limb first; a limb not
@@ -220,13 +245,14 @@ mod tests {
         let before = builder.cost();
         builder.flush_compressions();
         assert_eq!((builder.cost() - before).and, 0, "the two compressions shared their lanes");
-        let built = builder.build().unwrap();
+        let (built, tape) = builder.build_with_tape().unwrap();
         assert_eq!(built.system.and_constraints().len(), 336);
         built.system.verify(&built.public, &built.witness).unwrap();
+        crate::tape::tests::computes(&built, &tape);
     }
 
     #[test]
-    fn a_lone_compression_runs_in_the_low_lane() {
+    fn a_lone_compression_runs_beside_the_compression_of_zeros() {
         let mut builder = Builder::new(0);
         let words: [Val; 24] = std::array::from_fn(|i| builder.word(0x9E37_79B9 ^ i as u64));
         let cv: [Val; 8] = std::array::from_fn(|i| words[i]);

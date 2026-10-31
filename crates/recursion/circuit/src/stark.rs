@@ -95,13 +95,27 @@ where
          fixed cube {max_log_row_count}",
     );
 
-    let proof = crate::dummy::dummy_jagged_shard_proof::<KoalaBear, InnerChallenge, A>(
-        &chips,
-        &chip_heights_pairs,
-        max_log_row_count,
-        machine.pins_for_rows(&chip_heights_pairs),
-        <SC as zkm_pcs::WhirRing>::WHIR_PROFILE,
-    );
+    let blake3 = core::any::TypeId::of::<<SC as zkm_pcs::WhirRing>::WhirMmcs>()
+        == core::any::TypeId::of::<zkm_pcs::kb31_blake3::Blake3Mmcs>();
+    let pins = machine.pins_for_rows(&chip_heights_pairs);
+    let profile = <SC as zkm_pcs::WhirRing>::WHIR_PROFILE;
+    let proof = if blake3 {
+        crate::dummy::dummy_jagged_shard_proof::<
+            KoalaBear,
+            InnerChallenge,
+            A,
+            zkm_pcs::kb31_blake3::Blake3Mmcs,
+            [u8; 32],
+        >(&chips, &chip_heights_pairs, max_log_row_count, pins, profile)
+    } else {
+        crate::dummy::dummy_jagged_shard_proof::<
+            KoalaBear,
+            InnerChallenge,
+            A,
+            zkm_pcs::jagged_pcs::JaggedMmcs,
+            [KoalaBear; 8],
+        >(&chips, &chip_heights_pairs, max_log_row_count, pins, profile)
+    };
 
     let chip_ordering = chip_heights_pairs
         .iter()

@@ -20,7 +20,7 @@ pub type F = BinaryField128;
 pub type Var = u32;
 
 /// An operand of an operation: a variable or a constant of the program.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Operand {
     Var(Var),
     Const(F),
@@ -28,7 +28,7 @@ pub enum Operand {
 
 /// One recorded operation.  The value-producing ones define the next
 /// variable; the assertions define none.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// A value of the proof, the `n`-th read.
     Input(usize),

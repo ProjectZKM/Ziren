@@ -9,13 +9,26 @@
 
 use std::collections::HashMap;
 
+use p3_maybe_rayon::prelude::*;
 use p3_word::{
     AndConstraint, ConstraintSystem, IntegerMulConstraint, Operand, Segment, Shift, ShiftKind,
     ShiftSequenceError, ShiftedValue, SystemError, ValueIndex, Word64, ZeroConstraint,
 };
 
+use crate::tape::{Op, Tape};
+
+mod compose;
+
+pub use compose::{ComposeError, Composed};
+
 /// One shifted word of an operand.
 pub type Term = ShiftedValue<Word64>;
+
+/// An operand of a computed word: a value, or the terms of one.
+pub(crate) enum Arg<'a> {
+    Val(Val),
+    Terms(&'a [Term]),
+}
 
 /// A value: the XOR of at most two terms, with its native 64-bit value.
 ///
@@ -182,23 +195,115 @@ impl Built {
 }
 
 /// Accumulates words and relations.
+/// One family's operands end to end, each constraint's in order, so recording
+/// a relation allocates nothing; the relations are made from them in parallel.
+#[derive(Default)]
+struct Operands {
+    terms: Vec<Term>,
+    ends: Vec<usize>,
+}
+
+impl Operands {
+    fn push(&mut self, terms: impl IntoIterator<Item = Term>) {
+        self.terms.extend(terms);
+        self.ends.push(self.terms.len());
+    }
+
+    fn operand(&self, index: usize) -> Operand<Word64> {
+        let start = index.checked_sub(1).map_or(0, |previous| self.ends[previous]);
+        Operand::new(self.terms[start..self.ends[index]].to_vec())
+    }
+
+    /// The relations of `ARITY` operands each, made by `make`.
+    fn relations<const ARITY: usize, C: Send>(
+        self,
+        make: impl Fn([Operand<Word64>; ARITY]) -> C + Sync,
+    ) -> Vec<C> {
+        (0..self.ends.len() / ARITY)
+            .into_par_iter()
+            .map(|index| make(std::array::from_fn(|i| self.operand(index * ARITY + i))))
+            .collect()
+    }
+}
+
 pub struct Builder {
     public: Vec<u64>,
     constants: HashMap<u64, usize>,
     witness: Vec<u64>,
-    zero: Vec<ZeroConstraint<Word64>>,
-    and: Vec<AndConstraint<Word64>>,
-    mul: Vec<IntegerMulConstraint<Word64>>,
+    zero: Operands,
+    and: Operands,
+    mul: Operands,
     pub(crate) compressions: Vec<crate::blake3::Compression>,
     pub(crate) pending_range: Option<Val>,
+    /// How each committed word is computed.
+    pub(crate) tape: Tape,
+    /// Which gadget owns each word and relation, when a template census asks.
+    pub(crate) owners: Option<Owners>,
+    /// The committed word of each constant a gadget reads as a word.
+    pool: HashMap<u64, Val>,
+}
+
+/// The gadget instance that owns each committed word and each relation: a gadget is an
+/// instruction's lowering or a flushed range or compression, which may nest in one.
+#[derive(Default)]
+pub(crate) struct Owners {
+    stack: Vec<u32>,
+    kinds: Vec<&'static str>,
+    words: Vec<u32>,
+    relations: [Vec<u32>; 3],
+    /// The zero relations that copy a word into a gadget's port, in order.
+    links: Vec<u32>,
+}
+
+impl Owners {
+    fn current(&self) -> u32 {
+        self.stack.last().copied().unwrap_or(u32::MAX)
+    }
+}
+
+/// The items `owner_of` assigns to `gadgets` gadgets, grouped by gadget in order: gadget
+/// `g`'s are `order[start[g]..start[g + 1]]`, and those of no gadget follow the last.
+fn by_owner(owner_of: &[u32], gadgets: usize) -> (Vec<u32>, Vec<u32>) {
+    let mut start = vec![0_u32; gadgets + 2];
+    for &owner in owner_of {
+        start[(owner.min(gadgets as u32) + 2) as usize] += 1;
+    }
+    for i in 1..start.len() {
+        start[i] += start[i - 1];
+    }
+    let mut order = vec![0_u32; owner_of.len()];
+    for (index, &owner) in owner_of.iter().enumerate() {
+        let slot = &mut start[(owner.min(gadgets as u32) + 1) as usize];
+        order[*slot as usize] = index as u32;
+        *slot += 1;
+    }
+    (start, order)
+}
+
+/// How often one gadget template occurs, and its size.
+struct Template {
+    kind: &'static str,
+    instances: usize,
+    words: usize,
+    relations: [usize; 3],
+    imports: usize,
+    constants: usize,
+}
+
+/// A term of a gadget template: its class (local, imported, output or constant word), the
+/// class index, and its two shifts.
+fn template_term(class: u64, index: u32, term: Term) -> u64 {
+    let [inner, outer] = term.shifts();
+    (class << 62)
+        | (u64::from(index) << 32)
+        | (u64::from(inner.kind().code()) << 24)
+        | (u64::from(inner.amount()) << 16)
+        | (u64::from(outer.kind().code()) << 8)
+        | u64::from(outer.amount())
 }
 
 fn shift(kind: ShiftKind, amount: usize) -> Shift<Word64> {
     Shift::new(kind, amount).expect("a shift amount within the word")
-}
-
-fn operand(terms: impl IntoIterator<Item = Term>) -> Operand<Word64> {
-    Operand::new(terms.into_iter().collect())
 }
 
 /// `x + y` on each 32-bit lane, every lane wrapping on its own.
@@ -216,20 +321,252 @@ impl Builder {
             public: vec![0; outputs],
             constants: HashMap::new(),
             witness: Vec::new(),
-            zero: Vec::new(),
-            and: Vec::new(),
-            mul: Vec::new(),
+            zero: Operands::default(),
+            and: Operands::default(),
+            mul: Operands::default(),
             compressions: Vec::new(),
             pending_range: None,
+            tape: Tape::new(),
+            owners: None,
+            pool: HashMap::new(),
         }
+    }
+
+    /// The committed word holding the constant `value`, one per distinct value and tied to
+    /// its public word, so a gadget reads a constant as it reads any other word.
+    pub(crate) fn pool_word(&mut self, value: u64) -> Val {
+        if let Some(&word) = self.pool.get(&value) {
+            return word;
+        }
+        self.begin_gadget("Const");
+        let terms: Vec<Term> = self.constant(value).terms().collect();
+        let word = self.computed(value, Op::Xor, 0, &[Arg::Terms(&terms)]);
+        self.assert_zero(terms.into_iter().chain(word.terms()));
+        self.end_gadget();
+        self.pool.insert(value, word);
+        word
+    }
+
+    /// A port of the current gadget holding `value`: a fresh word the gadget owns, equal to
+    /// the one word `value` is made, which the gadget reads in place of it.
+    pub(crate) fn port_copy(&mut self, value: Val) -> Val {
+        let source = self.port(value);
+        let word = self.computed(source.value, Op::Xor, 0, &[Arg::Val(source)]);
+        self.assert_zero(source.terms().chain(word.terms()));
+        if let Some(owners) = &mut self.owners {
+            owners.links.push(self.zero.ends.len() as u32 - 1);
+        }
+        Val { narrow: source.narrow, ..word }
+    }
+
+    /// `value` as one unshifted committed word: a constant is its pool word, any other XOR
+    /// is committed.
+    pub(crate) fn port(&mut self, value: Val) -> Val {
+        if value.constant {
+            return self.pool_word(value.value);
+        }
+        self.materialize(value)
+    }
+
+    /// Records which gadget owns each word and relation from now on.
+    pub(crate) fn track_gadgets(&mut self) {
+        self.owners = Some(Owners::default());
+    }
+
+    /// Opens a gadget of `kind`, owning what is emitted until [`Self::end_gadget`].
+    pub(crate) fn begin_gadget(&mut self, kind: &'static str) {
+        if let Some(owners) = &mut self.owners {
+            owners.stack.push(owners.kinds.len() as u32);
+            owners.kinds.push(kind);
+        }
+    }
+
+    /// Closes the innermost gadget.
+    pub(crate) fn end_gadget(&mut self) {
+        if let Some(owners) = &mut self.owners {
+            owners.stack.pop();
+        }
+    }
+
+    fn own_relation(&mut self, family: usize) {
+        if let Some(owners) = &mut self.owners {
+            let owner = owners.current();
+            owners.relations[family].push(owner);
+        }
+    }
+
+    /// Logs the distinct gadget templates: a gadget's relations with its own words numbered
+    /// in order, the committed words it reads from other gadgets numbered by first read, and
+    /// the constants likewise; `positional` numbers every read of another gadget's word or of a
+    /// constant on its own, so equal values do not split a template.  With `dump`, writes one
+    /// line per template there.
+    pub(crate) fn template_census(
+        &self,
+        outputs: usize,
+        dump: Option<&std::path::Path>,
+        positional: bool,
+    ) {
+        let Some(owners) = &self.owners else { return };
+        let gadgets = owners.kinds.len();
+        let words = by_owner(&owners.words, gadgets);
+        let families = [&self.zero, &self.and, &self.mul];
+        let arity = [1, 3, 4];
+        let relations: Vec<_> =
+            owners.relations.iter().map(|owner_of| by_owner(owner_of, gadgets)).collect();
+        let mut templates: HashMap<Vec<u64>, Template> = HashMap::new();
+        let mut local = HashMap::new();
+        let mut imported = HashMap::new();
+        let mut constants = HashMap::new();
+        let mut code = Vec::new();
+        let mut link = vec![false; self.zero.ends.len()];
+        for &relation in &owners.links {
+            link[relation as usize] = true;
+        }
+        let mut ports = 0;
+        for gadget in 0..gadgets {
+            local.clear();
+            imported.clear();
+            constants.clear();
+            code.clear();
+            let (start, order) = &words;
+            for &word in &order[start[gadget] as usize..start[gadget + 1] as usize] {
+                let next = local.len() as u32;
+                local.insert(word, next);
+            }
+            let mut counts = [0; 3];
+            for (family, (start, order)) in relations.iter().enumerate() {
+                let owned = &order[start[gadget] as usize..start[gadget + 1] as usize];
+                counts[family] = owned.len();
+                for &relation in owned {
+                    if family == 0 && link[relation as usize] {
+                        ports += 1;
+                        counts[0] -= 1;
+                        continue;
+                    }
+                    code.push(family as u64 + 1);
+                    for operand in 0..arity[family] {
+                        let index = relation as usize * arity[family] + operand;
+                        let from = index.checked_sub(1).map_or(0, |i| families[family].ends[i]);
+                        let terms = &families[family].terms[from..families[family].ends[index]];
+                        code.push(terms.len() as u64);
+                        for &term in terms {
+                            let position = term.index().position();
+                            let entry = match term.index().segment() {
+                                Segment::Witness => match local.get(&position) {
+                                    Some(&slot) => (0, slot),
+                                    None if positional => {
+                                        let next = imported.len() as u32;
+                                        imported.insert(u32::MAX - next, next);
+                                        (1, next)
+                                    }
+                                    None => {
+                                        let next = imported.len() as u32;
+                                        (1, *imported.entry(position).or_insert(next))
+                                    }
+                                },
+                                Segment::Public if (position as usize) < outputs => (2, position),
+                                Segment::Public if positional => {
+                                    let next = constants.len() as u32;
+                                    constants.insert(u32::MAX - next, next);
+                                    (3, next)
+                                }
+                                Segment::Public => {
+                                    let next = constants.len() as u32;
+                                    (3, *constants.entry(position).or_insert(next))
+                                }
+                            };
+                            code.push(template_term(entry.0, entry.1, term));
+                        }
+                    }
+                }
+            }
+            code.push(local.len() as u64);
+            let template = templates.entry(code.clone()).or_insert_with(|| Template {
+                kind: owners.kinds[gadget],
+                instances: 0,
+                words: local.len(),
+                relations: counts,
+                imports: imported.len(),
+                constants: constants.len(),
+            });
+            template.instances += 1;
+        }
+        let unowned = words.0[gadgets + 1] - words.0[gadgets];
+        let mut list: Vec<_> = templates.into_iter().collect();
+        list.sort_by_key(|(_, t)| std::cmp::Reverse(t.instances * t.words.max(1)));
+        let total: usize = list.iter().map(|(_, t)| t.instances * t.words).sum();
+        let reads: usize = list.iter().map(|(_, t)| t.instances * t.imports).sum();
+        let singles: usize = list.iter().filter(|(_, t)| t.instances == 1).map(|(_, t)| t.words).sum();
+        tracing::info!(
+            "template census{}: {gadgets} gadgets, {} templates, {total} owned words ({unowned} unowned), {reads} imported reads, {ports} port copies; templates of one instance: {} holding {singles} words",
+            if positional { " positional" } else { "" },
+            list.len(),
+            list.iter().filter(|(_, t)| t.instances == 1).count(),
+        );
+        let mut covered = 0;
+        for (rank, (_, t)) in list.iter().enumerate() {
+            covered += t.instances * t.words;
+            if rank < 24 || [39, 59, 99, 199, 499].contains(&rank) {
+                tracing::info!(
+                    "template census{}: #{rank} {} x{} w{} z{} a{} m{} imports {} constants {}; covers {:.1}%",
+                    if positional { " positional" } else { "" },
+                    t.kind, t.instances, t.words, t.relations[0], t.relations[1], t.relations[2],
+                    t.imports, t.constants, 100.0 * covered as f64 / total.max(1) as f64
+                );
+            }
+        }
+        if let Some(path) = dump {
+            let mut out = String::new();
+            for (code, t) in &list {
+                let digest = blake3::hash(&code.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+                out.push_str(&format!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\n",
+                    &digest.to_hex()[..16], t.kind, t.instances, t.words, t.imports, t.constants
+                ));
+            }
+            let mode = if positional { "positional" } else { "shared" };
+            let path = path.with_extension(format!("{}.{mode}.tsv", self.witness.len()));
+            if let Err(error) = std::fs::write(&path, out) {
+                tracing::warn!("template census: write {}: {error}", path.display());
+            }
+        }
+    }
+
+    /// The number of committed words so far.
+    pub fn witness_len(&self) -> usize {
+        self.witness.len()
+    }
+
+    /// Where each family's operand terms end so far.
+    pub(crate) fn term_marks(&self) -> [usize; 3] {
+        [self.zero.terms.len(), self.and.terms.len(), self.mul.terms.len()]
+    }
+
+    /// The distinct committed words before `mark` that the terms after `marks` read, and the
+    /// number of such reads.
+    pub(crate) fn imports(&self, marks: [usize; 3], mark: usize) -> (usize, usize) {
+        let mut words: Vec<usize> = [&self.zero, &self.and, &self.mul]
+            .into_iter()
+            .zip(marks)
+            .flat_map(|(family, from)| family.terms[from..].iter())
+            .filter_map(|term| {
+                let index = term.index();
+                (index.segment() == Segment::Witness && (index.position() as usize) < mark)
+                    .then_some(index.position() as usize)
+            })
+            .collect();
+        let reads = words.len();
+        words.sort_unstable();
+        words.dedup();
+        (words.len(), reads)
     }
 
     /// What has been emitted so far.
     pub fn cost(&self) -> Cost {
         Cost {
-            and: self.and.len(),
-            mul: self.mul.len(),
-            zero: self.zero.len(),
+            and: self.and.ends.len() / 3,
+            mul: self.mul.ends.len() / 4,
+            zero: self.zero.ends.len(),
             words: self.witness.len(),
         }
     }
@@ -255,18 +592,32 @@ impl Builder {
         Val { terms: [Some(term), None], value, constant: true, narrow: value < 1 << 16 }
     }
 
-    /// A fresh committed word.
+    /// A fresh committed word given as the constant `value`, which a lowering never
+    /// commits: its words are all computed.
     pub fn word(&mut self, value: u64) -> Val {
+        self.computed(value, Op::Constant, value, &[])
+    }
+
+    /// A fresh committed word of `value`, which `op` with `imm` computes over `args`.
+    pub(crate) fn computed(&mut self, value: u64, op: Op, imm: u64, args: &[Arg<'_>]) -> Val {
+        debug_assert_eq!(op.arity(), args.len());
+        self.tape.begin(op, imm);
+        for arg in args {
+            match arg {
+                Arg::Val(value) => self.tape.operand(value.terms()),
+                Arg::Terms(terms) => self.tape.operand(terms.iter().copied()),
+            }
+        }
         let index = self.witness.len();
         self.witness.push(value);
+        if let Some(owners) = &mut self.owners {
+            let owner = owners.current();
+            owners.words.push(owner);
+        }
         Val::single(
             ShiftedValue::plain(ValueIndex::witness(index).expect("a witness index")),
             value,
         )
-    }
-
-    fn word_term(&mut self, value: u64) -> Term {
-        self.word(value).plain().expect("a fresh word is plain")
     }
 
     /// The native value of `term`.
@@ -281,7 +632,8 @@ impl Builder {
 
     /// `terms = 0`.
     pub fn assert_zero(&mut self, terms: impl IntoIterator<Item = Term>) {
-        self.zero.push(ZeroConstraint::new(operand(terms)));
+        self.zero.push(terms);
+        self.own_relation(0);
     }
 
     /// `left & right = out`.
@@ -291,7 +643,10 @@ impl Builder {
         right: impl IntoIterator<Item = Term>,
         out: impl IntoIterator<Item = Term>,
     ) {
-        self.and.push(AndConstraint::new(operand(left), operand(right), operand(out)));
+        self.and.push(left);
+        self.and.push(right);
+        self.and.push(out);
+        self.own_relation(1);
     }
 
     /// `left * right = lo + 2^64 hi`.
@@ -302,12 +657,11 @@ impl Builder {
         lo: impl IntoIterator<Item = Term>,
         hi: impl IntoIterator<Item = Term>,
     ) {
-        self.mul.push(IntegerMulConstraint::new(
-            operand(left),
-            operand(right),
-            operand(lo),
-            operand(hi),
-        ));
+        self.mul.push(left);
+        self.mul.push(right);
+        self.mul.push(lo);
+        self.mul.push(hi);
+        self.own_relation(2);
     }
 
     /// `value` as one unshifted word, committing it if it is not one.
@@ -315,7 +669,7 @@ impl Builder {
         if value.is_zero() || value.plain().is_some() {
             return value;
         }
-        let word = self.word(value.value);
+        let word = self.computed(value.value, Op::Xor, 0, &[Arg::Val(value)]);
         self.assert_zero(value.terms().chain(word.terms()));
         Val { narrow: value.narrow, ..word }
     }
@@ -428,7 +782,10 @@ impl Builder {
     ) -> Chain {
         let sum = if lane32 { lane_add(x_value, y_value) } else { x_value.wrapping_add(y_value) };
         let carries = (x_value & y_value) | ((sum ^ x_value ^ y_value) & (x_value ^ y_value));
-        let carry = self.word_term(carries);
+        let carry = self
+            .computed(carries, Op::Carry, u64::from(lane32), &[Arg::Terms(x), Arg::Terms(y)])
+            .plain()
+            .expect("a fresh word is plain");
         let kind = if lane32 { ShiftKind::Lane32LogicalLeft } else { ShiftKind::LogicalLeft };
         let carry_in = ShiftedValue::single(carry.index(), shift(kind, 1));
         self.and(
@@ -456,7 +813,7 @@ impl Builder {
         let x_terms: Vec<Term> = x.terms().collect();
         let y_terms: Vec<Term> = y.terms().collect();
         let chain = self.chain(&x_terms, x.value, &y_terms, y.value, lane32, false);
-        let sum = self.word(chain.value);
+        let sum = self.computed(chain.value, Op::Xor, 0, &[Arg::Terms(&chain.sum)]);
         self.assert_zero(chain.sum.into_iter().chain(sum.terms()));
         sum
     }
@@ -469,17 +826,26 @@ impl Builder {
         )]);
     }
 
+    /// [`Self::build`], with how each committed word is computed.
+    pub fn build_with_tape(mut self) -> Result<(Built, Tape), SystemError> {
+        self.flush_compressions();
+        self.flush_ranges();
+        let tape = std::mem::take(&mut self.tape);
+        debug_assert_eq!(tape.len(), self.witness.len());
+        Ok((self.build()?, tape))
+    }
+
     /// The relations and the words that satisfy them.
     pub fn build(mut self) -> Result<Built, SystemError> {
         self.flush_compressions();
         self.flush_ranges();
-        let system = ConstraintSystem::new(
-            self.public.len(),
-            self.witness.len(),
-            self.zero,
-            self.and,
-            self.mul,
-        )?;
+        let zero = self.zero.relations(|[value]| ZeroConstraint::new(value));
+        let and = self.and.relations(|[left, right, out]| AndConstraint::new(left, right, out));
+        let mul = self
+            .mul
+            .relations(|[left, right, lo, hi]| IntegerMulConstraint::new(left, right, lo, hi));
+        let system =
+            ConstraintSystem::new(self.public.len(), self.witness.len(), zero, and, mul)?;
         Ok(Built {
             system,
             public: self.public.into_iter().map(Word64::new).collect(),

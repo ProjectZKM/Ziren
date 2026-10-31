@@ -5,6 +5,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use zkm_binary_recursion::word::record_word_verification;
 use p3_field::PrimeCharacteristicRing;
 use zkm_binary_recursion::{Tape, F};
+use zkm_binary_stark::challenger;
 use zkm_recursion_r1cs::builder::{Built, Builder};
 use zkm_recursion_r1cs::kb::P;
 use zkm_recursion_r1cs::prove::{schedule, WordKey};
@@ -41,7 +42,7 @@ fn report(label: &str, tape: &Tape) {
 fn the_traced_verifier_accepts_a_word_proof() {
     let built = built(64, 4);
     let key = WordKey::new(&built, &schedule()).unwrap();
-    let (commitment, proof, hints) = key.prove(&built).unwrap();
+    let (commitment, proof, hints) = key.prove(&built, None, &mut challenger()).unwrap();
     let (verdict, tape) = record_word_verification(
         &key.key,
         &schedule(),
@@ -78,7 +79,7 @@ fn word_verifier_cost() {
     for n in sizes {
         let built = built(n, 7);
         let key = WordKey::new(&built, &schedule()).unwrap();
-        let (commitment, proof, hints) = key.prove(&built).unwrap();
+        let (commitment, proof, hints) = key.prove(&built, None, &mut challenger()).unwrap();
         let (verdict, tape) = record_word_verification(
             &key.key,
             &schedule(),

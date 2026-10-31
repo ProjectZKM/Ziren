@@ -10,14 +10,17 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-blake3 = { workspace = true, features = ["std"] }
+blake3 = { workspace = true, features = ["std", "rayon"] }
 p3-binary-pcs = { workspace = true }
 p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-word = { workspace = true }
 p3-word-backend = { workspace = true }
 postcard = { version = "1.1", features = ["alloc"] }
+serde = { workspace = true }
 thiserror = "1.0.60"
+tracing = { workspace = true }
 zkm-binary-stark = { workspace = true }
 zkm-recursion-core = { workspace = true }
 

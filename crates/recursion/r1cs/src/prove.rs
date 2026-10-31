@@ -1,19 +1,21 @@
 //! Proving lowered relations with the word backend, the committed bits
 //! under the binary stage's Boolean WHIR and Blake3 transcript.
 
-use p3_binary_pcs::BooleanBackend;
-use p3_word::Word64;
-use p3_word_backend::{PackedWitness, WordProof, WordProofKey};
+use p3_binary_pcs::{BooleanBackend, BooleanMultilinearPcs};
+use p3_word::{ConstraintSystem, Word64};
+use p3_word_backend::{PackedWitness, WordDevice, WordProof, WordProofKey};
 use zkm_binary_stark::{
     challenger,
     config::{bit_commitment, BitPcs},
-    BinarySchedule, F,
+    BinarySchedule, Challenger, F,
 };
 
 use crate::builder::Built;
 
 /// The commitment of a word proof.
 pub type Commitment = <BitPcs as BooleanBackend<F>>::Commitment;
+/// Where a key's commitment opens on a device.
+pub type OpeningDevice = <BitPcs as BooleanMultilinearPcs<F, Challenger>>::OpeningDevice;
 
 /// A word proof.
 pub type Proof = WordProof<F, F, <BitPcs as BooleanBackend<F>>::Proof>;
@@ -62,11 +64,36 @@ impl WordKey {
         schedule: &BinarySchedule,
         outputs: usize,
     ) -> Result<Self, String> {
-        let key = WordProofKey::new(built.system.clone()).map_err(|e| format!("key: {e:?}"))?;
-        let pcs = bit_commitment(key.trace_variables(), schedule).map_err(|e| e.to_string())?;
         let outputs = outputs.min(built.public.len());
-        let constants = built.public[outputs..].to_vec();
         let digest = relations_digest(built, outputs);
+        let system = tracing::info_span!("copy relations").in_scope(|| built.system.clone());
+        Self::compile(system, schedule, built.public[outputs..].to_vec(), outputs, digest)
+    }
+
+    /// [`Self::new`] with `built`'s relations moved into the key, an empty system left in
+    /// their place; its words stay.
+    pub fn taking(built: &mut Built, schedule: &BinarySchedule) -> Result<Self, String> {
+        let outputs = zkm_recursion_core::DIGEST_SIZE.min(built.public.len());
+        let digest = relations_digest(built, outputs);
+        let empty = ConstraintSystem::new(0, 0, Vec::new(), Vec::new(), Vec::new())
+            .map_err(|e| format!("an empty system: {e:?}"))?;
+        let system = std::mem::replace(&mut built.system, empty);
+        Self::compile(system, schedule, built.public[outputs..].to_vec(), outputs, digest)
+    }
+
+    fn compile(
+        system: ConstraintSystem<Word64>,
+        schedule: &BinarySchedule,
+        constants: Vec<Word64>,
+        outputs: usize,
+        digest: [u8; 32],
+    ) -> Result<Self, String> {
+        let key = tracing::info_span!("compile key")
+            .in_scope(|| WordProofKey::new(system))
+            .map_err(|e| format!("key: {e:?}"))?;
+        let pcs = tracing::info_span!("key commitment")
+            .in_scope(|| bit_commitment(key.trace_variables(), schedule))
+            .map_err(|e| e.to_string())?;
         Ok(Self { key, pcs, constants, outputs, digest })
     }
 
@@ -75,13 +102,42 @@ impl WordKey {
         outputs.iter().chain(&self.constants).copied().collect()
     }
 
-    /// Proves `built`'s words satisfy the key's relations.
-    pub fn prove(&self, built: &Built) -> Result<(Commitment, Proof, Hints), String> {
-        let values = PackedWitness::new(self.key.statement(), &built.public, &built.witness)
+    /// Proves `built`'s words satisfy the key's relations, over the transcript `challenger`
+    /// starts, on `devices` when given: the trees, relations and shifts on the first, the
+    /// commitment's opening on the second.
+    pub fn prove(
+        &self,
+        built: &Built,
+        devices: Option<(&dyn WordDevice, &OpeningDevice)>,
+        challenger: &mut Challenger,
+    ) -> Result<(Commitment, Proof, Hints), String> {
+        self.prove_words(&built.public, &built.witness, devices, challenger)
+    }
+
+    /// [`Self::prove`] for the public words `public` and the committed words `witness`.
+    pub fn prove_words(
+        &self,
+        public: &[Word64],
+        witness: &[Word64],
+        devices: Option<(&dyn WordDevice, &OpeningDevice)>,
+        challenger: &mut Challenger,
+    ) -> Result<(Commitment, Proof, Hints), String> {
+        let values = tracing::info_span!("pack witness")
+            .in_scope(|| PackedWitness::new(self.key.statement(), public, witness))
             .map_err(|e| format!("witness: {e:?}"))?;
-        self.key
-            .prove_with_hints::<F, F, _, _>(&self.pcs, &values, &mut challenger())
-            .map_err(|e| format!("prove: {e:?}"))
+        match devices {
+            Some((device, opening)) => self
+                .key
+                .prove_with_hints_on::<F, F, _, _>(&self.pcs, &values, device, opening, challenger),
+            None => self.key.prove_with_hints::<F, F, _, _>(&self.pcs, &values, challenger),
+        }
+        .map_err(|e| format!("prove: {e:?}"))
+    }
+
+    /// The height of the caps the key's commitments are made with.
+    #[must_use]
+    pub fn cap_height(&self) -> usize {
+        self.pcs.inner().mmcs().cap_height()
     }
 
     /// Verifies a proof against the public words.
@@ -95,6 +151,217 @@ impl WordKey {
             .verify::<F, F, _, _>(&self.pcs, commitment, public, proof, &mut challenger())
             .map_err(|e| format!("verify: {e:?}"))
     }
+}
+
+/// The tag a key file starts with; a change of the format changes it.
+const KEY_FILE_TAG: &[u8; 16] = b"ziren word key 1";
+
+impl WordKey {
+    /// The key as a file: [`KEY_FILE_TAG`], the Blake3 digest of the body, then the body,
+    /// the key's digest, outputs, constants and compiled relations.  The commitment is
+    /// rebuilt from the schedule on reading.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        let constants: Vec<u64> = self.constants.iter().map(|w| w.get()).collect();
+        let body = tracing::info_span!("encode key")
+            .in_scope(|| postcard::to_allocvec(&(&self.digest, self.outputs as u64, &constants, &self.key)))
+            .map_err(|e| format!("encode the key: {e}"))?;
+        if std::env::var_os("ZIREN_WORD_KEY_SIZES").is_some() {
+            let statement = postcard::to_allocvec(self.key.statement()).map_or(0, |b| b.len());
+            tracing::info!("word key: {} bytes, the statement {statement} of them", body.len());
+        }
+        let mut out = Vec::with_capacity(KEY_FILE_TAG.len() + 32 + body.len());
+        out.extend_from_slice(KEY_FILE_TAG);
+        out.extend_from_slice(blake3::Hasher::new().update_rayon(&body).finalize().as_bytes());
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    /// The key [`Self::to_bytes`] wrote, its commitment made under `schedule`.
+    pub fn from_bytes(bytes: &[u8], schedule: &BinarySchedule) -> Result<Self, String> {
+        let header = KEY_FILE_TAG.len() + 32;
+        if bytes.len() < header || &bytes[..KEY_FILE_TAG.len()] != KEY_FILE_TAG {
+            return Err("not a word key file of this format".into());
+        }
+        let body = &bytes[header..];
+        let sum = tracing::info_span!("check key file")
+            .in_scope(|| blake3::Hasher::new().update_rayon(body).finalize());
+        if sum.as_bytes() != &bytes[KEY_FILE_TAG.len()..header] {
+            return Err("the key file is corrupt".into());
+        }
+        let (digest, outputs, constants, key): ([u8; 32], u64, Vec<u64>, WordProofKey<Word64>) =
+            tracing::info_span!("decode key")
+                .in_scope(|| postcard::from_bytes(body))
+                .map_err(|e| format!("decode the key: {e}"))?;
+        let pcs = bit_commitment(key.trace_variables(), schedule).map_err(|e| e.to_string())?;
+        Ok(Self {
+            key,
+            pcs,
+            constants: constants.into_iter().map(Word64::new).collect(),
+            outputs: outputs as usize,
+            digest,
+        })
+    }
+}
+
+/// Keys by digest: those made or read so far, and a directory that keeps every key made
+/// across runs, one `<digest>.wkey` file each; and, by the digest of the program lowered,
+/// the key it is proved under and the tape that computes its witness.
+pub struct WordKeys {
+    keys: Vec<std::sync::Arc<WordKey>>,
+    dir: Option<std::path::PathBuf>,
+    programs: std::collections::HashMap<[u8; 32], (usize, std::sync::Arc<crate::tape::Tape>)>,
+}
+
+impl WordKeys {
+    /// No keys yet, kept in `dir` when given.
+    pub fn new(dir: Option<std::path::PathBuf>) -> Self {
+        Self { keys: Vec::new(), dir, programs: std::collections::HashMap::new() }
+    }
+
+    /// The key position and tape of the program of digest `program`, if it was lowered.
+    pub fn program(&self, program: &[u8; 32]) -> Option<(usize, std::sync::Arc<crate::tape::Tape>)> {
+        self.programs.get(program).cloned()
+    }
+
+    /// Records that the program of digest `program` is proved under the key at `key` and
+    /// its witness computed by `tape`.
+    pub fn insert_program(&mut self, program: [u8; 32], key: usize, mut tape: crate::tape::Tape) {
+        tracing::info_span!("schedule tape").in_scope(|| tape.schedule());
+        self.insert_tape(program, key, std::sync::Arc::new(tape));
+    }
+
+    /// [`Self::insert_program`] for a `tape` already scheduled.
+    pub fn insert_tape(
+        &mut self,
+        program: [u8; 32],
+        key: usize,
+        tape: std::sync::Arc<crate::tape::Tape>,
+    ) {
+        self.programs.insert(program, (key, tape));
+    }
+
+    /// What makes this set's keys on another thread.
+    pub fn maker(&self) -> KeyMaker {
+        KeyMaker { dir: self.dir.clone() }
+    }
+
+    /// The position of the key named `digest`, if it is known.
+    pub fn known(&self, digest: &[u8; 32]) -> Option<usize> {
+        self.keys.iter().position(|key| key.digest == *digest)
+    }
+
+    /// The position of the key of `key`'s digest: the one known, else `key`, added.
+    pub fn insert(&mut self, key: WordKey) -> usize {
+        if let Some(position) = self.known(&key.digest) {
+            return position;
+        }
+        self.keys.push(std::sync::Arc::new(key));
+        self.keys.len() - 1
+    }
+
+    /// [`Self::new`] in the directory `ZKM_WORD_KEY_DIR` names, if it does.
+    pub fn from_env() -> Self {
+        Self::new(std::env::var_os("ZKM_WORD_KEY_DIR").map(Into::into))
+    }
+
+    /// The keys known so far.
+    pub fn as_slice(&self) -> &[std::sync::Arc<WordKey>] {
+        &self.keys
+    }
+
+    /// The position of the key named `digest`: one known, else the one its file holds, else
+    /// the key of `built` under `schedule`, made and written to its file.
+    pub fn position(
+        &mut self,
+        built: &Built,
+        digest: [u8; 32],
+        schedule: &BinarySchedule,
+    ) -> Result<usize, String> {
+        if let Some(position) = self.known(&digest) {
+            return Ok(position);
+        }
+        let key = self.maker().make(built, digest, schedule)?;
+        Ok(self.insert(key))
+    }
+}
+
+/// Makes the keys of a [`WordKeys`] apart from it, so several are made at once: each read from
+/// the set's directory when its file is there, else built and written to it.
+#[derive(Clone, Debug)]
+pub struct KeyMaker {
+    dir: Option<std::path::PathBuf>,
+}
+
+impl KeyMaker {
+    fn path(&self, digest: &[u8; 32]) -> Option<std::path::PathBuf> {
+        let name: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        self.dir.as_ref().map(|dir| dir.join(format!("{name}.wkey")))
+    }
+
+    /// The key named `digest`: the one its file holds, else the key of `built` under
+    /// `schedule`, made and written to its file.
+    pub fn make(
+        &self,
+        built: &Built,
+        digest: [u8; 32],
+        schedule: &BinarySchedule,
+    ) -> Result<WordKey, String> {
+        self.read_or(digest, schedule, || WordKey::new(built, schedule))
+    }
+
+    /// [`Self::make`], a key made taking `built`'s relations as [`WordKey::taking`] does.
+    pub fn make_taking(
+        &self,
+        built: &mut Built,
+        digest: [u8; 32],
+        schedule: &BinarySchedule,
+    ) -> Result<WordKey, String> {
+        self.read_or(digest, schedule, || WordKey::taking(built, schedule))
+    }
+
+    fn read_or(
+        &self,
+        digest: [u8; 32],
+        schedule: &BinarySchedule,
+        build: impl FnOnce() -> Result<WordKey, String>,
+    ) -> Result<WordKey, String> {
+        let path = self.path(&digest);
+        let read = match &path {
+            Some(path) if path.exists() => {
+                let bytes = tracing::info_span!("read key file")
+                    .in_scope(|| std::fs::read(path))
+                    .map_err(|e| format!("read {}: {e}", path.display()))?;
+                let key = WordKey::from_bytes(&bytes, schedule)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                if key.digest != digest {
+                    return Err(format!("{} holds another key", path.display()));
+                }
+                Some(key)
+            }
+            _ => None,
+        };
+        match read {
+            Some(key) => Ok(key),
+            None => {
+                let key = build()?;
+                if let Some(path) = &path {
+                    let bytes = key.to_bytes()?;
+                    tracing::info_span!("write key file").in_scope(|| write_atomically(path, &bytes))?;
+                }
+                Ok(key)
+            }
+        }
+    }
+}
+
+/// Writes `bytes` to a temporary file beside `path`, then renames it into place, so a reader
+/// never sees a partial key.
+fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let dir = path.parent().ok_or_else(|| format!("{} has no directory", path.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let temporary = path.with_extension(format!("wkey.{}.part", std::process::id()));
+    std::fs::write(&temporary, bytes).map_err(|e| format!("write {}: {e}", temporary.display()))?;
+    std::fs::rename(&temporary, path).map_err(|e| format!("rename to {}: {e}", path.display()))
 }
 
 /// The digest naming the key of `built`'s relations with `outputs` outputs:
@@ -152,8 +419,17 @@ mod tests {
         builder.assert_zero(acc.terms().chain([output]));
         let built = builder.build().unwrap();
         let key = WordKey::new(&built, &schedule()).unwrap();
-        let (commitment, proof, _) = key.prove(&built).unwrap();
+        let (commitment, proof, _) = key.prove(&built, None, &mut challenger()).unwrap();
         key.verify(&commitment, &built.public, &proof).unwrap();
+        let read = WordKey::from_bytes(&key.to_bytes().unwrap(), &schedule()).unwrap();
+        assert_eq!(read.digest, key.digest);
+        assert!(read.key == key.key, "the key reads back as written");
+        let (commitment, proof, _) = read.prove(&built, None, &mut challenger()).unwrap();
+        key.verify(&commitment, &built.public, &proof).unwrap();
+        let mut bytes = key.to_bytes().unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        assert!(WordKey::from_bytes(&bytes, &schedule()).is_err());
         let mut wrong = built.public.clone();
         wrong[0] = Word64::new(wrong[0].get() ^ 1);
         assert!(key.verify(&commitment, &wrong, &proof).is_err());

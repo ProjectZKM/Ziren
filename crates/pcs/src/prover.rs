@@ -461,7 +461,14 @@ where
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
                 let (main_commitment, precomputed) = crate::shard_level::prover::commit_traces::<SC>(
                     &named_traces,
-                    record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
+                    record.area_pins().map(|p| p.main).or_else(|| {
+                        self.machine().main_area_pin_for(
+                            named_traces
+                                .values()
+                                .map(|t| t.real_trace_ref().map_or(0, |r| r.values.len()))
+                                .sum(),
+                        )
+                    }),
                 );
                 Some(RetainedJaggedCommit {
                     main_commitment,

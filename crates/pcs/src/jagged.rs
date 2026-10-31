@@ -246,6 +246,35 @@ impl RecursionPins {
     }
 }
 
+/// The main-round pins a CORE shard commits under, smallest first: a shard takes the smallest
+/// pin its natural committed area fits (`core_main_pin`).  The program verifying a core shard is
+/// then a function of its chip set and this class alone, not of its row counts, so the leaf
+/// programs are enumerable.  The pins step by halves of a power of two, so a shard pads at most
+/// a third of its area: every first-round WHIR query opens each stacking stripe of the pin, and
+/// power-of-two steps cost a real block 38% more core area against 13% for these.  The executor's
+/// budget counts unpadded events, so a precompile shard whose power-of-two padding (Keccak's)
+/// outgrows it can reach the top pin, the largest stacking-bucket area under the jagged
+/// verifier's `2^MAX_ROUND_LOG_AREA` ceiling.  `pad_columns` is the area over the row cube.
+pub const CORE_MAIN_PIN_CLASSES: [AreaPin; 8] = [
+    AreaPin { area: 1 << 26, pad_columns: 16 },
+    AreaPin { area: 3 << 25, pad_columns: 24 },
+    AreaPin { area: 1 << 27, pad_columns: 32 },
+    AreaPin { area: 3 << 26, pad_columns: 48 },
+    AreaPin { area: 1 << 28, pad_columns: 64 },
+    AreaPin { area: 3 << 27, pad_columns: 96 },
+    AreaPin { area: 1 << 29, pad_columns: 128 },
+    AreaPin { area: (1 << MAX_ROUND_LOG_AREA) - (1 << 24), pad_columns: 256 },
+];
+
+/// The smallest of [`CORE_MAIN_PIN_CLASSES`] a core main round of `total_values` cells fits.
+/// Panics past the largest class: the shard split's area budget keeps a shard under it.
+pub fn core_main_pin(total_values: usize) -> AreaPin {
+    let natural = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
+    *CORE_MAIN_PIN_CLASSES.iter().find(|pin| natural <= pin.area).unwrap_or_else(|| {
+        panic!("core main round: {natural} committed cells exceed every core pin class")
+    })
+}
+
 pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
     if total_values == 0 {
         return 0;

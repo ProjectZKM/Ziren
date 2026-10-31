@@ -27,7 +27,7 @@
 //!   A rewiring row is then 128 bytes wide where a whole transpose would be
 //!   128 elements: every column of a table is a value the verifier opens.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use p3_binary_field::TowerLevel;
 use p3_field::PrimeCharacteristicRing;
@@ -257,13 +257,19 @@ pub struct Program {
     pub num_public: usize,
 }
 
+/// The slot of an address that is never read.
+const UNREAD: u32 = u32::MAX;
+
 /// The program as it is being laid out.
 struct Builder {
     next_addr: u32,
     var_addr: Vec<u32>,
     var_source: Vec<Source>,
     const_addr: HashMap<u128, u32>,
-    reads: HashMap<u32, (u32, Cell, Source)>,
+    /// The index in `reads` of every allocated address's entry, or [`UNREAD`].
+    read_slot: Vec<u32>,
+    /// Every address read, its count, and the cell and source of its first read.
+    reads: Vec<Group>,
     program: Program,
 }
 
@@ -274,6 +280,9 @@ impl Builder {
         let base = self.next_addr.div_ceil(align) * align;
         self.next_addr = base + align;
         assert!(self.next_addr <= 1 << ADDR_BITS, "the program fits {ADDR_BITS}-bit addresses");
+        if self.read_slot.len() < self.next_addr as usize {
+            self.read_slot.resize(self.next_addr as usize, UNREAD);
+        }
         base
     }
 
@@ -305,7 +314,12 @@ impl Builder {
 
     /// One more read of the cell at `addr`.
     fn count(&mut self, addr: u32, cell: Cell, source: Source) {
-        self.reads.entry(addr).or_insert((0, cell, source)).0 += 1;
+        let slot = &mut self.read_slot[addr as usize];
+        if *slot == UNREAD {
+            *slot = u32::try_from(self.reads.len()).expect("the reads fit a slot");
+            self.reads.push(Group { addr, reads: 0, source, cell });
+        }
+        self.reads[*slot as usize].reads += 1;
     }
 
     /// Copy `operands` to a fresh aligned block, returning its base.
@@ -428,9 +442,11 @@ impl Program {
             var_addr: vec![u32::MAX; tape.values.len()],
             var_source: vec![Source::Write; tape.values.len()],
             const_addr: HashMap::new(),
-            reads: HashMap::new(),
+            read_slot: Vec::new(),
+            reads: Vec::new(),
             program: Program { num_public, ..Program::default() },
         };
+        let layout = tracing::debug_span!("layout").entered();
         for (op, defined) in tape.ops.iter().zip(&tape.defined) {
             let outputs = op.defines();
             let base = defined.map(|first| {
@@ -550,27 +566,34 @@ impl Program {
             }
         }
 
-        let mut reads = core::mem::take(&mut builder.reads);
-        let is_read = |addr: u32| reads.contains_key(&addr);
-        let mut program = builder.program;
-        let direct_candidates: HashSet<u32> = program
+        drop(layout);
+        let _settle = tracing::debug_span!("settle").entered();
+        let Builder { read_slot, reads, mut program, .. } = builder;
+        let is_read = |addr: u32| read_slot[addr as usize] != UNREAD;
+        let mut via_of = vec![Via::Ledger; reads.len()];
+        let direct = program
             .arith
             .iter()
             .flat_map(|row| [row.a, row.b, row.s])
             .flatten()
             .chain(program.kb.iter().flat_map(|row| [row.a, row.b]))
             .map(|read| read.addr)
-            .chain(program.rewire.iter().flat_map(RewireRow::input_addrs))
-            .collect();
-        let via_of: HashMap<u32, Via> = direct_candidates
-            .into_iter()
-            .filter_map(|addr| match reads.get(&addr) {
-                Some(&(1, _, Source::Write)) => Some((addr, Via::Write)),
-                Some(&(1, _, Source::Input)) => Some((addr, Via::Free)),
-                _ => None,
-            })
-            .collect();
-        let via = |addr: u32| via_of.get(&addr).copied().unwrap_or(Via::Ledger);
+            .chain(program.rewire.iter().flat_map(RewireRow::input_addrs));
+        for addr in direct {
+            let slot = read_slot[addr as usize];
+            if slot != UNREAD {
+                let group = &reads[slot as usize];
+                via_of[slot as usize] = match (group.reads, group.source) {
+                    (1, Source::Write) => Via::Write,
+                    (1, Source::Input) => Via::Free,
+                    _ => Via::Ledger,
+                };
+            }
+        }
+        let via = |addr: u32| match read_slot[addr as usize] {
+            UNREAD => Via::Ledger,
+            slot => via_of[slot as usize],
+        };
         let settle = |read: &mut Read| read.via = via(read.addr);
         for row in &mut program.arith {
             for read in [&mut row.a, &mut row.b, &mut row.s].into_iter().flatten() {
@@ -600,12 +623,13 @@ impl Program {
                 *reads = [is_read(*base), is_read(*base ^ 1)];
             }
         }
-        reads.retain(|addr, _| !via_of.contains_key(addr));
         let mut groups: Vec<Group> = reads
             .into_iter()
-            .map(|(addr, (reads, cell, source))| Group { addr, reads, source, cell })
+            .zip(via_of)
+            .filter(|(_, via)| *via == Via::Ledger)
+            .map(|(group, _)| group)
             .collect();
-        groups.sort_by_key(|group| group.addr);
+        groups.sort_unstable_by_key(|group| group.addr);
         program.groups = groups;
         program
     }

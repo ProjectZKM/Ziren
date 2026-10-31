@@ -78,7 +78,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         )?;
         Ok((
             ZKMProofWithPublicValues {
-                proof: ZKMProof::Compressed(Box::new(compressed)),
+                proof: ZKMProof::Compressed(Box::new(crate::CompressedProof::Binary(compressed))),
                 public_values: proof.public_values,
                 zkm_version: self.version().to_string(),
             },

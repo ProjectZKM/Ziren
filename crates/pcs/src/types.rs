@@ -133,19 +133,22 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// Whether this shard proof carries any INSTRUCTION chip — the
     /// execution-shard signal.  There is no Cpu chip any more (every
     /// instruction chip owns its frame), so "is this an execution shard"
-    /// is answered by the instruction-chip set instead: a memory-global or
-    /// precompile shard contains none of these.
+    /// is answered by the instruction chips' rows instead: a memory-global or
+    /// precompile shard has none, though its cluster may commit them empty.
     pub fn contains_execution(&self) -> bool {
-        let heights = &self.jagged_shard_proof.chip_heights;
-        EXECUTION_CHIP_NAMES.iter().any(|n| heights.contains_key(*n))
+        EXECUTION_CHIP_NAMES.iter().any(|n| self.has_rows(n))
     }
 
     pub fn contains_global_memory_init(&self) -> bool {
-        self.jagged_shard_proof.chip_heights.contains_key("MemoryGlobalInit")
+        self.has_rows("MemoryGlobalInit")
     }
 
     pub fn contains_global_memory_finalize(&self) -> bool {
-        self.jagged_shard_proof.chip_heights.contains_key("MemoryGlobalFinalize")
+        self.has_rows("MemoryGlobalFinalize")
+    }
+
+    fn has_rows(&self, chip: &str) -> bool {
+        self.jagged_shard_proof.chip_heights.get(chip).is_some_and(|h| *h > 0)
     }
 }
 

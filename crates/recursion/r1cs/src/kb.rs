@@ -23,7 +23,8 @@ use p3_field::{
 use p3_koala_bear::KoalaBear;
 use p3_word::{ShiftKind, ShiftedValue};
 
-use crate::builder::{Builder, Term, Val};
+use crate::builder::{Arg, Builder, Term, Val};
+use crate::tape::Op;
 
 /// The KoalaBear modulus.
 pub const P: u64 = 0x7f00_0001;
@@ -52,6 +53,16 @@ pub fn quotient(a: u64, b: u64) -> u64 {
         (_, 0) => 0,
         _ => canonical(felt(a) * felt(b).inverse()),
     }
+}
+
+/// The immediate of [`Op::Memory`] for coefficient `coefficient` at `addr`.
+pub fn memory_imm(addr: usize, coefficient: usize) -> u64 {
+    ((addr as u64) << 2) | coefficient as u64
+}
+
+/// The operands of an extension op over `a` and `b`, coefficients in order.
+fn ext_args<'a>(a: &Ext, b: &Ext) -> [Arg<'a>; 8] {
+    std::array::from_fn(|i| Arg::Val(if i < 4 { a[i] } else { b[i - 4] }))
 }
 
 /// The native element of `value`.
@@ -100,6 +111,7 @@ impl Builder {
     }
 
     fn range_lanes(&mut self, low: Val, high: Option<Val>) {
+        self.begin_gadget("Range");
         let low = self.materialize(low);
         self.below(low.plain().expect("a materialized value is plain"), 32);
         let high = high.map(|value| {
@@ -117,6 +129,7 @@ impl Builder {
             chain.carry.index(),
             p3_word::Shift::new(ShiftKind::Lane32LogicalRight, 31).expect("a lane shift"),
         )]);
+        self.end_gadget();
     }
 
     /// A hinted element, checked canonical.
@@ -126,9 +139,27 @@ impl Builder {
         word
     }
 
+    /// The hinted coefficient `coefficient` of the element at memory `addr`, of value
+    /// `value`, checked canonical.
+    pub fn hint_at(&mut self, value: u64, addr: usize, coefficient: usize) -> Val {
+        let word = self.computed(value, Op::Memory, memory_imm(addr, coefficient), &[]);
+        self.range(word);
+        word
+    }
+
     /// A hinted bit.
     pub fn hint_bit(&mut self, value: u64) -> Val {
         let word = self.word(value);
+        self.checked_bit(word)
+    }
+
+    /// The hinted bit at memory `addr`, of value `value`.
+    pub fn hint_bit_at(&mut self, value: u64, addr: usize) -> Val {
+        let word = self.computed(value, Op::Memory, memory_imm(addr, 0), &[]);
+        self.checked_bit(word)
+    }
+
+    fn checked_bit(&mut self, word: Val) -> Val {
         let term = word.plain().expect("a fresh word is plain");
         self.below(term, 1);
         word.narrowed()
@@ -159,8 +190,8 @@ impl Builder {
         if a.constant && b.constant {
             return self.constant(sum - wraps * P);
         }
-        let out = self.word(sum - wraps * P);
-        self.equal_sums(a, b, out, wraps);
+        let out = self.computed(sum - wraps * P, Op::AddMod, 0, &[Arg::Val(a), Arg::Val(b)]);
+        self.equal_sums(a, b, out, wraps, Op::Wraps, [a, b]);
         self.range(out);
         out
     }
@@ -175,15 +206,18 @@ impl Builder {
         if a.constant && b.constant {
             return self.constant(diff);
         }
-        let out = self.word(diff);
-        self.equal_sums(out, b, a, borrows);
+        let out = self.computed(diff, Op::SubMod, 0, &[Arg::Val(a), Arg::Val(b)]);
+        self.equal_sums(out, b, a, borrows, Op::Borrows, [a, b]);
         self.range(out);
         out
     }
 
-    /// `x + y = out + k p` for a hinted bit `k`.
-    fn equal_sums(&mut self, x: Val, y: Val, out: Val, wraps: u64) {
-        let k = self.word(wraps).plain().expect("a fresh word is plain");
+    /// `x + y = out + k p` for a hinted bit `k`, which `k_op` computes over `k_args`.
+    fn equal_sums(&mut self, x: Val, y: Val, out: Val, wraps: u64, k_op: Op, k_args: [Val; 2]) {
+        let k = self
+            .computed(wraps, k_op, 0, &[Arg::Val(k_args[0]), Arg::Val(k_args[1])])
+            .plain()
+            .expect("a fresh word is plain");
         self.below(k, 1);
         let x_terms: Vec<Term> = x.terms().collect();
         let y_terms: Vec<Term> = y.terms().collect();
@@ -198,7 +232,10 @@ impl Builder {
     /// when one factor of it is not range-checked.
     fn reduce_small(&mut self, x: Term, x_value: u64, r: Val) {
         let q_value = x_value / P;
-        let q = self.word(q_value).plain().expect("a fresh word is plain");
+        let q = self
+            .computed(q_value, Op::QuotientP, 0, &[Arg::Terms(&[x])])
+            .plain()
+            .expect("a fresh word is plain");
         self.below(q, 31);
         let left = self.chain(&[x], x_value, &[Self::moved(q, 24)], q_value << 24, false, true);
         let r_terms: Vec<Term> = r.terms().collect();
@@ -228,7 +265,7 @@ impl Builder {
         if b.constant && b.value == 1 {
             return a;
         }
-        let r = self.word(product % P);
+        let r = self.computed(product % P, Op::MulMod, 0, &[Arg::Val(a), Arg::Val(b)]);
         self.range(r);
         self.mul_into(a, b, r);
         r
@@ -241,7 +278,10 @@ impl Builder {
             return;
         }
         let product = a.value * b.value;
-        let x = self.word(product).plain().expect("a fresh word is plain");
+        let x = self
+            .computed(product, Op::Product, 0, &[Arg::Val(a), Arg::Val(b)])
+            .plain()
+            .expect("a fresh word is plain");
         self.imul(a.terms(), b.terms(), [x], []);
         self.reduce_small(x, product, r);
     }
@@ -253,7 +293,7 @@ impl Builder {
         if a.constant && b.constant {
             return self.constant(value);
         }
-        let out = self.word(value);
+        let out = self.computed(value, Op::Quotient, 0, &[Arg::Val(a), Arg::Val(b)]);
         if canonical_out {
             self.range(out);
         }
@@ -273,9 +313,12 @@ impl Builder {
         let b_term = self.plain_term(b);
         let k_value = tripled / P;
         let out_value = tripled % P;
-        let k = self.word(k_value).plain().expect("a fresh word is plain");
+        let k = self
+            .computed(k_value, Op::TripleQuotient, 0, &[Arg::Val(b)])
+            .plain()
+            .expect("a fresh word is plain");
         self.below(k, 2);
-        let out = self.word(out_value);
+        let out = self.computed(out_value, Op::TripleRemainder, 0, &[Arg::Val(b)]);
         let out_term = out.plain().expect("a fresh word is plain");
         let sum =
             self.chain(&[b_term], b.value, &[Self::moved(b_term, 1)], 2 * b.value, false, false);
@@ -335,7 +378,10 @@ impl Builder {
         }
         let product = ext_value(&a) * ext_value(&b);
         let coefficients = product.as_basis_coefficients_slice();
-        let out: Ext = std::array::from_fn(|i| self.word(canonical(coefficients[i])));
+        let args = ext_args(&a, &b);
+        let out: Ext = std::array::from_fn(|i| {
+            self.computed(canonical(coefficients[i]), Op::ExtMul, i as u64, &args)
+        });
         for value in out {
             self.range(value);
         }
@@ -369,7 +415,10 @@ impl Builder {
                     continue;
                 }
                 let product = left.value * factor.value;
-                let x = self.word(product).plain().expect("a fresh word is plain");
+                let x = self
+                    .computed(product, Op::Product, 0, &[Arg::Val(left), Arg::Val(factor)])
+                    .plain()
+                    .expect("a fresh word is plain");
                 self.imul(left.terms(), factor.terms(), [x], []);
                 if sum.is_empty() {
                     sum = vec![x];
@@ -389,7 +438,10 @@ impl Builder {
             return;
         }
         let q_value = x_value / P;
-        let q = self.word(q_value).plain().expect("a fresh word is plain");
+        let q = self
+            .computed(q_value, Op::QuotientP, 0, &[Arg::Terms(x)])
+            .plain()
+            .expect("a fresh word is plain");
         self.below(q, 33);
         let left = self.chain(x, x_value, &[Self::moved(q, 24)], q_value << 24, false, true);
         let high = self.chain(&[Self::moved(q, 31)], q_value << 31, &[q], q_value, false, true);
@@ -415,7 +467,10 @@ impl Builder {
             return self.constant_ext(value);
         }
         let coefficients = value.as_basis_coefficients_slice();
-        let out: Ext = std::array::from_fn(|i| self.word(canonical(coefficients[i])));
+        let args = ext_args(&a, &b);
+        let out: Ext = std::array::from_fn(|i| {
+            self.computed(canonical(coefficients[i]), Op::ExtDiv, i as u64, &args)
+        });
         for value in out {
             self.range(value);
         }
@@ -439,7 +494,12 @@ impl Builder {
         let a = self.materialize(a);
         let b = self.materialize(b);
         let diff_value = if bit.value == 1 { a.value ^ b.value } else { 0 };
-        let diff = self.word(diff_value);
+        let diff = self.computed(
+            diff_value,
+            Op::SelectDiff,
+            0,
+            &[Arg::Terms(&[bit_term]), Arg::Val(a), Arg::Val(b)],
+        );
         self.and([mask], a.terms().chain(b.terms()), diff.terms());
         let first = self.xor(a, diff);
         let second = self.xor(b, diff);
@@ -483,8 +543,9 @@ mod tests {
             builder.mul(a, b);
             builder.triple(a);
         }
-        let built = builder.build().unwrap();
+        let (built, tape) = builder.build_with_tape().unwrap();
         built.system.verify(&built.public, &built.witness).unwrap();
+        crate::tape::tests::computes(&built, &tape);
     }
 
     #[test]
@@ -504,8 +565,9 @@ mod tests {
         }
         let worst: Ext = std::array::from_fn(|_| builder.hint(P - 1));
         builder.ext_mul(worst, worst);
-        let built = builder.build().unwrap();
+        let (built, tape) = builder.build_with_tape().unwrap();
         built.system.verify(&built.public, &built.witness).unwrap();
+        crate::tape::tests::computes(&built, &tape);
     }
 
     #[test]
@@ -524,6 +586,44 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "times the lowering of prefix-sum checks"]
+    fn prefix_sum_lowering_speed() {
+        let steps: usize = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(1 << 20);
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut builder = Builder::new(0);
+        let inputs: Vec<(Val, Ext)> = (0..steps)
+            .map(|_| {
+                let bit = builder.hint_bit(rng.gen_range(0..2));
+                let x2: Ext = std::array::from_fn(|_| builder.hint(random(&mut rng)));
+                (bit, x2)
+            })
+            .collect();
+        let before = builder.cost();
+        let started = std::time::Instant::now();
+        let one = builder.constant(1);
+        let mut acc = Builder::embed(one);
+        let mut field_acc = Val::ZERO;
+        for &(x1, x2) in &inputs {
+            let x1 = builder.bit(x1);
+            let matched = builder.ext_mul(acc, x2);
+            let missed = builder.ext_sub(acc, matched);
+            acc = std::array::from_fn(|j| builder.select(x1, missed[j], matched[j]).0);
+            let doubled = builder.add(field_acc, field_acc);
+            field_acc = builder.add(x1, doubled);
+        }
+        let lowered = started.elapsed().as_secs_f64();
+        let cost = builder.cost() - before;
+        let started = std::time::Instant::now();
+        let (built, _tape) = builder.build_with_tape().unwrap();
+        let build = started.elapsed().as_secs_f64();
+        println!(
+            "{steps} steps: lower {lowered:.2} s ({:.1} ns/word), build {build:.2} s; {cost:?}; {} words",
+            lowered * 1e9 / cost.words as f64,
+            built.witness.len()
+        );
+    }
+
+    #[test]
     fn select_swaps_on_one() {
         let mut builder = Builder::new(0);
         let a = builder.hint(5);
@@ -534,7 +634,8 @@ mod tests {
             let expected = if bit.value == 1 { (9, 5) } else { (5, 9) };
             assert_eq!((first.value, second.value), expected);
         }
-        let built = builder.build().unwrap();
+        let (built, tape) = builder.build_with_tape().unwrap();
         built.system.verify(&built.public, &built.witness).unwrap();
+        crate::tape::tests::computes(&built, &tape);
     }
 }

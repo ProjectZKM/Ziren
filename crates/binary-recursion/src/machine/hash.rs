@@ -10,8 +10,10 @@
 //!   halves `p` of its two children's chaining values, pulled on [`CHAIN`].
 //!   A Merkle node's cells are its digest and its sibling, swapped when its
 //!   path bit is one: cell `k` of the block is `x + bit (x + x')`, `x'` the
-//!   cell two places on, which is in the same row.  The row pushes the
-//!   eight message words of its two cells at their first use.
+//!   cell two places on, which is in the same row.  Both cells of a row add
+//!   the same `bit (x + x')`, which the row holds as its swap, so the cells
+//!   it pushes are sums of its columns.  The row pushes the eight message
+//!   words of its two cells at their first use.
 //! - **The state** starts with the chaining value in lanes 0 to 7 and the
 //!   initial value, counter, block length and flags in lanes 8 to 15, which
 //!   message row 0 pushes at version zero.  The chaining value is the
@@ -21,7 +23,7 @@
 //! - **The output** of a root is the digest, its two halves pushed on
 //!   [`WRITE`]; a parent's child pushes its halves on [`CHAIN`].
 //!
-//! A row is 512 columns: a message row holds 257 of them, an output row the
+//! A row is 512 columns: a message row holds 385 of them, an output row the
 //! sixteen final lanes.  Every column of a table is a value the machine's
 //! verifier opens, and the rows of a compression were one row of 2,048.
 
@@ -33,7 +35,7 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{
-    dense, log_height_for, pack_field, BitRows, MEMORY, PERMUTATION_ID_BITS, WRITE,
+    dense, log_height_for, pack_field, packed, BitRows, MEMORY, PERMUTATION_ID_BITS, WRITE,
 };
 use zkm_binary_stark::machine::blake3::{STATE_WORDS, WORD_BITS};
 use zkm_binary_stark::machine_builder::MachineBuilder;
@@ -107,8 +109,11 @@ pub struct MsgCols<T> {
     /// Cells `p` and `p + 2` as pulled, before a Merkle node's swap.
     pub cells: [[T; VALUE_BITS]; 2],
     pub bit: T,
+    /// The bits of `bit (x + x')` for the row's cells `x` and `x'`, which a
+    /// Merkle node's swap adds to either cell.
+    pub swap: [T; VALUE_BITS],
     /// Zeros: the output row is the wider.
-    pub pad: [T; 512 - 2 * VALUE_BITS - 1],
+    pub pad: [T; 512 - 3 * VALUE_BITS - 1],
 }
 
 /// An output row's witness: the lanes after the last round.
@@ -286,6 +291,9 @@ impl HashAir {
                 let cols: &mut MsgCols<u8> = row_bits.as_mut_slice().borrow_mut();
                 cols.cells = [cells[pair], cells[pair + 2]].map(super::cells::value_bits);
                 cols.bit = u8::from(s.bit);
+                if s.bit {
+                    cols.swap = super::cells::value_bits(cells[pair] + cells[pair + 2]);
+                }
                 rows.set_row(ROWS_PER_COMPRESSION * c + pair, &row_bits);
             }
             row_bits.fill(0);
@@ -294,6 +302,14 @@ impl HashAir {
             rows.set_row(ROWS_PER_COMPRESSION * c + 2, &row_bits);
         }
         rows.into_table()
+    }
+}
+
+impl HashAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed(&self.preprocessed, NUM_HASH_PREP_COLS)
     }
 }
 
@@ -343,6 +359,10 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for HashAir {
         builder.assert_zero(is_msg.clone() * (AB::Expr::ONE - prep.is_merkle.into()) * bit.clone());
 
         let cells: [AB::Expr; 2] = core::array::from_fn(|k| pack::<AB>(&msg.cells[k]));
+        builder.assert_zero(
+            is_msg.clone()
+                * (pack::<AB>(&msg.swap) - bit.clone() * (cells[0].clone() + cells[1].clone())),
+        );
         for (slot, packed) in prep.slots.iter().zip(cells.iter()) {
             builder.declare_bus(
                 MEMORY,
@@ -371,12 +391,10 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for HashAir {
         }
         let first_use = constant_bits::<AB, USE_BITS>(0);
         for k in 0..2 {
-            let other = 1 - k;
             for w in 0..4 {
                 let word: [AB::Expr; WORD_BITS] = core::array::from_fn(|b| {
                     let x: AB::Expr = msg.cells[k][32 * w + b].into();
-                    let x2: AB::Expr = msg.cells[other][32 * w + b].into();
-                    x.clone() + bit.clone() * (x + x2)
+                    x + msg.swap[32 * w + b].into()
                 });
                 let index: [AB::Expr; MSG_INDEX_BITS] = [
                     AB::Expr::from_bool(w & 1 == 1),
