@@ -147,6 +147,122 @@ impl BitRows {
     }
 }
 
+/// Rows of bits row-major: row `r` holds `words_per_row` words, column `c`
+/// on bit `c % 64` of its word `c / 64`.  A table's rows are written here a
+/// value at a time and turned into [`BitRows`]' layout in one transposition.
+pub struct RowBits {
+    width: usize,
+    log_height: usize,
+    words: Vec<u64>,
+}
+
+impl RowBits {
+    /// An all-zero table of `width` columns and `2^log_height` rows.
+    #[must_use]
+    pub fn new(width: usize, log_height: usize) -> Self {
+        assert!(log_height >= MIN_LOG_HEIGHT, "a packed table holds at least one word per column");
+        Self { width, log_height, words: vec![0; (1 << log_height) * width.div_ceil(64)] }
+    }
+
+    /// The low `bits` bits of `value` on row `r` from column `column` up, the
+    /// columns there zero before.
+    pub fn put(&mut self, r: usize, column: usize, value: u128, bits: usize) {
+        let (width, per_row) = (self.width, self.words_per_row());
+        RowMut { width, words: &mut self.words[r * per_row..(r + 1) * per_row] }.put(column, value, bits);
+    }
+
+    /// Every row, to be written side by side.
+    pub fn par_rows_mut(&mut self) -> impl IndexedParallelIterator<Item = RowMut<'_>> {
+        let (width, per_row) = (self.width, self.words_per_row());
+        self.words.par_chunks_mut(per_row).map(move |words| RowMut { width, words })
+    }
+
+    #[must_use]
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    #[must_use]
+    pub const fn log_height(&self) -> usize {
+        self.log_height
+    }
+
+    #[must_use]
+    pub const fn words_per_row(&self) -> usize {
+        self.width.div_ceil(64)
+    }
+
+    /// The rows' words, row after row.
+    #[must_use]
+    pub fn words(&self) -> &[u64] {
+        &self.words
+    }
+
+    /// The table, transposed on the host.
+    #[must_use]
+    pub fn into_table(self) -> Table<F> {
+        let (width, per_row) = (self.width, self.words_per_row());
+        let mut out = vec![0u64; (1 << self.log_height) / 64 * width];
+        out.par_chunks_mut(width).enumerate().for_each(|(block, columns)| {
+            for w in 0..per_row {
+                let mut square: [u64; 64] =
+                    core::array::from_fn(|r| self.words[(64 * block + r) * per_row + w]);
+                transpose64(&mut square);
+                for (k, &column) in square.iter().enumerate().take(width.saturating_sub(64 * w)) {
+                    columns[64 * w + k] = column;
+                }
+            }
+        });
+        Table::from_packed_bits(RowMajorMatrix::new(out, width), self.log_height)
+    }
+}
+
+/// One row of a [`RowBits`].
+pub struct RowMut<'a> {
+    width: usize,
+    words: &'a mut [u64],
+}
+
+impl RowMut<'_> {
+    /// The low `bits` bits of `value` from column `column` up, the columns
+    /// there zero before.
+    pub fn put(&mut self, column: usize, value: u128, bits: usize) {
+        assert!(column + bits <= self.width && bits <= 128, "a value fits its row");
+        if bits == 0 {
+            return;
+        }
+        let value = if bits == 128 { value } else { value & ((1u128 << bits) - 1) };
+        let (word, shift) = (column / 64, column % 64);
+        self.words[word] |= (value as u64) << shift;
+        let rest = if shift == 0 { value >> 64 } else { value >> (64 - shift) };
+        if rest != 0 {
+            self.words[word + 1] |= rest as u64;
+            let rest = if shift == 0 { 0 } else { rest >> 64 };
+            if rest != 0 {
+                self.words[word + 2] |= rest as u64;
+            }
+        }
+    }
+}
+
+/// Transpose a 64 by 64 bit matrix, row `r` in word `r` with column `c` on
+/// bit `c`, in place.
+fn transpose64(m: &mut [u64; 64]) {
+    let mut j = 32;
+    let mut mask = 0x0000_0000_ffff_ffffu64;
+    while j != 0 {
+        let mut k = 0;
+        while k < 64 {
+            let t = ((m[k] >> j) ^ m[k + j]) & mask;
+            m[k] ^= t << j;
+            m[k + j] ^= t;
+            k = (k + j + 1) & !j;
+        }
+        j >>= 1;
+        mask ^= mask << j;
+    }
+}
+
 /// `bits`, row-major with `width` columns, as a dense matrix of zeros and
 /// ones.
 #[must_use]
@@ -278,4 +394,41 @@ pub fn blake3_tuple<AB: AirBuilder<F: BinaryBase>>(
         tuple.push(pack_field::<AB>(&block));
     }
     tuple
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BitRows, RowBits};
+
+    #[test]
+    fn row_bits_transpose_to_the_bit_rows() {
+        let (width, log_height) = (300, 7);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut by_value = RowBits::new(width, log_height);
+        let mut by_bit = BitRows::new(width, log_height);
+        for r in 0..1 << log_height {
+            let mut bits = vec![0u8; width];
+            let mut column = (next() % 7) as usize;
+            while column < width {
+                let n = (1 + next() % 128).min((width - column) as u64) as usize;
+                let value = u128::from(next()) | (u128::from(next()) << 64);
+                by_value.put(r, column, value, n);
+                for (i, bit) in bits[column..column + n].iter_mut().enumerate() {
+                    *bit = ((value >> i) & 1) as u8;
+                }
+                column += n + (next() % 5) as usize;
+            }
+            by_bit.set_row(r, &bits);
+        }
+        assert_eq!(
+            by_value.into_table().packed_bits().map(|m| m.values.clone()),
+            by_bit.into_table().packed_bits().map(|m| m.values.clone())
+        );
+    }
 }
