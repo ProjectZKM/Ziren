@@ -15,5 +15,5 @@ pub mod lower;
 pub mod prove;
 pub mod tape;
 
-pub use builder::{Builder, Built, Cost, Val};
-pub use lower::{lower, LowerError, Lowered};
+pub use builder::{Builder, Built, ComposeError, Composed, Cost, Val};
+pub use lower::{lower, lower_composed, LowerError, Lowered};

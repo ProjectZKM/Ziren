@@ -180,13 +180,26 @@ fn block_words(blocks: &[zkm_recursion_core::air::Block<KoalaBear>]) -> Vec<u32>
     blocks.iter().flat_map(|block| block.0.map(|x| x.as_canonical_u32())).collect()
 }
 
-/// `program`'s relations, lowered over the memory its run left.
+/// Whether leaves are proved as routed compositions of their gadgets' templates:
+/// `ZIREN_WORD_COMPOSED`.
+fn composed_leaves() -> bool {
+    std::env::var_os("ZIREN_WORD_COMPOSED").is_some()
+}
+
+/// `program`'s relations, lowered over the memory its run left, as a composition when leaves
+/// are composed.
 fn lower_leaf(
     program: &zkm_recursion_core::RecursionProgram<KoalaBear>,
     blocks: &[zkm_recursion_core::air::Block<KoalaBear>],
 ) -> Result<zkm_recursion_r1cs::Lowered, ZKMRecursionProverError> {
     tracing::info_span!("leaf lower")
-        .in_scope(|| zkm_recursion_r1cs::lower(program, Some(blocks)))
+        .in_scope(|| {
+            if composed_leaves() {
+                zkm_recursion_r1cs::lower_composed(program, Some(blocks))
+            } else {
+                zkm_recursion_r1cs::lower(program, Some(blocks))
+            }
+        })
         .map_err(stage)
 }
 
@@ -199,7 +212,7 @@ fn prove_leaf(
     let begun = std::time::Instant::now();
     let ReadyLeaf { shard, index, key, tape, lowered, new, memory, public_values, ran, keyed } =
         leaf;
-    let constants: Vec<u64> = key.constants.iter().map(|w| w.get()).collect();
+    let constants: Vec<u64> = key.tape_constants().iter().map(|w| w.get()).collect();
     let public = tape.public(&constants, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]));
     let witness = backend.witness(&tape, &public, &memory);
     if let (true, Some(lowered)) = (check, &lowered) {
@@ -210,6 +223,7 @@ fn prove_leaf(
     let witness: Vec<Word64> = witness.into_iter().map(Word64::new).collect();
     let evaluated = begun.elapsed().as_secs_f64();
     let devices = backend.word_devices(key.cap_height());
+    let statement = key.statement_public(&public);
     let (commitment, proof, hints) = key
         .prove_words(
             &public,
@@ -226,7 +240,7 @@ fn prove_leaf(
         begun.elapsed().as_secs_f64() - evaluated,
         proof_size(&proof)
     );
-    Ok(WordLeaf { key, public, public_values, commitment, proof, hints })
+    Ok(WordLeaf { key, public: statement, public_values, commitment, proof, hints })
 }
 
 /// `consume` of every item `produce` makes, `count` of them made in order on this thread and
@@ -388,6 +402,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     unplaced(),
                                     &leaf_schedule(),
                                     Some(&leaf.hints),
+                                    leaf.key.routing(),
                                 )
                             })
                             .collect()
@@ -586,10 +601,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let (blocks, public_values) = self.leaf_word_execute(program, input)?;
         let ran = begun.elapsed().as_secs_f64();
         let mut lowered = lower_leaf(program, &blocks)?;
-        let digest = relations_digest(&lowered.built, DIGEST_SIZE);
-        let key = if check {
-            maker.make(&lowered.built, digest, &leaf_schedule())
+        let key = if lowered.composed.is_some() {
+            WordKey::composed(&mut lowered, &leaf_schedule())
+        } else if check {
+            maker.make(&lowered.built, relations_digest(&lowered.built, DIGEST_SIZE), &leaf_schedule())
         } else {
+            let digest = relations_digest(&lowered.built, DIGEST_SIZE);
             maker.make_taking(&mut lowered.built, digest, &leaf_schedule())
         }
         .map_err(stage)?;

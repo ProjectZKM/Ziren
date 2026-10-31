@@ -138,12 +138,48 @@ pub fn verify_word(
     proof: &Proof,
     hints: Option<&Hints>,
 ) -> Result<Vec<DeferredClaim>, String> {
+    verify_word_routed(key, schedule, commitment, None, public, inputs, proof, hints)
+}
+
+/// The commitment to a key's routing words, over traced values: a constant of the program
+/// when lifted with [`lift_routing`].
+pub type TracedCommitment = <TracedBitPcs as BooleanBackend<Traced>>::Commitment;
+
+/// `routing`, the commitment to a routed key's routing words, as constants of the program.
+///
+/// # Panics
+/// Panics if called during a recording, where it would read as proof inputs.
+#[must_use]
+pub fn lift_routing(routing: &Commitment) -> TracedCommitment {
+    assert!(!crate::tape::recording(), "the routing is lifted before the recording");
+    reread(routing)
+}
+
+/// [`verify_word`] of a key that routes its ports when `routing`, the lifted commitment to
+/// its routing words, is given.
+///
+/// # Errors
+/// Returns why the proof does not verify.
+///
+/// # Panics
+/// As [`verify_word`].
+#[allow(clippy::too_many_arguments)]
+pub fn verify_word_routed(
+    key: &WordProofKey<Word64>,
+    schedule: &BinarySchedule,
+    commitment: &Commitment,
+    routing: Option<&TracedCommitment>,
+    public: &[Word64],
+    inputs: &[Traced],
+    proof: &Proof,
+    hints: Option<&Hints>,
+) -> Result<Vec<DeferredClaim>, String> {
     let count = inputs.len();
     assert!(count <= public.len(), "more inputs than public words");
     let input_bytes: Vec<[Traced; 8]> = inputs.iter().map(|&x| word_bytes(x)).collect();
     let pcs = tracing::info_span!("word traced pcs")
         .in_scope(|| bit_commitment(key.trace_variables(), schedule).expect("the traced commitment"));
-    let commitment: <TracedBitPcs as BooleanBackend<Traced>>::Commitment = reread(commitment);
+    let commitment: TracedCommitment = reread(commitment);
     let proof: TracedProof = tracing::info_span!("word reread").in_scope(|| reread(proof));
     let mut challenger = TracedChallenger::new(TRANSCRIPT_DOMAIN);
     let mut deferred = Vec::new();
@@ -152,13 +188,7 @@ pub fn verify_word(
             Some(SeedWords { count: public.len(), inputs: input_bytes.clone(), substituted: 0 });
     });
     let _span = tracing::info_span!("word traced verify").entered();
-    let verdict = key.verify_with::<Traced, Traced, _, _>(
-        &pcs,
-        &commitment,
-        public,
-        &proof,
-        &mut challenger,
-        &mut |kind, query| match kind {
+    let mut answer = |kind, query: &WiringQuery<Traced>| match kind {
             Deferred::Inputs => {
                 let weights = tracing::info_span!("word input weights")
                     .in_scope(|| key.input_bit_weights(count, query));
@@ -184,8 +214,26 @@ pub fn verify_word(
                 deferred.push(DeferredClaim { kind, query: query.clone(), value });
                 value
             }
-        },
-    );
+    };
+    let verdict = match routing {
+        Some(routing) => key.verify_routed_with::<Traced, Traced, _, _>(
+            &pcs,
+            &commitment,
+            routing,
+            public,
+            &proof,
+            &mut challenger,
+            &mut answer,
+        ),
+        None => key.verify_with::<Traced, Traced, _, _>(
+            &pcs,
+            &commitment,
+            public,
+            &proof,
+            &mut challenger,
+            &mut answer,
+        ),
+    };
     let substituted =
         SEED_WORDS.with(|cell| cell.borrow_mut().take().map_or(0, |words| words.substituted));
     crate::queries::take();
