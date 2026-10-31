@@ -33,7 +33,7 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{
-    dense_padded, log_height_for, padded_width, BitRows, MEMORY, WRITE,
+    dense_padded, log_height_for, packed_padded, padded_width, BitRows, MEMORY, WRITE,
 };
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
@@ -172,6 +172,14 @@ impl<const W: usize> RewireAir<W> {
             rows.set_row(row, &row_bits);
         }
         rows.into_table()
+    }
+}
+
+impl<const W: usize> RewireAir<W> {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed_padded(&self.preprocessed, Self::PREP_COLS)
     }
 }
 

@@ -6,7 +6,12 @@
 //! the parts of its key a verifier rebuilds the machine from, so the proof
 //! stands alone given the key tree.
 
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, LazyLock, Mutex};
+
 use p3_field::PrimeCharacteristicRing;
+use p3_multi_stark::HostProver;
 use serde::{Deserialize, Serialize};
 use zkm_binary_stark::config::MachineProof;
 use zkm_binary_stark::machine::RecursionMachine;
@@ -16,8 +21,9 @@ use zkm_recursion_core::DIGEST_SIZE;
 use crate::compose::{binary_key_digest, record_compose, Child, Compose, Composed, KeyKind};
 use crate::machine::ledger::MAX_PUBLIC;
 use crate::machine::program::Program;
+use crate::machine::TapeBackend;
 use crate::machine::{NodeKey, TapeMachine};
-use crate::tape::{kb_value, F};
+use crate::tape::{kb_value, Tape, F};
 
 /// Shard numbers of an execution are below `2^MAX_LOG_SHARDS`.
 pub const MAX_LOG_SHARDS: usize = 16;
@@ -25,7 +31,7 @@ pub const MAX_LOG_SHARDS: usize = 16;
 /// A proved compose node: the machine that verifies it, its proof, and
 /// what it commits to.
 pub struct ProvedNode {
-    pub machine: TapeMachine,
+    pub machine: Arc<TapeMachine>,
     pub proof: MachineProof,
     pub composed: Composed,
 }
@@ -131,12 +137,12 @@ pub fn prove_node(
     floor: &[(&str, usize)],
     schedule: &BinarySchedule,
 ) -> Result<ProvedNode, String> {
-    prove_node_with(children, is_complete, floor, schedule, true, [0; DIGEST_SIZE])
+    prove_node_with(children, is_complete, floor, schedule, true, [0; DIGEST_SIZE], &HostProver)
 }
 
 /// [`prove_node`], the children's keys shown in the key tree only if
-/// `check_keys`, and the claims chain continued from `claims_start` when
-/// the children are word proofs.
+/// `check_keys`, the claims chain continued from `claims_start` when the
+/// children are word proofs, and the proof computed on `backend`.
 ///
 /// # Errors
 /// As [`prove_node`].
@@ -147,29 +153,116 @@ pub fn prove_node_with(
     schedule: &BinarySchedule,
     check_keys: bool,
     claims_start: [u32; DIGEST_SIZE],
+    backend: &dyn TapeBackend,
 ) -> Result<ProvedNode, String> {
+    record_node_with(children, is_complete, check_keys, claims_start)?.prove(floor, schedule, backend)
+}
+
+/// A node's verification of its children, recorded: what it composes, and the tape a
+/// [`RecordedNode::prove`] proves, which no longer borrows the children.
+pub struct RecordedNode {
+    pub composed: Composed,
+    tape: Tape,
+}
+
+/// The recording [`prove_node_with`] proves.
+///
+/// # Errors
+/// Returns why the children do not compose.
+pub fn record_node_with(
+    children: Vec<Child<'_>>,
+    is_complete: bool,
+    check_keys: bool,
+    claims_start: [u32; DIGEST_SIZE],
+) -> Result<RecordedNode, String> {
     let node =
         Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS, check_keys, claims_start };
     let (composed, tape) = tracing::info_span!("node record").in_scope(|| record_compose(&node));
-    let composed = composed?;
-    let program = tracing::info_span!("node program").in_scope(|| Program::new(&tape, DIGEST_SIZE));
-    let mut machine = tracing::info_span!("node setup")
+    Ok(RecordedNode { composed: composed?, tape })
+}
+
+impl RecordedNode {
+    /// The node's proof on `backend`, its tables at least as tall as `floor`.
+    ///
+    /// # Errors
+    /// Returns why the node cannot be proved or does not verify.
+    pub fn prove(
+        self,
+        floor: &[(&str, usize)],
+        schedule: &BinarySchedule,
+        backend: &dyn TapeBackend,
+    ) -> Result<ProvedNode, String> {
+        let Self { composed, tape } = self;
+        let machine = node_machine(&tape, schedule, floor)?;
+        let public = machine.public_values(&tape.inputs);
+        if std::env::var_os("ZIREN_WORD_SELF_CHECK").is_some()
+            && tape.run(&tape.inputs).map_err(|e| format!("{e:?}"))? != tape.values
+        {
+            return Err("the recorded values are not the tape's run".into());
+        }
+        let proof = tracing::info_span!("node prove")
+            .in_scope(|| machine.prove_values_on(&tape.values, &public, backend))
+            .map_err(|e| format!("{e:?}"))?;
+        if public != digest_public(&composed.digest)
+            || crate::compose::public_values_digest(&composed.public_values) != composed.digest
+        {
+            return Err("the node's public inputs are not its digest".into());
+        }
+        if std::env::var_os("ZIREN_WORD_SELF_CHECK").is_some() {
+            tracing::info_span!("node verify")
+                .in_scope(|| machine.verify(&proof, &public))
+                .map_err(|e| format!("{e:?}"))?;
+        }
+        Ok(ProvedNode { machine, proof, composed })
+    }
+}
+
+/// The machines of the node programs proved so far, by [`program_fingerprint`]: the nodes of
+/// a level run one program, so its layout and preprocessed commitment are made once.
+static MACHINES: LazyLock<Mutex<HashMap<u64, Arc<TapeMachine>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The most machines [`MACHINES`] keeps: a tree has a program or two per level.
+const MAX_MACHINES: usize = 16;
+
+/// The machine of `tape`'s program under `schedule` at `floor`, set up once per program.
+fn node_machine(
+    tape: &Tape,
+    schedule: &BinarySchedule,
+    floor: &[(&str, usize)],
+) -> Result<Arc<TapeMachine>, String> {
+    let fingerprint = program_fingerprint(tape, schedule, floor);
+    if let Some(machine) = MACHINES.lock().expect("the machine cache").get(&fingerprint) {
+        return Ok(machine.clone());
+    }
+    let program = tracing::info_span!("node program").in_scope(|| Program::new(tape, DIGEST_SIZE));
+    tracing::debug!(
+        "node program over {} tape ops and {} values: {}",
+        tape.ops.len(),
+        tape.values.len(),
+        program.census()
+    );
+    let machine = tracing::info_span!("node setup")
         .in_scope(|| TapeMachine::new_with_floor(program, schedule, floor))
         .map_err(|e| format!("{e:?}"))?;
-    let proof = tracing::info_span!("node prove")
-        .in_scope(|| machine.prove(&tape, &tape.inputs))
-        .map_err(|e| format!("{e:?}"))?;
-    let public = machine.public_values(&tape.inputs);
-    if public != digest_public(&composed.digest)
-        || crate::compose::public_values_digest(&composed.public_values) != composed.digest
-    {
-        return Err("the node's public inputs are not its digest".into());
+    let machine = Arc::new(machine);
+    let mut machines = MACHINES.lock().expect("the machine cache");
+    if machines.len() == MAX_MACHINES {
+        machines.clear();
     }
-    tracing::info_span!("node verify")
-        .in_scope(|| machine.verify(&proof, &public))
-        .map_err(|e| format!("{e:?}"))?;
-    machine.drop_proving_key();
-    Ok(ProvedNode { machine, proof, composed })
+    machines.insert(fingerprint, machine.clone());
+    Ok(machine)
+}
+
+/// What a node's program and machine are a function of: the tape's operations, constants
+/// included, which variables they define, the schedule and the floor.  Values are not in it.
+fn program_fingerprint(tape: &Tape, schedule: &BinarySchedule, floor: &[(&str, usize)]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tape.ops.hash(&mut hasher);
+    tape.defined.hash(&mut hasher);
+    format!("{schedule:?}").hash(&mut hasher);
+    floor.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// The public values of a tape machine whose run commits to `digest`.

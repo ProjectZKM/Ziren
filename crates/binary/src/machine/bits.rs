@@ -12,6 +12,7 @@ use p3_binary_pcs::coordinate_basis;
 use p3_bus::{BusActivation, BusDirection, BusName};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::*;
 use p3_sumcheck::layout::Table;
 
 use crate::machine_builder::MachineBuilder;
@@ -172,6 +173,38 @@ pub fn dense_padded<X: Field>(bits: &[u8], raw: usize) -> RowMajorMatrix<X> {
         }
     }
     RowMajorMatrix::new(values, width)
+}
+
+/// `bits`, row-major with `width` columns, as the bit table a bit
+/// commitment packs [`dense`] into, without the dense matrix.
+#[must_use]
+pub fn packed(bits: &[u8], width: usize) -> Table<F> {
+    pack_rows(bits, width, width)
+}
+
+/// `bits`, row-major with `raw` columns, as the bit table a bit commitment
+/// packs [`dense_padded`] into, without the dense matrix.
+#[must_use]
+pub fn packed_padded(bits: &[u8], raw: usize) -> Table<F> {
+    pack_rows(bits, raw, padded_width(raw))
+}
+
+/// The rows of `bits`, `raw` to a row, as a table `width` columns wide: a
+/// word per column and 64 rows, row `r` on bit `r % 64`.
+fn pack_rows(bits: &[u8], raw: usize, width: usize) -> Table<F> {
+    assert!(!bits.is_empty(), "the preprocessed trace was released once setup committed it");
+    let height = bits.len() / raw;
+    assert!(height.is_power_of_two(), "a table's height is a power of two");
+    let mut words = vec![0u64; width * height.div_ceil(64)];
+    words.par_chunks_mut(width).enumerate().for_each(|(block, word_row)| {
+        let rows = 64 * block..(64 * block + 64).min(height);
+        for (lane, row) in bits[rows.start * raw..rows.end * raw].chunks_exact(raw).enumerate() {
+            for (&bit, word) in row.iter().zip(word_row.iter_mut()) {
+                *word |= u64::from(bit == 1) << lane;
+            }
+        }
+    });
+    Table::from_packed_bits(RowMajorMatrix::new(words, width), height.trailing_zeros() as usize)
 }
 
 /// `bits` as one field element, bit `i` on coordinate `i`.

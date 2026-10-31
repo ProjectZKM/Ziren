@@ -51,15 +51,8 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        let compressed = if std::env::var_os("ZIREN_BINARY_ON_HOST").is_some() {
-            self.cpu_prover.compress_binary(
-                &pk.vk,
-                &proof,
-                &zkm_prover::binary_tree::BinaryKeyStore::from_env(),
-            )?
-        } else {
-            self.cuda_prover.compress_binary(&pk.vk, proof.clone())?
-        };
+        let compressed =
+            crate::CompressedProof::Word(self.cuda_prover.compress_word(&pk.vk, proof.clone())?);
         Ok((
             ZKMProofWithPublicValues {
                 proof: ZKMProof::Compressed(Box::new(compressed)),

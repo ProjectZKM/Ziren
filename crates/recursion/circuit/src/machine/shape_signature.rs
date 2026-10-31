@@ -198,44 +198,56 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
         EvaluationProof::Empty => 0u8.hash(h),
         EvaluationProof::Bytes(b) => {
             1u8.hash(h);
-            b.len().hash(h);
+            match crate::shard_level_witness::blake3_whir_bundle_from_bytes(b) {
+                Some(bundle) => hash_bundle(&bundle, h),
+                None => b.len().hash(h),
+            }
         }
         EvaluationProof::Bundle(bundle) => {
             2u8.hash(h);
-            bundle.packing.log_dense_size.hash(h);
-            bundle.packing.offsets.len().hash(h);
-            bundle.packing.column_counts.hash(h);
-
-            hash_stacked_whir(&bundle.whir_proof, h);
-
-            bundle.reduction.rounds.len().hash(h);
-            bundle.reduction.eval_point.len().hash(h);
-
-            let je = &bundle.jagged_eval.partial_sumcheck_proof;
-            je.univariate_polys.len().hash(h);
-            for poly in je.univariate_polys.iter() {
-                poly.coefficients.len().hash(h);
-            }
-            je.point_and_eval.0.len().hash(h);
-
-            bundle.y_per_chip.len().hash(h);
-            for y in bundle.y_per_chip.iter() {
-                y.len().hash(h);
-            }
+            hash_bundle(bundle, h);
         }
     }
 }
 
+/// The structural dimensions of a jagged opening, the same for either Merkle hash.
+fn hash_bundle<MT: p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>, H: Hasher>(
+    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<MT>,
+    h: &mut H,
+) where
+    for<'a> &'a MT::Proof: IntoIterator,
+{
+    bundle.packing.log_dense_size.hash(h);
+    bundle.packing.offsets.len().hash(h);
+    bundle.packing.column_counts.hash(h);
+
+    hash_stacked_whir(&bundle.whir_proof, h);
+
+    bundle.reduction.rounds.len().hash(h);
+    bundle.reduction.eval_point.len().hash(h);
+
+    let je = &bundle.jagged_eval.partial_sumcheck_proof;
+    je.univariate_polys.len().hash(h);
+    for poly in je.univariate_polys.iter() {
+        poly.coefficients.len().hash(h);
+    }
+    je.point_and_eval.0.len().hash(h);
+
+    bundle.y_per_chip.len().hash(h);
+    for y in bundle.y_per_chip.iter() {
+        y.len().hash(h);
+    }
+    bundle.preceding_commits.len().hash(h);
+}
+
 /// Structural dimensions of a `StackedWhirProof` — round/message/opening
 /// shapes, all inline-witnessed by `read_stacked_whir_from_stream`.
-fn hash_stacked_whir<H: Hasher>(
-    wp: &zkm_pcs::whir::stacked::StackedWhirProof<
-        InnerVal,
-        InnerChallenge,
-        zkm_pcs::jagged_pcs::JaggedMmcs,
-    >,
+fn hash_stacked_whir<MT: p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>, H: Hasher>(
+    wp: &zkm_pcs::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
     h: &mut H,
-) {
+) where
+    for<'a> &'a MT::Proof: IntoIterator,
+{
     let whir = &wp.whir_proof;
     whir.round_sumcheck_polys.len().hash(h);
     for r in whir.round_sumcheck_polys.iter() {
@@ -257,7 +269,7 @@ fn hash_stacked_whir<H: Hasher>(
             for v in leaf.values.iter() {
                 v.len().hash(h);
             }
-            leaf.proof.len().hash(h);
+            (&leaf.proof).into_iter().count().hash(h);
         }
     }
     whir.final_poly.len().hash(h);

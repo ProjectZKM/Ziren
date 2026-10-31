@@ -26,7 +26,9 @@ use p3_bus::{BusActivation, BusDirection};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, PERMUTATION_ID_BITS};
+use zkm_binary_stark::machine::bits::{
+    dense, log_height_for, packed, BitRows, PERMUTATION_ID_BITS,
+};
 use zkm_binary_stark::machine::blake3::{ROUNDS, STATE_WORDS, WORD_BITS};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::word::{add_bits, add_carries, bits_le, exprs};
@@ -41,7 +43,7 @@ use crate::tape::F;
 const QUARTER_ROUNDS: usize = 8;
 
 /// Halves of a round, two per quarter-round.
-const HALVES: usize = 2 * QUARTER_ROUNDS;
+pub const HALVES: usize = 2 * QUARTER_ROUNDS;
 
 /// Rows of a compression.
 pub const ROWS_PER_COMPRESSION: usize = ROUNDS;
@@ -111,6 +113,12 @@ const fn lanes(q: usize) -> [usize; 4] {
 /// the permutation, applied `round` times, gives.
 fn message_index(round: usize, position: usize) -> usize {
     (0..round).fold(position, |p, _| MSG_PERMUTATION[p])
+}
+
+/// The block word each half quarter-round of each round reads.
+#[must_use]
+pub fn message_schedule() -> [[u8; HALVES]; ROUNDS] {
+    core::array::from_fn(|round| core::array::from_fn(|p| message_index(round, p) as u8))
 }
 
 /// The witness of `x + y mod 2^32`, returning the sum.
@@ -202,6 +210,14 @@ impl RoundsAir {
             finals.push(s);
         }
         (rows.into_table(), finals)
+    }
+}
+
+impl RoundsAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed(&self.preprocessed, NUM_ROUNDS_PREP_COLS)
     }
 }
 

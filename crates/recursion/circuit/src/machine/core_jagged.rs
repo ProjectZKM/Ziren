@@ -140,6 +140,7 @@ pub fn verify_core_jagged<C, SC, A>(
 
     let mut initial_execution_shard: Felt<_> = builder.uninit();
     let mut current_execution_shard: Felt<_> = builder.uninit();
+    let contains_execution_shard: Felt<_>;
 
     let mut start_pc: Felt<_> = builder.uninit();
     let mut current_pc: Felt<_> = builder.uninit();
@@ -158,7 +159,6 @@ pub fn verify_core_jagged<C, SC, A>(
         array::from_fn(|_| builder.uninit());
 
     let mut global_cumulative_sums = Vec::new();
-    let mut cpu_shard_seen = false;
 
     assert_eq!(
         shard_proof_tuples.len(),
@@ -169,21 +169,6 @@ pub fn verify_core_jagged<C, SC, A>(
     );
 
     use zkm_recursion_compiler::ir::IrIter;
-    let per_shard_chip_names: Vec<Vec<String>> = shard_proof_tuples
-        .iter()
-        .map(|t| t.2.logup_evaluations.chip_openings.keys().cloned().collect())
-        .collect();
-    let per_shard_contains: Vec<(bool, bool, bool)> = per_shard_chip_names
-        .iter()
-        .map(|names| {
-            let cc = |n: &str| names.iter().any(|s| s.as_str() == n);
-            (
-                zkm_pcs::EXECUTION_CHIP_NAMES.iter().any(|n| cc(n)),
-                cc("MemoryGlobalInit"),
-                cc("MemoryGlobalFinalize"),
-            )
-        })
-        .collect();
 
     let jagged_vk_ref = &jagged_vk;
     let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
@@ -253,6 +238,26 @@ pub fn verify_core_jagged<C, SC, A>(
                 );
                 hs
             });
+            let flags = {
+                let heights = chip_height_felts_pre.as_deref().unwrap_or(&[]);
+                let main_heights = &heights[preprocessed_round.row_counts.len()..];
+                let mut sorted_names = chip_names.clone();
+                sorted_names.sort();
+                let of = |pick: &dyn Fn(&str) -> bool| -> Vec<Felt<C::F>> {
+                    sorted_names
+                        .iter()
+                        .zip(main_heights.iter())
+                        .filter(|(name, _)| pick(name.as_str()))
+                        .map(|(_, h)| *h)
+                        .collect()
+                };
+                [
+                    of(&|n| zkm_pcs::EXECUTION_CHIP_NAMES.contains(&n)),
+                    of(&|n| n == "MemoryGlobalInit"),
+                    of(&|n| n == "MemoryGlobalFinalize"),
+                ]
+                .map(|heights| any_rows::<C>(builder, &heights, max_log_row_count))
+            };
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
             let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
                 if prep_widths_pre.is_empty() {
@@ -457,21 +462,23 @@ pub fn verify_core_jagged<C, SC, A>(
                 jagged_evaluator_fn,
             );
 
-            public_values_raw
+            let mut out = public_values_raw;
+            out.extend(flags);
+            out
         });
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
-        let public_values_raw = verify_outputs
+        let mut public_values_raw = verify_outputs
             .into_iter()
             .next()
             .expect("single-shard normalize has exactly one verify output");
+        let flags = public_values_raw.split_off(public_values_raw.len() - 3);
+        let (cpu, memory_init, memory_finalize) = (flags[0], flags[1], flags[2]);
+        contains_execution_shard = cpu;
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
-        let chip_names = &per_shard_chip_names[i];
-        let (contains_cpu, contains_memory_init, contains_memory_finalize) = per_shard_contains[i];
-        let _ = chip_names;
 
         if i == 0 {
             initial_shard = public_values.shard;
@@ -536,38 +543,38 @@ pub fn verify_core_jagged<C, SC, A>(
             }
         }
 
-        if !contains_cpu {
-            builder.assert_felt_ne(current_shard, C::F::ONE);
-        }
+        builder.assert_felt_ne((SymbolicFelt::ONE - cpu) * (current_shard - C::F::ONE) + cpu, C::F::ZERO);
 
         builder.assert_felt_eq(current_shard, public_values.shard);
         current_shard = builder.eval(current_shard + C::F::ONE);
 
-        if contains_cpu {
-            if !cpu_shard_seen {
-                initial_execution_shard = public_values.execution_shard;
-                current_execution_shard = initial_execution_shard;
-                cpu_shard_seen = true;
-            }
-            builder.assert_felt_eq(current_execution_shard, public_values.execution_shard);
-            current_execution_shard = builder.eval(current_execution_shard + C::F::ONE);
-        }
+        builder.assert_felt_eq(
+            cpu * (current_execution_shard - public_values.execution_shard),
+            C::F::ZERO,
+        );
+        current_execution_shard = builder.eval(current_execution_shard + cpu);
 
         builder.assert_felt_eq(current_pc, public_values.start_pc);
-        if !contains_cpu {
-            builder.assert_felt_eq(public_values.start_pc, public_values.next_pc);
-        } else {
-            builder.assert_felt_ne(public_values.start_pc, C::F::ZERO);
-        }
+        builder.assert_felt_eq(
+            (SymbolicFelt::ONE - cpu) * (public_values.start_pc - public_values.next_pc),
+            C::F::ZERO,
+        );
+        builder.assert_felt_ne(cpu * public_values.start_pc + (SymbolicFelt::ONE - cpu), C::F::ZERO);
         current_pc = public_values.next_pc;
 
         let four = C::F::from_u32(4);
-        if contains_cpu {
-            builder.assert_felt_eq(public_values.start_next_pc, public_values.start_pc + four);
-            builder.assert_felt_eq(public_values.next_next_pc, public_values.next_pc + four);
-        } else {
-            builder.assert_felt_eq(public_values.start_next_pc, public_values.next_next_pc);
-        }
+        builder.assert_felt_eq(
+            cpu * (public_values.start_next_pc - public_values.start_pc - four),
+            C::F::ZERO,
+        );
+        builder.assert_felt_eq(
+            cpu * (public_values.next_next_pc - public_values.next_pc - four),
+            C::F::ZERO,
+        );
+        builder.assert_felt_eq(
+            (SymbolicFelt::ONE - cpu) * (public_values.start_next_pc - public_values.next_next_pc),
+            C::F::ZERO,
+        );
 
         builder.assert_felt_eq(exit_code, C::F::ZERO);
 
@@ -582,23 +589,20 @@ pub fn verify_core_jagged<C, SC, A>(
         {
             builder.assert_felt_eq(*bit, *current_bit);
         }
-        if !contains_memory_init {
-            for (prev_bit, last_bit) in public_values
-                .previous_init_addr_bits
-                .iter()
-                .zip_eq(public_values.last_init_addr_bits.iter())
-            {
-                builder.assert_felt_eq(*prev_bit, *last_bit);
-            }
+        for (prev_bit, last_bit) in
+            public_values.previous_init_addr_bits.iter().zip_eq(public_values.last_init_addr_bits.iter())
+        {
+            builder.assert_felt_eq((SymbolicFelt::ONE - memory_init) * (*prev_bit - *last_bit), C::F::ZERO);
         }
-        if !contains_memory_finalize {
-            for (prev_bit, last_bit) in public_values
-                .previous_finalize_addr_bits
-                .iter()
-                .zip_eq(public_values.last_finalize_addr_bits.iter())
-            {
-                builder.assert_felt_eq(*prev_bit, *last_bit);
-            }
+        for (prev_bit, last_bit) in public_values
+            .previous_finalize_addr_bits
+            .iter()
+            .zip_eq(public_values.last_finalize_addr_bits.iter())
+        {
+            builder.assert_felt_eq(
+                (SymbolicFelt::ONE - memory_finalize) * (*prev_bit - *last_bit),
+                C::F::ZERO,
+            );
         }
         for (bit, pub_bit) in
             current_init_addr_bits.iter_mut().zip(public_values.last_init_addr_bits.iter())
@@ -628,13 +632,11 @@ pub fn verify_core_jagged<C, SC, A>(
                     }
                 }
             }
-            if !contains_cpu {
-                for (word_d, pub_word_d) in
-                    committed_value_digest.iter().zip(public_values.committed_value_digest.iter())
-                {
-                    for (d, pub_d) in word_d.0.iter().zip(pub_word_d.0.iter()) {
-                        builder.assert_felt_eq(*d, *pub_d);
-                    }
+            for (word_d, pub_word_d) in
+                committed_value_digest.iter().zip(public_values.committed_value_digest.iter())
+            {
+                for (d, pub_d) in word_d.0.iter().zip(pub_word_d.0.iter()) {
+                    builder.assert_felt_eq((SymbolicFelt::ONE - cpu) * (*d - *pub_d), C::F::ZERO);
                 }
             }
             for (word_d, pub_word_d) in
@@ -661,12 +663,10 @@ pub fn verify_core_jagged<C, SC, A>(
                     );
                 }
             }
-            if !contains_cpu {
-                for (d, pub_d) in
-                    deferred_proofs_digest.iter().zip(public_values.deferred_proofs_digest.iter())
-                {
-                    builder.assert_felt_eq(*d, *pub_d);
-                }
+            for (d, pub_d) in
+                deferred_proofs_digest.iter().zip(public_values.deferred_proofs_digest.iter())
+            {
+                builder.assert_felt_eq((SymbolicFelt::ONE - cpu) * (*d - *pub_d), C::F::ZERO);
             }
             deferred_proofs_digest.copy_from_slice(&public_values.deferred_proofs_digest);
         }
@@ -707,8 +707,7 @@ pub fn verify_core_jagged<C, SC, A>(
     recursion_public_values.end_reconstruct_deferred_digest = end_deferred_digest;
     recursion_public_values.exit_code = exit_code;
     recursion_public_values.is_complete = is_complete;
-    recursion_public_values.contains_execution_shard =
-        builder.eval(C::F::from_bool(cpu_shard_seen));
+    recursion_public_values.contains_execution_shard = contains_execution_shard;
     recursion_public_values.vk_root = vk_root;
 
     recursion_public_values.digest =
@@ -880,8 +879,30 @@ where
         }
 
         self.is_complete.hash(&mut h);
-        self.is_first_shard.hash(&mut h);
 
         h.finish()
     }
+}
+
+/// Whether any of `heights` is non-zero, as a constrained bit: the OR of the bits of their sum.
+/// Each height is at most `2^max_log_row_count`, so the sum of a few of them stays below `p`
+/// and its bit decomposition is unique.
+fn any_rows<C: CircuitConfig<F = InnerVal>>(
+    builder: &mut Builder<C>,
+    heights: &[Felt<C::F>],
+    max_log_row_count: usize,
+) -> Felt<C::F> {
+    use zkm_recursion_compiler::circuit::CircuitV2Builder;
+    if heights.is_empty() {
+        return builder.constant(C::F::ZERO);
+    }
+    let bits = max_log_row_count + 1 + heights.len().next_power_of_two().trailing_zeros() as usize;
+    assert!(bits <= 30, "the summed heights of {} chips need {bits} bits", heights.len());
+    let sum: Felt<C::F> = builder.eval(heights.iter().copied().map(SymbolicFelt::from).sum::<SymbolicFelt<C::F>>());
+    let none: SymbolicFelt<C::F> = builder
+        .num2bits_v2_f(sum, bits)
+        .into_iter()
+        .map(|bit| SymbolicFelt::ONE - bit)
+        .product();
+    builder.eval(SymbolicFelt::ONE - none)
 }

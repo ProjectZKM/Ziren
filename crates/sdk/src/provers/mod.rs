@@ -192,12 +192,12 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     .map_err(ZKMVerificationError::Core)
             }
             ZKMProof::Compressed(proof) => {
-                let values = &proof.root.public_values;
+                let values = proof.root_public_values();
                 if values.len() < zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
                     return Err(ZKMVerificationError::MalformedProof);
                 }
                 let public_values: &zkm_recursion_core::air::RecursionPublicValues<u32> =
-                    values.as_slice().borrow();
+                    values.borrow();
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
@@ -210,9 +210,23 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                         return Err(ZKMVerificationError::InvalidPublicValues);
                     }
                 }
-                self.zkm_prover()
-                    .verify_binary_compressed(proof, vkey, None)
-                    .map_err(ZKMVerificationError::Binary)
+                match &**proof {
+                    crate::CompressedProof::Binary(proof) => self
+                        .zkm_prover()
+                        .verify_binary_compressed(proof, vkey, None)
+                        .map_err(ZKMVerificationError::Binary),
+                    crate::CompressedProof::Word(proof) => {
+                        if !proof.keys_checked {
+                            tracing::warn!(
+                                "word-compressed proof: the nodes did not check their leaves' \
+                                 keys and the claims need those keys; only the root, its claims \
+                                 chain and the program are verified here"
+                            );
+                        }
+                        ZKMProver::<C>::verify_word_program(proof, vkey)
+                            .map_err(ZKMVerificationError::Binary)
+                    }
+                }
             }
             ZKMProof::Plonk(proof) => self
                 .zkm_prover()

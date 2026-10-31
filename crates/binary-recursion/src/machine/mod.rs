@@ -31,21 +31,27 @@ pub mod select;
 use p3_air::symbolic::AirLayout;
 use p3_air::{Air, BaseAir};
 use p3_binary_field::{BinaryField2, Ghash128};
+use p3_binary_pcs::BooleanMultilinearPcs;
 use p3_bus::BusSymbolicBuilder;
 use p3_bus::{BusDebugInstance, BusDebugReport};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_multi_stark::config::{Commitment, MultiStarkConfig, PcsError, PcsProverError};
 use p3_multi_stark::{
-    prove_with_backend, setup, verify, ProverInstance, ProverInstances, ProvingError, ProvingKey,
-    ReprBackend, SubfieldBackend, VerificationError, VerifierInstance, VerifierInstances,
-    VerifyingKey,
+    prove_on, setup_with_tables, verify, DeviceBackend, HostProver, ProverBackend, ProverInstance,
+    ProverInstances, ProvingError, ProvingKey, ReprBackend, SubfieldBackend, VerificationError,
+    VerifierInstance, VerifierInstances, VerifyingKey, ZerocheckDevice,
 };
 use p3_sumcheck::layout::Table;
 use p3_sumcheck::TableShape;
-use zkm_binary_stark::config::{MachineConfig, MachineConfigError, MachineProof};
+use p3_word_backend::WordDevice;
+use std::sync::Arc;
+use zkm_binary_stark::config::{BitPcs, MachineConfig, MachineConfigError, MachineProof};
+use zkm_binary_stark::machine::blake3::STATE_WORDS;
 use zkm_binary_stark::machine_builder::MachineBuilder;
-use zkm_binary_stark::{challenger, BinaryBase, BinarySchedule};
+use zkm_binary_stark::{challenger, BinaryBase, BinarySchedule, Challenger};
+
+pub use zkm_recursion_r1cs::tape::Tape as WordTape;
 
 use self::arith::ArithAir;
 use self::hash::HashAir;
@@ -107,6 +113,22 @@ pub enum TapeAir {
 }
 
 impl TapeAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        match self {
+            Self::Ledger(air) => air.preprocessed_table(),
+            Self::Arith(air) => air.preprocessed_table(),
+            Self::Rewire(air) => air.preprocessed_table(),
+            Self::Gather(air) => air.preprocessed_table(),
+            Self::Hash(air) => air.preprocessed_table(),
+            Self::Rounds(air) => air.preprocessed_table(),
+            Self::Kb(air) => air.preprocessed_table(),
+            Self::Select(air) => air.preprocessed_table(),
+            Self::Public(air) => air.preprocessed_table(),
+        }
+    }
+
     #[must_use]
     pub fn log_height(&self) -> usize {
         match self {
@@ -279,6 +301,86 @@ pub struct NodeKey {
     pub commitment: Commitment<MachineConfig>,
 }
 
+/// Where a tape machine's proof is computed: the trace commitment and the
+/// bus trees through [`ProverBackend`], and the zerocheck's stages on the
+/// device the backend names, or on the host's kernels when it names none.
+pub trait TapeBackend: ProverBackend<MachineConfig, TapeAir> {
+    /// The device that takes the zerocheck's stages, or `None` for the host.
+    fn zerocheck_device(&self) -> Option<&dyn ZerocheckDevice<F, F>>;
+
+    /// A fresh transcript for a proof on this backend, its proof-of-work witnesses searched
+    /// where the backend searches them.
+    fn challenger(&self) -> Challenger;
+
+    /// The devices that prove a word leaf whose commitment's caps are `cap_height` high, or
+    /// `None` for the host.
+    fn word_devices(&self, cap_height: usize) -> Option<WordDevices<'_>>;
+
+    /// The committed words `tape` computes over the public words `public` and `memory`,
+    /// the runtime's memory as four canonical coefficients per address.
+    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32]) -> Vec<u64>;
+
+    /// Makes the backend's device the calling thread's, before the thread proves on it.
+    fn bind(&self) {}
+
+    /// The Blake3 round table of `air` over the compressions that start from `inputs`, their
+    /// states and blocks, with each compression's final state.
+    fn rounds_table(
+        &self,
+        air: &RoundsAir,
+        inputs: &[([u32; STATE_WORDS], [u32; STATE_WORDS])],
+    ) -> (Table<F>, Vec<[u32; STATE_WORDS]>);
+
+    /// The table of `air`, `program`'s field operations, over a run with these values.
+    fn arith_table(&self, air: &ArithAir, program: &Program, values: &[F]) -> Table<F>;
+
+    /// The table of `air`, `program`'s KoalaBear operations, over a run with these values.
+    fn kb_table(&self, air: &KbAir, program: &Program, values: &[F]) -> Table<F>;
+}
+
+/// The devices of a word leaf: its trees, relations and shifts, and its commitment's opening.
+pub struct WordDevices<'a> {
+    pub words: &'a dyn WordDevice,
+    pub opening: Box<LeafOpening>,
+}
+
+/// Where a word leaf's commitment opens.
+pub type LeafOpening = <BitPcs as BooleanMultilinearPcs<F, Challenger>>::OpeningDevice;
+
+impl TapeBackend for HostProver {
+    fn zerocheck_device(&self) -> Option<&dyn ZerocheckDevice<F, F>> {
+        None
+    }
+
+    fn challenger(&self) -> Challenger {
+        challenger()
+    }
+
+    fn word_devices(&self, _cap_height: usize) -> Option<WordDevices<'_>> {
+        None
+    }
+
+    fn witness(&self, tape: &Arc<WordTape>, public: &[u64], memory: &[u32]) -> Vec<u64> {
+        tape.evaluate(public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]))
+    }
+
+    fn rounds_table(
+        &self,
+        air: &RoundsAir,
+        inputs: &[([u32; STATE_WORDS], [u32; STATE_WORDS])],
+    ) -> (Table<F>, Vec<[u32; STATE_WORDS]>) {
+        air.table_of(inputs)
+    }
+
+    fn arith_table(&self, air: &ArithAir, program: &Program, values: &[F]) -> Table<F> {
+        air.main_table(program, values)
+    }
+
+    fn kb_table(&self, air: &KbAir, program: &Program, values: &[F]) -> Table<F> {
+        air.main_table(program, values)
+    }
+}
+
 /// The machine of one tape's program.
 pub struct TapeMachine {
     program: Program,
@@ -310,17 +412,26 @@ impl TapeMachine {
         schedule: &BinarySchedule,
         floor: &[(&str, usize)],
     ) -> Result<Self, TapeMachineError> {
-        let mut airs = Self::airs_of(&program);
+        let mut airs = tracing::debug_span!("airs").in_scope(|| Self::airs_of(&program));
         for air in &mut airs {
             if let Some(&(_, log_height)) = floor.iter().find(|(name, _)| *name == air.name()) {
                 air.raise(log_height);
             }
         }
         let (main, preprocessed) = Self::shapes_of(&airs);
-        let config =
-            MachineConfig::new(&main, &preprocessed, schedule).map_err(TapeMachineError::Config)?;
+        let config = tracing::debug_span!("config")
+            .in_scope(|| MachineConfig::new(&main, &preprocessed, schedule))
+            .map_err(TapeMachineError::Config)?;
         let refs: Vec<&TapeAir> = airs.iter().collect();
-        let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(TapeMachineError::Setup)?;
+        let tables = tracing::debug_span!("preprocessed tables").in_scope(|| {
+            airs.iter()
+                .filter(|air| BaseAir::<F>::preprocessed_width(*air) != 0)
+                .map(TapeAir::preprocessed_table)
+                .collect()
+        });
+        let (pk, vk) = tracing::debug_span!("keys")
+            .in_scope(|| setup_with_tables(&config, &refs, tables, &mut challenger()))
+            .map_err(TapeMachineError::Setup)?;
         Ok(Self { program, airs, config, pk: Some(pk), vk })
     }
 
@@ -500,8 +611,27 @@ impl TapeMachine {
     /// Returns an error if the inputs do not satisfy the program, or if
     /// proving fails.
     pub fn prove(&self, tape: &Tape, inputs: &[F]) -> Result<MachineProof, TapeMachineError> {
+        self.prove_on(tape, inputs, &HostProver)
+    }
+
+    /// [`Self::prove`] on `backend`.
+    ///
+    /// # Errors
+    /// As [`Self::prove`].
+    pub fn prove_on(
+        &self,
+        tape: &Tape,
+        inputs: &[F],
+        backend: &dyn TapeBackend,
+    ) -> Result<MachineProof, TapeMachineError> {
         let values = tape.run(inputs).map_err(TapeMachineError::Run)?;
-        self.prove_values(&values, &self.public_values(inputs))
+        self.prove_values_on(&values, &self.public_values(inputs), backend)
+    }
+
+    /// The configuration the machine proves under.
+    #[must_use]
+    pub const fn config(&self) -> &MachineConfig {
+        &self.config
     }
 
     /// Prove that the program runs with these values of its variables and
@@ -518,8 +648,22 @@ impl TapeMachine {
         values: &[F],
         public: &[F; MAX_PUBLIC],
     ) -> Result<MachineProof, TapeMachineError> {
+        self.prove_values_on(values, public, &HostProver)
+    }
+
+    /// [`Self::prove_values`] on `backend`.
+    ///
+    /// # Errors
+    /// As [`Self::prove_values`].
+    pub fn prove_values_on(
+        &self,
+        values: &[F],
+        public: &[F; MAX_PUBLIC],
+        backend: &dyn TapeBackend,
+    ) -> Result<MachineProof, TapeMachineError> {
         let pk = self.pk.as_ref().ok_or(TapeMachineError::NoProvingKey)?;
-        let owned = self.main_tables(values, public);
+        let owned =
+            tracing::info_span!("main tables").in_scope(|| self.main_tables(values, public, backend));
         let instances = ProverInstances::new(
             self.airs
                 .iter()
@@ -533,49 +677,84 @@ impl TapeMachine {
                 })
                 .collect(),
         );
-        let proof = if p3_binary_field::poly_basis::HAS_HARDWARE_CLMUL {
-            prove_with_backend::<_, _, ReprBackend<BinaryField2, Ghash128, true>>(
+        let proof = if let Some(device) = backend.zerocheck_device() {
+            prove_on::<_, _, DeviceBackend<F, F>, _>(
                 &self.config,
                 instances,
                 0,
-                &mut challenger(),
+                &mut backend.challenger(),
+                &DeviceBackend(device),
+                backend,
+            )
+        } else if p3_binary_field::poly_basis::HAS_HARDWARE_CLMUL {
+            prove_on::<_, _, ReprBackend<BinaryField2, Ghash128, true>, _>(
+                &self.config,
+                instances,
+                0,
+                &mut backend.challenger(),
+                &ReprBackend::default(),
+                backend,
             )
         } else {
-            prove_with_backend::<_, _, SubfieldBackend<BinaryField2>>(
+            prove_on::<_, _, SubfieldBackend<BinaryField2>, _>(
                 &self.config,
                 instances,
                 0,
-                &mut challenger(),
+                &mut backend.challenger(),
+                &SubfieldBackend::default(),
+                backend,
             )
         };
         proof.map_err(TapeMachineError::Prove)
     }
 
     /// Every table's witness for a run with these values.
-    fn main_tables(&self, values: &[F], public: &[F; MAX_PUBLIC]) -> Vec<Table<F>> {
-        let states = self.program.compression_states(values);
+    fn main_tables(
+        &self,
+        values: &[F],
+        public: &[F; MAX_PUBLIC],
+        backend: &dyn TapeBackend,
+    ) -> Vec<Table<F>> {
+        let states = tracing::info_span!("compression states")
+            .in_scope(|| self.program.compression_states(values));
         let round_inputs = HashAir::round_inputs(&self.program, &states);
         let (mut rounds_table, finals) = self
             .airs
             .iter()
             .find_map(|air| match air {
-                TapeAir::Rounds(rounds) => Some(rounds.table_of(&round_inputs)),
+                TapeAir::Rounds(rounds) => Some(
+                    tracing::info_span!("main table", air = "rounds")
+                        .in_scope(|| backend.rounds_table(rounds, &round_inputs)),
+                ),
                 _ => None,
             })
             .map(|(table, finals)| (Some(table), finals))
             .expect("the machine has a round table");
         self.airs
             .iter()
-            .map(|air| match air {
-                TapeAir::Ledger(a) => a.main_table(&self.program, values),
-                TapeAir::Arith(a) => a.main_table(&self.program, values),
-                TapeAir::Rewire(a) => a.main_table(&self.program, values),
-                TapeAir::Gather(a) => a.main_table(&self.program, values),
-                TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
-                TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
-                TapeAir::Kb(a) => a.main_table(&self.program, values),
-                TapeAir::Select(a) => a.main_table(&self.program, values),
-                TapeAir::Public(a) => a.main_table(public),
+            .map(|air| {
+                let name = match air {
+                    TapeAir::Ledger(_) => "ledger",
+                    TapeAir::Arith(_) => "arith",
+                    TapeAir::Rewire(_) => "rewire",
+                    TapeAir::Gather(_) => "gather",
+                    TapeAir::Hash(_) => "hash",
+                    TapeAir::Rounds(_) => "rounds taken",
+                    TapeAir::Kb(_) => "kb",
+                    TapeAir::Select(_) => "select",
+                    TapeAir::Public(_) => "public",
+                };
+                tracing::info_span!("main table", air = name).in_scope(|| match air {
+                    TapeAir::Ledger(a) => a.main_table(&self.program, values),
+                    TapeAir::Arith(a) => backend.arith_table(a, &self.program, values),
+                    TapeAir::Rewire(a) => a.main_table(&self.program, values),
+                    TapeAir::Gather(a) => a.main_table(&self.program, values),
+                    TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
+                    TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
+                    TapeAir::Kb(a) => backend.kb_table(a, &self.program, values),
+                    TapeAir::Select(a) => a.main_table(&self.program, values),
+                    TapeAir::Public(a) => a.main_table(public),
+                })
             })
             .collect()
     }
@@ -588,7 +767,7 @@ impl TapeMachine {
     /// Panics if the tables do not match their declarations.
     #[must_use]
     pub fn unbalanced(&self, values: &[F], public: &[F; MAX_PUBLIC]) -> String {
-        let mains = self.main_tables(values, public);
+        let mains = self.main_tables(values, public, &HostProver);
         let preps: Vec<Option<Table<F>>> = self
             .airs
             .iter()

@@ -53,12 +53,16 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// node's row counts, and every node is proved at its own multiple-of-32
     /// rows.  `None` on core, shrink and wrap (natural own area).
     recursion_pins: Option<crate::jagged::RecursionPins>,
+
+    /// Whether a shard's main round commits under the smallest of
+    /// `zkm_pcs::jagged::CORE_MAIN_PIN_CLASSES` it fits (the CORE machine).
+    core_main_pins: bool,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`].
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, recursion_pins: None }
+        Self { config, chips, num_pv_elts, recursion_pins: None, core_main_pins: false }
     }
 
     /// Marks this machine's shard proofs as committing under `pins` (the
@@ -66,6 +70,21 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     pub const fn with_recursion_pins(mut self, pins: Option<crate::jagged::RecursionPins>) -> Self {
         self.recursion_pins = pins;
         self
+    }
+
+    /// Marks this machine's shards as committing their main round under the
+    /// core pin classes (the CORE machine).  Consuming builder.
+    pub const fn with_core_main_pins(mut self) -> Self {
+        self.core_main_pins = true;
+        self
+    }
+
+    /// The pin a main round of `total_values` cells commits under on this
+    /// machine: the recursion pin, else the core class it fits, else `None`.
+    pub fn main_area_pin_for(&self, total_values: usize) -> Option<crate::jagged::AreaPin> {
+        self.main_area_pin().or_else(|| {
+            self.core_main_pins.then(|| crate::jagged::core_main_pin(total_values))
+        })
     }
 
     /// The area pins this machine's proofs commit under (`None` = natural).
@@ -423,8 +442,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
     /// (`RecursionPins::class_for_committed`), or `None` on a machine without
     /// pins.  Rows name chips of this machine; unknown names are ignored.
     /// Panics when no class holds the rows — the largest pin must be raised.
+    ///
+    /// On the core machine the main round takes its core pin class and the
+    /// preprocessed round its natural geometry, written as the pin of its
+    /// natural area and unpinned padding-column count.
     pub fn pins_for_rows(&self, rows: &[(String, usize)]) -> Option<crate::jagged::RecursionPins> {
-        self.recursion_pins?;
+        if self.recursion_pins.is_none() && !self.core_main_pins {
+            return None;
+        }
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
         let (mut main, mut prep) = (0usize, 0usize);
         for (name, r) in rows {
@@ -435,6 +460,18 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         }
         let main_c = crate::jagged::committed_dense_len(main, log_stack);
         let prep_c = crate::jagged::committed_dense_len(prep, log_stack);
+        if self.recursion_pins.is_none() {
+            let cube = 1usize
+                << crate::shard_level::verifier::JaggedShardVerifier::production_default()
+                    .max_log_row_count;
+            return Some(crate::jagged::RecursionPins {
+                prep: crate::jagged::AreaPin {
+                    area: prep_c,
+                    pad_columns: crate::jagged::unpinned_pad_columns(prep, log_stack, cube),
+                },
+                main: crate::jagged::core_main_pin(main),
+            });
+        }
         let class = crate::jagged::RecursionPins::class_for_committed(main_c, prep_c)
             .unwrap_or_else(|| {
                 panic!(

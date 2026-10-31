@@ -145,40 +145,36 @@ fn extend_cluster(base: &BTreeSet<String>, extra: &[&str]) -> BTreeSet<String> {
     s
 }
 
-/// Build the full [`MachineShape`] for Ziren — 12 curated clusters
-/// covering every production workload class.
+/// Build the [`MachineShape`] for Ziren: fixed chip sets.  A core shard
+/// commits the smallest that holds its chips, every chip of it, so the leaf
+/// program verifying the shard is a function of the cluster and the shard's
+/// main area class (`zkm_pcs::jagged::CORE_MAIN_PIN_CLASSES`) alone.
+///
+/// * execution: the core chips and the global memory chips; a memory shard
+///   commits the core chips empty.
+/// * one per precompile family, over the precompile plumbing: a leaf verifies
+///   the constraints of every chip it commits, so one cluster of all families
+///   would grow every precompile leaf past the binary stage's schedule.
+/// * all: every chip, for a shard with rows across these.
 #[must_use]
 pub fn build_mips_machine_shape() -> MachineShape {
     let preprocessed = set_from(preprocessed_chips());
-    let core_base = {
-        let mut s = preprocessed.clone();
-        for name in core_base_chips() {
-            s.insert(name.to_string());
-        }
-        s
-    };
-    let memory = extend_cluster(&core_base, memory_cluster_extras());
-
-    let main_exec = extend_cluster(&core_base, &["Global"]);
-    let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
-    let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize", "Global"]);
-    let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit", "Global"]);
-    let precompile_base =
-        extend_cluster(&preprocessed, &["Global", "MemoryLocal", "SyscallPrecompile"]);
-
-    let mut clusters: Vec<BTreeSet<String>> = vec![
-        core_base.clone(),
-        main_exec,
-        memory.clone(),
-        memory_min,
-        memory_finalize_only,
-        memory_init_only,
-    ];
-    for (_, extras) in precompile_families() {
-        clusters.push(extend_cluster(&memory, extras));
-        clusters.push(extend_cluster(&precompile_base, extras));
+    let execution = extend_cluster(
+        &extend_cluster(&preprocessed, core_base_chips()),
+        memory_cluster_extras(),
+    );
+    let plumbing = extend_cluster(&preprocessed, &["Global", "MemoryLocal", "SyscallPrecompile"]);
+    let families: Vec<BTreeSet<String>> = precompile_families()
+        .iter()
+        .map(|(_, extras)| extend_cluster(&plumbing, extras))
+        .collect();
+    let mut all = execution.clone();
+    for family in families.iter() {
+        all.extend(family.iter().cloned());
     }
-
+    let mut clusters = vec![execution];
+    clusters.extend(families);
+    clusters.push(all);
     MachineShape::new(clusters)
 }
 
@@ -272,38 +268,39 @@ mod tests {
 
     #[test]
     fn machine_shape_has_expected_cluster_count() {
-        let ms = build_mips_machine_shape();
-        let expected = 6 + 2 * precompile_families().len();
         assert_eq!(
-            ms.chip_clusters.len(),
-            expected,
-            "cluster count drifted from 6 base + 2×{} families",
-            precompile_families().len(),
+            build_mips_machine_shape().chip_clusters.len(),
+            2 + precompile_families().len()
         );
-        assert_eq!(ms.chip_clusters.len(), 26);
     }
 
     /// A multi-shard run emits global-memory init and finalize events in
-    /// different shards, and a shard commits only the chips that have rows, so
-    /// a memory shard can carry `MemoryGlobalFinalize` without
-    /// `MemoryGlobalInit`: a strict subset of `memory_min`. Both halves must be
-    /// enumerated, or that shard's normalize vk is absent from `vk_map.bin`
-    /// and compress rejects it under `VERIFY_VK=true`.
+    /// different shards, so a memory shard can carry either half alone; the
+    /// execution cluster holds both.
     #[test]
     fn machine_shape_covers_split_memory_shards() {
         let ms = build_mips_machine_shape();
         let prep = set_from(preprocessed_chips());
-        for (label, only) in
-            [("finalize-only", "MemoryGlobalFinalize"), ("init-only", "MemoryGlobalInit")]
-        {
+        for only in ["MemoryGlobalFinalize", "MemoryGlobalInit"] {
             let mut want = prep.clone();
             want.insert("Global".to_string());
             want.insert(only.to_string());
-            assert!(
-                ms.chip_clusters.contains(&want),
-                "no cluster for the {label} memory shard {want:?}"
-            );
+            assert!(ms.smallest_cluster(&want).is_some(), "no cluster holds {want:?}");
         }
+    }
+
+    /// Every chip of the catalog is in the `all` cluster, so every shard has a cluster.
+    #[test]
+    fn every_shard_has_a_cluster() {
+        let ms = build_mips_machine_shape();
+        let mut every = set_from(preprocessed_chips());
+        every.extend(set_from(core_base_chips()));
+        every.extend(set_from(memory_cluster_extras()));
+        every.extend(set_from(&["MemoryLocal", "SyscallPrecompile"]));
+        for (_, extras) in precompile_families() {
+            every.extend(set_from(extras));
+        }
+        assert_eq!(ms.smallest_cluster(&every), Some(&every));
     }
 
     #[test]
@@ -316,41 +313,12 @@ mod tests {
         }
     }
 
-    /// The 26-cluster model includes MINIMAL multi-shard cluster types
-    /// (the `memory_min` and `precompile_base`-derived clusters) that are
-    /// intentionally CPU-FREE — a memory shard or precompile shard carries
-    /// no core/CPU chips.  So the old "every cluster has Cpu" invariant is
-    /// false by design; the correct invariants are:
-    ///   1. EVERY cluster carries the preprocessed chips (checked above).
-    ///   2. At least the four base clusters exist, and exactly the
-    ///      minimal memory/precompile shard types are Cpu-free.
-    ///   3. Every cluster that DOES carry Cpu also carries the full core
-    ///      ALU set (Cpu never appears without its core plumbing).
+    /// Only the precompile clusters are free of the core chips.
     #[test]
     fn cluster_cpu_membership_matches_shard_types() {
         let ms = build_mips_machine_shape();
-        let core_alu = ["AddSub", "Mul", "Lt", "DivRem"];
-
-        let cpu_clusters = ms.chip_clusters.iter().filter(|c| c.contains("Cpu")).count();
-        let cpu_free = ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
-
-        let expected_cpu_free = 3 + precompile_families().len();
-        assert_eq!(
-            cpu_free, expected_cpu_free,
-            "Cpu-free clusters (minimal memory/precompile shard types) drifted"
-        );
-        assert_eq!(cpu_clusters, ms.chip_clusters.len() - expected_cpu_free);
-
-        for cluster in &ms.chip_clusters {
-            if cluster.contains("Cpu") {
-                for chip in core_alu {
-                    assert!(
-                        cluster.contains(chip),
-                        "Cpu cluster missing core chip {chip}: {cluster:?}",
-                    );
-                }
-            }
-        }
+        let cpu_free = ms.chip_clusters.iter().filter(|c| !c.contains("AddSub")).count();
+        assert_eq!(cpu_free, precompile_families().len());
     }
 
     #[test]
@@ -366,7 +334,7 @@ mod tests {
             shapes.len(),
             upper,
         );
-        assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
+        assert_eq!(shapes.len(), 43_200, "expected 12 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
 

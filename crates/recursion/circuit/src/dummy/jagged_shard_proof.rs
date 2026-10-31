@@ -148,8 +148,8 @@ where
 /// | `opened_values`        | one zero entry per chip, shaped as the prover's |
 /// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
-/// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
-pub fn dummy_jagged_shard_proof<F, EF, A>(
+/// | `evaluation_proof`     | [`dummy_jagged_bundle_for`] over `MT`: the bundle itself under Poseidon2, its bytes under Blake3 |
+pub fn dummy_jagged_shard_proof<F, EF, A, MT, Dg>(
     chips: &[&Chip<F, A>],
     chip_heights_pairs: &[(String, usize)],
     max_log_row_count: usize,
@@ -160,6 +160,14 @@ where
     F: Field + Copy + PrimeCharacteristicRing,
     EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
     A: MachineAir<F>,
+    MT: p3_commit::Mmcs<
+            zkm_pcs::InnerVal,
+            Commitment = p3_symmetric::MerkleCap<zkm_pcs::InnerVal, Dg>,
+            Proof = Vec<Dg>,
+        > + 'static,
+    MT::Commitment: serde::Serialize + for<'d> serde::Deserialize<'d>,
+    MT::Proof: serde::Serialize + for<'d> serde::Deserialize<'d>,
+    Dg: Copy + Default + 'static,
 {
     let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS];
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
@@ -248,26 +256,27 @@ where
                 Some((w, rows))
             })
             .collect();
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_bundle(
-            &prep_dims,
-            &chip_dims,
-            max_log_row_count,
-            pins,
-            profile,
-        ))
+        dummy_jagged_bundle_for::<MT, Dg>(&prep_dims, &chip_dims, max_log_row_count, pins, profile)
     };
-
-    let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
-    {
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
-            let (rc, pcc) = zkm_pcs::jagged::derive_row_and_padding_counts(
-                &bundle.packing.column_counts,
-                &bundle.packing.offsets,
-                bundle.packing.total_values,
-            );
-            (vec![rc], vec![pcc])
+    let (row_counts, padding_column_counts) = {
+        let (rc, pcc) = zkm_pcs::jagged::derive_row_and_padding_counts(
+            &evaluation_proof.packing.column_counts,
+            &evaluation_proof.packing.offsets,
+            evaluation_proof.packing.total_values,
+        );
+        (vec![rc], vec![pcc])
+    };
+    let evaluation_proof = {
+        let bundle: Box<dyn std::any::Any> = Box::new(evaluation_proof);
+        match bundle.downcast::<zkm_pcs::jagged_pcs::jagged::JaggedPcsProof>() {
+            Ok(bundle) => zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(*bundle),
+            Err(bundle) => zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(
+                bundle
+                    .downcast_ref::<zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<MT>>()
+                    .expect("the bundle built above")
+                    .to_bytes(),
+            ),
         }
-        _ => (Vec::new(), Vec::new()),
     };
 
     let n_prep =
@@ -362,12 +371,38 @@ pub fn dummy_jagged_bundle(
     pins: Option<zkm_pcs::jagged::RecursionPins>,
     profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
+    dummy_jagged_bundle_for::<zkm_pcs::jagged_pcs::JaggedMmcs, [zkm_pcs::InnerVal; 8]>(
+        prep_dims,
+        chip_dims,
+        max_log_row_count,
+        pins,
+        profile,
+    )
+}
+
+/// [`dummy_jagged_bundle`] under the Merkle tree `MT`, whose roots and path
+/// nodes are digests `Dg`: Poseidon2's `[F; 8]` or Blake3's `[u8; 32]`.
+pub fn dummy_jagged_bundle_for<MT, Dg>(
+    prep_dims: &[(usize, usize)],
+    chip_dims: &[(usize, usize)],
+    max_log_row_count: usize,
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<MT>
+where
+    MT: p3_commit::Mmcs<
+        zkm_pcs::InnerVal,
+        Commitment = p3_symmetric::MerkleCap<zkm_pcs::InnerVal, Dg>,
+        Proof = Vec<Dg>,
+    >,
+    Dg: Copy + Default,
+{
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
     use zkm_pcs::jagged::pack_traces_jagged;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
-    use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProof, PackingMeta};
-    use zkm_pcs::jagged_pcs::{pick_log_stacking_height, JaggedCommit};
+    use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProofGeneric, PackingMeta};
+    use zkm_pcs::jagged_pcs::{pick_log_stacking_height, JaggedCommitGeneric};
     use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
     use zkm_pcs::{InnerChallenge, InnerVal};
@@ -479,8 +514,8 @@ pub fn dummy_jagged_bundle(
     };
     let jagged_n = 2 * (log_m + 1);
 
-    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
-    let whir_proof = dummy_stacked_whir_proof(log_stacking, &round_stripes, profile);
+    let zero_cap = || MerkleCap::<F, Dg>::new(vec![Dg::default()]);
+    let whir_proof = dummy_stacked_whir_proof::<MT, Dg>(log_stacking, &round_stripes, profile);
 
     let reduction = JaggedReductionProof::<EF> {
         rounds: vec![JaggedReductionRound { evals: [EF::ZERO; 3] }; l.max(1)],
@@ -499,11 +534,11 @@ pub fn dummy_jagged_bundle(
         },
     };
 
-    JaggedPcsProof {
+    JaggedPcsProofGeneric {
         reduction,
         whir_proof,
         y_per_chip: column_counts.iter().map(|c| vec![EF::ZERO; *c]).collect(),
-        commit: JaggedCommit {
+        commit: JaggedCommitGeneric {
             original_commitment: zero_cap(),
             chip_dims: vec![(1, main_log_dense as u32)],
             area: 0,
@@ -543,17 +578,20 @@ pub fn dummy_jagged_bundle(
 ///   committed round, `sum ff + (R - 1)`.
 /// * `batch_evaluations[r]`: `round_stripes[r]` claims, then one batching
 ///   grind witness.
-fn dummy_stacked_whir_proof(
+fn dummy_stacked_whir_proof<MT, Dg>(
     log_stacking: usize,
     round_stripes: &[usize],
     profile: zkm_pcs::whir::jagged::WhirProfile,
-) -> zkm_pcs::whir::stacked::StackedWhirProof<
-    zkm_pcs::InnerVal,
-    zkm_pcs::InnerChallenge,
-    zkm_pcs::jagged_pcs::JaggedMmcs,
-> {
+) -> zkm_pcs::whir::stacked::StackedWhirProof<zkm_pcs::InnerVal, zkm_pcs::InnerChallenge, MT>
+where
+    MT: p3_commit::Mmcs<
+        zkm_pcs::InnerVal,
+        Commitment = p3_symmetric::MerkleCap<zkm_pcs::InnerVal, Dg>,
+        Proof = Vec<Dg>,
+    >,
+    Dg: Copy + Default,
+{
     use p3_symmetric::MerkleCap;
-    use zkm_pcs::jagged_pcs::JaggedMmcs;
     use zkm_pcs::whir::merkle::{LeafOpening, MerkleOpening};
     use zkm_pcs::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
     use zkm_pcs::whir::stacked::StackedWhirProof;
@@ -567,13 +605,13 @@ fn dummy_stacked_whir_proof(
     let rounds = &config.round_parameters;
     let num_rounds = rounds.len();
     let ff0 = rounds[0].folding_factor;
-    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
+    let zero_cap = || MerkleCap::<F, Dg>::new(vec![Dg::default()]);
     let poly = || SumcheckPoly(vec![EF::ZERO; 3]);
 
     let mut round_sumcheck_polys: Vec<Vec<SumcheckPoly<EF>>> = Vec::new();
     let mut round_ood_answers: Vec<Vec<EF>> = Vec::new();
     let mut round_commitments = Vec::new();
-    let mut round_query_openings: Vec<MerkleOpening<F, JaggedMmcs>> = Vec::new();
+    let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
     let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
     let mut prev_domain_log = (log_stacking - ff0) + config.starting_log_inv_rate;
@@ -590,18 +628,18 @@ fn dummy_stacked_whir_proof(
         round_commitments.push(zero_cap());
         round_ood_answers.push(vec![EF::ZERO; rc.ood_samples]);
         folding_pow.push(ProofOfWork(F::ZERO));
-        let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..rc.num_queries)
+        let leaves: Vec<LeafOpening<F, MT>> = (0..rc.num_queries)
             .flat_map(|_| match prev_leaf {
                 None => round_stripes
                     .iter()
                     .map(|stripes| LeafOpening {
                         values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
-                        proof: vec![[F::ZERO; 8]; prev_domain_log],
+                        proof: vec![Dg::default(); prev_domain_log],
                     })
                     .collect::<Vec<_>>(),
                 Some(width) => vec![LeafOpening {
                     values: vec![vec![F::ZERO; width]],
-                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                    proof: vec![Dg::default(); prev_domain_log],
                 }],
             })
             .collect();
@@ -609,18 +647,18 @@ fn dummy_stacked_whir_proof(
         prev_domain_log = (rem - next_ff) + rc.log_inv_rate;
         prev_leaf = Some((1 << next_ff) * D);
     }
-    let final_leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..config.final_queries)
+    let final_leaves: Vec<LeafOpening<F, MT>> = (0..config.final_queries)
         .flat_map(|_| match prev_leaf {
             None => round_stripes
                 .iter()
                 .map(|stripes| LeafOpening {
                     values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
-                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                    proof: vec![Dg::default(); prev_domain_log],
                 })
                 .collect::<Vec<_>>(),
             Some(width) => vec![LeafOpening {
                 values: vec![vec![F::ZERO; width]],
-                proof: vec![[F::ZERO; 8]; prev_domain_log],
+                proof: vec![Dg::default(); prev_domain_log],
             }],
         })
         .collect();

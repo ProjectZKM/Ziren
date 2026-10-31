@@ -108,11 +108,11 @@ pub struct StatelessProveCoreRequestPayload {
     pub retain_for_compress: bool,
 }
 
-/// The payload for the [zkm_prover::ZKMProver::compress_binary] method.
+/// The payload for the [zkm_prover::ZKMProver::compress_word] method.
 ///
 /// This object is used to serialize and deserialize the payloads for the GPU server.
 #[derive(Serialize, Deserialize)]
-pub struct CompressBinaryRequestPayload {
+pub struct CompressWordRequestPayload {
     /// The verifying key.
     pub vk: ZKMVerifyingKey,
     /// The core proof, every shard proof included.
@@ -447,22 +447,23 @@ impl ZKMCudaProver {
         Ok(proof)
     }
 
-    /// Executes the [zkm_prover::ZKMProver::compress_binary] method inside the container, with
-    /// the server's own binary key store.
-    pub fn compress_binary(
+    /// Executes the [zkm_prover::ZKMProver::compress_word] method inside the container: the
+    /// leaves and nodes over `GF(2^128)` proved on the device, the root under the root schedule.
+    /// The server keeps the leaves' keys and checks every claim against them before answering.
+    pub fn compress_word(
         &self,
         vk: &ZKMVerifyingKey,
         proof: ZKMCoreProof,
-    ) -> Result<zkm_prover::binary_tree::BinaryCompressedProof, ZKMRecursionProverError> {
-        let payload = CompressBinaryRequestPayload { vk: vk.clone(), proof };
+    ) -> Result<zkm_prover::word_tree::WordCompressedProof, ZKMRecursionProverError> {
+        let payload = CompressWordRequestPayload { vk: vk.clone(), proof };
         let data = bincode::serialize(&payload)
-            .map_err(|e| rec_codec("compress_binary", "encode the request", e))?;
+            .map_err(|e| rec_codec("compress_word", "encode the request", e))?;
         let request = crate::api::CompressRequest { data };
-        let response = block_on(async { self.client.compress_binary(request).await })
-            .map_err(|e| rec_transport("compress_binary", e))?;
+        let response = block_on(async { self.client.compress(request).await })
+            .map_err(|e| rec_transport("compress_word", e))?;
         self.record_server_prove_ms(response.prove_ms);
         bincode::deserialize(&response.result)
-            .map_err(|e| rec_codec("compress_binary", "decode the response", e))
+            .map_err(|e| rec_codec("compress_word", "decode the response", e))
     }
 
     /// Executes the [zkm_prover::ZKMProver::wrap_bn254] method inside the container.
@@ -636,12 +637,12 @@ mod tests {
         assert!(msg.contains("prove_core") && msg.contains("version mismatch"), "got: {msg}");
 
         let Err(e) =
-            bincode::deserialize::<zkm_prover::binary_tree::BinaryCompressedProof>(&garbage)
-                .map_err(|e| rec_codec("compress_binary", "decode the response", e))
+            bincode::deserialize::<zkm_prover::word_tree::WordCompressedProof>(&garbage)
+                .map_err(|e| rec_codec("compress_word", "decode the response", e))
         else {
             panic!("garbage must not decode")
         };
         assert!(matches!(e, ZKMRecursionProverError::RuntimeError(_)), "got: {e}");
-        assert!(format!("{e}").contains("compress_binary"), "got: {e}");
+        assert!(format!("{e}").contains("compress_word"), "got: {e}");
     }
 }

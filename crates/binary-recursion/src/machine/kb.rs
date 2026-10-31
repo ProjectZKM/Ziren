@@ -17,7 +17,7 @@ use p3_bus::{BusActivation, BusDirection};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, BitRows, MEMORY, WRITE};
+use zkm_binary_stark::machine::bits::{dense, log_height_for, packed, BitRows, MEMORY, WRITE};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::word::{
     bits_le, eval_add, eval_mul, eval_sub, exprs, fill_add, fill_mul, fill_sub, AddCols, MulCols,
@@ -136,6 +136,41 @@ impl KbAir {
             rows.set_row(r, &row_bits);
         }
         rows.into_table()
+    }
+}
+
+impl KbAir {
+    /// What a device builds the table from: each row's kind, as [`KbAir::kind_code`] numbers it,
+    /// and its operands as the row reads them.
+    #[must_use]
+    pub fn row_operands(program: &Program, values: &[F]) -> (Vec<u8>, Vec<[u32; 2]>) {
+        let operand = |read: Read| {
+            let value = Program::value(values, read.cell);
+            as_kb(value).unwrap_or((value.to_repr() & ((1 << KB_BITS) - 1)) as u32)
+        };
+        program
+            .kb
+            .iter()
+            .map(|op| (Self::kind_code(op.kind), [operand(op.a), operand(op.b)]))
+            .unzip()
+    }
+
+    /// A row kind's number on the device: `c` is `a + b`, `a - b` or `a * b` modulo the prime.
+    #[must_use]
+    pub const fn kind_code(kind: KbOp) -> u8 {
+        match kind {
+            KbOp::Add => 0,
+            KbOp::Sub => 1,
+            KbOp::Mul => 2,
+        }
+    }
+}
+
+impl KbAir {
+    /// The preprocessed columns as the bit table setup commits.
+    #[must_use]
+    pub fn preprocessed_table(&self) -> Table<F> {
+        packed(&self.preprocessed, NUM_KB_PREP_COLS)
     }
 }
 

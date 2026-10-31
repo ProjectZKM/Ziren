@@ -1001,16 +1001,39 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Result<zkm_recursion_r1cs::Lowered, ZKMRecursionProverError> {
-        self.leaf_word_values(input).map(|(lowered, _)| lowered)
+        self.leaf_word_values(input).map(|(lowered, _, _)| lowered)
     }
 
-    /// [`Self::leaf_word`], with the public values the program commits to,
-    /// as canonical elements.
-    pub fn leaf_word_values(
+    /// The leaf program of `input` and its digest, run: the memory the runtime left and the
+    /// public values it committed, as canonical elements.
+    #[allow(clippy::type_complexity)]
+    pub fn leaf_word_run(
         &self,
         input: &ZKMCoreWitnessValues<CoreSC>,
-    ) -> Result<(zkm_recursion_r1cs::Lowered, Vec<u32>), ZKMRecursionProverError> {
-        let program = self.recursion_program(input).0;
+    ) -> Result<
+        (
+            Arc<RecursionProgram<KoalaBear>>,
+            [u8; 32],
+            Vec<zkm_recursion_core::air::Block<KoalaBear>>,
+            Vec<u32>,
+        ),
+        ZKMRecursionProverError,
+    > {
+        let (program, digest) =
+            tracing::info_span!("leaf program").in_scope(|| self.recursion_program(input));
+        let (memory, public_values) = self.leaf_word_execute(&program, input)?;
+        Ok((program, digest, memory, public_values))
+    }
+
+    /// The memory `program` leaves and the public values it commits to, run on `input`.
+    #[allow(clippy::type_complexity)]
+    pub fn leaf_word_execute(
+        &self,
+        program: &Arc<RecursionProgram<KoalaBear>>,
+        input: &ZKMCoreWitnessValues<CoreSC>,
+    ) -> Result<(Vec<zkm_recursion_core::air::Block<KoalaBear>>, Vec<u32>), ZKMRecursionProverError>
+    {
+        let _run = tracing::info_span!("leaf run").entered();
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
             zkm_pcs::inner_perm(),
@@ -1030,9 +1053,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             })
             .collect();
         let public_values = PublicValuesAir::public_values(&runtime.record);
-        let lowered = zkm_recursion_r1cs::lower(&program, Some(&memory))
+        Ok((memory, public_values))
+    }
+
+    /// [`Self::leaf_word`], with the public values the program commits to,
+    /// as canonical elements, and the memory the runtime left.
+    #[allow(clippy::type_complexity)]
+    pub fn leaf_word_values(
+        &self,
+        input: &ZKMCoreWitnessValues<CoreSC>,
+    ) -> Result<
+        (zkm_recursion_r1cs::Lowered, Vec<u32>, Vec<zkm_recursion_core::air::Block<KoalaBear>>),
+        ZKMRecursionProverError,
+    > {
+        let (program, _, memory, public_values) = self.leaf_word_run(input)?;
+        let lowered = tracing::info_span!("leaf lower")
+            .in_scope(|| zkm_recursion_r1cs::lower(&program, Some(&memory)))
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
-        Ok((lowered, public_values))
+        Ok((lowered, public_values, memory))
     }
 
     /// The binary machine of `program`, every table at least as tall as
@@ -1885,7 +1923,9 @@ pub mod tests {
                 started.elapsed().as_secs_f64()
             );
             let started = std::time::Instant::now();
-            let (commitment, proof, _) = key.prove(built).map_err(|e| anyhow::anyhow!(e))?;
+            let (commitment, proof, _) = key
+                .prove(built, None, &mut zkm_binary_stark::challenger())
+                .map_err(|e| anyhow::anyhow!(e))?;
             tracing::info!(
                 "word leaf proved in {:.1} s, {} bytes",
                 started.elapsed().as_secs_f64(),
@@ -1919,20 +1959,21 @@ pub mod tests {
             ZKMProverOpts::default(),
             ZKMContext::default(),
         )?;
-        let mut keys = Vec::new();
-        let compressed = prover.compress_word(&vk, &core_proof, &mut keys)?;
+        let mut keys = zkm_recursion_r1cs::prove::WordKeys::new(None);
+        let compressed =
+            prover.compress_word(&vk, &core_proof, &mut keys, &p3_multi_stark::HostProver)?;
         let claims: usize = compressed.claims.iter().map(|(_, claims)| claims.len()).sum();
         tracing::info!(
             "word compressed: root {} bytes, {} leaves, {claims} claims, {} keys",
             compressed.root.proof.len(),
             compressed.claims.len(),
-            keys.len()
+            keys.as_slice().len()
         );
         let mut forged = compressed.clone();
         let claim = &mut forged.claims[0].1[0];
         claim.value += zkm_binary_recursion::F::ONE;
         assert!(
-            ZKMProver::<DefaultProverComponents>::verify_word_compressed(&forged, &keys).is_err(),
+            ZKMProver::<DefaultProverComponents>::verify_word_compressed(&forged, keys.as_slice()).is_err(),
             "a changed claim is refused"
         );
         Ok(())
