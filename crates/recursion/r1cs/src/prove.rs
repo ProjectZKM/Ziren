@@ -31,14 +31,18 @@ pub type Hints = p3_word_backend::ShiftHints<F>;
 /// The schedule a word proof commits under.
 ///
 /// Decoding to the proven Johnson radius halves the queries of unique
-/// decoding, which keeps a leaf's opening under the proof-size ceiling.
+/// decoding, which keeps a leaf's opening under the proof-size ceiling, and
+/// the queries every node verifies.  Its grinds grow with the witness: a
+/// composed leaf of `2^34` bits grinds 31, so the ceiling is 32.
 pub fn schedule() -> BinarySchedule {
-    BinarySchedule {
+    let mut schedule = BinarySchedule {
         regime: zkm_binary_stark::WhirRegime::Johnson,
         log_inv_rate: 2,
         folding: 3,
         ..BinarySchedule::default()
-    }
+    };
+    schedule.budget.max_grinding_bits = 32;
+    schedule
 }
 
 /// A key, the commitment it is proven under, and its relations.
