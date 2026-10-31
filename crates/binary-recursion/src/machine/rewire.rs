@@ -29,11 +29,12 @@ use core::borrow::{Borrow, BorrowMut};
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_binary_field::TowerLevel;
 use p3_bus::{BusActivation, BusDirection};
+use rayon::prelude::*;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{
-    dense_padded, log_height_for, packed_padded, padded_width, BitRows, MEMORY, WRITE,
+    dense_padded, log_height_for, packed_padded, padded_width, RowBits, MEMORY, WRITE,
 };
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
@@ -150,28 +151,25 @@ impl<const W: usize> RewireAir<W> {
 
     /// The witness: each row's bytes.
     #[must_use]
-    pub fn main_table(&self, program: &Program, values: &[F]) -> Table<F> {
-        let mut rows = BitRows::new(Self::COLS, self.log_height);
-        let mut row_bits = vec![0u8; Self::COLS];
-        for (row, op) in Self::rows(program).enumerate() {
-            row_bits.fill(0);
-            let cols: &mut RewireCols<u8, W> = row_bits.as_mut_slice().borrow_mut();
-            let bytes: Vec<u8> = match op.kind {
-                RewireKind::ToBytes | RewireKind::Split | RewireKind::Bits { .. } => {
-                    Program::cell_value(values, op.inputs[0]).to_repr().to_le_bytes().to_vec()
-                }
-                RewireKind::FromBytes | RewireKind::Gather => op
-                    .inputs
-                    .iter()
-                    .map(|&cell| Program::cell_value(values, cell).to_repr() as u8)
-                    .collect(),
-            };
-            for (slot, byte) in cols.bytes.iter_mut().zip(bytes) {
-                *slot = core::array::from_fn(|i| (byte >> i) & 1);
+    pub fn main_rows(&self, program: &Program, values: &[F]) -> RowBits {
+        let mut rows = RowBits::new(Self::COLS, self.log_height);
+        let ops: Vec<&RewireRow> = Self::rows(program).collect();
+        rows.par_rows_mut().zip(ops.par_iter()).for_each(|(mut row, op)| match op.kind {
+            RewireKind::ToBytes | RewireKind::Split | RewireKind::Bits { .. } => {
+                let value = Program::cell_value(values, op.inputs[0]).to_repr();
+                row.put(0, value, (8 * W).min(128));
             }
-            rows.set_row(row, &row_bits);
-        }
-        rows.into_table()
+            RewireKind::FromBytes | RewireKind::Gather => {
+                let inputs = &op.inputs[..op.inputs.len().min(W)];
+                for (chunk, cells) in inputs.chunks(16).enumerate() {
+                    let bytes = cells.iter().enumerate().fold(0u128, |acc, (k, &cell)| {
+                        acc | (u128::from(Program::cell_value(values, cell).to_repr() as u8) << (8 * k))
+                    });
+                    row.put(128 * chunk, bytes, 8 * cells.len());
+                }
+            }
+        });
+        rows
     }
 }
 

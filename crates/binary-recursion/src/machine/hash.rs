@@ -28,6 +28,7 @@
 //! verifier opens, and the rows of a compression were one row of 2,048.
 
 use core::borrow::{Borrow, BorrowMut};
+use core::mem::offset_of;
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_bus::{BusActivation, BusDirection};
@@ -35,7 +36,7 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{
-    dense, log_height_for, pack_field, packed, BitRows, MEMORY, PERMUTATION_ID_BITS, WRITE,
+    dense, log_height_for, pack_field, packed, RowBits, MEMORY, PERMUTATION_ID_BITS, WRITE,
 };
 use zkm_binary_stark::machine::blake3::{STATE_WORDS, WORD_BITS};
 use zkm_binary_stark::machine_builder::MachineBuilder;
@@ -133,11 +134,6 @@ const _: () = assert!(ADDR_BITS == PERMUTATION_ID_BITS);
 pub struct HashAir {
     pub(super) log_height: usize,
     pub(super) preprocessed: Vec<u8>,
-}
-
-/// The bits of a word.
-fn word(value: u32) -> [u8; WORD_BITS] {
-    bits_le::<WORD_BITS>(u64::from(value))
 }
 
 /// Each compression's consumer: the compression that continues from its
@@ -263,15 +259,16 @@ impl HashAir {
 
     /// The witness: each compression's cells and bit, and its final lanes.
     #[must_use]
-    pub fn main_table(
+    pub fn main_rows(
         &self,
         program: &Program,
         values: &[F],
         states: &[CompressionState],
         finals: &[[u32; STATE_WORDS]],
-    ) -> Table<F> {
-        let mut rows = BitRows::new(NUM_HASH_COLS, self.log_height);
-        let mut row_bits = vec![0u8; NUM_HASH_COLS];
+    ) -> RowBits {
+        let mut rows = RowBits::new(NUM_HASH_COLS, self.log_height);
+        let bit_at = offset_of!(MsgCols<u8>, bit);
+        let swap_at = offset_of!(MsgCols<u8>, swap);
         for (c, ((compression, s), last)) in
             program.compressions.iter().zip(states).zip(finals).enumerate()
         {
@@ -287,21 +284,21 @@ impl HashAir {
                 }),
             };
             for pair in 0..2 {
-                row_bits.fill(0);
-                let cols: &mut MsgCols<u8> = row_bits.as_mut_slice().borrow_mut();
-                cols.cells = [cells[pair], cells[pair + 2]].map(super::cells::value_bits);
-                cols.bit = u8::from(s.bit);
+                let row = ROWS_PER_COMPRESSION * c + pair;
+                rows.put(row, 0, cells[pair].to_repr(), VALUE_BITS);
+                rows.put(row, VALUE_BITS, cells[pair + 2].to_repr(), VALUE_BITS);
+                rows.put(row, bit_at, u128::from(s.bit), 1);
                 if s.bit {
-                    cols.swap = super::cells::value_bits(cells[pair] + cells[pair + 2]);
+                    rows.put(row, swap_at, (cells[pair] + cells[pair + 2]).to_repr(), VALUE_BITS);
                 }
-                rows.set_row(ROWS_PER_COMPRESSION * c + pair, &row_bits);
             }
-            row_bits.fill(0);
-            let cols: &mut OutCols<u8> = row_bits.as_mut_slice().borrow_mut();
-            cols.last = last.map(word);
-            rows.set_row(ROWS_PER_COMPRESSION * c + 2, &row_bits);
+            let row = ROWS_PER_COMPRESSION * c + 2;
+            for (pair, words) in last.chunks(4).enumerate() {
+                let packed = words.iter().enumerate().fold(0u128, |acc, (w, &x)| acc | (u128::from(x) << (32 * w)));
+                rows.put(row, 128 * pair, packed, 32 * words.len());
+            }
         }
-        rows.into_table()
+        rows
     }
 }
 

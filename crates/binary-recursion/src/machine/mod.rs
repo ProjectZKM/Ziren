@@ -47,6 +47,7 @@ use p3_sumcheck::TableShape;
 use p3_word_backend::WordDevice;
 use std::sync::Arc;
 use zkm_binary_stark::config::{BitPcs, MachineConfig, MachineConfigError, MachineProof};
+use zkm_binary_stark::machine::bits::RowBits;
 use zkm_binary_stark::machine::blake3::STATE_WORDS;
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::{challenger, BinaryBase, BinarySchedule, Challenger};
@@ -336,6 +337,9 @@ pub trait TapeBackend: ProverBackend<MachineConfig, TapeAir> {
 
     /// The table of `air`, `program`'s KoalaBear operations, over a run with these values.
     fn kb_table(&self, air: &KbAir, program: &Program, values: &[F]) -> Table<F>;
+
+    /// The table of `rows`, transposed into the packed layout.
+    fn bit_table(&self, rows: RowBits) -> Table<F>;
 }
 
 /// The devices of a word leaf: its trees, relations and shifts, and its commitment's opening.
@@ -378,6 +382,10 @@ impl TapeBackend for HostProver {
 
     fn kb_table(&self, air: &KbAir, program: &Program, values: &[F]) -> Table<F> {
         air.main_table(program, values)
+    }
+
+    fn bit_table(&self, rows: RowBits) -> Table<F> {
+        rows.into_table()
     }
 }
 
@@ -745,11 +753,13 @@ impl TapeMachine {
                     TapeAir::Public(_) => "public",
                 };
                 tracing::info_span!("main table", air = name).in_scope(|| match air {
-                    TapeAir::Ledger(a) => a.main_table(&self.program, values),
+                    TapeAir::Ledger(a) => backend.bit_table(a.main_rows(&self.program, values)),
                     TapeAir::Arith(a) => backend.arith_table(a, &self.program, values),
-                    TapeAir::Rewire(a) => a.main_table(&self.program, values),
-                    TapeAir::Gather(a) => a.main_table(&self.program, values),
-                    TapeAir::Hash(a) => a.main_table(&self.program, values, &states, &finals),
+                    TapeAir::Rewire(a) => backend.bit_table(a.main_rows(&self.program, values)),
+                    TapeAir::Gather(a) => backend.bit_table(a.main_rows(&self.program, values)),
+                    TapeAir::Hash(a) => {
+                        backend.bit_table(a.main_rows(&self.program, values, &states, &finals))
+                    }
                     TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
                     TapeAir::Kb(a) => backend.kb_table(a, &self.program, values),
                     TapeAir::Select(a) => a.main_table(&self.program, values),

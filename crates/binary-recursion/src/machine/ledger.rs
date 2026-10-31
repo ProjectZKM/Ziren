@@ -16,11 +16,12 @@
 use core::borrow::{Borrow, BorrowMut};
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_binary_field::TowerLevel;
 use p3_bus::{BusActivation, BusDirection, BusName};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
-use zkm_binary_stark::machine::bits::{dense, log_height_for, packed, BitRows, MEMORY, WRITE};
+use zkm_binary_stark::machine::bits::{dense, log_height_for, packed, RowBits, MEMORY, WRITE};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
@@ -130,17 +131,17 @@ impl LedgerAir {
 
     /// The witness: each cell's value on each of its rows.
     #[must_use]
-    pub fn main_table(&self, program: &Program, values: &[F]) -> Table<F> {
-        let mut rows = BitRows::new(NUM_LEDGER_COLS, self.log_height);
+    pub fn main_rows(&self, program: &Program, values: &[F]) -> RowBits {
+        let mut rows = RowBits::new(NUM_LEDGER_COLS, self.log_height);
         let mut row = 0;
         for group in &program.groups {
-            let bits = value_bits(Program::cell_value(values, group.cell));
+            let value = Program::cell_value(values, group.cell).to_repr();
             for _ in 0..group.reads {
-                rows.set_row(row, &bits);
+                rows.put(row, 0, value, VALUE_BITS);
                 row += 1;
             }
         }
-        rows.into_table()
+        rows
     }
 }
 
