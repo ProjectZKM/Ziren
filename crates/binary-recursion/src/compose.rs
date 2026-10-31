@@ -56,6 +56,11 @@ use crate::Traced;
 pub type ChildVerifier<'a> =
     Box<dyn Fn(&[Traced; DIGEST_SIZE]) -> Result<Verified, String> + Send + Sync + 'a>;
 
+/// A child's key digest alone, for a child whose verification defers no
+/// claims: what the recording that only learns a node's digest reads in
+/// place of the verification.
+pub type ChildKey<'a> = Box<dyn Fn() -> [Traced; 2] + Send + Sync + 'a>;
+
 /// What a child's recorded verification leaves: its key digest, and, for a
 /// word proof, the claims its verification deferred to the root.
 pub struct Verified {
@@ -69,6 +74,8 @@ pub struct Child<'a> {
     pub public_values: Vec<u32>,
     /// The verification of its proof.
     pub verify: ChildVerifier<'a>,
+    /// Its key digest without the verification, when that defers no claims.
+    pub key: Option<ChildKey<'a>>,
     /// Where its key digest sits in the key tree.
     pub membership: VkMembership,
 }
@@ -197,9 +204,14 @@ impl<'a> Child<'a> {
     ) -> Self {
         let (main, preprocessed) = machine.shapes();
         let config = TracedConfig::new(&main, &preprocessed, schedule).expect("traced config");
+        let (key_main, key_preprocessed) = (main.clone(), preprocessed.clone());
         Self {
             public_values,
             membership,
+            key: Some(Box::new(move || {
+                let (_, roots) = lift_as_inputs(machine.verifying_key());
+                key_digest(KeyKind::Leaf, &key_main, &key_preprocessed, &roots)
+            })),
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
                 let (vk, roots) = lift_as_inputs(machine.verifying_key());
                 let digest = key_digest(KeyKind::Leaf, &main, &preprocessed, &roots);
@@ -230,9 +242,14 @@ impl<'a> Child<'a> {
     ) -> Self {
         let (main, preprocessed) = machine.shapes();
         let config = TracedConfig::new(&main, &preprocessed, schedule).expect("traced config");
+        let (key_main, key_preprocessed) = (main.clone(), preprocessed.clone());
         Self {
             public_values,
             membership,
+            key: Some(Box::new(move || {
+                let (_, roots) = lift_as_inputs(machine.verifying_key());
+                key_digest(KeyKind::Node, &key_main, &key_preprocessed, &roots)
+            })),
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
                 let (vk, roots) = lift_as_inputs(machine.verifying_key());
                 let digest = key_digest(KeyKind::Node, &main, &preprocessed, &roots);
@@ -289,6 +306,7 @@ impl<'a> Child<'a> {
         Self {
             public_values,
             membership,
+            key: None,
             verify: Box::new(move |digest: &[Traced; DIGEST_SIZE]| {
                 let claims = verify_word_routed(
                     key,
@@ -698,7 +716,10 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         for (w, &word) in current.digest.iter().enumerate() {
             assert_digest_word(word, &digest, w);
         }
-        let verified = (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?;
+        let verified = match (public, &child.key) {
+            (None, Some(key)) => Verified { key: key(), claims: None },
+            _ => (child.verify)(&current.digest).map_err(|e| format!("child {i}: {e}"))?,
+        };
         if node.check_keys {
             check_membership(verified.key, &child.membership, &current.vk_root);
         }
