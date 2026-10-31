@@ -42,7 +42,7 @@ use p3_word_backend::{Deferred, WiringQuery, WordProofKey};
 
 use crate::bytes::{blake3, byte_bits, digest_bytes, merkle_node, to_bytes, Piece};
 use crate::tape::digest_elements;
-use crate::word::{verify_word, DeferredClaim};
+use crate::word::{verify_word_routed, DeferredClaim};
 use crate::challenger::TracedChallenger;
 use crate::config::{reread, TracedConfig, TracedProof};
 use crate::machine::{TapeAir, TapeMachine};
@@ -281,15 +281,25 @@ impl<'a> Child<'a> {
         membership: VkMembership,
         schedule: &BinarySchedule,
         hints: Option<&'a crate::word::Hints>,
+        routing: Option<&crate::word::Commitment>,
     ) -> Self {
         assert!(!crate::tape::recording(), "a child is made outside a recording");
         let schedule = *schedule;
+        let routing = routing.map(crate::word::lift_routing);
         Self {
             public_values,
             membership,
             verify: Box::new(move |digest: &[Traced; DIGEST_SIZE]| {
-                let claims =
-                    verify_word(key, &schedule, commitment, public, digest, proof, hints)?;
+                let claims = verify_word_routed(
+                    key,
+                    &schedule,
+                    commitment,
+                    routing.as_ref(),
+                    public,
+                    digest,
+                    proof,
+                    hints,
+                )?;
                 let key = digest_elements(key_digest).map(Traced::constant);
                 Ok(Verified { key, claims: Some(claims) })
             }),
@@ -416,7 +426,32 @@ pub fn record_compose(node: &Compose<'_>) -> (Result<Composed, String>, Tape) {
         Err(error) => return (Err(error), Tape::default()),
     };
     let digest = composed.digest;
-    record(|| compose(node, Some(digest)))
+    let profiling = std::env::var_os("ZIREN_TAPE_PROFILE").is_some();
+    let (composed, tape) = record(|| {
+        if profiling {
+            crate::tape::profile(97);
+        }
+        let composed = compose(node, Some(digest));
+        if let Some(profile) = crate::tape::take_profile() {
+            for (signature, muls, bytes) in profile.by_signature(6).into_iter().take(24) {
+                tracing::info!(
+                    "node profile: mul ~{muls:>9} hashed {bytes:>8} B  {}",
+                    &signature[..signature.len().min(260)]
+                );
+            }
+        }
+        composed
+    });
+    if profiling {
+        let census: Vec<String> = Tape::KINDS
+            .iter()
+            .zip(tape.census())
+            .filter(|(_, count)| *count > 0)
+            .map(|(kind, count)| format!("{kind} {count}"))
+            .collect();
+        tracing::info!("node census: {} ops: {}", tape.ops.len(), census.join(", "));
+    }
+    (composed, tape)
 }
 
 fn constant(value: u32) -> Traced {

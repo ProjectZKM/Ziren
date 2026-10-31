@@ -18,7 +18,8 @@ use p3_word::{
 };
 use p3_word_backend::{PortError, PortRef, PortRouting};
 
-use super::{by_owner, template_term, Builder, Term};
+use super::{by_owner, template_term, Builder, Built, Term};
+use crate::tape::Tape;
 
 /// A lowering as calls of its gadgets, with the words that satisfy them.
 pub struct Composed {
@@ -30,6 +31,10 @@ pub struct Composed {
     pub public: Vec<Word64>,
     /// The committed words in the composition's layout.
     pub witness: Vec<Word64>,
+    /// For each of the composition's committed words, the lowering's word it holds.
+    pub witness_of: Vec<u32>,
+    /// For each of the composition's public words, the lowering's public word it is.
+    pub public_of: Vec<u32>,
 }
 
 /// Why a lowering does not compose.
@@ -108,12 +113,13 @@ struct Layout {
 
 impl Builder {
     /// The gadgets tracked since [`Self::track_gadgets`] as one routed composition of their
-    /// templates over `outputs` outputs, with its words.
+    /// templates over `outputs` outputs, with its words; and the lowering's own words, with no
+    /// relations, and the tape that computes them.
     ///
     /// # Errors
     ///
     /// Returns why the gadgets do not compose.
-    pub fn compose(mut self, outputs: usize) -> Result<Composed, ComposeError> {
+    pub fn compose(mut self, outputs: usize) -> Result<(Composed, Built, Tape), ComposeError> {
         self.flush_compressions();
         self.flush_ranges();
         let constants: Vec<u64> = self.public[outputs..].to_vec();
@@ -268,6 +274,8 @@ impl Builder {
         let mut links = Vec::with_capacity(sources.len());
         let mut witness = vec![Word64::new(0); composition.witness_len()];
         let mut public = vec![Word64::new(0); composition.public_len()];
+        let mut witness_of = vec![0_u32; composition.witness_len()];
+        let mut public_of = vec![0_u32; composition.public_len()];
         let place = |gadget: usize, index: ValueIndex| -> Result<usize, CompositionError> {
             let t = template_of[gadget] as usize;
             Ok(composition.resolve(call_of[t], instance_of[gadget] as usize, index)?.position() as usize)
@@ -281,10 +289,12 @@ impl Builder {
             for (slot, &word) in own.iter().enumerate() {
                 let at = place(gadget, ValueIndex::witness(slot).expect("a slot index"))?;
                 witness[at] = Word64::new(self.witness[word as usize]);
+                witness_of[at] = word;
             }
             for &(slot, word) in &sources[source_start[gadget] as usize..source_start[gadget + 1] as usize] {
                 let at = place(gadget, ValueIndex::witness(slot as usize).expect("a slot index"))?;
                 witness[at] = Word64::new(self.witness[word as usize]);
+                witness_of[at] = word;
                 let producer = owner[word as usize] as usize;
                 links.push((port_ref(gadget, slot), port_ref(producer, layout.slot_of[word as usize])));
             }
@@ -292,6 +302,7 @@ impl Builder {
                 for index in 0..outputs {
                     let at = place(gadget, ValueIndex::public(index).expect("an output index"))?;
                     public[at] = Word64::new(self.public[index]);
+                    public_of[at] = index as u32;
                 }
             }
             if templates[t].constant {
@@ -299,10 +310,24 @@ impl Builder {
                 let constant = canon.constant.expect("a pool gadget reads its constant");
                 let at = place(gadget, ValueIndex::public(0).expect("a public index"))?;
                 public[at] = Word64::new(self.public[constant as usize]);
+                public_of[at] = constant;
             }
         }
         let routing = PortRouting::new(&composition, &ports, &links)?;
-        Ok(Composed { composition, routing, public, witness })
+        let tape = std::mem::take(&mut self.tape);
+        debug_assert_eq!(tape.len(), self.witness.len());
+        let flat = Built {
+            system: ConstraintSystem::new(
+                self.public.len(),
+                self.witness.len(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )?,
+            public: std::mem::take(&mut self.public).into_iter().map(Word64::new).collect(),
+            witness: std::mem::take(&mut self.witness).into_iter().map(Word64::new).collect(),
+        };
+        Ok((Composed { composition, routing, public, witness, witness_of, public_of }, flat, tape))
     }
 
     /// Makes `gadget` canonical into `canon`, with its relations over its slots when `body`.
@@ -472,8 +497,11 @@ mod tests {
     fn a_composed_lowering_proves_under_its_routing() {
         let built = lowering().build().unwrap();
         built.system.verify(&built.public, &built.witness).unwrap();
-        let composed = lowering().compose(2).unwrap();
+        let (composed, flat, tape) = lowering().compose(2).unwrap();
         assert_eq!(composed.public[..2], built.public[..2]);
+        assert_eq!(tape.len(), flat.witness.len());
+        assert!(composed.witness_of.iter().zip(&composed.witness).all(|(&w, v)| flat.witness[w as usize] == *v));
+        assert!(composed.public_of.iter().zip(&composed.public).all(|(&p, v)| flat.public[p as usize] == *v));
         let lowered = composed.composition.lower().unwrap();
         lowered.verify(&composed.public, &composed.witness).unwrap();
         assert!(

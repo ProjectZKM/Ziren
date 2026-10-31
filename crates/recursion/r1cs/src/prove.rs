@@ -10,7 +10,9 @@ use zkm_binary_stark::{
     BinarySchedule, Challenger, F,
 };
 
-use crate::builder::Built;
+use p3_maybe_rayon::prelude::*;
+
+use crate::{builder::Built, lower::Lowered};
 
 /// The commitment of a word proof.
 pub type Commitment = <BitPcs as BooleanBackend<F>>::Commitment;
@@ -49,6 +51,21 @@ pub struct WordKey {
     /// The Blake3 digest naming the key: of a tag, the commitment's
     /// variables, the outputs, the constants and the relations.
     pub digest: [u8; 32],
+    /// How a composed key's statement takes its words from the lowering's, when the key is
+    /// one.
+    pub layout: Option<ComposedLayout>,
+}
+
+/// How the statement of a composed key takes its words from the lowering's.
+pub struct ComposedLayout {
+    /// For each committed word of the statement, the lowering's word it holds.
+    pub witness_of: Vec<u32>,
+    /// For each public word of the statement, the lowering's public word it is.
+    pub public_of: Vec<u32>,
+    /// The commitment to the statement's routing words.
+    pub routing: Commitment,
+    /// The lowering's public words past the outputs, which its tape reads.
+    pub tape_constants: Vec<Word64>,
 }
 
 impl WordKey {
@@ -94,12 +111,64 @@ impl WordKey {
         let pcs = tracing::info_span!("key commitment")
             .in_scope(|| bit_commitment(key.trace_variables(), schedule))
             .map_err(|e| e.to_string())?;
-        Ok(Self { key, pcs, constants, outputs, digest })
+        Ok(Self { key, pcs, constants, outputs, digest, layout: None })
+    }
+
+    /// The key of the composition [`crate::lower_composed`] left in `lowered`, taken from it,
+    /// under `schedule`: its digest is of a tag, the outputs, the constants and the key, the
+    /// routing included.
+    pub fn composed(lowered: &mut Lowered, schedule: &BinarySchedule) -> Result<Self, String> {
+        let composed = lowered.composed.take().ok_or("the lowering was not composed")?;
+        let outputs = zkm_recursion_core::DIGEST_SIZE.min(composed.public.len());
+        let key = tracing::info_span!("compile composed key")
+            .in_scope(|| WordProofKey::with_ports(composed.composition, composed.routing))
+            .map_err(|e| format!("key: {e:?}"))?;
+        let pcs = bit_commitment(key.trace_variables(), schedule).map_err(|e| e.to_string())?;
+        let routing = tracing::info_span!("commit routing")
+            .in_scope(|| key.port_commitment::<F, _, _>(&pcs, &mut challenger()))
+            .map_err(|e| format!("routing: {e:?}"))?
+            .ok_or("the composed key routes no ports")?;
+        let constants = composed.public[outputs..].to_vec();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"ziren composed word key");
+        hasher.update(&(outputs as u64).to_le_bytes());
+        for word in &constants {
+            hasher.update(&word.get().to_le_bytes());
+        }
+        let bytes = postcard::to_allocvec(&key).map_err(|e| format!("encode the key: {e}"))?;
+        hasher.update_rayon(&bytes);
+        let digest = *hasher.finalize().as_bytes();
+        let layout = ComposedLayout {
+            witness_of: composed.witness_of,
+            public_of: composed.public_of,
+            routing,
+            tape_constants: lowered.built.public[outputs.min(lowered.built.public.len())..].to_vec(),
+        };
+        Ok(Self { key, pcs, constants, outputs, digest, layout: Some(layout) })
+    }
+
+    /// The public words past the outputs the lowering's tape reads: the statement's own
+    /// unless the key is composed.
+    pub fn tape_constants(&self) -> &[Word64] {
+        self.layout.as_ref().map_or(&self.constants, |layout| &layout.tape_constants)
     }
 
     /// The statement's public words for the outputs `outputs`.
     pub fn public(&self, outputs: &[Word64]) -> Vec<Word64> {
         outputs.iter().chain(&self.constants).copied().collect()
+    }
+
+    /// The statement's public words, of the lowering's `public`.
+    pub fn statement_public(&self, public: &[Word64]) -> Vec<Word64> {
+        match &self.layout {
+            Some(layout) => layout.public_of.iter().map(|&p| public[p as usize]).collect(),
+            None => public.to_vec(),
+        }
+    }
+
+    /// The commitment to the routing words of a composed key.
+    pub fn routing(&self) -> Option<&Commitment> {
+        self.layout.as_ref().map(|layout| &layout.routing)
     }
 
     /// Proves `built`'s words satisfy the key's relations, over the transcript `challenger`
@@ -116,6 +185,26 @@ impl WordKey {
 
     /// [`Self::prove`] for the public words `public` and the committed words `witness`.
     pub fn prove_words(
+        &self,
+        public: &[Word64],
+        witness: &[Word64],
+        devices: Option<(&dyn WordDevice, &OpeningDevice)>,
+        challenger: &mut Challenger,
+    ) -> Result<(Commitment, Proof, Hints), String> {
+        if let Some(layout) = &self.layout {
+            let (public, witness) = tracing::info_span!("gather composed words").in_scope(|| {
+                let public: Vec<Word64> = layout.public_of.iter().map(|&p| public[p as usize]).collect();
+                let witness: Vec<Word64> =
+                    layout.witness_of.par_iter().map(|&w| witness[w as usize]).collect();
+                (public, witness)
+            });
+            return self.prove_statement(&public, &witness, devices, challenger);
+        }
+        self.prove_statement(public, witness, devices, challenger)
+    }
+
+    /// [`Self::prove_words`] for the statement's own public and committed words.
+    fn prove_statement(
         &self,
         public: &[Word64],
         witness: &[Word64],
@@ -147,9 +236,20 @@ impl WordKey {
         public: &[Word64],
         proof: &Proof,
     ) -> Result<(), String> {
-        self.key
-            .verify::<F, F, _, _>(&self.pcs, commitment, public, proof, &mut challenger())
-            .map_err(|e| format!("verify: {e:?}"))
+        match &self.layout {
+            Some(layout) => self.key.verify_routed::<F, F, _, _>(
+                &self.pcs,
+                commitment,
+                &layout.routing,
+                public,
+                proof,
+                &mut challenger(),
+            ),
+            None => self
+                .key
+                .verify::<F, F, _, _>(&self.pcs, commitment, public, proof, &mut challenger()),
+        }
+        .map_err(|e| format!("verify: {e:?}"))
     }
 }
 
@@ -161,6 +261,9 @@ impl WordKey {
     /// the key's digest, outputs, constants and compiled relations.  The commitment is
     /// rebuilt from the schedule on reading.
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        if self.layout.is_some() {
+            return Err("a composed key is not written".into());
+        }
         let constants: Vec<u64> = self.constants.iter().map(|w| w.get()).collect();
         let body = tracing::info_span!("encode key")
             .in_scope(|| postcard::to_allocvec(&(&self.digest, self.outputs as u64, &constants, &self.key)))
@@ -199,6 +302,7 @@ impl WordKey {
             constants: constants.into_iter().map(Word64::new).collect(),
             outputs: outputs as usize,
             digest,
+            layout: None,
         })
     }
 }

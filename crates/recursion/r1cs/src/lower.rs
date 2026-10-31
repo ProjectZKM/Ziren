@@ -61,6 +61,9 @@ pub enum LowerError {
     /// A committed word has no computation from the memory and the words before it.
     #[error("committed word {0} is not computed")]
     Uncomputed(usize),
+    /// The gadgets do not compose.
+    #[error(transparent)]
+    Compose(#[from] crate::builder::ComposeError),
 }
 
 /// A lowered program.
@@ -73,6 +76,9 @@ pub struct Lowered {
     pub census: BTreeMap<&'static str, (usize, Cost)>,
     /// How each committed word is computed from the runtime's memory.
     pub tape: Tape,
+    /// The gadgets as one routed composition, when asked for: `built` then holds the words
+    /// alone.
+    pub composed: Option<crate::builder::Composed>,
 }
 
 /// The spread of one kind's instances, for the census.
@@ -159,7 +165,7 @@ fn compose_experiment(program: &RecursionProgram<F>, memory: Option<&[Block<F>]>
         lowering.builder.end_gadget();
     }
     let composed = match lowering.builder.compose(DIGEST_SIZE) {
-        Ok(composed) => composed,
+        Ok((composed, _, _)) => composed,
         Err(error) => {
             tracing::warn!("compose experiment: {error}");
             return;
@@ -167,9 +173,9 @@ fn compose_experiment(program: &RecursionProgram<F>, memory: Option<&[Block<F>]>
     };
     let composition = &composed.composition;
     tracing::info!(
-        "compose experiment: flat {} words + {} public; composed {} words + {} public in {} calls, {} blocks, 2^{} port cells; lowered and composed in {:.1} s",
+        "compose experiment: flat {} words + {} public; composed {} words + {} public in {} calls, {} blocks, {} routed cells; lowered and composed in {:.1} s",
         flat.0, flat.1, composition.witness_len(), composition.public_len(), composition.calls().len(),
-        composition.blocks().len(), composed.routing.cell_variables(), started.elapsed().as_secs_f64()
+        composition.blocks().len(), composed.routing.moved(), started.elapsed().as_secs_f64()
     );
     let started = std::time::Instant::now();
     let key = match WordProofKey::with_ports(composition.clone(), composed.routing.clone()) {
@@ -556,6 +562,22 @@ pub fn lower(
     program: &RecursionProgram<F>,
     memory: Option<&[Block<F>]>,
 ) -> Result<Lowered, LowerError> {
+    lower_as(program, memory, false)
+}
+
+/// [`lower`], the gadgets then composed as one routed composition of their templates.
+pub fn lower_composed(
+    program: &RecursionProgram<F>,
+    memory: Option<&[Block<F>]>,
+) -> Result<Lowered, LowerError> {
+    lower_as(program, memory, true)
+}
+
+fn lower_as(
+    program: &RecursionProgram<F>,
+    memory: Option<&[Block<F>]>,
+    composed: bool,
+) -> Result<Lowered, LowerError> {
     let mut lowering = Lowering {
         builder: Builder::new(DIGEST_SIZE),
         slots: vec![Slot::Unset; program.total_memory],
@@ -570,7 +592,7 @@ pub fn lower(
     let mut census: BTreeMap<&'static str, (usize, Cost)> = BTreeMap::new();
     let sizes = std::env::var_os("ZIREN_LOWER_CENSUS").is_some();
     let templates = std::env::var_os("ZIREN_LOWER_TEMPLATES");
-    if templates.is_some() {
+    if templates.is_some() || composed {
         lowering.builder.track_gadgets();
     }
     let mut shapes: BTreeMap<&'static str, Shape> = BTreeMap::new();
@@ -642,6 +664,14 @@ pub fn lower(
                 lowering.builder.template_census(DIGEST_SIZE, dump, true);
             });
     }
+    if composed {
+        let digest = lowering.digest;
+        let (composed, built, tape) = lowering.builder.compose(DIGEST_SIZE)?;
+        if let Some(word) = tape.ops.iter().position(|&op| op == Op::Constant as u8) {
+            return Err(LowerError::Uncomputed(word));
+        }
+        return Ok(Lowered { built, digest, census, tape, composed: Some(composed) });
+    }
     let (built, tape) = lowering.builder.build_with_tape()?;
     if let Some(word) = tape.ops.iter().position(|&op| op == Op::Constant as u8) {
         return Err(LowerError::Uncomputed(word));
@@ -655,5 +685,5 @@ pub fn lower(
         tracing::info_span!("compose experiment")
             .in_scope(|| compose_experiment(program, memory, flat));
     }
-    Ok(Lowered { built, digest: lowering.digest, census, tape })
+    Ok(Lowered { built, digest: lowering.digest, census, tape, composed: None })
 }
