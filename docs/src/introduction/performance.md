@@ -1,6 +1,6 @@
 # Performance
 
-The latest Ethereum block benchmarks (11 October 2026) reach **75.8 MHz** on eight RTX 5090 GPUs, with **60.6 MHz aggregate throughput** across 15 blocks using Geth. The latest compressed-proof benchmark (28 October 2026) measures **290,530 bytes (284 KiB)** and **25.5 ms native verification**. The workloads and measurement conditions are detailed below.
+The latest Ethereum block benchmarks (1 November 2026) reach **75.1 MHz** on eight RTX 5090 GPUs, with **65.3 MHz aggregate throughput** across 15 blocks using Geth. The latest compressed-proof benchmark (28 October 2026) measures **290,530 bytes (284 KiB)** and **25.5 ms native verification**. The workloads and measurement conditions are detailed below.
 
 ## Metrics
 
@@ -18,7 +18,7 @@ To reproduce measurements on your own hardware, use the [zkvm-benchmarks](https:
 
 The figures below are from the Ziren V2.0 paper (`docs/paper`). The throughput workload is Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth (Rust) and the block keeper of Geth (Go). The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor, 124 vCPUs and 925 GiB of memory. The throughput runs use driver 570.153.02 and CUDA 12.8 on Ubuntu 22.04, with the GPU server in a CUDA 12.8.1 container based on Ubuntu 24.04.
 
-The throughput tables were rerun on 11 October 2026, before the subsequent Linux syscall and Poseidon2 address constraint fixes. The proof-size and native-verification measurements were rerun on 28 October 2026 at revision `7b9eec72`, with both fixes and the regenerated verification-key map. The GPU kernel profile and executor rates are historical measurements from an earlier configuration, including 13 Poseidon2 partial rounds rather than the corrected 20 and no lookup-challenge grinding. These results should be interpreted within their respective configurations.
+The throughput rows were measured on 1 November 2026. The proof-size and native-verification measurements were rerun on 28 October 2026 at revision `7b9eec72`, with both fixes and the regenerated verification-key map. These results should be interpreted within their respective configurations.
 
 ### Instruction efficiency
 
@@ -43,26 +43,26 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-The same 15 consecutive Ethereum mainnet blocks, 26,138,416 to 26,138,430, proved with both clients on the same GPUs. The initial block 26,138,415 is excluded to avoid startup effects, as are the separately flagged warm-up proofs. Proving time runs from the prove request to the compressed proof, warm, and excludes the client's execution and verification; throughput is guest cycles divided by it. For each client, the range row gives the minimum and maximum per-block values. In the total (15) row, guest cycles, shards and proving time are sums across the 15 blocks; throughput is total guest cycles divided by total proving time. Every proof in the 11 October 2026 rerun passed native verification. The benchmark logs and build and runtime metadata are archived separately.
+Both rows use 15 consecutive Ethereum mainnet blocks, 26,303,831 to 26,303,845, proved on one GPU (and on eight GPUs for the 8-GPU columns). Proving time runs from the prove request to the compressed proof, warm, and excludes the client's execution and verification; throughput is guest cycles divided by it. For each client, the range row gives the minimum and maximum per-block values. In the total (15) row, guest cycles and shards are sums across the 15 blocks; proving time and throughput use blocks 2 to 15 only, since block 1 includes cold-start cost. Every proof in the 11 October 2026 rerun passed native verification. The benchmark logs and build and runtime metadata are archived separately.
 
 | Client | Summary | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
 |--------|---------|-------------:|-------:|----------:|-----------:|------------:|-------------:|
-| Reth | range | 43–508 M | 33–164 | 16.4–76.6 | 6.3–14.3 | 2.6–6.6 | 6.8–35.5 |
-| | total (15) | 3.30 G | 1,409 | 661 | 153 | 5.0 | 21.5 |
-| Geth | range | 0.25–2.99 G | 64–537 | 33.9–257 | 10.3–39.4 | 7.5–12.0 | 24.6–75.8 |
-| | total (15) | 21.65 G | 4,251 | 2,020 | 358 | 10.7 | 60.6 |
+| Reth | range | 29.8–358 M | 17–140 | 7.7–51.1 | 3.7–14.5 | 3.9–7.5 | 8.1–33.7 |
+| | total (15) | 3.21 G | 1,280 | 433 | 116.5 | 6.9 | 25.6 |
+| Geth | range | 0.27–4.63 G | 92–1,425 | 31.7–418 | 7.4–62.0 | 8.5–11.1 | 36.4–75.1 |
+| | total (15) | 31.35 G | 9,917 | 2,837 | 452 | 10.4 | 65.3 |
 
-A block costs in proportion to its shards, not its cycles: a shard takes about 0.47 s on one GPU under either guest. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still finishes every block sooner. Its blocks are also smaller, so on eight GPUs the serial recursion tail after the last shard is a larger share of each.
+Shard counts vary slightly between runs: block 26,303,831 closes 90 shards on one GPU and 92 on eight.
 
-Scaling across GPUs, for three of these blocks proved with Reth (mean of three consecutive warm proofs):
+A block costs in proportion to its shards, not its cycles: a shard takes about 0.36 s on one GPU for Reth and 0.30 s for Geth. The Reth guest runs more of its work in precompiles, so its shards close after 2.5 million cycles on average against 3.2 million for Geth: it proves at a lower rate and still finishes every block sooner. Its blocks are also smaller, so on eight GPUs the serial recursion tail after the last shard is a larger share of each.
+
+Scaling across GPUs, for three of these blocks proved with Reth (minimum, median and maximum guest cycles of the set; mean of three consecutive warm proofs):
 
 | Block (guest cycles) | 1 GPU (s) | 2 GPUs (s) | 4 GPUs (s) | 1 GPU (MHz) | 2 GPUs (MHz) | 4 GPUs (MHz) |
 |----------------------|----------:|-----------:|-----------:|------------:|-------------:|-------------:|
-| 26,138,428 (206 M) | 41.4 | 21.5 | 12.5 | 5.0 | 9.6 | 16.5 |
-| 26,138,416 (348 M) | 55.1 | 29.2 | 16.4 | 6.3 | 11.9 | 21.2 |
-| 26,138,421 (508 M) | 75.8 | 38.9 | 21.5 | 6.7 | 13.1 | 23.6 |
-
-Two GPUs prove each block 1.9 to 2.0 times faster than one, and four 3.3 to 3.5 times faster.
+| 26,303,841 (30 M) | 7.9 | 5.3 | 5.7 | 3.8 | 5.7 | 5.2 |
+| 26,303,840 (204 M) | 31.5 | 23.2 | 11.2 | 6.5 | 8.8 | 18.2 |
+| 26,303,843 (358 M) | 51.3 | 28.2 | 16.7 | 7.0 | 12.7 | 21.4 |
 
 On a GPU, the lookup argument (LogUp-GKR) takes 42% of kernel time and WHIR commitment and opening 19%, in a ten-shard profile. The lookup cost scales with (row, interaction) pairs, so memory instructions, which carry 25 to 26 interactions per row, account for 47% of all pairs.
 
