@@ -16,6 +16,7 @@ tracing = { workspace = true }
 zkm-core-executor = { workspace = true }
 strum = "0.26"
 dotenv = "0.15.0"
+bincode = "1.3.3"
 
 [build-dependencies]
 zkm-build = { workspace = true }
@@ -23,6 +24,10 @@ zkm-build = { workspace = true }
 [[bin]]
 name = "keeper-host"
 path = "src/main.rs"
+
+[[bin]]
+name = "payload2stdin"
+path = "src/bin/payload2stdin.rs"
 
 # [features]
 # cuda = ["zkm-sdk/cuda"]
