@@ -49,9 +49,6 @@ enum-map = { version = "2.7.3", features = ["serde"] }
 anyhow = { workspace = true }
 num_enum = "0.7.5"
 
-[target.'cfg(not(target_os = "zkvm"))'.dependencies]
-p3-maybe-rayon = { workspace = true, features = ["parallel"] }
-
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
 libc = "0.2"
 
