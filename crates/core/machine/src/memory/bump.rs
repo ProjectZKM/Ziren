@@ -10,7 +10,7 @@ use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::events::{ByteLookupEvent, ByteRecord, MemoryBumpEvent, MemoryReadRecord};
 use zkm_core_executor::{ByteOpcode, ExecutionRecord, Program, NUM_REGISTERS};
 use zkm_derive::AlignedBorrow;

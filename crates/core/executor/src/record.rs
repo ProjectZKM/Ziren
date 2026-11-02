@@ -749,9 +749,7 @@ impl MachineRecord for ExecutionRecord {
 fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u32> {
     use p3_field::BasedVectorSpace;
     use p3_koala_bear::KoalaBear;
-    use p3_maybe_rayon::prelude::{
-        IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator,
-    };
+    use p3_maybe_rayon::prelude::*;
     type F = KoalaBear;
 
     let acc = events
@@ -765,7 +763,7 @@ fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u
             let point = if event.is_receive { point } else { point.neg() };
             SepticCurveComplete::Affine(point)
         })
-        .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b);
+        .par_fold_reduce(|| SepticCurveComplete::Infinity, |a, b| a + b, |a, b| a + b);
     let acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0) + acc;
     let final_digest = acc.point();
     SepticDigest(SepticCurve::convert(final_digest, |x: F| x.as_canonical_u32()))

@@ -24,7 +24,7 @@ p3-commit = { workspace = true }
 p3-field = { workspace = true }
 p3-keccak-air = { workspace = true }
 p3-matrix = { workspace = true }
-p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-maybe-rayon = { workspace = true }
 p3-poseidon2 = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-util = { workspace = true }
@@ -60,6 +60,9 @@ hashbrown = { workspace = true, features = ["serde", "inline-more"] }
 static_assertions = "1.1.0"
 
 zkm-pcs = { workspace = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }

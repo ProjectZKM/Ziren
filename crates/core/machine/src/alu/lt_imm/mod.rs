@@ -116,26 +116,24 @@ impl<F: PrimeField32> MachineAir<F> for LtImmChip {
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_LT_IMM_COLS);
         let chunk_size = std::cmp::max((input.lt_imm_events.len() + 1) / num_cpus::get(), 1);
 
-        values.chunks_mut(chunk_size * NUM_LT_IMM_COLS).enumerate().par_bridge().for_each(
-            |(i, rows)| {
-                rows.chunks_mut(NUM_LT_IMM_COLS).enumerate().for_each(|(j, row)| {
-                    let idx = i * chunk_size + j;
-                    let cols: &mut LtImmCols<F> = row.borrow_mut();
+        values.par_chunks_mut(chunk_size * NUM_LT_IMM_COLS).enumerate().for_each(|(i, rows)| {
+            rows.chunks_mut(NUM_LT_IMM_COLS).enumerate().for_each(|(j, row)| {
+                let idx = i * chunk_size + j;
+                let cols: &mut LtImmCols<F> = row.borrow_mut();
 
-                    if idx < input.lt_imm_events.len() {
-                        let mut byte_lookup_events = Vec::new();
-                        let event = &input.lt_imm_events[idx];
-                        self.event_to_row(
-                            event,
-                            cols,
-                            &mut byte_lookup_events,
-                            &input.program,
-                            input.public_values.execution_shard,
-                        );
-                    }
-                });
-            },
-        );
+                if idx < input.lt_imm_events.len() {
+                    let mut byte_lookup_events = Vec::new();
+                    let event = &input.lt_imm_events[idx];
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut byte_lookup_events,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
+                }
+            });
+        });
 
         Ok(RowMajorMatrix::new(values, NUM_LT_IMM_COLS))
     }

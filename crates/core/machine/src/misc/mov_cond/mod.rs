@@ -8,7 +8,7 @@ use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{ByteRecord, MovCondEvent},
     ExecutionRecord, Opcode, Program,
@@ -104,9 +104,8 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MOV_COND_COLS);
 
         let blu_events = values
-            .chunks_mut(chunk_size * NUM_MOV_COND_COLS)
+            .par_chunks_mut(chunk_size * NUM_MOV_COND_COLS)
             .enumerate()
-            .par_bridge()
             .map(|(i, rows)| {
                 let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 rows.chunks_mut(NUM_MOV_COND_COLS).enumerate().for_each(|(j, row)| {

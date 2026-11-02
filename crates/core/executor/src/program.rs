@@ -8,10 +8,7 @@ use elf::{endian::LittleEndian, file::Class, ElfBytes};
 
 use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
-use p3_maybe_rayon::prelude::IndexedParallelIterator;
-use p3_maybe_rayon::prelude::IntoParallelIterator;
-use p3_maybe_rayon::prelude::IntoParallelRefIterator;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::MachineProgram;
 use zkm_pcs::septic_curve::{SepticCurve, SepticCurveComplete};
@@ -382,10 +379,10 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
     }
 
     fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        let mut digests: Vec<SepticCurveComplete<F>> = self
-            .image
-            .iter()
-            .par_bridge()
+        let image = self.image.iter();
+        #[cfg(not(target_os = "zkvm"))]
+        let image = image.par_bridge();
+        let mut digests: Vec<SepticCurveComplete<F>> = image
             .map(|(&addr, &word)| {
                 let values = [
                     (LookupKind::Memory as u32) << 16,
@@ -404,7 +401,10 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
             .collect();
         digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
         SepticDigest(
-            digests.into_par_iter().reduce(|| SepticCurveComplete::Infinity, |a, b| a + b).point(),
+            digests
+                .into_par_iter()
+                .par_fold_reduce(|| SepticCurveComplete::Infinity, |a, b| a + b, |a, b| a + b)
+                .point(),
         )
     }
 }

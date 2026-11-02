@@ -52,7 +52,7 @@ use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
@@ -171,7 +171,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_SHIFT_RIGHT_COLS);
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
-        values.chunks_mut(chunk_size * NUM_SHIFT_RIGHT_COLS).enumerate().par_bridge().for_each(
+        values.par_chunks_mut(chunk_size * NUM_SHIFT_RIGHT_COLS).enumerate().for_each(
             |(i, rows)| {
                 rows.chunks_mut(NUM_SHIFT_RIGHT_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;

@@ -1,4 +1,6 @@
 use core::borrow::Borrow;
+#[cfg(target_os = "zkvm")]
+use itertools::Itertools;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 #[cfg(feature = "sys")]
