@@ -604,13 +604,13 @@ fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<Jagged
             continue;
         }
         let height = vals.len() / width;
-        let columns = (0..width).into_par_iter().map(|col| {
-            let column: Vec<JaggedVal> = (0..height).map(|r| vals[r * width + col]).collect();
-            Arc::new(Mle::from_row_major(RowMajorMatrix::new(column, 1)))
-        });
-        #[cfg(not(target_os = "zkvm"))]
-        polys.par_extend(columns);
-        #[cfg(target_os = "zkvm")]
+        let columns = (0..width)
+            .into_par_iter()
+            .map(|col| {
+                let column: Vec<JaggedVal> = (0..height).map(|r| vals[r * width + col]).collect();
+                Arc::new(Mle::from_row_major(RowMajorMatrix::new(column, 1)))
+            })
+            .collect::<Vec<_>>();
         polys.extend(columns);
     }
     polys

@@ -319,8 +319,10 @@ where
                 for (records, traces) in p2_records_and_traces_rx.into_iter() {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
-                        let proofs = records.into_par_iter().zip(traces.into_par_iter()).map(
-                            |(record, main_traces)| {
+                        let proofs = records
+                            .into_par_iter()
+                            .zip(traces.into_par_iter())
+                            .map(|(record, main_traces)| {
                                 let _span = span.enter();
 
                                 let cluster_widths = shard_clusters.cluster_widths(&record);
@@ -348,11 +350,8 @@ where
                                 });
 
                                 proof
-                            },
-                        );
-                        #[cfg(not(target_os = "zkvm"))]
-                        shard_proofs.par_extend(proofs);
-                        #[cfg(target_os = "zkvm")]
+                            })
+                            .collect::<Vec<_>>();
                         shard_proofs.extend(proofs);
                     });
                 }
