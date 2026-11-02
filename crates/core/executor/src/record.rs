@@ -738,14 +738,6 @@ impl MachineRecord for ExecutionRecord {
 /// reduction tree yield the bit-identical digest.  Field arithmetic is exact
 /// (no floating point), so this is byte-neutral, not merely
 /// numerically-equivalent.
-///
-/// Mirrors the reduction the rest of the codebase already uses for exactly this
-/// accumulation — `GlobalChip::generate_trace`
-/// (`crates/core/machine/src/global/mod.rs`, `into_par_iter().with_min_len(1 <<
-/// 15)`) and `Program::global_cumulative_sum`
-/// (`crates/core/executor/src/program.rs`, `into_par_iter().reduce(||
-/// SepticCurveComplete::Infinity, ...)`).  `with_min_len` keeps small shards on
-/// a single worker so the rayon split cost cannot dominate.
 fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u32> {
     use p3_field::BasedVectorSpace;
     use p3_koala_bear::KoalaBear;
