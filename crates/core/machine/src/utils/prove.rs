@@ -319,41 +319,40 @@ where
                 for (records, traces) in p2_records_and_traces_rx.into_iter() {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
-                        shard_proofs.par_extend(
-                            records.into_par_iter().zip(traces.into_par_iter()).map(
-                                |(record, main_traces)| {
-                                    let _span = span.enter();
+                        let proofs = records
+                            .into_par_iter()
+                            .zip(traces.into_par_iter())
+                            .map(|(record, main_traces)| {
+                                let _span = span.enter();
 
-                                    let cluster_widths = shard_clusters.cluster_widths(&record);
+                                let cluster_widths = shard_clusters.cluster_widths(&record);
 
-                                    let t_commit = std::time::Instant::now();
-                                    let main_data =
-                                        prover.commit(&record, main_traces, cluster_widths);
-                                    let commit_ms = t_commit.elapsed().as_millis();
+                                let t_commit = std::time::Instant::now();
+                                let main_data = prover.commit(&record, main_traces, cluster_widths);
+                                let commit_ms = t_commit.elapsed().as_millis();
 
-                                    let opening_span = tracing::debug_span!("opening").entered();
-                                    let t_open = std::time::Instant::now();
-                                    let proof = prover
-                                        .open(pk, main_data, &mut challenger.clone())
-                                        .unwrap();
-                                    let open_ms = t_open.elapsed().as_millis();
-                                    opening_span.exit();
+                                let opening_span = tracing::debug_span!("opening").entered();
+                                let t_open = std::time::Instant::now();
+                                let proof =
+                                    prover.open(pk, main_data, &mut challenger.clone()).unwrap();
+                                let open_ms = t_open.elapsed().as_millis();
+                                opening_span.exit();
 
-                                    tracing::info!(
-                                        "PCS timing: commit={}ms open={}ms total={}ms",
-                                        commit_ms,
-                                        open_ms,
-                                        commit_ms + open_ms
-                                    );
+                                tracing::info!(
+                                    "PCS timing: commit={}ms open={}ms total={}ms",
+                                    commit_ms,
+                                    open_ms,
+                                    commit_ms + open_ms
+                                );
 
-                                    rayon::spawn(move || {
-                                        drop(record);
-                                    });
+                                rayon::spawn(move || {
+                                    drop(record);
+                                });
 
-                                    proof
-                                },
-                            ),
-                        );
+                                proof
+                            })
+                            .collect::<Vec<_>>();
+                        shard_proofs.extend(proofs);
                     });
                 }
             });

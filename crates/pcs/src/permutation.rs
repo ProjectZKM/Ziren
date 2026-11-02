@@ -9,6 +9,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_field::{ExtensionField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
+#[cfg(not(target_os = "zkvm"))]
 use rayon_scan::ScanParallelIterator;
 
 /// Computes the width of the local permutation trace in terms of extension field elements.
@@ -174,8 +175,17 @@ pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
             })
             .collect::<Vec<_>>();
 
+        #[cfg(not(target_os = "zkvm"))]
         let local_cumulative_sums =
             local_cumulative_sums.into_par_iter().scan(|a, b| *a + *b, zero).collect::<Vec<_>>();
+        #[cfg(target_os = "zkvm")]
+        let local_cumulative_sums = local_cumulative_sums
+            .into_iter()
+            .scan(zero, |sum, value| {
+                *sum += value;
+                Some(*sum)
+            })
+            .collect::<Vec<_>>();
 
         local_cumulative_sum = *local_cumulative_sums.last().unwrap();
 

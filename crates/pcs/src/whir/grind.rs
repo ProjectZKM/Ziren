@@ -145,10 +145,15 @@ where
     let mut span = 1u64 << bits.min(32);
     let witness = loop {
         let hi = core::cmp::min(end, lo.saturating_add(span));
-        let found = (lo..hi).into_par_iter().map(C::Witness::from_u64).find_first(|&w| {
+        let candidates = (lo..hi).into_par_iter().map(C::Witness::from_u64);
+        let check = |&w: &C::Witness| {
             let mut probe = challenger.clone();
             probe.check_witness(bits, w)
-        });
+        };
+        #[cfg(not(target_os = "zkvm"))]
+        let found = candidates.find_first(check);
+        #[cfg(target_os = "zkvm")]
+        let found = { candidates }.find(check);
         if let Some(w) = found {
             break w;
         }

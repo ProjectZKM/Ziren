@@ -238,9 +238,7 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     let row_half = rows_r / 2;
     let col_half = cols_r / 2;
 
-    use p3_maybe_rayon::prelude::{
-        IndexedParallelIterator, IntoParallelIterator, ParallelIterator,
-    };
+    use p3_maybe_rayon::prelude::*;
     let chunk_size = 4096.min(half).max(1);
 
     let contrib = |e: EF, n0x: EF, d0x: EF, n1x: EF, d1x: EF| -> EF {
@@ -278,7 +276,11 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
                 let sh = contrib(eh, n0h, d0h, n1h, d1h);
                 (s0, sh)
             })
-            .reduce(|| (EF::ZERO, EF::ZERO), |(a0, ah), (b0, bh)| (a0 + b0, ah + bh));
+            .par_fold_reduce(
+                || (EF::ZERO, EF::ZERO),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+            );
         if let Some(evals) =
             reconstruct_round_evals_from_eqroot(sum0, sum_half, current_claim, round_coord)
         {
@@ -341,8 +343,9 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
                 contrib(e3, n03, d03, n13, d13),
             )
         })
-        .reduce(
+        .par_fold_reduce(
             || (EF::ZERO, EF::ZERO, EF::ZERO),
+            |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
             |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
         );
 
@@ -725,9 +728,17 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
                         }
                         (chip_s0 * er0, chip_sh * er_half)
                     })
-                    .reduce(|| (EF::ZERO, EF::ZERO), |(a0, ah), (b0, bh)| (a0 + b0, ah + bh))
+                    .par_fold_reduce(
+                        || (EF::ZERO, EF::ZERO),
+                        |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+                        |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+                    )
             })
-            .reduce(|| (EF::ZERO, EF::ZERO), |(a0, ah), (b0, bh)| (a0 + b0, ah + bh));
+            .par_fold_reduce(
+                || (EF::ZERO, EF::ZERO),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+            );
         let sum0 = chip_sum0 + pad_eq_int_sum * er_sum0;
         let sum_half = chip_sum_half + pad_eq_int_sum * er_sum_half;
         if let Some(evals) =
@@ -821,13 +832,15 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
                     }
                     (chip_p1 * er1, chip_p2 * er2, chip_p3 * er3)
                 })
-                .reduce(
+                .par_fold_reduce(
                     || (EF::ZERO, EF::ZERO, EF::ZERO),
+                    |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
                     |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
                 )
         })
-        .reduce(
+        .par_fold_reduce(
             || (EF::ZERO, EF::ZERO, EF::ZERO),
+            |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
             |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
         );
 

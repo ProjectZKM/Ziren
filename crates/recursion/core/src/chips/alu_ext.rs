@@ -1,4 +1,6 @@
 use core::borrow::Borrow;
+#[cfg(target_os = "zkvm")]
+use itertools::Itertools;
 use std::{borrow::BorrowMut, iter::zip};
 
 use p3_air::{Air, BaseAir, WindowAccess};

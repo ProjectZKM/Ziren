@@ -7,8 +7,7 @@ use std::{
 use p3_air::{Air, AirBuilder, ExtensionBuilder, PermutationAirBuilder};
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::ParallelBridge;
-use p3_maybe_rayon::prelude::ParallelIterator;
+use p3_maybe_rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use super::{MachineChip, StarkGenericConfig, Val};
 use crate::{
@@ -41,7 +40,7 @@ pub fn debug_constraints<SC, A>(
         return;
     }
 
-    (0..height).par_bridge().for_each(|i| {
+    (0..height).into_par_iter().for_each(|i| {
         let i_next = (i + 1) % height;
 
         let main_local = main.row_slice(i).unwrap();

@@ -16,7 +16,7 @@ use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{
         ByteLookupEvent, ByteRecord, EllipticCurveDoubleEvent, FieldOperation, MemoryWriteRecord,
@@ -273,7 +273,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         cols.p_access[num_words_field_element].populate(dummy_memory_record, &mut vec![]);
         Self::populate_field_ops(&mut vec![], cols, zero, one, false);
 
-        values.chunks_mut(chunk_size * num_cols).enumerate().par_bridge().for_each(|(i, rows)| {
+        values.par_chunks_mut(chunk_size * num_cols).enumerate().for_each(|(i, rows)| {
             rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {
                 let idx = i * chunk_size + j;
                 if idx < events.len() {

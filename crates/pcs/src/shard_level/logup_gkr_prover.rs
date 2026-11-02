@@ -74,8 +74,14 @@ where
             }
             acc
         })
-        .reduce(
+        .par_fold_reduce(
             || vec![EF::ZERO; width],
+            |mut l, r| {
+                for (a, b) in l.iter_mut().zip(r) {
+                    *a += b;
+                }
+                l
+            },
             |mut l, r| {
                 for (a, b) in l.iter_mut().zip(r) {
                     *a += b;

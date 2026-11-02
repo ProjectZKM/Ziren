@@ -793,7 +793,6 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
         return Vec::new();
     }
     let mut out = vec![EF::ZERO; num_real.div_ceil(2) * ncols];
-    use p3_maybe_rayon::prelude::*;
     out.par_chunks_mut(ncols).enumerate().for_each(|(i, out_row)| {
         let r0 = 2 * i;
         let r1 = 2 * i + 1;

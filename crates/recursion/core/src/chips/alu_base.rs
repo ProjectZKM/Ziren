@@ -1,4 +1,6 @@
 use core::borrow::Borrow;
+#[cfg(target_os = "zkvm")]
+use itertools::Itertools;
 use std::borrow::BorrowMut;
 use std::iter::zip;
 
@@ -9,7 +11,7 @@ use p3_field::{Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+use p3_maybe_rayon::prelude::*;
 
 use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;

@@ -8,7 +8,7 @@ use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{AluEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
@@ -99,7 +99,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubImmChip {
         let padded_nb_rows = <AddSubImmChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_IMM_COLS);
 
-        values.chunks_mut(chunk_size * NUM_ADD_SUB_IMM_COLS).enumerate().par_bridge().for_each(
+        values.par_chunks_mut(chunk_size * NUM_ADD_SUB_IMM_COLS).enumerate().for_each(
             |(i, rows)| {
                 rows.chunks_mut(NUM_ADD_SUB_IMM_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
@@ -132,8 +132,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubImmChip {
 
         let blu_batches = input
             .add_sub_imm_events
-            .chunks(chunk_size)
-            .par_bridge()
+            .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {

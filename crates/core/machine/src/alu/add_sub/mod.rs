@@ -8,7 +8,7 @@ use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{AluEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
@@ -100,26 +100,24 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         let padded_nb_rows = <AddSubChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_COLS);
 
-        values.chunks_mut(chunk_size * NUM_ADD_SUB_COLS).enumerate().par_bridge().for_each(
-            |(i, rows)| {
-                rows.chunks_mut(NUM_ADD_SUB_COLS).enumerate().for_each(|(j, row)| {
-                    let idx = i * chunk_size + j;
-                    let cols: &mut AddSubCols<F> = row.borrow_mut();
+        values.par_chunks_mut(chunk_size * NUM_ADD_SUB_COLS).enumerate().for_each(|(i, rows)| {
+            rows.chunks_mut(NUM_ADD_SUB_COLS).enumerate().for_each(|(j, row)| {
+                let idx = i * chunk_size + j;
+                let cols: &mut AddSubCols<F> = row.borrow_mut();
 
-                    if idx < input.add_sub_events.len() {
-                        let mut byte_lookup_events = Vec::new();
-                        let event = &input.add_sub_events[idx];
-                        self.event_to_row(
-                            event,
-                            cols,
-                            &mut byte_lookup_events,
-                            &input.program,
-                            input.public_values.execution_shard,
-                        );
-                    }
-                });
-            },
-        );
+                if idx < input.add_sub_events.len() {
+                    let mut byte_lookup_events = Vec::new();
+                    let event = &input.add_sub_events[idx];
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut byte_lookup_events,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
+                }
+            });
+        });
 
         Ok(RowMajorMatrix::new(values, NUM_ADD_SUB_COLS))
     }
@@ -133,8 +131,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
 
         let blu_batches = input
             .add_sub_events
-            .chunks(chunk_size)
-            .par_bridge()
+            .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {

@@ -1,3 +1,5 @@
+#[cfg(target_os = "zkvm")]
+use itertools::Itertools;
 use std::borrow::BorrowMut;
 use std::mem::size_of;
 

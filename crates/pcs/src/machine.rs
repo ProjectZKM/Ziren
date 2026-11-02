@@ -543,10 +543,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut chip_cumulative_sums = Vec::with_capacity(chips.len());
             tracing::debug_span!("generate permutation traces").in_scope(|| {
-                chips
-                    .par_iter()
-                    .zip(traces.par_iter_mut())
-                    .map(|(chip, (main_trace, pre_trace))| {
+                let permutation_data = chips.par_iter().zip(traces.par_iter_mut()).map(
+                    |(chip, (main_trace, pre_trace))| {
                         let (trace, local_sum) = chip.generate_permutation_trace(
                             *pre_trace,
                             main_trace,
@@ -568,8 +566,15 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                             })
                         };
                         (trace, (global_sum, local_sum))
-                    })
+                    },
+                );
+                #[cfg(not(target_os = "zkvm"))]
+                permutation_data
                     .unzip_into_vecs(&mut permutation_traces, &mut chip_cumulative_sums);
+                #[cfg(target_os = "zkvm")]
+                {
+                    (permutation_traces, chip_cumulative_sums) = permutation_data.unzip();
+                }
             });
 
             let global_cumulative_sum =
@@ -935,7 +940,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 (&chips[..first_consumer], &chips[first_consumer..])
             };
             if !par_chips.is_empty() {
-                use rayon::prelude::*;
                 let t_par = std::time::Instant::now();
                 let included: Vec<&_> = par_chips
                     .iter()
