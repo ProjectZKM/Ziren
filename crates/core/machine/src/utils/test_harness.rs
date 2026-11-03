@@ -130,7 +130,8 @@ where
     SC::Pcs: p3_commit::UnivariateStarkPcs<SC::Challenge, SC::Challenger>,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>
+        + p3_uni_stark::QuotientAir<UniConfig<SC>>,
 {
     p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &[]).unwrap()
 }
