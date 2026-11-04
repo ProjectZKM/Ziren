@@ -1,0 +1,31 @@
+name: Compact shrinker
+
+on:
+  pull_request:
+    paths:
+      - 'crates/pcs/**'
+      - 'crates/prover/**'
+      - 'Cargo.*'
+      - '.github/workflows/compact-shrink.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/compact-shrink-target
+      PYTHONDONTWRITEBYTECODE: '1'
+      # Match the main CI fallback for the pinned gnark setup dependency.
+      GOPROXY: https://proxy.golang.org,https://goproxy.cn,direct
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-17
+      - run: cargo test --locked -p zkm-pcs --features compact-shrink --lib shrink::
+      - run: cargo test --locked -p zkm-pcs --features compact-shrink --lib compact_params
+      - run: cargo check --locked -p zkm-prover --lib
+      - run: cargo check --locked -p zkm-prover --features compact-shrink --lib

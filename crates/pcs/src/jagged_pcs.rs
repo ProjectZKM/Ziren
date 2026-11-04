@@ -1455,6 +1455,18 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
+        #[cfg(feature = "compact-shrink")]
+        crate::whir::export::capture(challenger, || {
+            serde_json::json!({
+                "config": &config,
+                "log_stacking_height": bundle.commit.log_stacking_height,
+                "areas": &areas,
+                "point": &extended_z_star,
+                "evaluation_claim": q_at_z_adj,
+                "commitments": &commitments,
+                "stacked_proof": whir_proof,
+            })
+        });
         let res = crate::whir::jagged::verify_jagged_whir_rounds::<Challenger, MT>(
             mmcs,
             config,
