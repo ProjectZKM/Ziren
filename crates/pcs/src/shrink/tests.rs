@@ -1,5 +1,5 @@
 use super::*;
-use crate::basefold::Mle;
+use crate::whir::mle::Mle;
 use crate::whir::stacked::{StackedWhirProof, StackedWhirProver, StackedWhirVerifier};
 use p3_challenger::{CanObserve, CanSample};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};

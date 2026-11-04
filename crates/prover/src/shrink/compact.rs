@@ -12,7 +12,7 @@ use zkm_pcs::{
 };
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_recursion_circuit::machine::{
-    PublicValuesOutputDigest, RootPublicValues, ZKMWrapBasefoldWitnessValues,
+    PublicValuesOutputDigest, RootPublicValues, ZKMWrapWitnessValues,
 };
 use zkm_recursion_circuit::witness::Witnessable;
 use zkm_recursion_compiler::config::InnerConfig;
@@ -43,8 +43,8 @@ impl<S: HashSuite> ShrinkStrategy for CompactShrink<S> {
             ));
         }
         let ZKMReduceProof { vk, proof } = reduced_proof;
-        let vk_merkle_data = prover.make_basefold_merkle_proofs(std::slice::from_ref(&vk))?;
-        let input = ZKMWrapBasefoldWitnessValues {
+        let vk_merkle_data = prover.make_merkle_proofs(std::slice::from_ref(&vk))?;
+        let input = ZKMWrapWitnessValues {
             vks_and_proofs: vec![(vk, *proof.jagged_shard_proof)],
             vk_merkle_data,
         };
@@ -52,7 +52,7 @@ impl<S: HashSuite> ShrinkStrategy for CompactShrink<S> {
             // The compact shrink is terminal: commit the root digest, which
             // byte-hash verifiers recompute with 7 Poseidon2 permutations
             // instead of 28.
-            zkm_recursion_circuit::machine::basefold_programs::build_wrap_basefold_program_with_digest(
+            zkm_recursion_circuit::machine::programs::build_wrap_program_with_digest(
                 prover.root_prover.machine(),
                 &input,
                 ZKMProver::<C>::pcs_max_log_row_count(),
@@ -111,9 +111,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             zkm_pcs::shrink::CompactMmcs<T::Suite>,
         >::from_bytes_for_verification(bytes)
         .ok_or(MachineVerificationError::InvalidPublicValues("shrink WHIR encoding"))?;
-        if bundle.commit.original_commitment.roots().len() != 1 || bundle.whir_proof.is_none() {
+        if bundle.commit.original_commitment.roots().len() != 1 {
             return Err(MachineVerificationError::InvalidPublicValues(
-                "shrink requires WHIR single-root cap",
+                "shrink requires single-root cap",
             ));
         }
         let prover = compact_shrink_prover::<T::Suite>();

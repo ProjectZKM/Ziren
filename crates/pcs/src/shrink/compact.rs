@@ -2,8 +2,8 @@
 //! Hash suites define commitments, transcript conventions and key identity.
 //! Consumer adapters and export formats are independent of this module.
 use super::suites::{HashSuite, SuiteHasher};
-use crate::config::{BasefoldRing, PrepCommitRoot, StarkGenericConfig, ZeroCommitment};
-use crate::jagged_pcs::jagged::{PrecomputedJaggedCommitGeneric, WhirDenseOpen};
+use crate::config::{PrepCommitRoot, StarkGenericConfig, WhirRing, ZeroCommitment};
+use crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric;
 use crate::jagged_pcs::{JaggedDft, JaggedVal};
 use crate::Com;
 use alloc::{vec, vec::Vec};
@@ -245,6 +245,7 @@ fn compact_fri_params<S: HashSuite>() -> FriParameters<CompactChallengeMmcs<S>> 
         num_queries: 100,
         commit_proof_of_work_bits: 0,
         query_proof_of_work_bits: 0,
+        batch_proof_of_work_bits: 0,
         mmcs: CompactChallengeMmcs::<S>::new(compact_mmcs::<S>()),
     }
 }
@@ -334,7 +335,7 @@ impl<S: HashSuite> StarkGenericConfig for CompactShrink<S> {
     ) -> Self::PrepPrecomputed {
         let views =
             crate::jagged_pcs::jagged::views_over_traces(named_preprocessed_traces.to_vec());
-        <Self as BasefoldRing>::commit_multilinears(&views, pin)
+        <Self as WhirRing>::commit_multilinears(&views, pin)
     }
 }
 
@@ -355,64 +356,52 @@ impl<S: HashSuite> ZeroCommitment<CompactShrink<S>> for CompactPcs<S> {
     }
 }
 
-impl<S: HashSuite> BasefoldRing for CompactShrink<S> {
-    const WHIR_INNER_PCS: bool = true;
-
+impl<S: HashSuite> WhirRing for CompactShrink<S> {
     const WHIR_PROFILE: crate::whir::jagged::WhirProfile =
         crate::whir::jagged::WhirProfile::CompactShrink;
 
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
-    ) -> &PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+    ) -> &PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
         prep
     }
 
-    type BfMmcs = CompactMmcs<S>;
+    type WhirMmcs = CompactMmcs<S>;
 
-    fn bf_mmcs() -> Self::BfMmcs {
+    fn whir_mmcs() -> Self::WhirMmcs {
         compact_mmcs::<S>()
     }
 
     fn vk_commit_is_preceding_root(
         vk_commit: &Com<Self>,
-        raw: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+        raw: &<Self::WhirMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     ) -> Option<bool> {
         Some(vk_commit == raw)
     }
 
     fn digest_felts(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+        commit: &<Self::WhirMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     ) -> [JaggedVal; DIGEST_FELTS] {
         let roots = commit.roots();
         assert_eq!(roots.len(), 1, "the compact shrinker uses a single-root cap");
         root_felts::<S>(&roots[0])
     }
 
-    fn whir_committed_bf_prover_data(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
-    ) -> Option<<Self::BfMmcs as p3_commit::Mmcs<JaggedVal>>::ProverData<RowMajorMatrix<JaggedVal>>>
-    {
-        let root = commit.roots()[0];
-        Some(p3_merkle_tree::MerkleTree::from_parts(Vec::new(), vec![vec![root]], Vec::new()))
-    }
-
     fn prove_jagged_open(
         z_row: &[crate::InnerChallenge],
-        rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+        rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
-            Self::BfMmcs,
+            Self::WhirMmcs,
             JaggedDft,
-            WhirDenseOpen,
         >(
             &rounds,
             z_row,
             challenger,
-            Self::bf_mmcs(),
+            Self::whir_mmcs(),
             alloc::sync::Arc::new(JaggedDft::default()),
-            Self::fri_config(),
             Self::WHIR_PROFILE,
         );
         crate::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
@@ -456,7 +445,7 @@ pub fn shrink_key_digest<S: HashSuite>(
     integer(&mut bytes, crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize);
     integer(&mut bytes, crate::logup_gkr::gkr_grinding_bits());
     let config = crate::whir::jagged::whir_config_for_profile(
-        <CompactShrink<S> as BasefoldRing>::WHIR_PROFILE,
+        <CompactShrink<S> as WhirRing>::WHIR_PROFILE,
         crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
     );
     // This structure consists only of integers/vectors of integers. Bincode's
@@ -518,7 +507,7 @@ mod tests {
     }
 
     use crate::jagged_pcs::jagged::{
-        build_jagged_verify_inputs, verify_jagged_inner_generic_with_profile, JaggedOpenRound,
+        build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedOpenRound,
     };
     use crate::jagged_pcs::JaggedChallenge;
 
@@ -720,8 +709,8 @@ mod tests {
         let prep_views = views(&prep_traces);
         let main_views = views(&main_traces);
 
-        let prep = <KoalaBearKeccak as BasefoldRing>::commit_multilinears(&prep_views, None);
-        let main = <KoalaBearKeccak as BasefoldRing>::commit_multilinears(&main_views, None);
+        let prep = <KoalaBearKeccak as WhirRing>::commit_multilinears(&prep_views, None);
+        let main = <KoalaBearKeccak as WhirRing>::commit_multilinears(&main_views, None);
         let prep_root = prep.commit.original_commitment.clone();
         let main_root = main.commit.original_commitment.clone();
         assert_ne!(prep_root, main_root);
@@ -779,7 +768,7 @@ mod tests {
                 precomputed: &main,
             },
         ];
-        let proof = <KoalaBearKeccak as BasefoldRing>::prove_jagged_open(
+        let proof = <KoalaBearKeccak as WhirRing>::prove_jagged_open(
             &z_row,
             rounds,
             &mut prover_challenger,
@@ -791,7 +780,6 @@ mod tests {
         let bundle =
             crate::jagged_pcs::jagged::JaggedPcsProofGeneric::<KeccakMmcs>::from_bytes(&bytes)
                 .expect("the bundle decodes");
-        assert!(bundle.whir_proof.is_some(), "the Keccak ring opens under WHIR");
 
         let chip_widths: Vec<usize> =
             prep_traces.iter().chain(main_traces.iter()).map(|(_, t)| t.width).collect();
@@ -801,7 +789,7 @@ mod tests {
             let mut challenger = keccak_challenger();
             challenger.observe(prep_root.clone());
             challenger.observe(main_root.clone());
-            verify_jagged_inner_generic_with_profile::<KeccakChallenger, KeccakMmcs>(
+            verify_jagged_inner_generic::<KeccakChallenger, KeccakMmcs>(
                 &chip_infos,
                 &r_row_v,
                 &z_row_v,
@@ -809,10 +797,9 @@ mod tests {
                 &mut challenger,
                 keccak_mmcs(),
                 true,
-                <KoalaBearKeccak as BasefoldRing>::fri_config(),
+                <KoalaBearKeccak as WhirRing>::whir_config(bundle.commit.log_stacking_height as usize),
                 &[(prep_root.clone(), prep.prover_data.area)],
                 opened,
-                Some(crate::whir::jagged::WhirProfile::CompactShrink),
             )
         };
         let honest = bundle.y_per_chip.clone();
