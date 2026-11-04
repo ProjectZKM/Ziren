@@ -23,6 +23,7 @@ bincode = "1.3.3"
 itertools = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 p3-fri = { workspace = true  }
 p3-uni-stark = { workspace = true }
 

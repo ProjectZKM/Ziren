@@ -34,6 +34,7 @@ pub mod compact_params;
 pub mod config;
 pub mod encoder;
 pub mod error;
+pub mod export;
 #[cfg(test)]
 pub mod full_prover;
 pub mod grind;

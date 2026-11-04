@@ -6186,6 +6186,7 @@ dependencies = [
  "rayon-scan",
  "rmp-serde",
  "serde",
+ "serde_json",
  "sha2",
  "strum",
  "strum_macros",

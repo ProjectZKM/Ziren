@@ -55,6 +55,15 @@ pub fn compact_mmcs<S: HashSuite>() -> CompactMmcs<S> {
     )
 }
 
+/// A copy of a [`CompactChallenger`] state: the digest, the bytes waiting for
+/// the next fold, and the squeeze words not yet read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptState {
+    pub digest: Digest,
+    pub buffered: Vec<u8>,
+    pub words_left: usize,
+}
+
 /// A suite-defined hash-chain transcript with canonical LE32 field observations.
 /// Digest words are consumed little-endian, in order. Base-field challenges
 /// use 31-bit rejection sampling for an exactly uniform KoalaBear element;
@@ -129,6 +138,16 @@ impl<S: HashSuite> CompactChallenger<S> {
             self.state[at + 2],
             self.state[at + 3],
         ])
+    }
+
+    /// A copy of the transcript state.
+    #[must_use]
+    pub fn export_state(&self) -> TranscriptState {
+        TranscriptState {
+            digest: self.state,
+            buffered: self.buffer.clone(),
+            words_left: self.words_left,
+        }
     }
 
     /// The bytes waiting to be folded into the state.
