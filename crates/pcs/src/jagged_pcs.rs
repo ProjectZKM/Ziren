@@ -1455,6 +1455,7 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
+        #[cfg(feature = "compact-shrink")]
         crate::whir::export::capture(challenger, || {
             serde_json::json!({
                 "config": &config,
