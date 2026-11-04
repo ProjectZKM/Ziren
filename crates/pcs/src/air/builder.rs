@@ -617,6 +617,10 @@ impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder
     for p3_uni_stark::VerifierConstraintFolder<'_, SC>
 {
 }
+impl<SC: p3_uni_stark::StarkGenericConfig, const N: usize> EmptyMessageBuilder
+    for p3_uni_stark::VectorizedConstraintFolder<'_, SC, N>
+{
+}
 // `p3_uni_stark::prove`/`verify` run `debug_constraints` (under `debug_assertions`)
 // with the upstream `p3_air::DebugConstraintBuilder`, so the per-chip unit tests
 // (`uni_stark_prove`) need it to satisfy `ZKMAirBuilder` too.  The
