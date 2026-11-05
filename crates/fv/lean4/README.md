@@ -200,6 +200,50 @@ Maintaining coverage and improving the extraction:
 theorem they target, and the chip-specific snippet recipes live with the generators
 (`recipes.tsv`).
 
+### Pinning the statements
+
+A closed theorem is only as strong as its statement, and the statement is generated. A
+regeneration, a generator or snippet edit, or an extractor change can weaken it (a value moved
+into `assumed`, an output dropped, an input added, a new helper hypothesis) while every chip
+still has the same number of theorems. `statements.json` pins what each statement says, for
+every module of every chip file of the current `main`, and `check/pin_statements.py` compares a
+regeneration against it:
+
+```bash
+SNIPPET_TOOLS=/path/to/snippets/tools crates/fv/lean4/check/regen_all.sh /scratch/regen
+python3 crates/fv/lean4/check/pin_statements.py compare \
+    crates/fv/lean4/statements.json /scratch/regen/ZirenDet         # exit 1 on a weakening
+python3 crates/fv/lean4/check/pin_statements.py snapshot \
+    /scratch/regen/ZirenDet > crates/fv/lean4/statements.json        # record the new statements
+```
+
+For each module the manifest records the `deterministic` and `postconditions` statements (their
+binders, the `h_*` helper hypotheses and the conclusion, or the postcondition conjuncts), the
+`inputs`, `outputs` and `assumed` ports, which ports share one column, the `rel` and interface
+definitions, and the declaration of each opaque helper relation, each with a hash. A port is
+written `provenance <- column`: the lookup it comes from and the name of the column that carries
+it (`derived` for an expression the extractor names), so renumbering or inserting columns changes
+nothing that is pinned. Constraint bodies, the witness layout and the proof lemmas change with
+every AIR edit; their hashes and counts are recorded for information only. The constraints are
+the AIR itself and every proof is re-checked against them: dropping a constraint weakens the
+theorem's hypotheses, which makes the claim harder to prove, not weaker.
+
+`compare` classifies each difference:
+
+| Class | Differences |
+|---|---|
+| WEAKENING (exit 1) | a module or a pinned theorem removed; `inputs` or `assumed` gained a port; `outputs` lost a port; a port now carried by a different column, or now sharing a column with another port; a helper hypothesis added; binders, conclusion or interface definitions changed; a postcondition conjunct lost; a helper relation redefined; an `axiom` declared |
+| INFO (exit 0) | a module, theorem or helper added, a helper removed; the opposite port, sharing and hypothesis changes, which strengthen the statement; ports reordered; constraint bodies, range facts and helper calls; witness columns added, removed or renamed one to one; proof lemmas and snippet sections |
+
+A weakening is not necessarily wrong, but it changes what is proved, so it needs a reviewer who
+reads the reported difference against the AIR change that caused it: a dropped output must no
+longer be sent anywhere, a selector split must cover the module it replaces, and a port moved to
+another column must carry the same value on every satisfying row. The pull request that causes
+it states that review and updates `statements.json` itself; a weakening never lands through a
+later manifest refresh. Any pull request that changes a chip's AIR, the extractor or a snippet
+also refreshes the manifest, so that it always describes `main`; `snapshot` of a regeneration is
+byte-identical for identical checkout and snippet inputs.
+
 ## Known limits
 
 - **Determinism, not correctness.** A closed theorem says the chip has *one* behaviour, not
