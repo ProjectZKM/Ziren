@@ -146,6 +146,14 @@ impl BinarySchedule {
     /// The profile of the schedule's commitment at its regime.
     #[must_use]
     pub fn profile(&self) -> BinaryWhirProfile {
+        let profile = self.profile_constant().with_first_round(FIRST_ROUND.0, FIRST_ROUND.1);
+        match *ROUND_FOLDS {
+            Some((folds, bumps)) => profile.with_round_folds(folds, bumps),
+            None => profile,
+        }
+    }
+
+    fn profile_constant(&self) -> BinaryWhirProfile {
         match self.regime {
             WhirRegime::UniqueDecoding => BinaryWhirProfile::unique_decoding(
                 self.term_security_bits,
@@ -169,6 +177,31 @@ impl BinarySchedule {
         boolean_whir_config::<A, Blake3>(air, shape, self.options(), self.whir())
     }
 }
+
+/// whir-gc experiment: `ZIREN_B_FIRST_ROUND=f0,bumps` gives the narrow
+/// machine's WHIR a first round folding `f0` variables and keeps the folded
+/// domain in the rounds of the bit mask `bumps`.
+static FIRST_ROUND: std::sync::LazyLock<(usize, u32)> = std::sync::LazyLock::new(|| {
+    std::env::var("ZIREN_B_FIRST_ROUND").map_or((0, 0), |spec| {
+        let mut parts = spec.split(',').map(|part| part.trim().parse::<u64>().expect("ZIREN_B_FIRST_ROUND=f0,bumps"));
+        let f0 = parts.next().expect("a first folding") as usize;
+        (f0, parts.next().unwrap_or(0) as u32)
+    })
+});
+
+/// whir-gc experiment: `ZIREN_B_FOLDS=f0,f1,..;bumps` gives the narrow
+/// machine's WHIR a folding factor per round, and keeps the folded domain in
+/// the rounds of the bit mask `bumps`.
+static ROUND_FOLDS: std::sync::LazyLock<Option<([u8; 8], u32)>> = std::sync::LazyLock::new(|| {
+    std::env::var("ZIREN_B_FOLDS").ok().map(|spec| {
+        let (folds, bumps) = spec.split_once(';').unwrap_or((&spec, "0"));
+        let mut out = [0u8; 8];
+        for (slot, fold) in out.iter_mut().zip(folds.split(',')) {
+            *slot = fold.trim().parse().expect("ZIREN_B_FOLDS=f0,f1,..;bumps");
+        }
+        (out, bumps.trim().parse().expect("a bump mask"))
+    })
+});
 
 /// A fresh transcript of the stage.
 #[must_use]

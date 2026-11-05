@@ -36,7 +36,7 @@ use zkm_recursion_core::runtime::blake3::{compress, CHUNK_END, CHUNK_START, IV, 
 use crate::tape::{Op, Operand, Tape, Var, F};
 
 /// Bits of an address.
-pub const ADDR_BITS: usize = 24;
+pub const ADDR_BITS: usize = 26;
 
 /// Bytes of a Blake3 chunk.
 const CHUNK_BYTES: usize = 1024;

@@ -10,6 +10,7 @@
 //! verifier itself, so that it agrees with Plonky3 on every step of the
 //! transcript by construction.
 
+pub mod forms;
 pub mod bytes;
 pub mod challenger;
 pub mod config;

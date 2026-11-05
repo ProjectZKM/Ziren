@@ -123,6 +123,18 @@ impl<X: Field> BaseAir<X> for TapeAir {
         Vec::new()
     }
 
+    /// whir-gc experiment: the linear forms of its main columns the table
+    /// reads, derived from its symbolic constraints and buses, when fewer
+    /// than the columns.
+    fn main_linear_forms(&self) -> Option<p3_air::LinearForms> {
+        crate::forms::table_forms(self).0
+    }
+
+    /// As for the main columns, the forms of the preprocessed columns.
+    fn preprocessed_linear_forms(&self) -> Option<p3_air::LinearForms> {
+        crate::forms::table_forms(self).1
+    }
+
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
         match self {
             Self::Ledger(air) => air.preprocessed_trace(),
@@ -209,6 +221,19 @@ impl TapeMachine {
     #[must_use]
     pub fn airs(&self) -> &[TapeAir] {
         &self.airs
+    }
+
+    /// whir-gc experiment: the preprocessed commitment's Merkle nodes `level`
+    /// layers below its root, `2^level` digests in index order.
+    #[must_use]
+    pub fn preprocessed_tree_layer(
+        &self,
+        level: usize,
+    ) -> Option<Vec<[u8; zkm_binary_stark::config::DIGEST_BYTES]>> {
+        let data = self.pk.preprocessed_prover_data()?;
+        let layers = data.inner().merkle_data.digest_layers();
+        let layer = layers.get(layers.len().checked_sub(1 + level)?)?;
+        (layer.len() == 1 << level).then(|| layer.clone())
     }
 
     #[must_use]

@@ -10,7 +10,7 @@
 use p3_binary_pcs::whir::{
     recommended_cap_height, BooleanWhirPcs, BooleanWhirProver, BooleanWhirTracePcs,
 };
-use p3_blake3::Blake3;
+
 use p3_multi_stark::config::{Commitment, MultiStarkConfig, ProverData};
 use p3_multi_stark::{MultiStarkProof, VerifyingKey};
 use p3_sumcheck::layout::Table;
@@ -67,8 +67,8 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<TracedPcs, Mach
         .map_err(MachineConfigError::Profile)?;
     let cap_height = recommended_cap_height(&whir_config);
     let merkle = TracedMmcs::new(MerkleMmcs::new(
-        SerializingHasher::new(Blake3),
-        CompressionFunctionFromHasher::new(Blake3),
+        SerializingHasher::new(zkm_binary_stark::config::Blake3Short),
+        CompressionFunctionFromHasher::new(zkm_binary_stark::config::Blake3Short),
         cap_height,
     ));
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);

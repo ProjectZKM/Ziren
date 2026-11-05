@@ -21,14 +21,50 @@ use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 
 use crate::{BinarySchedule, Challenger, F};
 
-/// The Blake3 Merkle tree over bytes, arity 2.
+/// whir-gc experiment: bytes of a Merkle digest, Blake3 truncated.  200
+/// bits keep collisions at `2^100` work, the composed target.
+pub const DIGEST_BYTES: usize = 25;
+
+/// Blake3 truncated to [`DIGEST_BYTES`] bytes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Blake3Short;
+
+fn short(digest: [u8; 32]) -> [u8; DIGEST_BYTES] {
+    core::array::from_fn(|i| digest[i])
+}
+
+impl p3_symmetric::CryptographicHasher<u8, [u8; DIGEST_BYTES]> for Blake3Short {
+    const LANES: usize = <Blake3 as p3_symmetric::CryptographicHasher<u8, [u8; 32]>>::LANES;
+
+    fn hash_iter<I: IntoIterator<Item = u8>>(&self, input: I) -> [u8; DIGEST_BYTES] {
+        short(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_iter(&Blake3, input))
+    }
+
+    fn hash_iter_slices<'a, I: IntoIterator<Item = &'a [u8]>>(&self, input: I) -> [u8; DIGEST_BYTES] {
+        short(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_iter_slices(&Blake3, input))
+    }
+
+    fn hash_slice(&self, input: &[u8]) -> [u8; DIGEST_BYTES] {
+        short(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_slice(&Blake3, input))
+    }
+
+    fn hash_many(&self, input: &[u8], out: &mut [[u8; DIGEST_BYTES]]) {
+        let mut full = vec![[0u8; 32]; out.len()];
+        p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_many(&Blake3, input, &mut full);
+        for (out, full) in out.iter_mut().zip(full) {
+            *out = short(full);
+        }
+    }
+}
+
+/// The Blake3 Merkle tree over bytes, arity 2, digests truncated.
 pub type MerkleMmcs = p3_merkle_tree::MerkleTreeMmcs<
     F,
     u8,
-    SerializingHasher<Blake3>,
-    CompressionFunctionFromHasher<Blake3, 2, 32>,
+    SerializingHasher<Blake3Short>,
+    CompressionFunctionFromHasher<Blake3Short, 2, DIGEST_BYTES>,
     2,
-    32,
+    DIGEST_BYTES,
 >;
 
 /// The stacked Boolean WHIR commitment of every table of a machine.
@@ -71,7 +107,7 @@ pub fn proof_breakdown(proof: &MachineProof) -> Vec<(String, usize)> {
                 ));
                 &pair.whir
             }
-            BooleanWhirOpening::Paired => return,
+            BooleanWhirOpening::Paired | BooleanWhirOpening::JointPaired => return,
         };
         parts.push((format!("{label}.opening.whir.initial_sumcheck"), size(&run.initial_sumcheck)));
         parts.push((
@@ -192,8 +228,8 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, Mac
     }
     let cap_height = recommended_cap_height(&whir_config);
     let merkle = MerkleMmcs::new(
-        SerializingHasher::new(Blake3),
-        CompressionFunctionFromHasher::new(Blake3),
+        SerializingHasher::new(Blake3Short),
+        CompressionFunctionFromHasher::new(Blake3Short),
         cap_height,
     );
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);

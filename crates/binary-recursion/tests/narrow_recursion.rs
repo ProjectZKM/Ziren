@@ -91,6 +91,13 @@ fn proves_a_recorded_verification_and_records_its_own() {
         println!("    {part:<55} {bytes:>9} B");
     }
 
+    // whir-gc experiment: read the preprocessed commitment down to its nodes at
+    // ZIREN_DEEP_PREP_CAP layers below the root, as constants.
+    if let Some(level) = std::env::var("ZIREN_DEEP_PREP_CAP").ok().map(|v| v.parse::<usize>().expect("a level")) {
+        let nodes = machine.preprocessed_tree_layer(level).expect("the preprocessed tree reaches the level");
+        zkm_binary_recursion::mmcs::set_deep_cap(level, nodes);
+        eprintln!("deep preprocessed cap: {} constant nodes at level {level}", 1usize << level);
+    }
     let (main, preprocessed) = machine.shapes();
     let instances: Vec<Instance<'_, TapeAir>> = machine
         .airs()

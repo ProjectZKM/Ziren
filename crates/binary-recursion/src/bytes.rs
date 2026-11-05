@@ -156,6 +156,39 @@ pub fn merkle_node(bit: Traced, cur: [Traced; 2], sib: [Traced; 2]) -> [Traced; 
     )
 }
 
+/// whir-gc experiment: bytes of a Merkle digest past its low element.
+pub const TAIL: usize = zkm_binary_stark::config::DIGEST_BYTES - 16;
+
+/// A Blake3 digest truncated to a Merkle digest: the low element kept, the
+/// high one cut to its first [`TAIL`] bytes, the rest zero.  Wiring only.
+#[must_use]
+pub fn shorten(digest: [Traced; 2]) -> [Traced; 2] {
+    let high = to_bytes(digest[1]);
+    let tail: [Traced; 16] =
+        core::array::from_fn(|i| if i < TAIL { high[i] } else { constant_byte(0) });
+    [digest[0], from_bytes(&tail)]
+}
+
+/// The bytes of a truncated digest, as pieces of a message.
+#[must_use]
+pub fn short_pieces(digest: [Traced; 2]) -> Vec<Piece> {
+    let high = to_bytes(digest[1]);
+    core::iter::once(Piece::Element(digest[0]))
+        .chain(high[..TAIL].iter().map(|&b| Piece::Byte(b)))
+        .collect()
+}
+
+/// One node of a Merkle path over truncated digests: the truncated digest
+/// of `cur ‖ sib` if `bit` is zero, of `sib ‖ cur` if it is one.
+#[must_use]
+pub fn short_node(bit: Traced, cur: [Traced; 2], sib: [Traced; 2]) -> [Traced; 2] {
+    let left: [Traced; 2] = core::array::from_fn(|i| select(bit, cur[i], sib[i]));
+    let right: [Traced; 2] = core::array::from_fn(|i| select(bit, sib[i], cur[i]));
+    let mut pieces = short_pieces(left);
+    pieces.extend(short_pieces(right));
+    shorten(blake3(&pieces))
+}
+
 /// The thirty-two bytes of a digest held as two elements.
 #[must_use]
 pub fn digest_bytes(digest: [Traced; 2]) -> [Traced; 32] {
