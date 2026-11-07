@@ -16,6 +16,10 @@ pub mod adapter;
 mod compact;
 #[cfg(feature = "compact-shrink")]
 pub use compact::compact_shrink_prover;
+#[cfg(feature = "zk")]
+pub mod zk;
+#[cfg(feature = "zk")]
+pub use zk::{zk_shrink_prover, ZkShrink, ZkShrinkSC};
 
 /// Selects an output proof configuration and its proving implementation.
 ///

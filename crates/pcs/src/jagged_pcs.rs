@@ -434,7 +434,7 @@ pub mod jagged {
         DEFAULT_LOG_STACKING_HEIGHT,
     };
     use crate::jagged::{JaggedChipInfo, JaggedPacking};
-    use crate::jagged_sumcheck::{verify_jagged_reduction, JaggedReductionProof};
+    use crate::jagged_sumcheck::JaggedReductionProof;
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
     /// A named per-chip trace in the form the jagged commit and open consume.
@@ -764,9 +764,14 @@ pub mod jagged {
 
     /// Open every round's WHIR data at one point under the WHIR schedule of
     /// `profile`: ONE batched opening across all rounds.
+    ///
+    /// `zk`: on the zk ring, the shard's claims on the mask region and the
+    /// jagged reduction's mask challenge ([`crate::whir::zk`]); the other
+    /// profiles ignore it.
     pub fn open_whir_rounds<Challenger, MT, D>(
         rounds: &[JaggedOpenRound<'_, MT>],
         point: Vec<InnerChallenge>,
+        zk: Option<(&[crate::zk_mask::ZkCellClaim<InnerChallenge>], InnerChallenge)>,
         challenger: &mut Challenger,
         mmcs: MT,
         dft: alloc::sync::Arc<D>,
@@ -796,9 +801,20 @@ pub mod jagged {
         );
         let cfg = crate::whir::jagged::whir_config_for_profile(profile, lsh);
         let ef_dft = alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
-        crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
-            &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
-        )
+        match profile {
+            #[cfg(feature = "zk")]
+            crate::whir::jagged::WhirProfile::ZkShrink => {
+                crate::whir::zk::open_zk_whir_rounds::<Challenger, MT, D, _>(
+                    &wdatas, point, zk, challenger, mmcs, dft, ef_dft, cfg,
+                )
+            }
+            _ => {
+                let _ = zk;
+                crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
+                    &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
+                )
+            }
+        }
     }
 
     /// The INNER ring's multi-round prove — the ring's own Mmcs and DFT,
@@ -823,10 +839,23 @@ pub mod jagged {
         challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
     ) -> JaggedPcsProof {
+        prove_jagged_rounds_with_profile_zk(rounds, z_row, challenger, profile, &[])
+    }
+
+    /// [`prove_jagged_rounds_with_profile`] with the shard's claims on the
+    /// zk mask region, which the zk ring's opening binds
+    /// ([`crate::whir::zk`]); empty on every other ring.
+    pub fn prove_jagged_rounds_with_profile_zk(
+        rounds: &[JaggedOpenRound<'_, JaggedMmcs>],
+        z_row: &[InnerChallenge],
+        challenger: &mut JaggedChallenger,
+        profile: crate::whir::jagged::WhirProfile,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
+    ) -> JaggedPcsProof {
         let mmcs = jagged_mmcs();
         let dft = alloc::sync::Arc::new(JaggedDft::default());
-        prove_jagged_rounds_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
-            rounds, z_row, challenger, mmcs, dft, profile,
+        prove_jagged_rounds_generic_zk::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+            rounds, z_row, challenger, mmcs, dft, profile, zk_claims,
         )
     }
 
@@ -996,6 +1025,40 @@ pub mod jagged {
             + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
             + 'static,
     {
+        prove_jagged_rounds_generic_zk(rounds, z_row, challenger, mmcs, dft, profile, &[])
+    }
+
+    /// [`prove_jagged_rounds_generic`] with the shard's claims on the zk
+    /// mask region ([`crate::whir::zk`]), empty on every ring but the zk one.
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    pub fn prove_jagged_rounds_generic_zk<Challenger, MT, D>(
+        rounds: &[JaggedOpenRound<'_, MT>],
+        z_row: &[InnerChallenge],
+        challenger: &mut Challenger,
+        mmcs: MT,
+        dft: alloc::sync::Arc<D>,
+        profile: crate::whir::jagged::WhirProfile,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
+    ) -> JaggedPcsProofGeneric<MT>
+    where
+        MT: p3_commit::Mmcs<
+                JaggedVal,
+                Commitment: Clone,
+                ProverData<p3_matrix::dense::RowMajorMatrix<JaggedVal>>: 'static,
+            > + Clone,
+        D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+        Challenger: p3_challenger::FieldChallenger<JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + Clone
+            + Sync
+            + p3_challenger::CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+            + 'static,
+    {
+        assert!(
+            zk_claims.is_empty() || profile.is_zk(),
+            "claims on the zk mask region reach only the zk ring's opening"
+        );
+        let jagged_rho: core::cell::Cell<Option<InnerChallenge>> = core::cell::Cell::new(None);
         let log_stacking_height = validate_jagged_rounds(
             &rounds
                 .iter()
@@ -1092,13 +1155,29 @@ pub mod jagged {
                     log_dense_size as u32,
                 ),
             };
-            crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
+            match profile {
+                #[cfg(feature = "zk")]
+                crate::whir::jagged::WhirProfile::ZkShrink => {
+                    let rho: InnerChallenge = challenger.sample_algebra_element();
+                    jagged_rho.set(Some(rho));
+                    let jagged_mask = crate::whir::zk::jagged_mask(
+                        &rounds.last().expect("a main round").precomputed.whir_data,
+                    );
+                    crate::jagged_long::prove_jagged_reduction_hadamard_poly_masked(
+                        hp,
+                        challenger,
+                        Some((&jagged_mask, rho)),
+                    )
+                }
+                _ => crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger),
+            }
         };
 
         let open = |extended_eval_point: Vec<InnerChallenge>, challenger: &mut Challenger| {
             open_whir_rounds::<Challenger, MT, D>(
                 rounds,
                 extended_eval_point,
+                jagged_rho.get().map(|rho| (zk_claims, rho)),
                 challenger,
                 mmcs,
                 dft,
@@ -1186,6 +1265,7 @@ pub mod jagged {
             opened_main,
             challenger,
             crate::whir::jagged::WhirProfile::Core,
+            &[],
         )
     }
 
@@ -1201,16 +1281,8 @@ pub mod jagged {
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
     ) -> bool {
-        // Checked again inside, but the schedule below is only defined at
-        // the production height.
-        if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
-            return false;
-        }
-        let config = crate::whir::jagged::whir_config_for_profile(
-            profile,
-            DEFAULT_LOG_STACKING_HEIGHT as usize,
-        );
         verify_jagged_inner_generic(
             chip_infos,
             r_row_per_chip,
@@ -1219,9 +1291,10 @@ pub mod jagged {
             challenger,
             jagged_mmcs(),
             true,
-            config,
+            profile,
             preceding_rounds,
             opened_main,
+            zk_claims,
         )
     }
 
@@ -1353,9 +1426,10 @@ pub mod jagged {
     }
 
     /// Verifier counterpart of `prove_jagged_rounds_generic`, generic over the
-    /// challenger and the MMCS, under the WHIR schedule `config`. The outer
-    /// (wrap) ring runs it with `OuterChallenger` and `OuterValMmcs`; the inner
-    /// ring through [`verify_jagged_no_observe`] with `JaggedChallenger` and
+    /// challenger and the MMCS, under the opening protocol and WHIR schedule
+    /// of `profile` at the protocol's stacking height. The outer (wrap) ring
+    /// runs it with `OuterChallenger` and `OuterValMmcs`; the inner ring
+    /// through [`verify_jagged_no_observe`] with `JaggedChallenger` and
     /// `JaggedMmcs`.
     ///
     /// `preceding_rounds` are the rounds before the main one, as
@@ -1365,6 +1439,10 @@ pub mod jagged {
     /// with `chip_infos` and `bundle.y_per_chip`, for the cross-bind; required
     /// on this ring as on the inner one.
     #[allow(clippy::too_many_arguments)]
+    ///
+    /// `zk_claims`: on the zk ring, the shard's claims on the mask region
+    /// (the LogUp-GKR's and the zerocheck's, [`crate::zk_mask`]), which the
+    /// WHIR opening binds to the committed cells; empty elsewhere.
     pub fn verify_jagged_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
@@ -1373,9 +1451,10 @@ pub mod jagged {
         challenger: &mut Challenger,
         mmcs: MT,
         skip_commit_observe: bool,
-        config: crate::whir::config::WhirConfig,
+        profile: crate::whir::jagged::WhirProfile,
         preceding_rounds: &[(<MT as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         opened_main: &[Vec<InnerChallenge>],
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
     ) -> bool
     where
         MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -1396,6 +1475,10 @@ pub mod jagged {
         if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
+        let config = crate::whir::jagged::whir_config_for_profile(
+            profile,
+            bundle.commit.log_stacking_height as usize,
+        );
         let whir_proof = &bundle.whir_proof;
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
@@ -1415,16 +1498,24 @@ pub mod jagged {
             tracing::warn!("[jagged verify] cross-bind failed: {why}");
             return false;
         }
-        let red_result = verify_jagged_reduction(
+        let masked = profile.is_zk();
+        if masked == zk_claims.is_empty() {
+            tracing::warn!("[jagged verify] zk mask claims supplied for the wrong ring");
+            return false;
+        }
+        let jagged_rho: Option<InnerChallenge> =
+            masked.then(|| challenger.sample_algebra_element());
+        let red_result = crate::jagged_sumcheck::verify_jagged_reduction_masked(
             &bundle.reduction,
             &packing,
             r_row_per_chip,
             opened_main,
             &z_col,
             z_row,
+            masked,
             challenger,
         );
-        let Some((z_star, q_at_z, _w_at_z)) = red_result else {
+        let Some((z_star, q_at_z, _w_at_z, jagged_residue)) = red_result else {
             tracing::warn!("[jagged verify] jagged sumcheck reduction rejected");
             return false;
         };
@@ -1467,7 +1558,9 @@ pub mod jagged {
                 "stacked_proof": whir_proof,
             })
         });
-        let res = crate::whir::jagged::verify_jagged_whir_rounds::<Challenger, MT>(
+        let masks = jagged_rho.map(|rho| (zk_claims, (rho, jagged_residue)));
+        let res = crate::whir::jagged::verify_whir_rounds_for_profile::<Challenger, MT>(
+            profile,
             mmcs,
             config,
             bundle.commit.log_stacking_height,
@@ -1476,6 +1569,7 @@ pub mod jagged {
             &extended_z_star,
             whir_proof,
             q_at_z_adj,
+            masks,
             challenger,
         );
         if let Err(e) = &res {

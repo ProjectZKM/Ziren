@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use p3_field::{ExtensionField, PrimeField};
 
 use super::extract::{extract_outputs, LogUpGkrOutput};
-use super::first_layer::generate_first_layer;
+use super::first_layer::generate_first_layer_with_rows;
 use super::layer::{GkrCircuitLayer, LayerState, LogupGkrCpuCircuit};
 use super::transition::layer_transition;
 use crate::air::MachineAir;
@@ -48,19 +48,49 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F>,
 {
-    assert!(
-        num_row_variables >= 2,
-        "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
-         num_row_variables=1 produces no terminal EF layer for output extraction"
-    );
-
-    let first = generate_first_layer::<F, EF, A>(
+    build_gkr_circuit_with_rows::<F, EF, A>(
         chips,
         preprocessed_traces,
         shared_trace_mles,
         alpha,
         betas,
         num_row_variables,
+        false,
+    )
+}
+
+/// [`build_gkr_circuit`] over a shard that carries the zk random rows when
+/// `zk_rows` is set (see
+/// [`super::first_layer::generate_first_layer_with_rows`]).
+#[allow(clippy::too_many_arguments)]
+pub fn build_gkr_circuit_with_rows<F, EF, A>(
+    chips: &[&Chip<F, A>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
+    shared_trace_mles: &[PaddedMle<F>],
+    alpha: EF,
+    betas: &[EF],
+    num_row_variables: usize,
+    zk_rows: bool,
+) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+    A: MachineAir<F>,
+{
+    assert!(
+        num_row_variables >= 2,
+        "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
+         num_row_variables=1 produces no terminal EF layer for output extraction"
+    );
+
+    let first = generate_first_layer_with_rows::<F, EF, A>(
+        chips,
+        preprocessed_traces,
+        shared_trace_mles,
+        alpha,
+        betas,
+        num_row_variables,
+        zk_rows,
     );
 
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);

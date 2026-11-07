@@ -160,6 +160,35 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_row: &[InnerChallenge],
     challenger: &mut C,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
+    let (z_star, q_at_z, w_at_z, _) = verify_jagged_reduction_masked(
+        proof,
+        packing,
+        r_row_per_chip,
+        y_per_chip,
+        z_col,
+        z_row,
+        false,
+        challenger,
+    )?;
+    Some((z_star, q_at_z, w_at_z))
+}
+
+/// [`verify_jagged_reduction`] for a reduction that may carry a sumcheck
+/// mask ([`crate::zk_mask`]): with `masked`, the closing identity is not
+/// checked but its residue `claim − q(z*)·w(z*)` is returned as the fourth
+/// value, for the WHIR opening to compare with `ρ·h(z*)`; without, the
+/// residue must be zero and is returned as such.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_jagged_reduction_masked<C: p3_challenger::FieldChallenger<InnerVal>>(
+    proof: &JaggedReductionProof<InnerChallenge>,
+    packing: &JaggedPacking<InnerVal>,
+    r_row_per_chip: &[Vec<InnerChallenge>],
+    y_per_chip: &[Vec<InnerChallenge>],
+    z_col: &[InnerChallenge],
+    z_row: &[InnerChallenge],
+    masked: bool,
+    challenger: &mut C,
+) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge, InnerChallenge)> {
     if proof.rounds.len() != packing.log_dense_size()
         || proof.eval_point.len() != packing.log_dense_size()
         || r_row_per_chip.len() != packing.chip_infos.len()
@@ -287,12 +316,13 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         &z_star_rev,
     );
 
-    if current_claim != proof.q_at_z * w_at_z {
+    let residue = current_claim - proof.q_at_z * w_at_z;
+    if !masked && residue != InnerChallenge::ZERO {
         tracing::debug!("jagged sumcheck final identity failed");
         return None;
     }
 
-    Some((z_star, proof.q_at_z, w_at_z))
+    Some((z_star, proof.q_at_z, w_at_z, residue))
 }
 
 // The jagged/zerocheck closing identity.
@@ -345,6 +375,17 @@ mod closing_identity {
     // Run the REAL production reduction round-trip and return the closing
     // (z_star, w_at_z) plus the BP oracle value at the same point.
     fn run_case(chips: &[(usize, usize)], seed: u64) -> (InnerChallenge, InnerChallenge) {
+        run_case_masked(chips, seed, false)
+    }
+
+    // `run_case`, optionally through the masked prover and verifier with a
+    // pseudo-random mask: the residue the verifier returns must then be
+    // `ρ·h(z*)`.
+    fn run_case_masked(
+        chips: &[(usize, usize)],
+        seed: u64,
+        masked: bool,
+    ) -> (InnerChallenge, InnerChallenge) {
         let mut rng = StdRng::seed_from_u64(seed);
         let traces = build_traces(chips, &mut rng);
         let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> = traces
@@ -424,26 +465,49 @@ mod closing_identity {
                 packing.log_dense_size() as u32,
             ),
         };
-        let proof = crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, &mut prover_ch);
+        let mask_cells: Vec<InnerVal> =
+            (0..crate::zk_mask::mask_cells(2, 4)).map(|_| rand_kb(&mut rng)).collect();
+        let mask = crate::zk_mask::LibraMask::<InnerChallenge>::from_cells(&mask_cells, 2);
+        let rho: Option<InnerChallenge> = masked.then(|| prover_ch.sample_algebra_element());
+        let proof = crate::jagged_long::prove_jagged_reduction_hadamard_poly_masked(
+            hp,
+            &mut prover_ch,
+            rho.map(|rho| (&mask, rho)),
+        );
         let mut verifier_ch = challenger();
         let z_col_v: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| verifier_ch.sample_algebra_element()).collect();
         assert_eq!(z_col, z_col_v, "z_col prover/verifier mismatch");
+        let rho_v: Option<InnerChallenge> = masked.then(|| verifier_ch.sample_algebra_element());
+        assert_eq!(rho, rho_v);
 
-        let (z_star, _q_at_z, w_at_z) = verify_jagged_reduction(
+        let (z_star, _q_at_z, w_at_z, residue) = verify_jagged_reduction_masked(
             &proof,
             &packing,
             &r_row_per_chip,
             &y_per_chip,
             &z_col_v,
             &z_row,
+            masked,
             &mut verifier_ch,
         )
         .expect("reduction must self-verify (internal identity)");
+        assert_eq!(residue, rho.map_or(InnerChallenge::ZERO, |rho| rho * mask.evaluate(&z_star)));
 
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
         let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
         (w_at_z, bp)
+    }
+
+    /// The masked reduction closes on `q(z*)·w(z*) + ρ·h(z*)` and still
+    /// agrees with the branching program on `w(z*)`.
+    #[test]
+    fn masked_reduction_leaves_the_mask_residue() {
+        let cases: &[&[(usize, usize)]] = &[&[(4, 2), (4, 2)], &[(5, 2), (4, 3), (2, 1)]];
+        for (ci, chips) in cases.iter().enumerate() {
+            let (w_at_z, bp) = run_case_masked(chips, 9000 + ci as u64, true);
+            assert_eq!(w_at_z, bp);
+        }
     }
 
     #[test]

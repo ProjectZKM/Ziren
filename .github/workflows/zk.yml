@@ -1,0 +1,37 @@
+name: ZK shrink
+
+on:
+  pull_request:
+    paths:
+      - 'crates/pcs/**'
+      - 'crates/prover/**'
+      - 'Cargo.*'
+      - '.github/workflows/zk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zk:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/zk-target
+      PYTHONDONTWRITEBYTECODE: '1'
+      GOPROXY: https://proxy.golang.org,https://goproxy.cn,direct
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-17
+      - run: cargo test --locked -p zkm-pcs --features zk --lib zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib whir::zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib shard_level::zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib row_gkr::zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib zerocheck_poly::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib zk_mask::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib sumcheck_poly::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib zk_budget::
+      - run: cargo test --locked -p zkm-prover --features zk --lib shrink::zk::tests::
+      - run: cargo check --locked -p zkm-prover --lib
+      - run: cargo check --locked -p zkm-prover --features zk --lib --tests
