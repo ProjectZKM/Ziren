@@ -130,6 +130,8 @@ pub use zkm_pcs::shrink::{Blake3Suite, CompactShrink, Keccak256Suite, Sha256Suit
 pub mod shrink;
 #[cfg(feature = "compact-shrink")]
 pub use shrink::{compact_shrink_prover, CompactShrinkStrategy};
+#[cfg(feature = "zk")]
+pub use shrink::{zk_shrink_prover, ZkShrink, ZkShrinkSC};
 pub use shrink::{NativeShrink, ShrinkStrategy};
 
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<

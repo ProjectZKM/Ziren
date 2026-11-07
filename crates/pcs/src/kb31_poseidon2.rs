@@ -167,6 +167,13 @@ pub mod koala_bear_poseidon2 {
     /// ([`crate::whir::jagged::WhirProfile::Shrink`]): the shrink proof.
     pub const WHIR_PROFILE_SHRINK: u8 = 2;
 
+    /// The `P` of the ring that proves the zero-knowledge shrink
+    /// ([`crate::zk`], feature `zk`).  It proves under the shrink schedule
+    /// today; the ring is a distinct type so a zk-shrink proof and key never
+    /// pass for a native shrink proof and key, and so the ZK encoding can
+    /// change this ring alone.
+    pub const WHIR_PROFILE_ZK_SHRINK: u8 = 3;
+
     /// The inner ring: KoalaBear, its quartic extension, the Poseidon2
     /// sponge, and the jagged-WHIR PCS.  `P` selects the WHIR schedule the
     /// ring commits, opens and verifies under; the hash, the field and the
@@ -407,7 +414,7 @@ pub mod koala_bear_poseidon2 {
     impl<const P: u8> crate::config::WhirRing for KoalaBearPoseidon2Ring<P> {
         const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
             crate::whir::jagged::WhirProfile::Compress
-        } else if P == WHIR_PROFILE_SHRINK {
+        } else if P == WHIR_PROFILE_SHRINK || P == WHIR_PROFILE_ZK_SHRINK {
             crate::whir::jagged::WhirProfile::Shrink
         } else {
             crate::whir::jagged::WhirProfile::Core

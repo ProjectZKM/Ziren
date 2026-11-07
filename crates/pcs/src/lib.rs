@@ -47,6 +47,8 @@ mod verifier;
 pub mod whir;
 mod word;
 pub mod zerocheck_prover;
+#[cfg(feature = "zk")]
+pub mod zk;
 
 pub use air::*;
 pub use chip::*;
