@@ -204,10 +204,135 @@ mod tests {
         }
     }
 
+    /// The shipped zk shrink keeps every zero-knowledge budget of
+    /// `zkm_pcs::zk_budget` for the shrink machine's shard shape, and the
+    /// error terms it adds stay far below the schedule's soundness.
+    #[test]
+    fn zk_shrink_keeps_the_zero_knowledge_budgets() {
+        use zkm_pcs::shard_level::zk::num_interaction_variables;
+        use zkm_pcs::zk_budget::{ZkBudget, ZkErrors, EF_DIM};
+        use zkm_pcs::zk_mask::ZkCellLayout;
+        let machine = ShrinkAir::<KoalaBear>::shrink_machine(ZkShrinkSC::compressed());
+        let chips: Vec<_> = machine.chips().iter().collect();
+        let interaction_variables = num_interaction_variables(&chips);
+        let lsh = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let layout = ZkCellLayout::for_shard(
+            EF_DIM,
+            ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count(),
+            interaction_variables,
+        );
+        let budget = ZkBudget::for_schedule(
+            &zkm_pcs::whir::jagged::zk_shrink_whir_config(lsh),
+            lsh,
+            &layout,
+        );
+        assert_eq!(budget.violations(), Vec::<String>::new(), "{budget}");
+        let errors = ZkErrors::new(&budget, &layout, interaction_variables);
+        assert!(errors.soundness_bits >= 110, "{errors}");
+        assert!(errors.simulation_bits >= 150, "{errors}");
+    }
+
     fn fib_stdin(n: u32) -> ZKMStdin {
         let mut stdin = ZKMStdin::new();
         stdin.write(&n);
         stdin
+    }
+
+    /// Every scalar of a proof, in serialisation order, as text, with the
+    /// path that reaches it.
+    fn scalars(value: &serde_json::Value, path: &str, out: &mut Vec<(String, String)>) {
+        match value {
+            serde_json::Value::Array(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    scalars(v, &format!("{path}[{i}]"), out);
+                }
+            }
+            serde_json::Value::Object(fields) => {
+                for (k, v) in fields {
+                    scalars(v, &format!("{path}.{k}"), out);
+                }
+            }
+            other => out.push((path.to_string(), other.to_string())),
+        }
+    }
+
+    /// Two witnesses of one statement: Fibonacci inputs 10 and 10 + 7918
+    /// (the period of the pair `(a, b)` modulo 7919) commit the same values,
+    /// so their compress roots prove the same zk-shrink statement from
+    /// different traces.  A scalar of the proof that is equal across two
+    /// proofs of one witness but differs across the witnesses would
+    /// distinguish them; there is none.  Scalars below `2^20` (shape
+    /// counts, indices, bytes) are left out of the comparison, which a
+    /// uniform field element falls under with probability `2^-11`, and so
+    /// are the authentication paths of the preprocessed tree: that tree is
+    /// public and the same in every proof, and which of its sibling digests
+    /// a proof carries at a query slot depends on the query index alone.
+    #[test]
+    #[ignore]
+    fn test_e2e_zk_shrink_hides_the_witness() -> Result<()> {
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let mut proofs = Vec::new();
+        for n in [10u32, 10 + 7918, 10] {
+            let core_proof = prover.prove_core(
+                &pk_d,
+                program.clone(),
+                &fib_stdin(n),
+                opts,
+                ZKMContext::default(),
+            )?;
+            let public_values = core_proof.public_values.clone();
+            let compressed = prover.compress(&vk, core_proof, vec![], opts)?;
+            let zk = prover.shrink_with::<ZkShrink>(compressed, opts)?;
+            proofs.push((zk, public_values));
+        }
+        let (first, public_values) = &proofs[0];
+        for (zk, pv) in &proofs {
+            assert_eq!(pv.hash(), public_values.hash(), "one statement");
+            assert_eq!(zk.vk.hash_koalabear(), first.vk.hash_koalabear(), "one key");
+            prover.verify_zk_shrink(zk, &vk, &first.vk, public_values)?;
+        }
+        let values: Vec<Vec<(String, String)>> = proofs
+            .iter()
+            .map(|(zk, _)| {
+                let mut out = Vec::new();
+                scalars(&serde_json::to_value(&zk.proof)?, "proof", &mut out);
+                Ok(out)
+            })
+            .collect::<Result<_>>()?;
+        assert_eq!(values[0].len(), values[1].len());
+        assert_eq!(values[0].len(), values[2].len());
+        let large = |s: &str| s.parse::<u64>().is_ok_and(|v| v >= 1 << 20);
+        let preprocessed_path = |path: &str| -> bool {
+            let Some(rest) = path.split("round_query_openings[0].leaves[").nth(1) else {
+                return false;
+            };
+            let (index, tail) = rest.split_once(']').expect("a leaf index");
+            index.parse::<usize>().expect("a leaf index") % 2 == 0 && tail.starts_with(".proof[")
+        };
+        let equal_at = |a: &[(String, String)], b: &[(String, String)]| -> Vec<usize> {
+            (0..a.len())
+                .filter(|&i| a[i].1 == b[i].1 && large(&a[i].1) && !preprocessed_path(&a[i].0))
+                .collect()
+        };
+        let same_witness = equal_at(&values[0], &values[2]);
+        let other_witness = equal_at(&values[0], &values[1]);
+        let leaks: Vec<&(String, String)> = same_witness
+            .iter()
+            .filter(|i| !other_witness.contains(i))
+            .map(|&i| &values[0][i])
+            .collect();
+        assert!(
+            leaks.is_empty(),
+            "{} scalars equal across proofs of one witness but not across witnesses: {:?}",
+            leaks.len(),
+            leaks.iter().take(12).collect::<Vec<_>>()
+        );
+        assert!(same_witness.len() * 4 < values[0].len(), "the proof is randomised");
+        Ok(())
     }
 
     /// One zk shrink proof of the Fibonacci compress root beside the native

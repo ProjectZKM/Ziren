@@ -1,7 +1,7 @@
 \section{Security}
 \label{sec:security}
 
-This section collects the security argument. It states the relation the block proof is an argument for (\S\ref{sec:security-relation}), the concrete soundness of each proof (\S\ref{sec:iopp-soundness}), how those levels compose into a statement about the non-interactive block proof (\S\ref{sec:iopp-layers}), how the verifying keys tie that proof to the advertised machine (\S\ref{sec:security-binding}), the one assumption that is not about hashing (\S\ref{sec:air-digest-security}), what makes the satisfying trace unique (\S\ref{sec:air-unique}), why it is the MIPS32 execution, with the determinism of every extracted chip machine-checked in \Lean{} (\S\ref{sec:verification}), and what changes against quantum adversaries (\S\ref{sec:pq}). Every hypothesis the end-to-end statement carries is named in this section, and the ones that remain open are listed together in \S\ref{sec:security-relation}.
+This section collects the security argument. It states the relation the block proof is an argument for (\S\ref{sec:security-relation}), the concrete soundness of each proof (\S\ref{sec:iopp-soundness}), how those levels compose into a statement about the non-interactive block proof (\S\ref{sec:iopp-layers}), what the optional zero-knowledge shrink hides and at what cost (\S\ref{sec:zk}), how the verifying keys tie that proof to the advertised machine (\S\ref{sec:security-binding}), the one assumption that is not about hashing (\S\ref{sec:air-digest-security}), what makes the satisfying trace unique (\S\ref{sec:air-unique}), why it is the MIPS32 execution, with the determinism of every extracted chip machine-checked in \Lean{} (\S\ref{sec:verification}), and what changes against quantum adversaries (\S\ref{sec:pq}). Every hypothesis the end-to-end statement carries is named in this section, and the ones that remain open are listed together in \S\ref{sec:security-relation}.
 
 \subsection{The proved relation}
 \label{sec:security-relation}
@@ -68,6 +68,48 @@ Out-of-domain samples & 213.00 & 200.00 \\
 \paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage has more than 100 bits of interactive soundness; the union bound for one core-schedule proof and one compress-schedule proof gives 99.91 bits; the folding rounds are the largest error group in both schedules, and only the compress schedule grinds them (Table~\ref{tab:whir-schedule}). We call $-\log_2 \sum_i \varepsilon_i$, summed over every node $i$ of a block's recursion tree, the block's \emph{composite security}; when all nodes have the same error bound, this is $\log_2$ of the node count below that common per-proof level; for different schedules we sum their individual errors. For an illustrative tree of 150 proofs, comprising 149 proofs under the core schedule and one root under the compress schedule, it is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms.
 
 Applying the $Q$ factor of Theorem~\ref{thm:composition} to these quantified interactive terms gives $93.51 - \log_2 Q$ bits, or 53.5 bits at $Q = 2^{40}$. This calculation excludes the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the digest term of Assumption~\ref{ass:digest}, and the theorem's separate hash-collision term. It therefore does not give a numerical bound on the full non-interactive proof's security.
+
+\subsection{Zero knowledge}
+\label{sec:zk}
+
+The proofs above are succinct but not hiding (\S\ref{sec:intro}): the opened values, the sumcheck messages and the queried codeword entries are functions of the trace. An optional build of the prover (the \texttt{zk} feature, off by default, which leaves every default proof and key byte-identical) adds a \emph{zero-knowledge shrink}: one terminal proof after the recursion root, on the shrink machine, whose statement is the application key digest, the committed-values digest, exit code zero and the recursion root, and whose witness is the root proof. The verifier checks it natively against a trusted key. The shard shape is fixed by the program, so the heights and column counts the proof carries depend on nothing of the execution.
+
+\paragraph{Construction.} The zk shrink is the shard protocol of Section~\ref{sec:argument} with four additions, each a committed source of randomness drawn before the challenge it meets:
+\begin{enumerate}
+  \item \emph{Random rows.} Every main trace commits eight uniformly random rows past its real ones. They come in pairs with equal lookup values and opposite multiplicities, so their fractions cancel in the \LogUp{} argument for every challenge; the zerocheck weighs the constraints by the equality table cut at the real height, so no constraint sees them. Each column is opened at two points, the \LogUp{} anchor and the zerocheck point, and has four free pair sums, so both openings carry a uniform summand.
+  \item \emph{Hiding commitment.} Every stripe of the jagged layer is padded to one more variable with uniform cells, a uniform stripe $R$ joins the batch, and the per-stripe evaluations the opening would send are replaced by one claim $\sum_j \lambda^j e_j$ that $R$ randomises. Every leaf of the main round's Merkle tree and of every folded oracle's tree hashes eight uniform cells (247 bits) next to its row.
+  \item \emph{Masked sumchecks.} The zerocheck, the jagged reduction and every \LogUp{}-GKR layer run on the prover's polynomial plus $\rho\, g$, with $g(\bm x) = \sum_i g_i(x_i)$, $g_i(0) + g_i(1) = 0$, committed in the top $2^{14}$ cells of $R$ before $\rho$ is drawn~\citep{libra}. The children a \LogUp{} layer sends carry an offset that vanishes on the cube, and the circuit output is hidden behind two merge layers over a virtual slice of cancelling fractions, whose top layer is two simulatable fractions carrying the public-value balance.
+  \item \emph{Cell claims.} Each value the verifier learns of $R$'s mask cells is a sparse linear functional of them, batched into the \WHIR{} claim with a fresh power of the batching challenge and checked as Lagrange constraints of the final round.
+\end{enumerate}
+
+\paragraph{Budgets.} Each source of randomness hides as many values as it has cells, so the construction is hiding only while what the verifier learns stays within what was committed. Table~\ref{tab:zk-budget} lists the four budgets with the figures of the measured instantiation; a census program kept with the source emits them from the schedule and the shrink machine, and a test asserts them. For the data stripes the bound is exact: the opened entries of a stripe are evaluations of $x^{2^{21}} r(x)$ at distinct domain points, which are independent uniform values while at most $2^{21}$ are opened. For $R$, every other value the verifier learns is a linear functional of the batched polynomial $G = \sum_j \gamma_j S_j + \gamma_R R$, which $R$ makes uniform; the table counts them.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The zero-knowledge budgets of the zk shrink at log stacking height 21, as the census emits them. A budget holds when the learned count does not exceed the committed one.}
+\label{tab:zk-budget}
+\begin{tabular}{lrr}
+\toprule
+Randomness & learned & committed \\
+\midrule
+Padding of a data stripe (entries opened by the round-0 queries) & 992 & $2^{21}$ \\
+The stripe $R$ (functionals of $G$, its rows and its mask cells) & 33\,959 & $2^{22}$ \\
+Mask cells of $R$ (the shrink shard's layout, 29 masked \LogUp{} rounds) & 9\,524 & $2^{14}$ \\
+Random rows (openings of a column, free pair sums) & 2 & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{theorem}[Zero knowledge of the zk shrink]
+\label{thm:zk}
+Run the zk shrink with a schedule and a shard shape for which the budgets of Table~\ref{tab:zk-budget} hold, and suppose the functionals of $G$ the verifier learns are linearly independent. Then the interactive protocol is honest-verifier zero knowledge: a simulator given the statement alone outputs a transcript distributed as an honest prover's. In the random-oracle model, its Fiat--Shamir compilation is zero knowledge with simulation error at most $Q\, N / 2^{247}$ against an adversary making $Q$ oracle queries, where $N = $ 2\,396\,160 is the number of salted leaves. The masks add at most 1002$/|\EF| < 2^{-113}$ to the shard's soundness error, and the opening's error is that of the shrink schedule over one more variable (Table~\ref{tab:whir-schedule}).
+\end{theorem}
+\begin{proof}[Proof sketch]
+The simulator draws the verifier's challenges, then fills the transcript backwards. The two openings of each column are uniform by the random rows, so it samples them. Each masked sumcheck's messages are uniform in the affine space its round identities leave, because the mask's fresh coefficients enter every non-constant coefficient and the chain fixes the constant one; the simulator samples the messages and sets the mask's residue to whatever the final check needs. The \LogUp{} children are uniform given the next claim by their offsets, and the output's top layer is two uniform fractions with the required balance. The \WHIR{} transcript on $G$ is uniform given the claim while the learned functionals are independent and fewer than $R$'s cells; the queried stripe rows are uniform by the padding argument. Independence of the stripe functionals is the Vandermonde argument above; independence of the folded functionals is the hypothesis of the statement. The compiled proof reveals, beyond the transcript, the sibling digests of the authentication paths; each is the oracle's output on a preimage holding a 247-bit salt, and the simulator programs the oracle, failing only when a query hits such a preimage, which the union bound charges at $Q N / 2^{247}$. Soundness: a mask whose cube sum is not zero shifts the claimed sum by $\rho$ times that sum, caught with probability $1 - 1/|\EF|$ once $\rho$ is drawn after the commitment; the masked layer rounds have degree five instead of three, the merge rounds are new, and the cell claims batch into one claim with a fresh challenge power each; the census counts these in units of $1/|\EF|$.
+\end{proof}
+
+What the theorem leaves open is the independence hypothesis on the folded functionals, which the count of Table~\ref{tab:zk-budget} makes a statement about 33\,959 functionals in a space of dimension $2^{22}$ but does not discharge, and the distribution of the trusted key, which the verifier pins as it pins the wrap key (\S\ref{sec:security-binding}). On one CPU, the zk shrink of a Fibonacci root proves in 3.75\,s, is 716\,705 bytes and verifies in 0.51\,s; the native shrink of the same root proves in 11.5\,s and is 845\,701 bytes.
 
 \subsection{Security in three layers}
 \label{sec:iopp-layers}

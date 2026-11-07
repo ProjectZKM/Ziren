@@ -23,7 +23,7 @@ and a cost estimate before the measurements.
 | `046_ext` | multiplication, division, bit manipulation and system calls |
 | `05_pcs` | dense packing, stacking, jagged reduction and branching program |
 | `06_iopp` | WHIR protocol, interleaved commitment, schedule, soundness, proof size |
-| `065_security` | security relation, soundness accounting, compose and root checks, verifying-key binding and cross-shard digest |
+| `065_security` | security relation, soundness accounting, the optional zero-knowledge shrink and its budgets, compose and root checks, verifying-key binding and cross-shard digest |
 | `075_verification` | trusted base, conformance, extracted determinism, defects |
 | `08_performance` | per-instruction cost estimate, then the measurements |
 | `09_conclusion` | conclusion |

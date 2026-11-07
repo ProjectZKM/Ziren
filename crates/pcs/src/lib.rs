@@ -49,6 +49,8 @@ mod word;
 pub mod zerocheck_prover;
 #[cfg(feature = "zk")]
 pub mod zk;
+#[cfg(feature = "zk")]
+pub mod zk_budget;
 pub mod zk_mask;
 
 pub use air::*;

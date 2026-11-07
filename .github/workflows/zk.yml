@@ -31,6 +31,7 @@ jobs:
       - run: cargo test --locked -p zkm-pcs --features zk --lib zerocheck_poly::
       - run: cargo test --locked -p zkm-pcs --features zk --lib zk_mask::
       - run: cargo test --locked -p zkm-pcs --features zk --lib sumcheck_poly::
-      - run: cargo test --locked -p zkm-prover --features zk --lib shrink::zk::tests::every_shrink_chip_admits_hidden_random_rows
+      - run: cargo test --locked -p zkm-pcs --features zk --lib zk_budget::
+      - run: cargo test --locked -p zkm-prover --features zk --lib shrink::zk::tests::
       - run: cargo check --locked -p zkm-prover --lib
       - run: cargo check --locked -p zkm-prover --features zk --lib --tests

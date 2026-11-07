@@ -29,7 +29,7 @@ Referring to the above diagram, Ziren follows a structured pipeline composed of 
    The trace is the data the proof is about. Each row of a chip's table records one operation, and the constraints of every chip check that the rows follow the semantics of the MIPS instructions.
 
 6. **Prover**
-   The prover takes the execution trace and generates a zero-knowledge proof that the program ran from its entry point to a halt and produced the committed public values, without revealing private inputs.
+   The prover takes the execution trace and generates a succinct proof that the program ran from its entry point to a halt and produced the committed public values. The proof is far smaller than the trace and verifies in milliseconds, but it is not hiding: its openings and sumcheck messages depend on the trace. The optional `zk` build feature adds a zero-knowledge shrink proof of the same statement, whose transcript reveals nothing of the execution beyond the public values.
 
 7. **Verifier**
    Proofs can be verified natively with the `zkm-verifier` crate (also in `no_std` and WASM builds), or on EVM-compatible chains with the Solidity verifier contracts shipped with each release.

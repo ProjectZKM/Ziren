@@ -33,9 +33,12 @@
 //!   its own jagged evaluation claim and `eq(bp, j) = 0` for `R`.  A wrong
 //!   `v` or `c` survives the affine check in `μ` with probability `1/|EF|`,
 //!   on top of the batching error the `λ` powers already carry.
-//! * **salted leaves** — the main round's Merkle tree hashes one extra
-//!   matrix of `ZK_SALT_WIDTH` uniformly random cells into every leaf, so the
-//!   sibling digests of an opened path reveal nothing of the rows they hash.
+//! * **salted leaves** — the main round's Merkle tree and the tree of every
+//!   folded oracle hash one extra matrix of `ZK_SALT_WIDTH` uniformly random
+//!   cells into every leaf, so the sibling digests of an opened path are
+//!   random-oracle outputs on preimages with [`crate::zk_budget`]'s
+//!   `salt_bits` of entropy and reveal nothing of the rows they hash.  The
+//!   preprocessed round is public and stays unsalted.
 //!
 //! * **the mask region** — the top [`ZK_MASK_CELLS`] cells of `R` (fewer on
 //!   a short stripe, [`region_cells`]) hold every mask of the shard, laid out
@@ -499,6 +502,7 @@ where
     };
     let _batch: EF = challenger.sample_algebra_element();
     let mut folder = WhirFolder { f_vec: virt, weight, claimed_sum: claim };
+    let mut salt_rng = StdRng::from_entropy();
 
     let mut prev_domain_log = (n - ff) + config.starting_log_inv_rate;
     let mut prev_tree: Option<MT::ProverData<RowMajorMatrix<F>>> = None;
@@ -539,7 +543,11 @@ where
             })
             .collect();
         let leaves = RowMajorMatrix::new(base_vals, width * EF_DIM);
-        let (commitment, this_tree) = prover.mmcs.commit(alloc::vec![leaves]);
+        let salt = RowMajorMatrix::new(
+            random_cells(&mut salt_rng, leaves.height() * ZK_SALT_WIDTH),
+            ZK_SALT_WIDTH,
+        );
+        let (commitment, this_tree) = prover.mmcs.commit(alloc::vec![leaves, salt]);
         challenger.observe(commitment.clone());
         round_commitments.push(commitment);
 
@@ -837,13 +845,16 @@ where
                        width: usize,
                        height_log: usize|
      -> Result<Vec<EF>, WhirVerifierError> {
-        if leaf.values.len() != 1 || leaf.values[0].len() != width * EF_DIM {
+        if leaf.values.len() != 2
+            || leaf.values[0].len() != width * EF_DIM
+            || leaf.values[1].len() != ZK_SALT_WIDTH
+        {
             return Err(WhirVerifierError::IncorrectShape("folded row".into()));
         }
-        let dims = alloc::vec![p3_matrix::Dimensions {
-            width: width * EF_DIM,
-            height: 1usize << height_log,
-        }];
+        let dims = alloc::vec![
+            p3_matrix::Dimensions { width: width * EF_DIM, height: 1usize << height_log },
+            p3_matrix::Dimensions { width: ZK_SALT_WIDTH, height: 1usize << height_log },
+        ];
         let opened =
             p3_commit::BatchOpeningRef { opened_values: &leaf.values, opening_proof: &leaf.proof };
         mmcs.verify_batch(commitment, &dims, idx, opened)
@@ -1325,6 +1336,18 @@ mod tests {
         let mut bad = proof.clone();
         bad.whir_proof.round_query_openings[0].leaves[1].values.pop();
         assert!(verify(&inst, &bad, inst.claim).is_err());
+
+        for r in 1..proof.whir_proof.round_query_openings.len() {
+            let leaf = &proof.whir_proof.round_query_openings[r].leaves[0];
+            assert_eq!(leaf.values.len(), 2, "folded round {r}: codeword row and salt");
+            assert_eq!(leaf.values[1].len(), ZK_SALT_WIDTH);
+            let mut bad = proof.clone();
+            bad.whir_proof.round_query_openings[r].leaves[0].values[1][0] += F::ONE;
+            assert!(verify(&inst, &bad, inst.claim).is_err());
+            let mut bad = proof.clone();
+            bad.whir_proof.round_query_openings[r].leaves[0].values.pop();
+            assert!(verify(&inst, &bad, inst.claim).is_err());
+        }
 
         let mut bad = proof.clone();
         bad.whir_proof.final_poly[0] += EF::ONE;
