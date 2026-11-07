@@ -630,8 +630,6 @@ where
         }
 
         let mmcs = <SC as crate::WhirRing>::whir_mmcs();
-        let config =
-            <SC as crate::WhirRing>::whir_config(bundle.commit.log_stacking_height as usize);
         let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::WhirRing>::WhirMmcs>(
             &chip_infos,
             &r_row_per_chip,
@@ -640,7 +638,7 @@ where
             challenger,
             mmcs,
             true,
-            config,
+            <SC as crate::WhirRing>::WHIR_PROFILE,
             &bundle
                 .preceding_commits
                 .iter()

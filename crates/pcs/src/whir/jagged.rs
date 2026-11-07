@@ -143,6 +143,16 @@ pub fn shrink_whir_config(lsh: usize) -> WhirConfig {
     core_schedule(lsh, SHRINK_START_LOG_INV_RATE)
 }
 
+/// The shrink schedule of the zk shrink ring at the jagged stacking height
+/// `lsh`: [`shrink_whir_config`] over stripes of `lsh + ZK_PAD_VARS`
+/// variables, the width the zk opening commits them at.  At the production
+/// height the first oracle is `2^(22 + 2)` points, the whole two-adic
+/// subgroup of KoalaBear.
+#[cfg(feature = "zk")]
+pub fn zk_shrink_whir_config(lsh: usize) -> WhirConfig {
+    core_schedule(lsh + crate::whir::zk::ZK_PAD_VARS, SHRINK_START_LOG_INV_RATE)
+}
+
 fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
     let mut config = core_whir_config_without_batch_grind(lsh, start);
     config.batch_pow_bits = whir_batch_grinding_bits();
@@ -288,6 +298,11 @@ pub enum WhirProfile {
     /// Size-oriented shrink schedule; hash selection belongs to the suite.
     #[cfg(feature = "compact-shrink")]
     CompactShrink,
+    /// The zk shrink ring's schedule: the shrink schedule over stripes one
+    /// variable wider, which is where the zk opening keeps its random
+    /// padding ([`zk_shrink_whir_config`], [`crate::whir::zk`]).
+    #[cfg(feature = "zk")]
+    ZkShrink,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -299,6 +314,8 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
         WhirProfile::Wrap => wrap_whir_config(lsh),
         #[cfg(feature = "compact-shrink")]
         WhirProfile::CompactShrink => super::compact_params::compact_whir_config(lsh),
+        #[cfg(feature = "zk")]
+        WhirProfile::ZkShrink => zk_shrink_whir_config(lsh),
     }
 }
 
@@ -598,7 +615,7 @@ fn size_tuned_whir_config_for_target(
 /// width-1 form is the one the round-0 engine and the device upload read
 /// (one stripe per `Arc<Mle>`, each `2^log_stacking_height` values), so it
 /// is kept as the committed representation.
-fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<JaggedVal>>> {
+pub(crate) fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<JaggedVal>>> {
     use p3_maybe_rayon::prelude::*;
     let mut polys = Vec::new();
     for stripe in stripes {
@@ -759,6 +776,58 @@ where
     let stack_point: Vec<JaggedChallenge> = eval_point[..log_stacking_height as usize].to_vec();
     let stacked: Vec<&_> = rounds.iter().map(|r| &r.stacked_data).collect();
     prover.prove_trusted_evaluation_with_engine(ef_dft, stack_point, &stacked, challenger, engine)
+}
+
+/// [`verify_jagged_whir_rounds`] under the opening protocol of `profile`:
+/// the zk shrink profile verifies the zk opening ([`crate::whir::zk`]),
+/// every other profile the plain stacked one.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_whir_rounds_for_profile<Challenger, MT>(
+    profile: WhirProfile,
+    mmcs: MT,
+    config: WhirConfig,
+    log_stacking_height: u32,
+    commitments: &[<MT as Mmcs<JaggedVal>>::Commitment],
+    round_areas: &[usize],
+    point: &[JaggedChallenge],
+    proof: &StackedWhirProof<JaggedVal, JaggedChallenge, MT>,
+    evaluation_claim: JaggedChallenge,
+    challenger: &mut Challenger,
+) -> Result<(), WhirVerifierError>
+where
+    MT: Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    Challenger: FieldChallenger<JaggedVal>
+        + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
+        + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
+        + 'static,
+{
+    match profile {
+        #[cfg(feature = "zk")]
+        WhirProfile::ZkShrink => crate::whir::zk::verify_zk_whir_rounds::<Challenger, MT>(
+            mmcs,
+            config,
+            log_stacking_height,
+            commitments,
+            round_areas,
+            point,
+            proof,
+            evaluation_claim,
+            challenger,
+        ),
+        _ => verify_jagged_whir_rounds::<Challenger, MT>(
+            mmcs,
+            config,
+            log_stacking_height,
+            commitments,
+            round_areas,
+            point,
+            proof,
+            evaluation_claim,
+            challenger,
+        ),
+    }
 }
 
 /// Verify a jagged-WHIR batched open: bind the claim by interpolating the

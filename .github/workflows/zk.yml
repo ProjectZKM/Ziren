@@ -25,5 +25,6 @@ jobs:
         with:
           toolchain: nightly-2026-09-17
       - run: cargo test --locked -p zkm-pcs --features zk --lib zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib whir::zk::
       - run: cargo check --locked -p zkm-prover --lib
       - run: cargo check --locked -p zkm-prover --features zk --lib --tests

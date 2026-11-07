@@ -168,11 +168,23 @@ pub mod koala_bear_poseidon2 {
     pub const WHIR_PROFILE_SHRINK: u8 = 2;
 
     /// The `P` of the ring that proves the zero-knowledge shrink
-    /// ([`crate::zk`], feature `zk`).  It proves under the shrink schedule
-    /// today; the ring is a distinct type so a zk-shrink proof and key never
-    /// pass for a native shrink proof and key, and so the ZK encoding can
-    /// change this ring alone.
+    /// ([`crate::zk`], feature `zk`): the shrink schedule over the zk
+    /// opening ([`crate::whir::jagged::WhirProfile::ZkShrink`]).  Without
+    /// the feature nothing proves on this ring and it reads as the shrink
+    /// ring's schedule.
     pub const WHIR_PROFILE_ZK_SHRINK: u8 = 3;
+
+    /// The schedule of [`WHIR_PROFILE_ZK_SHRINK`].
+    #[cfg(feature = "zk")]
+    const fn zk_shrink_profile() -> crate::whir::jagged::WhirProfile {
+        crate::whir::jagged::WhirProfile::ZkShrink
+    }
+
+    /// The schedule of [`WHIR_PROFILE_ZK_SHRINK`] without the feature.
+    #[cfg(not(feature = "zk"))]
+    const fn zk_shrink_profile() -> crate::whir::jagged::WhirProfile {
+        crate::whir::jagged::WhirProfile::Shrink
+    }
 
     /// The inner ring: KoalaBear, its quartic extension, the Poseidon2
     /// sponge, and the jagged-WHIR PCS.  `P` selects the WHIR schedule the
@@ -414,8 +426,10 @@ pub mod koala_bear_poseidon2 {
     impl<const P: u8> crate::config::WhirRing for KoalaBearPoseidon2Ring<P> {
         const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
             crate::whir::jagged::WhirProfile::Compress
-        } else if P == WHIR_PROFILE_SHRINK || P == WHIR_PROFILE_ZK_SHRINK {
+        } else if P == WHIR_PROFILE_SHRINK {
             crate::whir::jagged::WhirProfile::Shrink
+        } else if P == WHIR_PROFILE_ZK_SHRINK {
+            zk_shrink_profile()
         } else {
             crate::whir::jagged::WhirProfile::Core
         };
@@ -439,7 +453,33 @@ pub mod koala_bear_poseidon2 {
         }
 
         // `commit_multilinears` — the ring commit — is the trait DEFAULT
-        // (this ring's `whir_mmcs()` and `WHIR_PROFILE` are what it reads).
+        // (this ring's `whir_mmcs()` and `WHIR_PROFILE` are what it reads),
+        // except on the zk shrink ring, which pads its rounds and randomises
+        // its main round (`crate::whir::zk`).
+
+        #[cfg(feature = "zk")]
+        fn commit_multilinears(
+            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
+            pin: Option<crate::jagged::AreaPin>,
+        ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
+            if P == WHIR_PROFILE_ZK_SHRINK {
+                crate::whir::zk::commit_multilinears_zk::<Self>(chip_traces, pin, false)
+            } else {
+                crate::config::commit_multilinears_default::<Self>(chip_traces, pin)
+            }
+        }
+
+        #[cfg(feature = "zk")]
+        fn commit_main_multilinears(
+            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
+            pin: Option<crate::jagged::AreaPin>,
+        ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
+            if P == WHIR_PROFILE_ZK_SHRINK {
+                crate::whir::zk::commit_multilinears_zk::<Self>(chip_traces, pin, true)
+            } else {
+                crate::config::commit_multilinears_default::<Self>(chip_traces, pin)
+            }
+        }
 
         /// Ring-native jagged WHIR open.  `Self::WhirMmcs == JaggedMmcs` and
         /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared

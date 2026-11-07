@@ -816,9 +816,7 @@ mod tests {
                 &mut challenger,
                 keccak_mmcs(),
                 true,
-                <KoalaBearKeccak as WhirRing>::whir_config(
-                    bundle.commit.log_stacking_height as usize,
-                ),
+                <KoalaBearKeccak as WhirRing>::WHIR_PROFILE,
                 &[(prep_root.clone(), prep.prover_data.area)],
                 opened,
             )

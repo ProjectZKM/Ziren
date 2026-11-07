@@ -6,9 +6,11 @@
 //! statement fields and nothing of the execution beyond them, and
 //! [`ZKMProver::verify_zk_shrink`] checks it against a trusted key.
 //!
-//! Phase 0 (plumbing): the shard prover is today's non-hiding prover, so the
-//! proof is not yet zero-knowledge; this stage fixes the API, the proof type
-//! and the measurement that the later phases keep.
+//! The ring opens its commitments under the zero-knowledge stacked WHIR
+//! (`zkm_pcs::whir::zk`): the opening reveals nothing of the committed
+//! traces, and two proofs of one root differ in every opened value.  The
+//! zerocheck and LogUp openings of the trace columns are not masked yet,
+//! which the later phases add on this same ring.
 
 use std::borrow::Borrow;
 use std::sync::Arc;
@@ -181,9 +183,10 @@ mod tests {
         stdin
     }
 
-    /// Phase-0 measurement: one zk shrink proof of the Fibonacci compress
-    /// root beside the native shrink of the same root, timed and sized
-    /// (`ZIREN_ZK_REPORT=<path>` writes the numbers as JSON).
+    /// One zk shrink proof of the Fibonacci compress root beside the native
+    /// shrink of the same root, timed and sized (`ZIREN_ZK_REPORT=<path>`
+    /// writes the numbers as JSON); a second zk proof of the same root
+    /// shares its key and public values and nothing else.
     #[test]
     #[ignore]
     fn test_e2e_zk_shrink_fibonacci() -> Result<()> {
@@ -218,6 +221,13 @@ mod tests {
         let again = prover.shrink_with::<ZkShrink>(compressed, opts)?;
         assert_eq!(again.vk.hash_koalabear(), zk.vk.hash_koalabear());
         assert_ne!(zk.vk.hash_koalabear(), native.vk.hash_koalabear());
+        assert_eq!(again.proof.public_values, zk.proof.public_values);
+        assert_ne!(
+            bincode::serialize(&again.proof)?,
+            bincode::serialize(&zk.proof)?,
+            "a zk shrink proof is randomised"
+        );
+        prover.verify_zk_shrink(&again, &vk, &zk.vk, &public_values)?;
 
         let mut wrong = public_values.clone();
         wrong.write(&1u8);
@@ -229,7 +239,7 @@ mod tests {
             "native_shrink": {"secs": native_secs, "bytes": native_bytes, "proof_bytes": native_proof_bytes},
             "zk_shrink": {"secs": zk_secs, "bytes": zk_bytes, "proof_bytes": zk_proof_bytes, "verify_secs": zk_verify_secs},
         });
-        tracing::info!("zk shrink phase 0: {report}");
+        tracing::info!("zk shrink: {report}");
         if let Ok(path) = std::env::var("ZIREN_ZK_REPORT") {
             std::fs::write(path, serde_json::to_string_pretty(&report)?)?;
         }

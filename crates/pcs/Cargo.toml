@@ -48,6 +48,8 @@ rayon = "1.12"
 num-traits = "0.2.19"
 sysinfo = "0.30.13"
 
+rand = { workspace = true, optional = true }
+
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 
@@ -59,7 +61,7 @@ compact-shrink = ["dep:p3-keccak", "dep:sha2", "dep:blake3", "dep:serde_json"]
 # Cargo.toml change.
 gpu = []
 # The zero-knowledge shrink ring (`zk`); off by default, see crates/pcs/src/zk.rs.
-zk = []
+zk = ["dep:rand"]
 # The prove-and-verify harness the recursion crates' tests share
 # (`test_harness`).  Off by default: only their `[dev-dependencies]` turn it
 # on, so no shipped build compiles it.  `-debug` additionally runs the host

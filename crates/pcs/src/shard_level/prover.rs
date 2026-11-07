@@ -70,7 +70,7 @@ where
     ) = if is_inner {
         let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
             let any: Box<dyn core::any::Any> =
-                Box::new(<SC as WhirRing>::commit_multilinears(&named_inner, pin));
+                Box::new(<SC as WhirRing>::commit_main_multilinears(&named_inner, pin));
             *any.downcast().unwrap_or_else(|_| {
                 panic!("commit_traces: the inner ring's precompute is a JaggedMmcs precompute")
             })
@@ -98,7 +98,7 @@ where
         };
         (main_commitment, precomputed_generic)
     } else {
-        let precomputed_generic = <SC as WhirRing>::commit_multilinears(&named_inner, pin);
+        let precomputed_generic = <SC as WhirRing>::commit_main_multilinears(&named_inner, pin);
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
             <SC as WhirRing>::digest_felts(&precomputed_generic.commit.original_commitment);
         let main_commitment: [Val<SC>; 8] = unsafe {

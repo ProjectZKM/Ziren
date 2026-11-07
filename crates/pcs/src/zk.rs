@@ -6,11 +6,15 @@
 //! (the root digest, see
 //! `zkm_recursion_circuit::machine::PublicValuesOutputDigest::ReduceToRoot`).
 //!
-//! Phase 0 (plumbing): the ring is the inner ring under the shrink schedule
-//! at its own profile index, [`WHIR_PROFILE_ZK_SHRINK`], so that a zk-shrink
-//! proof and key are a distinct type from the native shrink's and the hiding
-//! encoding, the masked sumchecks and the salted commitments of the later
-//! phases change this ring alone.  Nothing it proves is hidden yet.
+//! The ring is the inner ring at its own profile index,
+//! [`WHIR_PROFILE_ZK_SHRINK`], so that a zk-shrink proof and key are a
+//! distinct type from the native shrink's.  Its openings run the
+//! zero-knowledge stacked WHIR of [`crate::whir::zk`] under the shrink
+//! schedule one variable wider ([`crate::whir::jagged::WhirProfile::ZkShrink`]):
+//! padded stripes, a random stripe, one funnelled claim and salted leaves, so
+//! the opening reveals nothing of the committed traces.  The masked
+//! sumchecks and the hiding of the trace columns themselves are the later
+//! phases' work.
 
 use crate::koala_bear_poseidon2::{KoalaBearPoseidon2Ring, WHIR_PROFILE_ZK_SHRINK};
 
@@ -26,14 +30,27 @@ mod tests {
         whir::jagged::WhirProfile,
     };
 
+    /// The zk ring's schedule is the shrink schedule over stripes one
+    /// variable wider: the same rounds, queries and rates, one more variable
+    /// to fold.
     #[test]
-    fn zk_shrink_ring_proves_under_the_shrink_schedule() {
-        assert_eq!(<KoalaBearPoseidon2ZkShrink as WhirRing>::WHIR_PROFILE, WhirProfile::Shrink);
-        assert_eq!(
-            <KoalaBearPoseidon2ZkShrink as WhirRing>::WHIR_PROFILE,
-            <KoalaBearPoseidon2Shrink as WhirRing>::WHIR_PROFILE
-        );
+    fn zk_shrink_ring_proves_under_the_widened_shrink_schedule() {
+        use crate::whir::jagged::{shrink_whir_config, whir_config_for_profile};
+        use crate::whir::zk::ZK_PAD_VARS;
+        assert_eq!(<KoalaBearPoseidon2ZkShrink as WhirRing>::WHIR_PROFILE, WhirProfile::ZkShrink);
+        assert_eq!(<KoalaBearPoseidon2Shrink as WhirRing>::WHIR_PROFILE, WhirProfile::Shrink);
         assert_ne!(WHIR_PROFILE_ZK_SHRINK, WHIR_PROFILE_SHRINK);
+        let lsh = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let zk = <KoalaBearPoseidon2ZkShrink as WhirRing>::whir_config(lsh);
+        assert_eq!(zk, whir_config_for_profile(WhirProfile::ZkShrink, lsh));
+        assert_eq!(zk, shrink_whir_config(lsh + ZK_PAD_VARS));
+        let folds: Vec<usize> = zk.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+        assert_eq!(folds.iter().sum::<usize>() + zk.final_poly_log_degree, lsh + ZK_PAD_VARS);
+        assert!(
+            lsh + ZK_PAD_VARS + zk.starting_log_inv_rate
+                <= <crate::InnerVal as p3_field::TwoAdicField>::TWO_ADICITY,
+            "the first oracle must fit the two-adic subgroup"
+        );
     }
 
     #[test]

@@ -796,9 +796,17 @@ pub mod jagged {
         );
         let cfg = crate::whir::jagged::whir_config_for_profile(profile, lsh);
         let ef_dft = alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
-        crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
-            &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
-        )
+        match profile {
+            #[cfg(feature = "zk")]
+            crate::whir::jagged::WhirProfile::ZkShrink => {
+                crate::whir::zk::open_zk_whir_rounds::<Challenger, MT, D, _>(
+                    &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
+                )
+            }
+            _ => crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
+                &wdatas, point, challenger, mmcs, dft, ef_dft, cfg,
+            ),
+        }
     }
 
     /// The INNER ring's multi-round prove — the ring's own Mmcs and DFT,
@@ -1202,15 +1210,6 @@ pub mod jagged {
         challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
     ) -> bool {
-        // Checked again inside, but the schedule below is only defined at
-        // the production height.
-        if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
-            return false;
-        }
-        let config = crate::whir::jagged::whir_config_for_profile(
-            profile,
-            DEFAULT_LOG_STACKING_HEIGHT as usize,
-        );
         verify_jagged_inner_generic(
             chip_infos,
             r_row_per_chip,
@@ -1219,7 +1218,7 @@ pub mod jagged {
             challenger,
             jagged_mmcs(),
             true,
-            config,
+            profile,
             preceding_rounds,
             opened_main,
         )
@@ -1353,9 +1352,10 @@ pub mod jagged {
     }
 
     /// Verifier counterpart of `prove_jagged_rounds_generic`, generic over the
-    /// challenger and the MMCS, under the WHIR schedule `config`. The outer
-    /// (wrap) ring runs it with `OuterChallenger` and `OuterValMmcs`; the inner
-    /// ring through [`verify_jagged_no_observe`] with `JaggedChallenger` and
+    /// challenger and the MMCS, under the opening protocol and WHIR schedule
+    /// of `profile` at the protocol's stacking height. The outer (wrap) ring
+    /// runs it with `OuterChallenger` and `OuterValMmcs`; the inner ring
+    /// through [`verify_jagged_no_observe`] with `JaggedChallenger` and
     /// `JaggedMmcs`.
     ///
     /// `preceding_rounds` are the rounds before the main one, as
@@ -1373,7 +1373,7 @@ pub mod jagged {
         challenger: &mut Challenger,
         mmcs: MT,
         skip_commit_observe: bool,
-        config: crate::whir::config::WhirConfig,
+        profile: crate::whir::jagged::WhirProfile,
         preceding_rounds: &[(<MT as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         opened_main: &[Vec<InnerChallenge>],
     ) -> bool
@@ -1396,6 +1396,10 @@ pub mod jagged {
         if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
+        let config = crate::whir::jagged::whir_config_for_profile(
+            profile,
+            bundle.commit.log_stacking_height as usize,
+        );
         let whir_proof = &bundle.whir_proof;
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
@@ -1467,7 +1471,8 @@ pub mod jagged {
                 "stacked_proof": whir_proof,
             })
         });
-        let res = crate::whir::jagged::verify_jagged_whir_rounds::<Challenger, MT>(
+        let res = crate::whir::jagged::verify_whir_rounds_for_profile::<Challenger, MT>(
+            profile,
             mmcs,
             config,
             bundle.commit.log_stacking_height,

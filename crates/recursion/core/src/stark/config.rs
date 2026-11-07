@@ -422,9 +422,6 @@ mod whir_over_bn254_roundtrip_test {
             })
             .collect();
 
-        let whir = <KoalaBearPoseidon2Outer as WhirRing>::whir_config(
-            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
-        );
         let precompute =
             <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&trace_views, None);
         let commitment = precompute.commit.original_commitment.clone();
@@ -478,7 +475,7 @@ mod whir_over_bn254_roundtrip_test {
             &mut v_chal,
             mmcs,
             true,
-            whir.clone(),
+            <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
             &[],
             &bundle.y_per_chip.clone(),
         );
@@ -496,7 +493,7 @@ mod whir_over_bn254_roundtrip_test {
                 &mut v_chal,
                 <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs(),
                 true,
-                whir.clone(),
+                <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[],
                 &honest,
             ),
@@ -516,7 +513,7 @@ mod whir_over_bn254_roundtrip_test {
                 &mut v_chal,
                 <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs(),
                 true,
-                whir.clone(),
+                <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[],
                 &tampered,
             ),
@@ -585,9 +582,6 @@ mod whir_over_bn254_roundtrip_test {
 
         let mmcs = <KoalaBearPoseidon2Outer as WhirRing>::whir_mmcs();
         let dft = Arc::new(OuterDft::default());
-        let whir = <KoalaBearPoseidon2Outer as WhirRing>::whir_config(
-            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
-        );
         let prep = <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&prep_views, None);
         let main = <KoalaBearPoseidon2Outer as WhirRing>::commit_multilinears(&main_views, None);
         let prep_root = prep.commit.original_commitment.clone();
@@ -681,7 +675,7 @@ mod whir_over_bn254_roundtrip_test {
                 &mut v_chal,
                 mmcs.clone(),
                 true,
-                whir.clone(),
+                <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[(preceding_root.clone(), prep.prover_data.area)],
                 &b.y_per_chip.clone(),
             )
