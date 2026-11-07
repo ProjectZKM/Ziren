@@ -1193,6 +1193,52 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         self.current_claim.expect("claimed_sum: poly was constructed without a claim")
     }
 
+    /// A round polynomial over four flat tables of `2^t` cells, the children
+    /// of a `t`-variable layer evaluated at `point`: the zk shard's hidden
+    /// output layers ([`super::zk`]), which have no chip structure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_packed(
+        n0: Vec<EF>,
+        d0: Vec<EF>,
+        n1: Vec<EF>,
+        d1: Vec<EF>,
+        point: &[EF],
+        numerator_eval: EF,
+        denominator_eval: EF,
+        lambda: EF,
+    ) -> Self {
+        let t = point.len();
+        assert!(t >= 1, "a packed round polynomial binds at least one variable");
+        for table in [&n0, &d0, &n1, &d1] {
+            assert_eq!(table.len(), 1usize << t, "packed tables of 2^{t} cells");
+        }
+        Self {
+            state: PolynomialLayer::Packed { n0, d0, n1, d1 },
+            eq_int: build_eq_table(point),
+            eq_row: vec![EF::ONE],
+            int_point: point.to_vec(),
+            row_point: Vec::new(),
+            pad_eq_int_sum: EF::ZERO,
+            active_cols: 1usize << t,
+            lambda,
+            current_claim: Some(lambda * numerator_eval + denominator_eval),
+            remaining_int_vars: t,
+            remaining_row_vars: 0,
+            layer_int_vars: t,
+        }
+    }
+
+    /// With one variable left, the four component values at that variable
+    /// `= 0` and `= 1`: `[[n0, d0, n1, d1] at 0, [n0, d0, n1, d1] at 1]`.
+    pub fn children_at_last_variable(&self) -> [[EF; 4]; 2] {
+        match &self.state {
+            PolynomialLayer::Packed { n0, d0, n1, d1 } if n0.len() == 2 => {
+                [[n0[0], d0[0], n1[0], d1[0]], [n0[1], d0[1], n1[1], d1[1]]]
+            }
+            _ => panic!("children_at_last_variable: not a packed polynomial with one variable"),
+        }
+    }
+
     /// Switch from chip-structured to packed-flat storage.  Fired at
     /// construction (when `num_row_variables == 0`) and at the
     /// transition round (when `chip_rows` collapses to 1).

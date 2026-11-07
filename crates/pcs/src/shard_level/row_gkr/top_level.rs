@@ -214,6 +214,42 @@ where
         "logup_gkr sub-phase done"
     );
 
+    finish_logup_gkr_proof::<F, EF, A, Challenger>(
+        chips,
+        preprocessed_traces,
+        shared_trace_mles,
+        max_log_row_count,
+        eval_point,
+        LogUpGkrOutput { numerator: output.numerator, denominator: output.denominator },
+        round_proofs,
+        witness,
+        challenger,
+    )
+}
+
+/// The tail of a LogUp-GKR proof once the layers are reduced to the trace
+/// point: every chip's trace openings at that point, the proof, and the
+/// openings observed.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn finish_logup_gkr_proof<F, EF, A, Challenger>(
+    chips: &[&Chip<F, A>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
+    shared_trace_mles: &[PaddedMle<F>],
+    max_log_row_count: usize,
+    eval_point: Vec<EF>,
+    circuit_output: LogUpGkrOutput<EF>,
+    round_proofs: Vec<crate::shard_level::types::LogupGkrRoundProof<EF>>,
+    witness: F,
+    challenger: &mut Challenger,
+) -> LogupGkrProof<F, EF>
+where
+    F: PrimeField + 'static,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    A: MachineAir<F>,
+    Challenger: FieldChallenger<F> + Clone + Sync + 'static,
+{
+    let n_chips = chips.len();
+    let num_row_variables = max_log_row_count;
     let _t_extract = std::time::Instant::now();
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
@@ -276,10 +312,7 @@ where
     }
 
     let proof = LogupGkrProof {
-        circuit_output: LogUpGkrOutput {
-            numerator: output.numerator,
-            denominator: output.denominator,
-        },
+        circuit_output,
         round_proofs,
         logup_evaluations: LogUpEvaluations { point: trace_dim_point, chip_openings },
         witness,

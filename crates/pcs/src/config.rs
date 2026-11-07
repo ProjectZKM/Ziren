@@ -324,6 +324,19 @@ pub trait WhirRing: StarkGenericConfig {
         rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
+
+    /// [`Self::prove_jagged_open`] with the shard's claims on the zk mask
+    /// region ([`crate::zk_mask`]), which only the zk shrink ring's opening
+    /// binds; every other ring ignores them.
+    fn prove_jagged_open_zk(
+        z_row: &[crate::InnerChallenge],
+        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<crate::InnerChallenge>],
+        challenger: &mut Self::Challenger,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        let _ = zk_claims;
+        Self::prove_jagged_open(z_row, rounds, challenger)
+    }
 }
 
 /// The WHIR jagged-PCS commitment type for a `WhirRing`

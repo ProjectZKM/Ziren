@@ -809,7 +809,10 @@ pub fn verify_whir_rounds_for_profile<Challenger, MT>(
     point: &[JaggedChallenge],
     proof: &StackedWhirProof<JaggedVal, JaggedChallenge, MT>,
     evaluation_claim: JaggedChallenge,
-    masks: Option<&crate::zk_mask::ZkMaskClaims<JaggedChallenge>>,
+    masks: Option<(
+        &[crate::zk_mask::ZkCellClaim<JaggedChallenge>],
+        (JaggedChallenge, JaggedChallenge),
+    )>,
     challenger: &mut Challenger,
 ) -> Result<(), WhirVerifierError>
 where

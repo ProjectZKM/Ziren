@@ -26,7 +26,7 @@ use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 /// transcript observes, so the verifier requires exactly these: bits it did
 /// not derive from an observed height would let a prover move the masks after
 /// the challenges are fixed.
-fn height_bits<EF: Field>(height: usize, bit_len: usize) -> Vec<EF> {
+pub(crate) fn height_bits<EF: Field>(height: usize, bit_len: usize) -> Vec<EF> {
     (0..bit_len)
         .map(|i| {
             let shift = bit_len - 1 - i;
@@ -300,18 +300,51 @@ impl JaggedShardVerifier {
                 None
             };
 
-        verify_logup_gkr_host::<SC, A>(
-            &proof.logup_gkr_proof,
-            chips,
-            &proof.opened_values,
-            max_log_row_count,
-            beta_seed_dim,
-            proof.fold_orientation,
-            &proof.public_values,
-            machine_has_pv_buses,
-            challenger,
-            constrained_heights.as_deref(),
-        )?;
+        let zk_layout: Option<crate::zk_mask::ZkCellLayout> =
+            constrained_heights.as_ref().map(|_| {
+                crate::zk_mask::ZkCellLayout::for_shard(
+                    <Challenge<SC> as BasedVectorSpace<Val<SC>>>::DIMENSION,
+                    max_log_row_count,
+                    crate::shard_level::zk::num_interaction_variables(chips),
+                )
+            });
+        let mut zk_claims: Option<Vec<crate::zk_mask::ZkCellClaim<Challenge<SC>>>> =
+            match (constrained_heights.as_deref(), zk_layout.as_ref()) {
+                (Some(heights), Some(layout)) => {
+                    if proof.fold_orientation != FoldOrientation::Msb {
+                        return Err(JaggedShardVerifyError::LogupGkr(
+                            "a zk shard is folded MSB first".into(),
+                        ));
+                    }
+                    Some(crate::shard_level::row_gkr::zk::verify_logup_gkr_zk_host::<SC, A>(
+                        &proof.logup_gkr_proof,
+                        chips,
+                        &proof.opened_values,
+                        max_log_row_count,
+                        beta_seed_dim,
+                        &proof.public_values,
+                        machine_has_pv_buses,
+                        challenger,
+                        heights,
+                        layout,
+                    )?)
+                }
+                _ => {
+                    verify_logup_gkr_host::<SC, A>(
+                        &proof.logup_gkr_proof,
+                        chips,
+                        &proof.opened_values,
+                        max_log_row_count,
+                        beta_seed_dim,
+                        proof.fold_orientation,
+                        &proof.public_values,
+                        machine_has_pv_buses,
+                        challenger,
+                        None,
+                    )?;
+                    None
+                }
+            };
 
         let zerocheck_mask = verify_zerocheck_host::<SC, A>(
             chips,
@@ -323,6 +356,19 @@ impl JaggedShardVerifier {
             &proof.opened_values,
             constrained_heights.as_deref(),
         )?;
+        if let (Some((rho, residue)), Some(layout), Some(claims)) =
+            (zerocheck_mask, zk_layout.as_ref(), zk_claims.as_mut())
+        {
+            claims.push(crate::zk_mask::ZkCellClaim {
+                value: residue,
+                weights: crate::zk_mask::mask_claim_weights::<Val<SC>, Challenge<SC>>(
+                    layout.zerocheck,
+                    crate::zk_mask::ZEROCHECK_MASK_DEGREE,
+                    &proof.zerocheck_proof.point_and_eval.0,
+                    rho,
+                ),
+            });
+        }
 
         {
             use crate::shard_level::shard_proof::EvaluationProof;
@@ -394,7 +440,7 @@ impl JaggedShardVerifier {
             &proof.chip_heights,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
-            zerocheck_mask,
+            zk_claims.as_deref(),
         )?;
 
         Ok(())
@@ -447,7 +493,7 @@ fn verify_jagged_pcs_host<SC, A>(
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
-    zerocheck_mask: Option<(Challenge<SC>, Challenge<SC>)>,
+    zk_claims: Option<&[crate::zk_mask::ZkCellClaim<Challenge<SC>>]>,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig + crate::WhirRing,
@@ -471,11 +517,13 @@ where
         return Ok(());
     }
 
-    let zerocheck_mask: Option<(InnerChallenge, InnerChallenge)> = zerocheck_mask.map(|(r, g)| {
-        (unsafe { core::mem::transmute_copy::<Challenge<SC>, InnerChallenge>(&r) }, unsafe {
-            core::mem::transmute_copy::<Challenge<SC>, InnerChallenge>(&g)
-        })
-    });
+    let zk_claims: Option<&[crate::zk_mask::ZkCellClaim<InnerChallenge>]> =
+        zk_claims.map(|claims| unsafe {
+            core::slice::from_raw_parts(
+                claims.as_ptr() as *const crate::zk_mask::ZkCellClaim<InnerChallenge>,
+                claims.len(),
+            )
+        });
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
@@ -687,7 +735,7 @@ where
                 })
                 .collect::<Vec<_>>(),
             &opened_main,
-            zerocheck_mask,
+            zk_claims,
         );
         return if ok {
             Ok(())
@@ -1041,7 +1089,7 @@ where
         &opened_main,
         lb_challenger,
         <SC as crate::WhirRing>::WHIR_PROFILE,
-        zerocheck_mask,
+        zk_claims,
     ) {
         return Err(JaggedShardVerifyError::JaggedPcs(
             "verify_jagged_no_observe rejected the bundle".into(),
@@ -1064,7 +1112,7 @@ where
 /// `zkm_recursion_circuit::zerocheck::full_geq` but on concrete
 /// extension-field values.
 #[allow(dead_code)] // kept for unit tests
-fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
+pub(crate) fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
     debug_assert_eq!(
         threshold.len(),
         eval_point.len(),
@@ -1379,7 +1427,7 @@ where
 ///
 /// Mirrors `zkm_recursion_circuit::zerocheck::eq_eval` but for concrete
 /// `Challenge<SC>` values instead of symbolic circuit exprs.
-fn eq_eval_host<EF: Field + Copy>(a: &[EF], b: &[EF]) -> EF {
+pub(crate) fn eq_eval_host<EF: Field + Copy>(a: &[EF], b: &[EF]) -> EF {
     debug_assert_eq!(a.len(), b.len(), "eq_eval_host: dimension mismatch");
     let one = EF::ONE;
     a.iter().zip(b.iter()).fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
@@ -1389,7 +1437,7 @@ fn eq_eval_host<EF: Field + Copy>(a: &[EF], b: &[EF]) -> EF {
 ///
 /// Computes `Σ_i f[i] · eq(i, point)` via the standard partial-lagrange
 /// table expansion.  Length of `mle_evals` must equal `1 << point.len()`.
-fn evaluate_mle_host<EF: Field + Copy>(mle_evals: &[EF], point: &[EF]) -> EF {
+pub(crate) fn evaluate_mle_host<EF: Field + Copy>(mle_evals: &[EF], point: &[EF]) -> EF {
     let dim = point.len();
     assert_eq!(
         mle_evals.len(),
@@ -1435,7 +1483,7 @@ fn eval_coeffs_host<EF: Field + Copy>(coeffs: &[EF], x: EF) -> EF {
 ///   6. `p_{last}(α_last) == point_and_eval.1`
 ///
 /// Mirrors [`crate::recursion_circuit::sumcheck::verify_sumcheck`].
-fn verify_sumcheck_host<F, EF, Challenger>(
+pub(crate) fn verify_sumcheck_host<F, EF, Challenger>(
     proof: &PartialSumcheckProof<EF>,
     challenger: &mut Challenger,
     expected_num_variables: usize,
@@ -1710,6 +1758,66 @@ where
 
     let log_num_interactions = initial_num_variables - 1;
 
+    let (reconstructed_numerator, reconstructed_denominator) = reconstruct_logup_leaves::<SC, A>(
+        chips,
+        opened_values,
+        &proof.logup_evaluations,
+        &eval_point,
+        log_num_interactions,
+        max_log_row_count,
+        alpha,
+        &beta_powers,
+        constrained_heights,
+    )?;
+
+    if numerator_eval != reconstructed_numerator {
+        return Err(JaggedShardVerifyError::LogupGkr(
+            "last-layer reconstruction: numerator mismatch (degree-masked \
+             height-soundness assert)"
+                .into(),
+        ));
+    }
+    if denominator_eval != reconstructed_denominator {
+        return Err(JaggedShardVerifyError::LogupGkr(
+            "last-layer reconstruction: denominator mismatch (degree-masked \
+             height-soundness assert)"
+                .into(),
+        ));
+    }
+
+    let _ = max_log_row_count;
+
+    crate::shard_level::prover::observe_logup_gkr_openings::<Val<SC>, Challenge<SC>, SC::Challenger>(
+        challenger,
+        chips.len(),
+        &proof.logup_evaluations,
+    );
+
+    Ok(())
+}
+
+/// The LogUp-GKR leaves at the reduced point: every chip's interactions
+/// evaluated on its trace openings, masked past the chip's height, packed
+/// along the interaction axis and read at `eval_point`'s interaction
+/// coordinates.  Returns `(numerator, denominator)`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reconstruct_logup_leaves<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    eval_point: &[Challenge<SC>],
+    log_num_interactions: usize,
+    max_log_row_count: usize,
+    alpha: Challenge<SC>,
+    beta_powers: &[Challenge<SC>],
+    constrained_heights: Option<&[usize]>,
+) -> Result<(Challenge<SC>, Challenge<SC>), JaggedShardVerifyError>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
+{
     if eval_point.len() != log_num_interactions + max_log_row_count {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: reduced eval_point dim {} != log_num_interactions {} + \
@@ -1721,7 +1829,6 @@ where
     }
     let (interaction_point, trace_point) = eval_point.split_at(log_num_interactions);
 
-    let logup_evaluations = &proof.logup_evaluations;
     if trace_point.len() != max_log_row_count {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: trace_point dim {} != max_log_row_count {}",
@@ -1793,13 +1900,13 @@ where
             chip.sends().iter().map(|s| (s, true)).chain(chip.receives().iter().map(|r| (r, false)))
         {
             let (real_numerator, real_denominator) = interaction
-                .eval::<Challenge<SC>, Challenge<SC>>(prep.as_deref(), &main, alpha, &beta_powers);
+                .eval::<Challenge<SC>, Challenge<SC>>(prep.as_deref(), &main, alpha, beta_powers);
             let (padding_numerator, padding_denominator) = interaction
                 .eval::<Challenge<SC>, Challenge<SC>>(
                     padding_prep.as_deref(),
                     &padding_main,
                     alpha,
-                    &beta_powers,
+                    beta_powers,
                 );
 
             let numerator_geq = match geq_constrained {
@@ -1831,33 +1938,10 @@ where
     numerator_values.resize(axis_width, Challenge::<SC>::ZERO);
     denominator_values.resize(axis_width, Challenge::<SC>::ONE);
 
-    let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
-    let reconstructed_denominator = evaluate_mle_host(&denominator_values, interaction_point);
-
-    if numerator_eval != reconstructed_numerator {
-        return Err(JaggedShardVerifyError::LogupGkr(
-            "last-layer reconstruction: numerator mismatch (degree-masked \
-             height-soundness assert)"
-                .into(),
-        ));
-    }
-    if denominator_eval != reconstructed_denominator {
-        return Err(JaggedShardVerifyError::LogupGkr(
-            "last-layer reconstruction: denominator mismatch (degree-masked \
-             height-soundness assert)"
-                .into(),
-        ));
-    }
-
-    let _ = max_log_row_count;
-
-    crate::shard_level::prover::observe_logup_gkr_openings::<Val<SC>, Challenge<SC>, SC::Challenger>(
-        challenger,
-        chips.len(),
-        &proof.logup_evaluations,
-    );
-
-    Ok(())
+    Ok((
+        evaluate_mle_host(&numerator_values, interaction_point),
+        evaluate_mle_host(&denominator_values, interaction_point),
+    ))
 }
 
 #[cfg(test)]

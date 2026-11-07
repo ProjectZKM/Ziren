@@ -15,9 +15,6 @@ pub enum WhirVerifierError {
     OodPointMismatch { round: usize, sample: usize },
     /// The terminal identity did not hold.
     TerminalMismatch,
-    /// A sumcheck mask's opened value is not what the masked sumcheck left
-    /// over (zk ring only).
-    MaskMismatch(&'static str),
     /// The proof's shape (message counts, final-poly length) is wrong.
     IncorrectShape(String),
 }

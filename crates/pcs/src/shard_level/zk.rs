@@ -68,6 +68,13 @@ pub fn ring_has_random_rows<SC: crate::WhirRing>() -> bool {
     false
 }
 
+/// `log2` of the interaction axis of a shard's LogUp-GKR, as the first
+/// layer sizes it: the chips' interactions rounded up to a power of two.
+pub fn num_interaction_variables<F: Field, A: MachineAir<F>>(chips: &[&Chip<F, A>]) -> usize {
+    let total: usize = chips.iter().map(|chip| chip.sends().len() + chip.receives().len()).sum();
+    total.max(1).next_power_of_two().trailing_zeros() as usize
+}
+
 /// The constrained (real) height of a zk chip from its committed height:
 /// a chip with main columns committed `ZK_RANDOM_ROWS` random rows past its
 /// real ones, a chip without has nothing to hide.  `None` when a committed

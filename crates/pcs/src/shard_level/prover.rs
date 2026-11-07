@@ -24,28 +24,27 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// proves against, and the open does not observe the commitment again.
 ///
 /// The traces are borrowed: each is relabelled in place, and no cell is copied.
-/// The zerocheck mask of a zk shard, read off the main round's random
-/// stripe ([`crate::whir::zk::zk_mask_cells`]) as the ring's own field
-/// elements; `Val` is KoalaBear on every ring with a WHIR commitment.
+/// The mask region of a zk shard, read off the main round's random stripe
+/// ([`crate::whir::zk::zk_region`]) as the ring's own field elements; `Val`
+/// is KoalaBear on every ring with a WHIR commitment.
 #[cfg(feature = "zk")]
-fn zerocheck_mask_of<SC>(
+fn zk_region_of<SC>(
     commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         <SC as crate::WhirRing>::WhirMmcs,
     >,
-) -> crate::zk_mask::LibraMask<Challenge<SC>>
+) -> Vec<Val<SC>>
 where
     SC: StarkGenericConfig + crate::WhirRing,
     Val<SC>: 'static,
-    Challenge<SC>: ExtensionField<Val<SC>>,
 {
     assert!(
         core::any::TypeId::of::<Val<SC>>() == core::any::TypeId::of::<crate::InnerVal>(),
-        "the zerocheck mask is read off a KoalaBear stripe"
+        "the mask region is read off a KoalaBear stripe"
     );
-    let (cells, _) = crate::whir::zk::zk_mask_cells(&commit.whir_data);
+    let cells = crate::whir::zk::zk_region(&commit.whir_data);
     let cells: &[Val<SC>] =
         unsafe { core::slice::from_raw_parts(cells.as_ptr() as *const Val<SC>, cells.len()) };
-    crate::zk_mask::LibraMask::from_cells(cells, crate::zk_mask::ZEROCHECK_MASK_DEGREE)
+    cells.to_vec()
 }
 
 pub fn commit_traces<SC>(
@@ -226,21 +225,53 @@ where
     }
     let zk_rows = crate::shard_level::zk::ring_has_random_rows::<SC>();
     #[cfg(feature = "zk")]
-    let zerocheck_mask: Option<crate::zk_mask::LibraMask<Challenge<SC>>> =
-        zk_rows.then(|| zerocheck_mask_of::<SC>(&precomputed_commit));
-    #[cfg(not(feature = "zk"))]
-    let zerocheck_mask: Option<crate::zk_mask::LibraMask<Challenge<SC>>> = None;
-    let _t_logup_gkr = std::time::Instant::now();
-    let logup_gkr_proof = {
-        let _span = tracing::info_span!("logup gkr proof").entered();
-        prove_shard_logup_gkr_rows_with_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
-            chips,
-            preprocessed_traces,
+    let zk_region: Option<(Vec<Val<SC>>, crate::zk_mask::ZkCellLayout)> = zk_rows.then(|| {
+        let layout = crate::zk_mask::ZkCellLayout::for_shard(
+            <Challenge<SC> as BasedVectorSpace<Val<SC>>>::DIMENSION,
             max_log_row_count,
-            challenger,
-            shared_trace_mles,
-            zk_rows,
-        )
+            crate::shard_level::zk::num_interaction_variables(chips),
+        );
+        (zk_region_of::<SC>(&precomputed_commit), layout)
+    });
+    #[cfg(not(feature = "zk"))]
+    let zk_region: Option<(Vec<Val<SC>>, crate::zk_mask::ZkCellLayout)> = None;
+    let zerocheck_mask: Option<crate::zk_mask::LibraMask<Challenge<SC>>> =
+        zk_region.as_ref().map(|(region, layout)| {
+            crate::zk_mask::LibraMask::from_cells(
+                &region[layout.zerocheck..layout.jagged],
+                crate::zk_mask::ZEROCHECK_MASK_DEGREE,
+            )
+        });
+    let _t_logup_gkr = std::time::Instant::now();
+    let (logup_gkr_proof, mut zk_claims) = {
+        let _span = tracing::info_span!("logup gkr proof").entered();
+        match &zk_region {
+            Some((region, layout)) => crate::shard_level::row_gkr::zk::prove_shard_logup_gkr_zk::<
+                Val<SC>,
+                Challenge<SC>,
+                A,
+                SC::Challenger,
+            >(
+                chips,
+                preprocessed_traces,
+                max_log_row_count,
+                challenger,
+                shared_trace_mles,
+                region,
+                layout,
+            ),
+            None => (
+                prove_shard_logup_gkr_rows_with_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+                    chips,
+                    preprocessed_traces,
+                    max_log_row_count,
+                    challenger,
+                    shared_trace_mles,
+                    zk_rows,
+                ),
+                Vec::new(),
+            ),
+        }
     };
     tracing::info!(
         elapsed_ms = _t_logup_gkr.elapsed().as_millis() as u64,
@@ -257,7 +288,7 @@ where
 
     let (zerocheck_proof, trace_at_z) = {
         let _span = tracing::info_span!("zerocheck").entered();
-        let (zerocheck_proof, trace_at_z) = prove_shard_zerocheck_with_rows::<SC, A>(
+        let (zerocheck_proof, trace_at_z, zerocheck_rho) = prove_shard_zerocheck_with_rows::<SC, A>(
             chips,
             preprocessed_traces,
             &public_values,
@@ -270,6 +301,27 @@ where
             zk_rows,
             zerocheck_mask.as_ref(),
         );
+        if let (Some(rho), Some(mask), Some((region, layout))) =
+            (zerocheck_rho, zerocheck_mask.as_ref(), zk_region.as_ref())
+        {
+            let point = &zerocheck_proof.point_and_eval.0;
+            zk_claims.push(crate::zk_mask::ZkCellClaim {
+                value: rho * mask.evaluate(point),
+                weights: crate::zk_mask::mask_claim_weights::<Val<SC>, Challenge<SC>>(
+                    layout.zerocheck,
+                    crate::zk_mask::ZEROCHECK_MASK_DEGREE,
+                    point,
+                    rho,
+                ),
+            });
+            debug_assert_eq!(
+                crate::zk_mask::claim_over_cells::<Val<SC>, Challenge<SC>>(
+                    &zk_claims.last().expect("the zerocheck claim").weights,
+                    region
+                ),
+                zk_claims.last().expect("the zerocheck claim").value
+            );
+        }
 
         observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
 
@@ -341,6 +393,7 @@ where
             precomputed_commit,
             residual_y,
             &[],
+            &zk_claims,
         )
     };
     tracing::info!(
@@ -954,6 +1007,7 @@ where
 ///   `h_i = 0`, empty only when `w_i = 0`.
 /// * `heights[i]`: `h_i` of a chip whose commit trace is empty; a missing entry
 ///   means `h_i = 1`.
+/// * `zk_claims`: the zk shard's claims on its mask region, empty elsewhere.
 ///
 /// The ring-specific open is [`crate::WhirRing::prove_jagged_open`]; both
 /// rings open the claims above.
@@ -978,6 +1032,7 @@ pub fn prove_trusted_evaluations<SC, A>(
     >,
     pre_y_per_chip: Vec<Vec<Challenge<SC>>>,
     heights: &[Option<usize>],
+    zk_claims: &[crate::zk_mask::ZkCellClaim<Challenge<SC>>],
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::WhirRing,
@@ -1102,5 +1157,11 @@ where
         claims: pre_y_inner,
         precomputed: &precomputed_commit,
     });
-    <SC as WhirRing>::prove_jagged_open(z_row, rounds, challenger)
+    let zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>] = unsafe {
+        core::slice::from_raw_parts(
+            zk_claims.as_ptr() as *const crate::zk_mask::ZkCellClaim<InnerChallenge>,
+            zk_claims.len(),
+        )
+    };
+    <SC as WhirRing>::prove_jagged_open_zk(z_row, rounds, zk_claims, challenger)
 }

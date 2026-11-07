@@ -37,24 +37,25 @@
 //!   matrix of `ZK_SALT_WIDTH` uniformly random cells into every leaf, so the
 //!   sibling digests of an opened path reveal nothing of the rows they hash.
 //!
-//! * **the sumcheck masks** — the top [`ZK_MASK_CELLS`] cells of `R` are read
-//!   as the coefficients of two [`LibraMask`]s, the zerocheck's and the
-//!   jagged reduction's ([`crate::zk_mask`]); every other main stripe is
-//!   zero there, the preprocessed round anyway.  The opening sends each
-//!   mask's value at its point (`g(z)` at the zerocheck's reduced point,
-//!   `h(z*)` at the WHIR point) next to the funnelled claim, and the verifier
-//!   folds `μ²·w_g + μ³·w_h` into the weight, where `w_g` is the sparse
-//!   public functional with `g(z)` at `R`'s mask cells and zero elsewhere:
-//!   `Σ_x w_g(x)·G(x) = μλ^k·g(z)` because the other stripes vanish on the
-//!   support.  Each support point is one Lagrange constraint of the final
-//!   check.  The verifier compares the two values with what the masked
-//!   sumchecks left over (`ρ·g(z)` and `ρ'·h(z*)`, [`ZkMaskClaims`]).
+//! * **the mask region** — the top [`ZK_MASK_CELLS`] cells of `R` (fewer on
+//!   a short stripe, [`region_cells`]) hold every mask of the shard, laid out
+//!   by [`ZkCellLayout`]: the zerocheck's and the jagged reduction's
+//!   [`LibraMask`]s, the virtual LogUp leaves and the LogUp-GKR rounds'
+//!   masks ([`crate::shard_level::row_gkr::zk`]); every other main stripe is
+//!   zero there, the preprocessed round anyway.  Each value the verifier must
+//!   learn of those cells is a [`ZkCellClaim`], a sparse public linear
+//!   functional `Σ_k w_k·R[o_k]` and the value the masked sumchecks fixed
+//!   for it.  The opening folds every claim into the batched WHIR claim:
+//!   with `μ^{k+2}·w` on the cells of claim `k`, `Σ_x w(x)·G(x) = μλ^j·value`
+//!   because the other stripes vanish on the support, so the claim's value
+//!   times `R`'s coefficient joins the claimed sum and each support cell is
+//!   one Lagrange constraint of the final check.  The jagged reduction's
+//!   claim is built here, at the WHIR point; the others come from the shard.
 //!
 //! The schedule is the shrink schedule one variable wider
-//! ([`super::jagged::zk_shrink_whir_config`]); the funnelled claim and the
-//! two mask values travel in [`StackedWhirProof::batch_evaluations`] as one
-//! round of three values, so the proof and bundle types are those of every
-//! other ring.  Nothing here runs on a device: the zk shrink is one small
+//! ([`super::jagged::zk_shrink_whir_config`]); the funnelled claim travels
+//! in [`StackedWhirProof::batch_evaluations`] as one round of one value, so
+//! the proof and bundle types are those of every other ring.  Nothing here runs on a device: the zk shrink is one small
 //! terminal proof.
 
 use alloc::sync::Arc;
@@ -84,7 +85,8 @@ use crate::whir::stacked::{
 };
 use crate::whir::sumcheck::{eq_table, WhirFolder};
 use crate::zk_mask::{
-    mask_cells, opening_weights, LibraMask, ZkMaskClaims, JAGGED_MASK_DEGREE, ZEROCHECK_MASK_DEGREE,
+    mask_claim_weights, LibraMask, ZkCellClaim, ZkCellLayout, JAGGED_MASK_DEGREE,
+    ZEROCHECK_MASK_DEGREE, ZK_MASK_CELLS,
 };
 
 type F = JaggedVal;
@@ -106,23 +108,20 @@ pub const ZK_PAD_VARS: usize = 1;
 /// eight KoalaBear elements, 248 bits of salt, one round-0 query row wide.
 pub const ZK_SALT_WIDTH: usize = 8;
 
-/// Cells at the top of the random stripe that hold the sumcheck masks: the
-/// zerocheck's coefficients, then the jagged reduction's.  Every other
-/// stripe of the main round is zero on these cells.
-pub const ZK_MASK_CELLS: usize =
-    mask_cells(ZEROCHECK_MASK_DEGREE, EF_DIM) + mask_cells(JAGGED_MASK_DEGREE, EF_DIM);
-
-/// The offsets of the zerocheck mask and of the jagged mask inside a padded
-/// stripe of `padded_len` cells.
-fn mask_offsets(padded_len: usize) -> (usize, usize) {
-    assert!(padded_len >= ZK_MASK_CELLS, "zk stripes of {padded_len} cells cannot hold the masks");
-    let zerocheck = padded_len - ZK_MASK_CELLS;
-    (zerocheck, zerocheck + mask_cells(ZEROCHECK_MASK_DEGREE, EF_DIM))
+/// The cells of the mask region in a padded stripe of `padded_len` cells:
+/// [`ZK_MASK_CELLS`], or half the random half of a stripe too short for
+/// that, so that every stripe keeps random padding.
+pub fn region_cells(padded_len: usize) -> usize {
+    ZK_MASK_CELLS.min(padded_len >> (ZK_PAD_VARS + 1))
 }
 
-/// The committed cells of the two masks of a main round: the zerocheck's
-/// and the jagged reduction's, read off the random stripe.
-pub fn zk_mask_cells<MT: Mmcs<F>>(data: &JaggedWhirProverDataGeneric<MT>) -> (&[F], &[F]) {
+/// Where the mask region starts in a padded stripe of `padded_len` cells.
+pub fn region_offset(padded_len: usize) -> usize {
+    padded_len - region_cells(padded_len)
+}
+
+/// The mask region of a main round, read off its random stripe.
+pub fn zk_region<MT: Mmcs<F>>(data: &JaggedWhirProverDataGeneric<MT>) -> &[F] {
     let lsh = data.log_stacking_height as usize;
     assert_eq!(
         data.stacked_data.stripes.len(),
@@ -130,19 +129,41 @@ pub fn zk_mask_cells<MT: Mmcs<F>>(data: &JaggedWhirProverDataGeneric<MT>) -> (&[
         "zk masks: the round carries no random stripe"
     );
     let random = data.stacked_data.stripes.last().expect("a random stripe").guts().as_slice();
-    let (zerocheck, jagged) = mask_offsets(random.len());
-    (&random[zerocheck..jagged], &random[jagged..])
+    &random[region_offset(random.len())..]
 }
 
-/// The two masks of a main round, zerocheck's then jagged reduction's.
-pub fn zk_masks<MT: Mmcs<F>>(
-    data: &JaggedWhirProverDataGeneric<MT>,
-) -> (LibraMask<EF>, LibraMask<EF>) {
-    let (zerocheck, jagged) = zk_mask_cells(data);
-    (
-        LibraMask::from_cells(zerocheck, ZEROCHECK_MASK_DEGREE),
-        LibraMask::from_cells(jagged, JAGGED_MASK_DEGREE),
-    )
+/// The layout of a shard's masks without LogUp-GKR rounds: what the
+/// opening needs to place the jagged reduction's mask.
+fn opening_layout() -> ZkCellLayout {
+    ZkCellLayout::new(EF_DIM, &[])
+}
+
+/// The jagged reduction's mask of a main round.
+pub fn jagged_mask<MT: Mmcs<F>>(data: &JaggedWhirProverDataGeneric<MT>) -> LibraMask<EF> {
+    let layout = opening_layout();
+    let region = zk_region(data);
+    LibraMask::from_cells(&region[layout.jagged..layout.virtual_leaves], JAGGED_MASK_DEGREE)
+}
+
+/// The zerocheck's mask of a main round.
+pub fn zerocheck_mask<MT: Mmcs<F>>(data: &JaggedWhirProverDataGeneric<MT>) -> LibraMask<EF> {
+    let layout = opening_layout();
+    let region = zk_region(data);
+    LibraMask::from_cells(&region[layout.zerocheck..layout.jagged], ZEROCHECK_MASK_DEGREE)
+}
+
+/// The claim the jagged reduction leaves on its mask: `ρ·h(point) =
+/// residue`, as the opening and the verifier both build it.
+fn jagged_claim(rho: EF, residue: EF, point: &[EF]) -> ZkCellClaim<EF> {
+    ZkCellClaim {
+        value: residue,
+        weights: mask_claim_weights::<F, EF>(
+            opening_layout().jagged,
+            JAGGED_MASK_DEGREE,
+            point,
+            rho,
+        ),
+    }
 }
 
 /// The boolean point of cell `index` over `n` variables, LSB first, as the
@@ -278,8 +299,8 @@ where
     let stripe_len = 1usize << lsh;
     let padded_len = stripe_len << ZK_PAD_VARS;
     assert!(
-        ZK_MASK_CELLS <= padded_len - stripe_len,
-        "zk commit: the masks ({ZK_MASK_CELLS} cells) do not fit the random half of a stripe"
+        region_cells(padded_len) >= opening_layout().end,
+        "zk commit: the masks do not fit the random half of a stripe of {padded_len} cells"
     );
     let mut rng = main.then(StdRng::from_entropy);
     let mut padded: Vec<Arc<Mle<F>>> = polys
@@ -292,7 +313,7 @@ where
             match rng.as_mut() {
                 Some(rng) => {
                     stripe.extend(random_cells(rng, padded_len - stripe_len));
-                    stripe[mask_offsets(padded_len).0..].fill(F::ZERO);
+                    stripe[region_offset(padded_len)..].fill(F::ZERO);
                 }
                 None => stripe.resize(padded_len, F::ZERO),
             }
@@ -367,17 +388,17 @@ pub fn commit_multilinears_zk<R: WhirRing>(
 /// [`commit_zk_whir_round`] at `eval_point` (stack coordinates first, then
 /// the batch coordinates), under `config`, the schedule over `lsh +
 /// ZK_PAD_VARS` variables.  The transcript is the module's: batch grind,
-/// `λ`, the funnelled claim and (with `zerocheck_point`) the two mask
-/// values, `μ`, then the WHIR rounds of the stacked open.
+/// `λ`, the funnelled claim, `μ`, then the WHIR rounds of the stacked open.
 ///
-/// `zerocheck_point`: the point the zerocheck mask is opened at; the jagged
-/// mask is opened at `eval_point`.  `None` opens without masks (one funnelled
-/// value), as the unit tests of the opening do.
+/// `masks`: the shard's claims on the mask region and the jagged
+/// reduction's mask challenge `ρ`, whose claim the opening builds at
+/// `eval_point`; `None` opens without masks, as the unit tests of the
+/// opening do.
 #[allow(clippy::too_many_arguments)]
 pub fn open_zk_whir_rounds<Challenger, MT, D, EFD>(
     rounds: &[&JaggedWhirProverDataGeneric<MT>],
     eval_point: Vec<EF>,
-    zerocheck_point: Option<&[EF]>,
+    masks: Option<(&[ZkCellClaim<EF>], EF)>,
     challenger: &mut Challenger,
     mmcs: MT,
     dft: Arc<D>,
@@ -432,9 +453,11 @@ where
         })
         .collect();
 
-    let masks = zerocheck_point.map(|zp| {
-        let (zerocheck, jagged) = zk_masks(rounds[layout.main()]);
-        (zerocheck.evaluate(zp), jagged.evaluate(&eval_point), zp.to_vec())
+    let claims: Option<Vec<ZkCellClaim<EF>>> = masks.map(|(shard_claims, rho)| {
+        let main = rounds[layout.main()];
+        let mut claims = shard_claims.to_vec();
+        claims.push(jagged_claim(rho, rho * jagged_mask(main).evaluate(&eval_point), &eval_point));
+        claims
     });
 
     let batch_grinding_witness =
@@ -442,13 +465,6 @@ where
     let lambda: EF = challenger.sample_algebra_element();
     let funnelled = funnel(&evaluations, lambda);
     challenger.observe_algebra_element(funnelled);
-    let mut batch_evaluations = alloc::vec![funnelled];
-    if let Some((zerocheck_value, jagged_value, _)) = &masks {
-        challenger.observe_algebra_element(*zerocheck_value);
-        challenger.observe_algebra_element(*jagged_value);
-        batch_evaluations.push(*zerocheck_value);
-        batch_evaluations.push(*jagged_value);
-    }
     let mu: EF = challenger.sample_algebra_element();
     let eq_bp = eq_table(bp.len(), bp);
     assert!(layout.total_covered() <= eq_bp.len(), "zk open: more stripes than batch points");
@@ -457,16 +473,18 @@ where
     let mut claim: EF =
         coefficients.iter().flatten().zip(evaluations.iter().flatten()).map(|(&g, &e)| g * e).sum();
     let mut weight = eq_table(n, &stack_point);
-    if let Some((zerocheck_value, jagged_value, zp)) = &masks {
+    if let Some(claims) = &claims {
         let random_coefficient = *coefficients.last().and_then(|g| g.last()).expect("R");
-        let (mu2, mu3) = (mu * mu, mu * mu * mu);
-        claim += random_coefficient * (mu2 * *zerocheck_value + mu3 * *jagged_value);
-        let (zerocheck_offset, jagged_offset) = mask_offsets(1usize << n);
-        for (k, w) in opening_weights::<F, EF>(ZEROCHECK_MASK_DEGREE, zp).iter().enumerate() {
-            weight[zerocheck_offset + k] += mu2 * *w;
-        }
-        for (k, w) in opening_weights::<F, EF>(JAGGED_MASK_DEGREE, &eval_point).iter().enumerate() {
-            weight[jagged_offset + k] += mu3 * *w;
+        let region = region_offset(1usize << n);
+        let cells = region_cells(1usize << n);
+        let mut power = mu * mu;
+        for c in claims {
+            claim += random_coefficient * power * c.value;
+            for &(o, w) in &c.weights {
+                assert!(o < cells, "zk open: a claim on cell {o} outside the mask region");
+                weight[region + o] += power * w;
+            }
+            power *= mu;
         }
     }
     let virt = {
@@ -640,7 +658,7 @@ where
             folding_pow,
             final_pow,
         },
-        batch_evaluations: alloc::vec![batch_evaluations],
+        batch_evaluations: alloc::vec![alloc::vec![funnelled]],
         batch_grinding_witness,
     }
 }
@@ -649,6 +667,10 @@ where
 /// an [`open_zk_whir_rounds`] proof of `commitments` (one per round, areas
 /// in `round_areas`) at `point` against `evaluation_claim`, the jagged
 /// layer's claim on the dense polynomial.
+///
+/// `masks`: the shard's claims on the mask region, and the jagged
+/// reduction's mask challenge `ρ` with the residue `ρ·h(point)` its masked
+/// sumcheck left; `None` on an opening without masks.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_zk_whir_rounds<Challenger, MT>(
     mmcs: MT,
@@ -659,7 +681,7 @@ pub fn verify_zk_whir_rounds<Challenger, MT>(
     point: &[EF],
     proof: &StackedWhirProof<F, EF, MT>,
     evaluation_claim: EF,
-    masks: Option<&ZkMaskClaims<EF>>,
+    masks: Option<(&[ZkCellClaim<EF>], (EF, EF))>,
     challenger: &mut Challenger,
 ) -> Result<(), WhirVerifierError>
 where
@@ -692,11 +714,10 @@ where
     if layout.total_covered() > 1usize << bp.len() {
         return Err(shape("more stripes than batch points"));
     }
-    let funnel_round = match proof.batch_evaluations.as_slice() {
-        [round] if round.len() == 1 + 2 * usize::from(masks.is_some()) => round,
+    let funnelled = match proof.batch_evaluations.as_slice() {
+        [round] if round.len() == 1 => round[0],
         _ => return Err(shape("funnelled claim")),
     };
-    let funnelled = funnel_round[0];
 
     let ff = config.round_parameters[0].folding_factor;
     let num_rounds = config.round_parameters.len();
@@ -736,10 +757,6 @@ where
     }
     let lambda: EF = challenger.sample_algebra_element();
     challenger.observe_algebra_element(funnelled);
-    if masks.is_some() {
-        challenger.observe_algebra_element(funnel_round[1]);
-        challenger.observe_algebra_element(funnel_round[2]);
-    }
     let mu: EF = challenger.sample_algebra_element();
     let coefficients = layout.coefficients(&eq_table(bp.len(), bp), lambda, mu);
     let mut claim = evaluation_claim + mu * funnelled;
@@ -751,36 +768,27 @@ where
     }
     let mut constraints: Vec<C> =
         alloc::vec![C::Lagrange { point: zk_stack_point(sp), coeff: EF::ONE, vars: n }];
-    if let Some(masks) = masks {
-        let (zerocheck_value, jagged_value) = (funnel_round[1], funnel_round[2]);
-        if masks.zerocheck.0 * zerocheck_value != masks.zerocheck.1 {
-            return Err(WhirVerifierError::MaskMismatch("zerocheck"));
-        }
-        if masks.jagged.0 * jagged_value != masks.jagged.1 {
-            return Err(WhirVerifierError::MaskMismatch("jagged reduction"));
-        }
-        if masks.zerocheck_point.len() > crate::zk_mask::ZK_MASK_MAX_VARS
-            || point.len() > crate::zk_mask::ZK_MASK_MAX_VARS
-        {
+    if let Some((shard_claims, (rho, residue))) = masks {
+        if point.len() > crate::zk_mask::ZK_MASK_MAX_VARS {
             return Err(shape("mask point"));
         }
         let random_coefficient = *coefficients.last().and_then(|g| g.last()).expect("R");
-        let (mu2, mu3) = (mu * mu, mu * mu * mu);
-        claim += random_coefficient * (mu2 * zerocheck_value + mu3 * jagged_value);
-        let (zerocheck_offset, jagged_offset) = mask_offsets(1usize << n);
-        let zerocheck_weights =
-            opening_weights::<F, EF>(ZEROCHECK_MASK_DEGREE, &masks.zerocheck_point);
-        let jagged_weights = opening_weights::<F, EF>(JAGGED_MASK_DEGREE, point);
-        for (offset, scale, weights) in
-            [(zerocheck_offset, mu2, zerocheck_weights), (jagged_offset, mu3, jagged_weights)]
-        {
-            for (k, w) in weights.into_iter().enumerate().filter(|(_, w)| *w != EF::ZERO) {
+        let region = region_offset(1usize << n);
+        let cells = region_cells(1usize << n);
+        let mut power = mu * mu;
+        for c in shard_claims.iter().chain(core::iter::once(&jagged_claim(rho, residue, point))) {
+            claim += random_coefficient * power * c.value;
+            for &(o, w) in &c.weights {
+                if o >= cells {
+                    return Err(shape("a claim on a cell outside the mask region"));
+                }
                 constraints.push(C::Lagrange {
-                    point: boolean_point(offset + k, n),
-                    coeff: scale * w,
+                    point: boolean_point(region + o, n),
+                    coeff: power * w,
                     vars: n,
                 });
             }
+            power *= mu;
         }
     }
 
@@ -1053,14 +1061,14 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use zkm_primitives::poseidon2_init;
 
-    const LSH: usize = 10;
+    const LSH: usize = 11;
 
     fn challenger() -> JaggedChallenger {
         JaggedChallenger::new(poseidon2_init())
     }
 
     fn config() -> WhirConfig {
-        let mut cfg = whir_config_for_fold_schedule(LSH + ZK_PAD_VARS, &[4, 3, 2], 2);
+        let mut cfg = whir_config_for_fold_schedule(LSH + ZK_PAD_VARS, &[4, 3, 3], 2);
         for rp in cfg.round_parameters.iter_mut() {
             rp.num_queries = 5;
         }
@@ -1114,16 +1122,39 @@ mod tests {
     const RHO_ZEROCHECK: u32 = 1234;
     const RHO_JAGGED: u32 = 5678;
 
-    /// The mask claims an honest shard would hand the verifier: `ρ·g(z)` and
-    /// `ρ'·h(z*)` read off the committed masks.
-    fn mask_claims(inst: &Instance) -> ZkMaskClaims<EF> {
-        let (zerocheck, jagged) = zk_masks(&inst.main);
-        let (rho_z, rho_j) = (EF::from_u32(RHO_ZEROCHECK), EF::from_u32(RHO_JAGGED));
-        ZkMaskClaims {
-            zerocheck_point: inst.zerocheck_point.clone(),
-            zerocheck: (rho_z, rho_z * zerocheck.evaluate(&inst.zerocheck_point)),
-            jagged: (rho_j, rho_j * jagged.evaluate(&inst.point)),
-        }
+    /// The claims an honest shard would hand the opening: the zerocheck's
+    /// `ρ·g(z) = residue`, one claim on the virtual cells, and the jagged
+    /// reduction's challenge with its residue `ρ'·h(z*)`.
+    fn mask_claims(inst: &Instance) -> (Vec<ZkCellClaim<EF>>, (EF, EF)) {
+        let layout = ZkCellLayout::new(EF_DIM, &[]);
+        let region = zk_region(&inst.main);
+        let rho_z = EF::from_u32(RHO_ZEROCHECK);
+        let zerocheck = ZkCellClaim {
+            value: rho_z * zerocheck_mask(&inst.main).evaluate(&inst.zerocheck_point),
+            weights: crate::zk_mask::mask_claim_weights::<F, EF>(
+                layout.zerocheck,
+                ZEROCHECK_MASK_DEGREE,
+                &inst.zerocheck_point,
+                rho_z,
+            ),
+        };
+        let weights: Vec<(usize, EF)> = (0..3)
+            .flat_map(|k| {
+                crate::zk_mask::ef_cell_weights::<F, EF>(
+                    layout.virtual_leaves + k * EF_DIM,
+                    EF::from_u32(7 + k as u32),
+                )
+            })
+            .collect();
+        let virtual_cells = ZkCellClaim {
+            value: crate::zk_mask::claim_over_cells::<F, EF>(&weights, region),
+            weights,
+        };
+        let rho_j = EF::from_u32(RHO_JAGGED);
+        (
+            alloc::vec![zerocheck, virtual_cells],
+            (rho_j, rho_j * jagged_mask(&inst.main).evaluate(&inst.point)),
+        )
     }
 
     /// Two rounds (3 + 2 stripes, 8 batch slots) and the dense polynomial's
@@ -1146,10 +1177,11 @@ mod tests {
     }
 
     fn open_with(inst: &Instance, masked: bool) -> StackedWhirProof<F, EF, JaggedMmcs> {
+        let (claims, (rho_j, _)) = mask_claims(inst);
         open_zk_whir_rounds::<JaggedChallenger, JaggedMmcs, _, _>(
             &[&inst.prep, &inst.main],
             inst.point.clone(),
-            masked.then_some(inst.zerocheck_point.as_slice()),
+            masked.then_some((claims.as_slice(), rho_j)),
             &mut challenger(),
             jagged_mmcs(),
             Arc::new(Radix2DitParallel::<F>::default()),
@@ -1166,7 +1198,7 @@ mod tests {
         inst: &Instance,
         proof: &StackedWhirProof<F, EF, JaggedMmcs>,
         claim: EF,
-        masks: Option<&ZkMaskClaims<EF>>,
+        masks: Option<(&[ZkCellClaim<EF>], (EF, EF))>,
     ) -> Result<(), WhirVerifierError> {
         verify_zk_whir_rounds::<JaggedChallenger, JaggedMmcs>(
             jagged_mmcs(),
@@ -1187,7 +1219,8 @@ mod tests {
         proof: &StackedWhirProof<F, EF, JaggedMmcs>,
         claim: EF,
     ) -> Result<(), WhirVerifierError> {
-        verify_with(inst, proof, claim, Some(&mask_claims(inst)))
+        let (claims, jagged) = mask_claims(inst);
+        verify_with(inst, proof, claim, Some((claims.as_slice(), jagged)))
     }
 
     /// The committed shapes: padded stripes, the random stripe and the salt
@@ -1211,18 +1244,31 @@ mod tests {
         let (cells, main) = commit_round(&mut StdRng::seed_from_u64(2), 2, true);
         assert_eq!(main.stacked_data.stripes.len(), 3);
         let padded_len = 1usize << (LSH + ZK_PAD_VARS);
+        let region = region_offset(padded_len);
+        assert_eq!(region_cells(padded_len), 1 << (LSH - 1), "half a short stripe's random half");
         for (stripe, data) in main.stacked_data.stripes.iter().zip(&cells) {
             let vals = stripe.guts().as_slice();
             assert_eq!(&vals[..1 << LSH], data.as_slice());
-            assert!(vals[1 << LSH..padded_len - ZK_MASK_CELLS].iter().any(|v| *v != F::ZERO));
-            assert!(vals[padded_len - ZK_MASK_CELLS..].iter().all(|v| *v == F::ZERO));
+            assert!(vals[1 << LSH..region].iter().any(|v| *v != F::ZERO));
+            assert!(vals[region..].iter().all(|v| *v == F::ZERO));
         }
         let random = main.stacked_data.stripes[2].guts().as_slice();
-        assert!(random[padded_len - ZK_MASK_CELLS..].iter().any(|v| *v != F::ZERO));
-        let (zerocheck_cells, jagged_cells) = zk_mask_cells(&main);
-        assert_eq!(zerocheck_cells.len(), mask_cells(ZEROCHECK_MASK_DEGREE, EF_DIM));
-        assert_eq!(jagged_cells.len(), mask_cells(JAGGED_MASK_DEGREE, EF_DIM));
-        assert_eq!(&random[padded_len - ZK_MASK_CELLS..][..zerocheck_cells.len()], zerocheck_cells);
+        assert!(random[region..].iter().any(|v| *v != F::ZERO));
+        let cells_of = zk_region(&main);
+        assert_eq!(cells_of.len(), region_cells(padded_len));
+        assert_eq!(cells_of, &random[region..]);
+        let layout = ZkCellLayout::new(EF_DIM, &[]);
+        assert_eq!(
+            zerocheck_mask(&main),
+            LibraMask::from_cells(&cells_of[..layout.jagged], ZEROCHECK_MASK_DEGREE)
+        );
+        assert_eq!(
+            jagged_mask(&main),
+            LibraMask::from_cells(
+                &cells_of[layout.jagged..layout.virtual_leaves],
+                JAGGED_MASK_DEGREE
+            )
+        );
         let matrices = jagged_mmcs().get_matrices(&main.stacked_data.prover_data);
         assert_eq!(matrices.len(), 4);
         assert_eq!(matrices[3].width(), ZK_SALT_WIDTH);
@@ -1245,7 +1291,7 @@ mod tests {
         let proof = open(&inst);
         assert_eq!(verify(&inst, &proof, inst.claim), Ok(()));
         assert_eq!(proof.batch_evaluations.len(), 1);
-        assert_eq!(proof.batch_evaluations[0].len(), 3);
+        assert_eq!(proof.batch_evaluations[0].len(), 1);
         assert!(verify(&inst, &proof, inst.claim + EF::ONE).is_err());
 
         let mut bad = proof.clone();
@@ -1255,11 +1301,7 @@ mod tests {
         let mut bad = proof.clone();
         bad.batch_evaluations = alloc::vec![alloc::vec![proof.batch_evaluations[0][0]; 2]];
         assert!(verify(&inst, &bad, inst.claim).is_err());
-
-        let mut bad = proof.clone();
-        bad.batch_evaluations[0].truncate(1);
-        assert!(verify(&inst, &bad, inst.claim).is_err());
-        assert!(verify_with(&inst, &bad, inst.claim, None).is_err());
+        assert!(verify_with(&inst, &proof, inst.claim, None).is_err());
 
         let plain = open_with(&inst, false);
         assert_eq!(plain.batch_evaluations[0].len(), 1);
@@ -1289,41 +1331,54 @@ mod tests {
         assert!(verify(&inst, &bad, inst.claim).is_err());
     }
 
-    /// The mask values the opening sends are the committed masks at their
-    /// points and nothing else: a residue that disagrees with either, or a
-    /// different zerocheck point, is rejected before the WHIR rounds.
+    /// Every claim is bound to the committed cells: a claim whose value or
+    /// weights differ from what the cells give, or a jagged residue off the
+    /// mask, fails the final check.
     #[test]
-    fn zk_opening_binds_the_sumcheck_masks() {
+    fn zk_opening_binds_the_cell_claims() {
         let inst = instance(9);
         let proof = open(&inst);
-        let claims = mask_claims(&inst);
-        assert_eq!(verify_with(&inst, &proof, inst.claim, Some(&claims)), Ok(()));
-        let (zerocheck, jagged) = zk_masks(&inst.main);
-        assert_eq!(proof.batch_evaluations[0][1], zerocheck.evaluate(&inst.zerocheck_point));
-        assert_eq!(proof.batch_evaluations[0][2], jagged.evaluate(&inst.point));
-
-        let mut bad = claims.clone();
-        bad.zerocheck.1 += EF::ONE;
+        let (claims, jagged) = mask_claims(&inst);
         assert_eq!(
-            verify_with(&inst, &proof, inst.claim, Some(&bad)),
-            Err(WhirVerifierError::MaskMismatch("zerocheck"))
+            verify_with(&inst, &proof, inst.claim, Some((claims.as_slice(), jagged))),
+            Ok(())
         );
-        let mut bad = claims.clone();
-        bad.jagged.1 += EF::ONE;
-        assert_eq!(
-            verify_with(&inst, &proof, inst.claim, Some(&bad)),
-            Err(WhirVerifierError::MaskMismatch("jagged reduction"))
-        );
+        let region = zk_region(&inst.main);
+        for c in &claims {
+            assert_eq!(crate::zk_mask::claim_over_cells::<F, EF>(&c.weights, region), c.value);
+        }
 
+        for k in 0..claims.len() {
+            let mut bad = claims.clone();
+            bad[k].value += EF::ONE;
+            assert!(
+                verify_with(&inst, &proof, inst.claim, Some((bad.as_slice(), jagged))).is_err(),
+                "claim {k}"
+            );
+            let mut bad = claims.clone();
+            bad[k].weights[0].1 += EF::ONE;
+            assert!(verify_with(&inst, &proof, inst.claim, Some((bad.as_slice(), jagged))).is_err());
+        }
         let mut bad = claims.clone();
-        bad.zerocheck_point[0] += EF::ONE;
-        assert!(verify_with(&inst, &proof, inst.claim, Some(&bad)).is_err());
+        bad[0].weights.push((region.len(), EF::ONE));
+        assert!(verify_with(&inst, &proof, inst.claim, Some((bad.as_slice(), jagged))).is_err());
 
-        let mut forged = proof.clone();
-        forged.batch_evaluations[0][1] += EF::ONE;
-        let mut forged_claims = claims.clone();
-        forged_claims.zerocheck.1 += claims.zerocheck.0;
-        assert!(verify_with(&inst, &forged, inst.claim, Some(&forged_claims)).is_err());
+        let (rho_j, residue) = jagged;
+        assert!(verify_with(
+            &inst,
+            &proof,
+            inst.claim,
+            Some((claims.as_slice(), (rho_j, residue + EF::ONE)))
+        )
+        .is_err());
+        assert!(verify_with(
+            &inst,
+            &proof,
+            inst.claim,
+            Some((&claims, (rho_j + EF::ONE, residue)))
+        )
+        .is_err());
+        assert!(verify_with(&inst, &proof, inst.claim, Some((&claims[..1], jagged))).is_err());
     }
 
     /// Two openings of the same cells at the same point share nothing the

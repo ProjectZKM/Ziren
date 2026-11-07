@@ -81,7 +81,7 @@ where
     SC: StarkGenericConfig,
     A: super::constraint_folder::ShardProvableAir<SC>,
 {
-    prove_shard_zerocheck_with_rows::<SC, A>(
+    let (proof, trace_at_z, _) = prove_shard_zerocheck_with_rows::<SC, A>(
         chips,
         preprocessed_traces,
         public_values,
@@ -93,7 +93,8 @@ where
         shared_trace_mles,
         false,
         None,
-    )
+    );
+    (proof, trace_at_z)
 }
 
 /// [`prove_shard_zerocheck`] over a shard that carries the zk random rows
@@ -104,8 +105,8 @@ where
 #[allow(clippy::too_many_arguments)]
 ///
 /// `mask`: the zk shard's zerocheck mask ([`crate::zk_mask`]), committed in
-/// the main round; its challenge `ρ` is drawn right after `λ`.  `None` on a
-/// plain shard.
+/// the main round; its challenge `ρ` is drawn right after `λ` and returned.
+/// `None` on a plain shard.
 pub fn prove_shard_zerocheck_with_rows<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -118,7 +119,11 @@ pub fn prove_shard_zerocheck_with_rows<SC, A>(
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     zk_rows: bool,
     mask: Option<&crate::zk_mask::LibraMask<Challenge<SC>>>,
-) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
+) -> (
+    PartialSumcheckProof<Challenge<SC>>,
+    std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+    Option<Challenge<SC>>,
+)
 where
     SC: StarkGenericConfig,
     A: super::constraint_folder::ShardProvableAir<SC>,
@@ -293,7 +298,7 @@ where
         let name = chips[chip_idx].name().to_string();
         trace_at_z.insert(name, component_poly_evals[k].clone());
     }
-    (sumcheck_proof, trace_at_z)
+    (sumcheck_proof, trace_at_z, rho)
 }
 
 /// Derive a chip's global cumulative sum from the last 14 elements of

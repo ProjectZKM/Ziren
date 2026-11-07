@@ -497,5 +497,21 @@ pub mod koala_bear_poseidon2 {
             );
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
+
+        fn prove_jagged_open_zk(
+            z_row: &[crate::InnerChallenge],
+            rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
+            zk_claims: &[crate::zk_mask::ZkCellClaim<crate::InnerChallenge>],
+            challenger: &mut Self::Challenger,
+        ) -> crate::shard_level::shard_proof::EvaluationProof {
+            let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds_with_profile_zk(
+                &rounds,
+                z_row,
+                challenger,
+                Self::WHIR_PROFILE,
+                zk_claims,
+            );
+            crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
+        }
     }
 }

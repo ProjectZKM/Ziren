@@ -27,6 +27,7 @@ jobs:
       - run: cargo test --locked -p zkm-pcs --features zk --lib zk::
       - run: cargo test --locked -p zkm-pcs --features zk --lib whir::zk::
       - run: cargo test --locked -p zkm-pcs --features zk --lib shard_level::zk::
+      - run: cargo test --locked -p zkm-pcs --features zk --lib row_gkr::zk::
       - run: cargo test --locked -p zkm-pcs --features zk --lib zerocheck_poly::
       - run: cargo test --locked -p zkm-pcs --features zk --lib zk_mask::
       - run: cargo test --locked -p zkm-pcs --features zk --lib sumcheck_poly::
