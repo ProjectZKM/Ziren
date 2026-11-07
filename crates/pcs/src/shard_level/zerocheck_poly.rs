@@ -341,12 +341,12 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     virtual_geq: VirtualGeq<EF>,
     /// The zk shard's constraint weight: the equality table of the anchor
     /// cut at the chip's constrained height, one value per held row, folded
-    /// with the cells.  `Some` only on the zk shrink ring, where the
+    /// with the cells.  Empty except on the zk shrink ring, where the
     /// constraint part of the round polynomial is `Σ_rows W(row) · C(row)`
     /// in place of `Σ_rows eq(ζ, row) · C(row)` and no padded-row
     /// correction applies (`W` is zero past the constrained height).  See
     /// [`crate::shard_level::zk`].
-    constraint_weight: Option<Vec<EF>>,
+    constraint_weight: Vec<EF>,
     _marker: PhantomData<A>,
 }
 
@@ -396,17 +396,20 @@ where
             geq_value,
             padded_row_adjustment,
             virtual_geq,
-            constraint_weight: None,
+            constraint_weight: Vec::new(),
             _marker: PhantomData,
         }
     }
 
     /// Weigh the constraint part by `weight` (one value per real row, the
     /// zk shard's cut equality table) instead of the anchor's equality
-    /// polynomial.
+    /// polynomial; an empty `weight` keeps the equality polynomial.
     pub(crate) fn with_constraint_weight(mut self, weight: Vec<EF>) -> Self {
-        debug_assert_eq!(weight.len(), self.num_real_entries, "one weight per held row");
-        self.constraint_weight = Some(weight);
+        debug_assert!(
+            weight.is_empty() || weight.len() == self.num_real_entries,
+            "one weight per held row"
+        );
+        self.constraint_weight = weight;
         self
     }
 
@@ -448,8 +451,12 @@ where
         let rest_point = &self.zeta[..dim - 1];
         let partial = partial_lagrange_prefix(rest_point, num_real.div_ceil(2));
 
-        if let Some(weight) = self.constraint_weight.as_deref() {
-            let (g, c) = self.accumulate_weighted_y_tuples(&partial, weight, is_first_round);
+        if !self.constraint_weight.is_empty() {
+            let (g, c) = self.accumulate_weighted_y_tuples(
+                &partial,
+                &self.constraint_weight,
+                is_first_round,
+            );
             return self.finalize_weighted_round_poly(claim, last, g, c);
         }
 
@@ -760,10 +767,11 @@ where
         let new_num_real = self.num_real_entries.div_ceil(2);
         let new_num_vars = self.num_variables - 1;
         let new_virtual_geq = self.virtual_geq.fix_last_variable(alpha);
-        let new_weight: Option<Vec<EF>> = self
-            .constraint_weight
-            .as_ref()
-            .map(|w| fold_cells::<EF, EF>(w, 1, self.num_real_entries, alpha));
+        let new_weight = if self.constraint_weight.is_empty() {
+            Vec::new()
+        } else {
+            fold_cells::<EF, EF>(&self.constraint_weight, 1, self.num_real_entries, alpha)
+        };
 
         let dim = self.zeta.len();
         let last = self.zeta[dim - 1];

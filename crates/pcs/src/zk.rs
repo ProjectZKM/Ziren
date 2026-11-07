@@ -10,7 +10,8 @@
 //! [`WHIR_PROFILE_ZK_SHRINK`], so that a zk-shrink proof and key are a
 //! distinct type from the native shrink's.  Its openings run the
 //! zero-knowledge stacked WHIR of [`crate::whir::zk`] under the shrink
-//! schedule one variable wider ([`crate::whir::jagged::WhirProfile::ZkShrink`]):
+//! schedule with a final polynomial one variable larger
+//! ([`crate::whir::jagged::WhirProfile::ZkShrink`]):
 //! padded stripes, a random stripe, one funnelled claim and salted leaves, so
 //! the opening reveals nothing of the committed traces.  The masked
 //! sumchecks and the hiding of the trace columns themselves are the later
@@ -43,9 +44,23 @@ mod tests {
         let lsh = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
         let zk = <KoalaBearPoseidon2ZkShrink as WhirRing>::whir_config(lsh);
         assert_eq!(zk, whir_config_for_profile(WhirProfile::ZkShrink, lsh));
-        assert_eq!(zk, shrink_whir_config(lsh + ZK_PAD_VARS));
+        let native = shrink_whir_config(lsh);
         let folds: Vec<usize> = zk.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+        let native_folds: Vec<usize> =
+            native.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+        assert_eq!(folds, native_folds);
+        assert_eq!(zk.final_poly_log_degree, native.final_poly_log_degree + ZK_PAD_VARS);
         assert_eq!(folds.iter().sum::<usize>() + zk.final_poly_log_degree, lsh + ZK_PAD_VARS);
+        for (z, n) in zk.round_parameters.iter().zip(&native.round_parameters) {
+            assert_eq!(
+                (z.num_queries, z.log_inv_rate, z.ood_samples),
+                (n.num_queries, n.log_inv_rate, n.ood_samples)
+            );
+        }
+        assert_eq!(
+            (zk.final_queries, zk.final_pow_bits),
+            (native.final_queries, native.final_pow_bits)
+        );
         assert!(
             lsh + ZK_PAD_VARS + zk.starting_log_inv_rate
                 <= <crate::InnerVal as p3_field::TwoAdicField>::TWO_ADICITY,

@@ -52,11 +52,12 @@
 //!   with `μ^{k+2}·w` on the cells of claim `k`, `Σ_x w(x)·G(x) = μλ^j·value`
 //!   because the other stripes vanish on the support, so the claim's value
 //!   times `R`'s coefficient joins the claimed sum and each support cell is
-//!   one Lagrange constraint of the final check.  The jagged reduction's
+//!   one Lagrange constraint of the final check, which the verifier batches
+//!   into one multilinear fold over the mask region.  The jagged reduction's
 //!   claim is built here, at the WHIR point; the others come from the shard.
 //!
-//! The schedule is the shrink schedule one variable wider
-//! ([`super::jagged::zk_shrink_whir_config`]); the funnelled claim travels
+//! The schedule is the shrink schedule's, with the final polynomial one
+//! variable larger ([`super::jagged::zk_shrink_whir_config`]); the funnelled claim travels
 //! in [`StackedWhirProof::batch_evaluations`] as one round of one value, so
 //! the proof and bundle types are those of every other ring.  Nothing here runs on a device: the zk shrink is one small
 //! terminal proof.
@@ -169,10 +170,34 @@ fn jagged_claim(rho: EF, residue: EF, point: &[EF]) -> ZkCellClaim<EF> {
     }
 }
 
-/// The boolean point of cell `index` over `n` variables, LSB first, as the
-/// Lagrange constraints of the final check take it.
-fn boolean_point(index: usize, n: usize) -> Vec<EF> {
-    (0..n).map(|j| if (index >> j) & 1 == 1 { EF::ONE } else { EF::ZERO }).collect()
+/// `Σ_o weights[o]·eq(b(region + o), r)·final(b(region + o))` for the mask
+/// region at the top of a stripe: the cells' boolean points share their
+/// high bits (all ones), so the sum is one multilinear fold of the
+/// region's weights over the low bits, times the eq of the shared bits
+/// with the folding challenges `r` and the final polynomial's entries
+/// (`final[i]` at the point whose bits spell `i`).
+fn region_weight_eval(weights: &[EF], folding_randomness: &[EF], final_poly: &[EF]) -> EF {
+    let cells = weights.len();
+    let final_log = final_poly.len().trailing_zeros() as usize;
+    let k = folding_randomness.len();
+    let n = k + final_log;
+    let region_bits = cells.trailing_zeros() as usize;
+    debug_assert!(cells.is_power_of_two() && region_bits <= n);
+    let folded_region_bits = region_bits.min(k);
+    let mut table = weights.to_vec();
+    for &r in &folding_randomness[..folded_region_bits] {
+        let half = table.len() / 2;
+        for i in 0..half {
+            let lo = table[2 * i];
+            let hi = table[2 * i + 1];
+            table[i] = lo + r * (hi - lo);
+        }
+        table.truncate(half);
+    }
+    let shared: EF = folding_randomness[folded_region_bits..].iter().copied().product();
+    let region = (1usize << n) - cells;
+    let total: EF = table.iter().enumerate().map(|(i, &w)| w * final_poly[(region >> k) + i]).sum();
+    shared * total
 }
 
 /// `n` uniformly random field elements from `rng`, filled in parallel from
@@ -773,6 +798,7 @@ where
     enum C {
         Lagrange { point: Vec<EF>, coeff: EF, vars: usize },
         Monomial { point: Vec<EF>, coeff: EF, vars: usize },
+        Region { weights: Vec<EF> },
     }
     let mut constraints: Vec<C> =
         alloc::vec![C::Lagrange { point: zk_stack_point(sp), coeff: EF::ONE, vars: n }];
@@ -781,8 +807,8 @@ where
             return Err(shape("mask point"));
         }
         let random_coefficient = *coefficients.last().and_then(|g| g.last()).expect("R");
-        let region = region_offset(1usize << n);
         let cells = region_cells(1usize << n);
+        let mut weights = alloc::vec![EF::ZERO; cells];
         let mut power = mu * mu;
         for c in shard_claims.iter().chain(core::iter::once(&jagged_claim(rho, residue, point))) {
             claim += random_coefficient * power * c.value;
@@ -790,14 +816,11 @@ where
                 if o >= cells {
                     return Err(shape("a claim on a cell outside the mask region"));
                 }
-                constraints.push(C::Lagrange {
-                    point: boolean_point(region + o, n),
-                    coeff: power * w,
-                    vars: n,
-                });
+                weights[o] += power * w;
             }
             power *= mu;
         }
+        constraints.push(C::Region { weights });
     }
 
     let lagrange_eq = |a: &[EF], b: &[EF]| -> EF {
@@ -1038,6 +1061,8 @@ where
         }
     }
 
+    let _final_span =
+        tracing::info_span!("zk_whir_final_check", constraints = constraints.len()).entered();
     let final_mle = Mle::from_row_major(RowMajorMatrix::new(whir.final_poly.clone(), 1));
     let mut total = EF::ZERO;
     for c in &constraints {
@@ -1053,6 +1078,9 @@ where
                 let fold_part = monomial_fold(&p[..k], &all_fr[(n - vars)..(n - vars) + k]);
                 let f_part = mono_eval_lsb(&whir.final_poly, &p[k..]);
                 total += *coeff * fold_part * f_part;
+            }
+            C::Region { weights } => {
+                total += region_weight_eval(weights, &all_fr, &whir.final_poly);
             }
         }
     }

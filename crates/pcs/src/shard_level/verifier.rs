@@ -308,6 +308,7 @@ impl JaggedShardVerifier {
                     crate::shard_level::zk::num_interaction_variables(chips),
                 )
             });
+        let gkr_span = tracing::info_span!("verify_logup_gkr").entered();
         let mut zk_claims: Option<Vec<crate::zk_mask::ZkCellClaim<Challenge<SC>>>> =
             match (constrained_heights.as_deref(), zk_layout.as_ref()) {
                 (Some(heights), Some(layout)) => {
@@ -346,6 +347,8 @@ impl JaggedShardVerifier {
                 }
             };
 
+        drop(gkr_span);
+        let zerocheck_span = tracing::info_span!("verify_zerocheck").entered();
         let zerocheck_mask = verify_zerocheck_host::<SC, A>(
             chips,
             &proof.zerocheck_proof,
@@ -356,6 +359,7 @@ impl JaggedShardVerifier {
             &proof.opened_values,
             constrained_heights.as_deref(),
         )?;
+        drop(zerocheck_span);
         if let (Some((rho, residue)), Some(layout), Some(claims)) =
             (zerocheck_mask, zk_layout.as_ref(), zk_claims.as_mut())
         {
@@ -428,6 +432,7 @@ impl JaggedShardVerifier {
             }
         }
 
+        let _pcs_span = tracing::info_span!("verify_jagged_pcs").entered();
         verify_jagged_pcs_host::<SC, A>(
             _vk,
             chips,

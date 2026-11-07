@@ -245,7 +245,7 @@ where
             num_variables,
         );
 
-        let constraint_weight: Option<Vec<Challenge<SC>>> = if zk_rows && main_width > 0 {
+        let constraint_weight: Vec<Challenge<SC>> = if zk_rows && main_width > 0 {
             let constrained = crate::shard_level::zk::constrained_height(main_height, main_width)
                 .unwrap_or_else(|| {
                     panic!(
@@ -253,13 +253,9 @@ where
                          the random rows"
                     )
                 });
-            Some(crate::shard_level::zk::constraint_weight_table(
-                &zeta_anchor,
-                constrained,
-                main_height,
-            ))
+            crate::shard_level::zk::constraint_weight_table(&zeta_anchor, constrained, main_height)
         } else {
-            None
+            Vec::new()
         };
         let poly = ZeroCheckPoly::<Val<SC>, Val<SC>, Challenge<SC>, A>::new(
             chip,
@@ -278,11 +274,7 @@ where
             padded_row_adjustment,
             virtual_geq,
         );
-        let poly = match constraint_weight {
-            Some(w) => poly.with_constraint_weight(w),
-            None => poly,
-        };
-        zerocheck_polys.push(poly);
+        zerocheck_polys.push(poly.with_constraint_weight(constraint_weight));
     }
 
     let (sumcheck_proof, component_poly_evals) =

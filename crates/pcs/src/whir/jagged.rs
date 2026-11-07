@@ -144,13 +144,26 @@ pub fn shrink_whir_config(lsh: usize) -> WhirConfig {
 }
 
 /// The shrink schedule of the zk shrink ring at the jagged stacking height
-/// `lsh`: [`shrink_whir_config`] over stripes of `lsh + ZK_PAD_VARS`
-/// variables, the width the zk opening commits them at.  At the production
-/// height the first oracle is `2^(22 + 2)` points, the whole two-adic
-/// subgroup of KoalaBear.
+/// `lsh`: the folds, rates, queries and grinding of [`shrink_whir_config`]
+/// over stripes of `lsh + ZK_PAD_VARS` variables, the width the zk opening
+/// commits them at, so the padding variables land in the final polynomial
+/// rather than in an extra round.  At the production height the first
+/// oracle is `2^(22 + 2)` points, the whole two-adic subgroup of KoalaBear,
+/// and the final polynomial has `2^7` coefficients instead of the native
+/// shrink's `2^6`.
 #[cfg(feature = "zk")]
 pub fn zk_shrink_whir_config(lsh: usize) -> WhirConfig {
-    core_schedule(lsh + crate::whir::zk::ZK_PAD_VARS, SHRINK_START_LOG_INV_RATE)
+    let native = shrink_whir_config(lsh);
+    let folds: Vec<usize> = native.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+    let final_log = native.final_poly_log_degree + crate::whir::zk::ZK_PAD_VARS;
+    let mut config = solve_rounds(
+        lsh + crate::whir::zk::ZK_PAD_VARS,
+        &folds,
+        final_log,
+        SHRINK_START_LOG_INV_RATE,
+    );
+    config.batch_pow_bits = native.batch_pow_bits;
+    config
 }
 
 fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
@@ -234,7 +247,11 @@ fn core_whir_config_without_batch_grind(lsh: usize, start: usize) -> WhirConfig 
         folds.push(6);
         rem -= 6;
     }
-    let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
+    solve_rounds(lsh, &folds, rem, start)
+}
+
+fn solve_rounds(lsh: usize, folds: &[usize], final_log: usize, start: usize) -> WhirConfig {
+    let mut config = whir_config_for_fold_schedule(lsh, folds, final_log);
     config.starting_log_inv_rate = start;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = start + 3 * (r + 1);

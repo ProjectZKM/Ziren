@@ -226,7 +226,7 @@ fn main() {
         zkm_pcs::whir::jagged::SizeTunedParams::wrap().johnson_m,
     );
 
-    // The zk shrink opens under the shrink schedule one variable wider; its
+    // The zk shrink opens under the shrink schedule over one more variable; its
     // zero-knowledge budgets and the error terms its masks add follow.
     #[cfg(feature = "zk")]
     {
