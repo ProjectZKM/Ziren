@@ -81,6 +81,42 @@ where
     SC: StarkGenericConfig,
     A: super::constraint_folder::ShardProvableAir<SC>,
 {
+    prove_shard_zerocheck_with_rows::<SC, A>(
+        chips,
+        preprocessed_traces,
+        public_values,
+        alpha,
+        gkr_batch_open,
+        logup_evaluations,
+        max_log_row_count,
+        challenger,
+        shared_trace_mles,
+        false,
+    )
+}
+
+/// [`prove_shard_zerocheck`] over a shard that carries the zk random rows
+/// when `zk_rows` is set: every chip's constraint part is weighed by the
+/// anchor's equality table cut at the chip's constrained height
+/// ([`crate::shard_level::zk::constraint_weight_table`]) and no padded-row
+/// correction applies.  The transcript shape is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn prove_shard_zerocheck_with_rows<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
+    public_values: &[Val<SC>],
+    alpha: Challenge<SC>,
+    gkr_batch_open: Challenge<SC>,
+    logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    max_log_row_count: usize,
+    challenger: &mut SC::Challenger,
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    zk_rows: bool,
+) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
+where
+    SC: StarkGenericConfig,
+    A: super::constraint_folder::ShardProvableAir<SC>,
+{
     let n_chips = chips.len();
 
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
@@ -169,9 +205,13 @@ where
             };
             cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
         };
-        let prep_cells: Option<Vec<Val<SC>>> = prep_trace
-            .real_trace_ref()
-            .map(|pt| pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect());
+        let prep_cells: Option<Vec<Val<SC>>> = prep_trace.real_trace_ref().map(|pt| {
+            let mut cells: Vec<Val<SC>> = pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect();
+            if zk_rows && prep_width > 0 && cells.len() < main_height * prep_width {
+                cells.resize(main_height * prep_width, Val::<SC>::ZERO);
+            }
+            cells
+        });
 
         let zeta_anchor: Vec<Challenge<SC>> = zeta.iter().rev().copied().collect();
 
@@ -191,6 +231,22 @@ where
             num_variables,
         );
 
+        let constraint_weight: Option<Vec<Challenge<SC>>> = if zk_rows && main_width > 0 {
+            let constrained = crate::shard_level::zk::constrained_height(main_height, main_width)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "zk random rows: chip {name} committed {main_height} rows, fewer than \
+                         the random rows"
+                    )
+                });
+            Some(crate::shard_level::zk::constraint_weight_table(
+                &zeta_anchor,
+                constrained,
+                main_height,
+            ))
+        } else {
+            None
+        };
         let poly = ZeroCheckPoly::<Val<SC>, Val<SC>, Challenge<SC>, A>::new(
             chip,
             public_values,
@@ -208,6 +264,10 @@ where
             padded_row_adjustment,
             virtual_geq,
         );
+        let poly = match constraint_weight {
+            Some(w) => poly.with_constraint_weight(w),
+            None => poly,
+        };
         zerocheck_polys.push(poly);
     }
 

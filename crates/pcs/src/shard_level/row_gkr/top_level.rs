@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 
-use super::build::build_gkr_circuit;
+use super::build::build_gkr_circuit_with_rows;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
 use crate::logup_gkr::gkr_grinding_bits;
@@ -38,6 +38,38 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     max_log_row_count: usize,
     challenger: &mut Challenger,
     shared_trace_mles: &[PaddedMle<F>],
+) -> LogupGkrProof<F, EF>
+where
+    F: PrimeField + 'static,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    A: MachineAir<F>,
+    Challenger: FieldChallenger<F>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + Clone
+        + Sync
+        + 'static,
+{
+    prove_shard_logup_gkr_rows_with_rows::<F, EF, A, Challenger>(
+        chips,
+        preprocessed_traces,
+        max_log_row_count,
+        challenger,
+        shared_trace_mles,
+        false,
+    )
+}
+
+/// [`prove_shard_logup_gkr_rows`] over a shard that carries the zk random
+/// rows when `zk_rows` is set (see
+/// [`super::first_layer::generate_first_layer_with_rows`]); the transcript
+/// is otherwise the same.
+pub fn prove_shard_logup_gkr_rows_with_rows<F, EF, A, Challenger>(
+    chips: &[&Chip<F, A>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
+    max_log_row_count: usize,
+    challenger: &mut Challenger,
+    shared_trace_mles: &[PaddedMle<F>],
+    zk_rows: bool,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -84,13 +116,14 @@ where
 
     let _t_first = std::time::Instant::now();
     let _first_span = tracing::info_span!("logup_gkr_first_layer").entered();
-    let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
+    let (output, mut circuit) = build_gkr_circuit_with_rows::<F, EF, A>(
         chips,
         preprocessed_traces,
         shared_trace_mles,
         alpha,
         &betas,
         num_row_variables,
+        zk_rows,
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;

@@ -279,6 +279,27 @@ impl JaggedShardVerifier {
 
         let max_log_row_count = self.max_log_row_count;
 
+        let constrained_heights: Option<Vec<usize>> =
+            if crate::shard_level::zk::ring_has_random_rows::<SC>() {
+                let mut heights = Vec::with_capacity(chips.len());
+                for chip in chips.iter() {
+                    let name = chip.name();
+                    let committed = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
+                    let width = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
+                    let constrained = crate::shard_level::zk::constrained_height(committed, width)
+                        .ok_or_else(|| {
+                            JaggedShardVerifyError::LogupGkr(format!(
+                                "chip '{name}': committed {committed} rows, fewer than the zk \
+                                 random rows"
+                            ))
+                        })?;
+                    heights.push(constrained);
+                }
+                Some(heights)
+            } else {
+                None
+            };
+
         verify_logup_gkr_host::<SC, A>(
             &proof.logup_gkr_proof,
             chips,
@@ -289,6 +310,7 @@ impl JaggedShardVerifier {
             &proof.public_values,
             machine_has_pv_buses,
             challenger,
+            constrained_heights.as_deref(),
         )?;
 
         verify_zerocheck_host::<SC, A>(
@@ -299,6 +321,7 @@ impl JaggedShardVerifier {
             max_log_row_count,
             challenger,
             &proof.opened_values,
+            constrained_heights.as_deref(),
         )?;
 
         {
@@ -1075,6 +1098,9 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 /// [`crate::recursion_circuit::zerocheck::ShardZerocheckVerifier::verify_zerocheck`])
 /// against the direct `Σ_b C(b) == 0` sumcheck the shard-level prover
 /// ([`crate::shard_level::zerocheck_prover::prove_shard_zerocheck`]) emits.
+///
+/// `constrained_heights`: on a zk shard, every chip's constrained height in
+/// chip order (see [`crate::shard_level::zk`]); `None` on a plain shard.
 #[allow(clippy::too_many_arguments)]
 fn verify_zerocheck_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1084,6 +1110,7 @@ fn verify_zerocheck_host<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    constrained_heights: Option<&[usize]>,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
@@ -1105,6 +1132,7 @@ where
         gkr_batch_open,
         lambda,
         opened_values,
+        constrained_heights,
     );
     if rlc_eval != zerocheck_proof.point_and_eval.1 {
         return Err(JaggedShardVerifyError::Zerocheck(
@@ -1214,6 +1242,12 @@ where
 ///     in the prover/verifier order.
 ///   * `gkr_evaluations.point` = z_gkr; `zerocheck_proof.point_and_eval.0`
 ///     = z* (the reduced point).
+///
+/// On a zk shard (`constrained_heights` set) the constraint evaluation is
+/// weighed by the anchor's equality table cut at the chip's constrained
+/// height ([`crate::shard_level::zk::masked_eq_eval`]) and the padded-row
+/// adjustment is dropped, mirroring
+/// [`crate::shard_level::zerocheck_prover::prove_shard_zerocheck_with_rows`].
 #[allow(clippy::too_many_arguments)]
 fn recompute_zerocheck_rlc_eval_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1224,6 +1258,7 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    constrained_heights: Option<&[usize]>,
 ) -> Challenge<SC>
 where
     SC: StarkGenericConfig,
@@ -1264,7 +1299,33 @@ where
 
     let mut rlc_eval = Challenge::<SC>::ZERO;
 
-    for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
+    for (i, (chip, opening)) in chips.iter().zip(opened_values.chips.iter()).enumerate() {
+        let ce = eval_constraints_shard_host::<Val<SC>, Challenge<SC>, A>(
+            chip,
+            opening,
+            alpha,
+            public_values,
+        );
+
+        let openings_batch: Challenge<SC> = opening
+            .main
+            .local
+            .iter()
+            .chain(opening.preprocessed.local.iter())
+            .copied()
+            .zip(beta_powers.iter().copied())
+            .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + o * p);
+
+        if let Some(heights) = constrained_heights.filter(|_| !opening.main.local.is_empty()) {
+            let weight = crate::shard_level::zk::masked_eq_eval::<Challenge<SC>>(
+                &z_gkr_anchor,
+                z_star,
+                heights[i],
+            );
+            rlc_eval = rlc_eval * lambda + zerocheck_eq_val * openings_batch + weight * ce;
+            continue;
+        }
+
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
 
@@ -1279,23 +1340,7 @@ where
             alpha,
             public_values,
         );
-
-        let ce = eval_constraints_shard_host::<Val<SC>, Challenge<SC>, A>(
-            chip,
-            opening,
-            alpha,
-            public_values,
-        );
         let constraint_eval = ce - pra * geq_val;
-
-        let openings_batch: Challenge<SC> = opening
-            .main
-            .local
-            .iter()
-            .chain(opening.preprocessed.local.iter())
-            .copied()
-            .zip(beta_powers.iter().copied())
-            .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + o * p);
 
         rlc_eval = rlc_eval * lambda + zerocheck_eq_val * (constraint_eval + openings_batch);
     }
@@ -1478,6 +1523,11 @@ where
 ///                                  (λ·(n0·d1 + n1·d0) + d0·d1)`
 ///      - observe (n0, n1, d0, d1) into the transcript
 ///      - sample line challenge, extend eval_point, update n/d evals
+///
+/// `constrained_heights`: on a zk shard, every chip's constrained height in
+/// chip order; the numerator of a lookup whose multiplicity ignores the main
+/// columns is reconstructed with that height in place of the committed one
+/// (see [`crate::shard_level::zk`]).  `None` on a plain shard.
 #[allow(clippy::too_many_arguments)]
 fn verify_logup_gkr_host<SC, A>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
@@ -1489,6 +1539,7 @@ fn verify_logup_gkr_host<SC, A>(
     public_values: &[Val<SC>],
     machine_has_pv_buses: bool,
     challenger: &mut SC::Challenger,
+    constrained_heights: Option<&[usize]>,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
@@ -1673,7 +1724,7 @@ where
     let mut numerator_values: Vec<Challenge<SC>> = Vec::new();
     let mut denominator_values: Vec<Challenge<SC>> = Vec::new();
 
-    for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
+    for (i, (chip, opening)) in chips.iter().zip(opened_values.chips.iter()).enumerate() {
         let name = <A as MachineAir<Val<SC>>>::name(&chip.air);
 
         let degree: &[Challenge<SC>] =
@@ -1687,6 +1738,10 @@ where
             )));
         }
         let geq_eval = full_geq_host::<Challenge<SC>>(degree, &point_extended);
+        let geq_constrained: Option<Challenge<SC>> = constrained_heights.map(|heights| {
+            let bits = height_bits::<Challenge<SC>>(heights[i], max_log_row_count + 1);
+            full_geq_host::<Challenge<SC>>(&bits, &point_extended)
+        });
 
         let chip_eval = logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
             JaggedShardVerifyError::LogupGkr(format!(
@@ -1722,7 +1777,15 @@ where
                     &beta_powers,
                 );
 
-            let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
+            let numerator_geq = match geq_constrained {
+                Some(g)
+                    if crate::shard_level::zk::multiplicity_is_constant_on_main(interaction) =>
+                {
+                    g
+                }
+                _ => geq_eval,
+            };
+            let numerator_eval_i = real_numerator - padding_numerator * numerator_geq;
             let denominator_eval_i =
                 real_denominator + (Challenge::<SC>::ONE - padding_denominator) * geq_eval;
             let numerator_eval_i = if is_send { numerator_eval_i } else { -numerator_eval_i };

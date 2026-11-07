@@ -453,6 +453,15 @@ where
             }
         }
 
+        #[cfg(feature = "zk")]
+        if crate::shard_level::zk::ring_has_random_rows::<SC>() {
+            named_traces = crate::shard_level::zk::append_random_rows(
+                self.machine().chips(),
+                named_traces,
+                &mut rand::thread_rng(),
+            );
+        }
+
         let chip_ordering: hashbrown::HashMap<String, usize> =
             named_traces.keys().enumerate().map(|(i, name)| (name.to_owned(), i)).collect();
 

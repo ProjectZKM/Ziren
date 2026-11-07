@@ -8,8 +8,8 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::shard_proof::{FoldOrientation, JaggedShardProof};
 use crate::air::MachineAir;
 use crate::prover::ShardData;
-use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows;
-use crate::shard_level::zerocheck_prover::prove_shard_zerocheck;
+use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows_with_rows;
+use crate::shard_level::zerocheck_prover::prove_shard_zerocheck_with_rows;
 use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 
 /// Commits the shard's main round and returns `(C_main, precompute)`.
@@ -200,15 +200,17 @@ where
             shared_trace_mles,
         );
     }
+    let zk_rows = crate::shard_level::zk::ring_has_random_rows::<SC>();
     let _t_logup_gkr = std::time::Instant::now();
     let logup_gkr_proof = {
         let _span = tracing::info_span!("logup gkr proof").entered();
-        prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+        prove_shard_logup_gkr_rows_with_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
             chips,
             preprocessed_traces,
             max_log_row_count,
             challenger,
             shared_trace_mles,
+            zk_rows,
         )
     };
     tracing::info!(
@@ -226,7 +228,7 @@ where
 
     let (zerocheck_proof, trace_at_z) = {
         let _span = tracing::info_span!("zerocheck").entered();
-        let (zerocheck_proof, trace_at_z) = prove_shard_zerocheck::<SC, A>(
+        let (zerocheck_proof, trace_at_z) = prove_shard_zerocheck_with_rows::<SC, A>(
             chips,
             preprocessed_traces,
             &public_values,
@@ -236,6 +238,7 @@ where
             max_log_row_count,
             challenger,
             shared_trace_mles,
+            zk_rows,
         );
 
         observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);

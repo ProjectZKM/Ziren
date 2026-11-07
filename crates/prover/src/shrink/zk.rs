@@ -177,6 +177,33 @@ mod tests {
     use zkm_core_machine::io::ZKMStdin;
     use zkm_core_machine::utils::setup_logger;
 
+    /// Every chip of the shrink machine admits cancelling random-row pairs
+    /// and none of its main columns is pinned by its lookups, so the zk
+    /// shard hides every opening.
+    #[test]
+    fn every_shrink_chip_admits_hidden_random_rows() {
+        use p3_air::BaseAir;
+        use zkm_pcs::shard_level::zk::RandomRowPlan;
+        use zkm_pcs::MachineAir;
+        let machine = ShrinkAir::<KoalaBear>::shrink_machine(ZkShrinkSC::compressed());
+        for chip in machine.chips() {
+            let width = <_ as BaseAir<KoalaBear>>::width(chip);
+            let plan = RandomRowPlan::new(chip, width).unwrap_or_else(|e| panic!("{e}"));
+            assert!(
+                plan.exposed_columns().is_empty(),
+                "chip {}: lookups pin columns {:?}",
+                chip.name(),
+                plan.exposed_columns()
+            );
+            assert_eq!(
+                plan.exposed_dimension(),
+                0,
+                "chip {}: lookups pin a combination of columns",
+                chip.name()
+            );
+        }
+    }
+
     fn fib_stdin(n: u32) -> ZKMStdin {
         let mut stdin = ZKMStdin::new();
         stdin.write(&n);
