@@ -313,7 +313,7 @@ impl JaggedShardVerifier {
             constrained_heights.as_deref(),
         )?;
 
-        verify_zerocheck_host::<SC, A>(
+        let zerocheck_mask = verify_zerocheck_host::<SC, A>(
             chips,
             &proof.zerocheck_proof,
             &proof.logup_gkr_proof.logup_evaluations,
@@ -394,6 +394,7 @@ impl JaggedShardVerifier {
             &proof.chip_heights,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
+            zerocheck_mask,
         )?;
 
         Ok(())
@@ -446,6 +447,7 @@ fn verify_jagged_pcs_host<SC, A>(
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
+    zerocheck_mask: Option<(Challenge<SC>, Challenge<SC>)>,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig + crate::WhirRing,
@@ -468,6 +470,12 @@ where
     {
         return Ok(());
     }
+
+    let zerocheck_mask: Option<(InnerChallenge, InnerChallenge)> = zerocheck_mask.map(|(r, g)| {
+        (unsafe { core::mem::transmute_copy::<Challenge<SC>, InnerChallenge>(&r) }, unsafe {
+            core::mem::transmute_copy::<Challenge<SC>, InnerChallenge>(&g)
+        })
+    });
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
@@ -679,6 +687,7 @@ where
                 })
                 .collect::<Vec<_>>(),
             &opened_main,
+            zerocheck_mask,
         );
         return if ok {
             Ok(())
@@ -1032,6 +1041,7 @@ where
         &opened_main,
         lb_challenger,
         <SC as crate::WhirRing>::WHIR_PROFILE,
+        zerocheck_mask,
     ) {
         return Err(JaggedShardVerifyError::JaggedPcs(
             "verify_jagged_no_observe rejected the bundle".into(),
@@ -1102,6 +1112,12 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 /// `constrained_heights`: on a zk shard, every chip's constrained height in
 /// chip order (see [`crate::shard_level::zk`]); `None` on a plain shard.
 #[allow(clippy::too_many_arguments)]
+/// On a zk shard (`constrained_heights` set) the zerocheck is masked
+/// ([`crate::zk_mask`]): the mask challenge `ρ` is drawn after `λ`, the
+/// recomputed `rlc_eval` is not compared with the final evaluation, and the
+/// residue `point_and_eval.1 − rlc_eval` (which must equal `ρ·g(z*)`) is
+/// returned with `ρ` for the WHIR opening to check against the committed
+/// mask.  `None` on a plain shard, whose identity is checked here.
 fn verify_zerocheck_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
@@ -1111,7 +1127,7 @@ fn verify_zerocheck_host<SC, A>(
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
     constrained_heights: Option<&[usize]>,
-) -> Result<(), JaggedShardVerifyError>
+) -> Result<Option<(Challenge<SC>, Challenge<SC>)>, JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
@@ -1122,6 +1138,8 @@ where
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let rho: Option<Challenge<SC>> =
+        constrained_heights.is_some().then(|| challenger.sample_algebra_element::<Challenge<SC>>());
 
     let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
         chips,
@@ -1134,11 +1152,18 @@ where
         opened_values,
         constrained_heights,
     );
-    if rlc_eval != zerocheck_proof.point_and_eval.1 {
-        return Err(JaggedShardVerifyError::Zerocheck(
-            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)".to_string(),
-        ));
-    }
+    let mask_residue = match rho {
+        Some(rho) => Some((rho, zerocheck_proof.point_and_eval.1 - rlc_eval)),
+        None => {
+            if rlc_eval != zerocheck_proof.point_and_eval.1 {
+                return Err(JaggedShardVerifyError::Zerocheck(
+                    "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)"
+                        .to_string(),
+                ));
+            }
+            None
+        }
+    };
 
     let point_dim = zerocheck_proof.point_and_eval.0.len();
     if point_dim != max_log_row_count {
@@ -1221,7 +1246,7 @@ where
             .map(|c| (c.preprocessed.local.as_slice(), c.main.local.as_slice())),
     );
 
-    Ok(())
+    Ok(mask_residue)
 }
 
 /// Host recompute of the in-circuit zerocheck `rlc_eval`.

@@ -92,6 +92,7 @@ where
         challenger,
         shared_trace_mles,
         false,
+        None,
     )
 }
 
@@ -101,6 +102,10 @@ where
 /// ([`crate::shard_level::zk::constraint_weight_table`]) and no padded-row
 /// correction applies.  The transcript shape is unchanged.
 #[allow(clippy::too_many_arguments)]
+///
+/// `mask`: the zk shard's zerocheck mask ([`crate::zk_mask`]), committed in
+/// the main round; its challenge `ρ` is drawn right after `λ`.  `None` on a
+/// plain shard.
 pub fn prove_shard_zerocheck_with_rows<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -112,14 +117,18 @@ pub fn prove_shard_zerocheck_with_rows<SC, A>(
     challenger: &mut SC::Challenger,
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     zk_rows: bool,
+    mask: Option<&crate::zk_mask::LibraMask<Challenge<SC>>>,
 ) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
     SC: StarkGenericConfig,
     A: super::constraint_folder::ShardProvableAir<SC>,
 {
     let n_chips = chips.len();
+    assert_eq!(zk_rows, mask.is_some(), "a zk shard masks its zerocheck, a plain one does not");
 
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let rho: Option<Challenge<SC>> =
+        mask.map(|_| challenger.sample_algebra_element::<Challenge<SC>>());
 
     let zeta: Vec<Challenge<SC>> = logup_evaluations.point.clone();
     let num_variables = max_log_row_count as u32;
@@ -272,12 +281,12 @@ where
     }
 
     let (sumcheck_proof, component_poly_evals) =
-        crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation::<
+        crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation_masked::<
             Val<SC>,
             Challenge<SC>,
             _,
             SC::Challenger,
-        >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda);
+        >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda, mask.zip(rho));
     let mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>> =
         std::collections::BTreeMap::new();
     for (k, &chip_idx) in name_order.iter().enumerate() {

@@ -305,6 +305,21 @@ pub enum WhirProfile {
     ZkShrink,
 }
 
+impl WhirProfile {
+    /// Is this the zk shrink ring's profile, whose opening hides the cells
+    /// and masks the sumchecks ([`crate::whir::zk`])?
+    pub fn is_zk(self) -> bool {
+        #[cfg(feature = "zk")]
+        {
+            matches!(self, WhirProfile::ZkShrink)
+        }
+        #[cfg(not(feature = "zk"))]
+        {
+            false
+        }
+    }
+}
+
 /// The schedule of `profile` at stacking height `lsh`.
 pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
     match profile {
@@ -782,6 +797,8 @@ where
 /// the zk shrink profile verifies the zk opening ([`crate::whir::zk`]),
 /// every other profile the plain stacked one.
 #[allow(clippy::too_many_arguments)]
+/// `masks`: the zk ring's sumcheck-mask claims, ignored by every other
+/// profile.
 pub fn verify_whir_rounds_for_profile<Challenger, MT>(
     profile: WhirProfile,
     mmcs: MT,
@@ -792,6 +809,7 @@ pub fn verify_whir_rounds_for_profile<Challenger, MT>(
     point: &[JaggedChallenge],
     proof: &StackedWhirProof<JaggedVal, JaggedChallenge, MT>,
     evaluation_claim: JaggedChallenge,
+    masks: Option<&crate::zk_mask::ZkMaskClaims<JaggedChallenge>>,
     challenger: &mut Challenger,
 ) -> Result<(), WhirVerifierError>
 where
@@ -814,19 +832,23 @@ where
             point,
             proof,
             evaluation_claim,
+            masks,
             challenger,
         ),
-        _ => verify_jagged_whir_rounds::<Challenger, MT>(
-            mmcs,
-            config,
-            log_stacking_height,
-            commitments,
-            round_areas,
-            point,
-            proof,
-            evaluation_claim,
-            challenger,
-        ),
+        _ => {
+            let _ = masks;
+            verify_jagged_whir_rounds::<Challenger, MT>(
+                mmcs,
+                config,
+                log_stacking_height,
+                commitments,
+                round_areas,
+                point,
+                proof,
+                evaluation_claim,
+                challenger,
+            )
+        }
     }
 }
 

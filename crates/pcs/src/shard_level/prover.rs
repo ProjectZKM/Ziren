@@ -24,6 +24,30 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// proves against, and the open does not observe the commitment again.
 ///
 /// The traces are borrowed: each is relabelled in place, and no cell is copied.
+/// The zerocheck mask of a zk shard, read off the main round's random
+/// stripe ([`crate::whir::zk::zk_mask_cells`]) as the ring's own field
+/// elements; `Val` is KoalaBear on every ring with a WHIR commitment.
+#[cfg(feature = "zk")]
+fn zerocheck_mask_of<SC>(
+    commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::WhirRing>::WhirMmcs,
+    >,
+) -> crate::zk_mask::LibraMask<Challenge<SC>>
+where
+    SC: StarkGenericConfig + crate::WhirRing,
+    Val<SC>: 'static,
+    Challenge<SC>: ExtensionField<Val<SC>>,
+{
+    assert!(
+        core::any::TypeId::of::<Val<SC>>() == core::any::TypeId::of::<crate::InnerVal>(),
+        "the zerocheck mask is read off a KoalaBear stripe"
+    );
+    let (cells, _) = crate::whir::zk::zk_mask_cells(&commit.whir_data);
+    let cells: &[Val<SC>] =
+        unsafe { core::slice::from_raw_parts(cells.as_ptr() as *const Val<SC>, cells.len()) };
+    crate::zk_mask::LibraMask::from_cells(cells, crate::zk_mask::ZEROCHECK_MASK_DEGREE)
+}
+
 pub fn commit_traces<SC>(
     main_traces: &crate::traces::Traces<Val<SC>>,
     pin: Option<crate::jagged::AreaPin>,
@@ -201,6 +225,11 @@ where
         );
     }
     let zk_rows = crate::shard_level::zk::ring_has_random_rows::<SC>();
+    #[cfg(feature = "zk")]
+    let zerocheck_mask: Option<crate::zk_mask::LibraMask<Challenge<SC>>> =
+        zk_rows.then(|| zerocheck_mask_of::<SC>(&precomputed_commit));
+    #[cfg(not(feature = "zk"))]
+    let zerocheck_mask: Option<crate::zk_mask::LibraMask<Challenge<SC>>> = None;
     let _t_logup_gkr = std::time::Instant::now();
     let logup_gkr_proof = {
         let _span = tracing::info_span!("logup gkr proof").entered();
@@ -239,6 +268,7 @@ where
             challenger,
             shared_trace_mles,
             zk_rows,
+            zerocheck_mask.as_ref(),
         );
 
         observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
