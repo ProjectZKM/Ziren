@@ -81,6 +81,28 @@ The proofs above are succinct but not hiding (\S\ref{sec:intro}): the opened val
   \item \emph{Masked sumchecks.} The zerocheck, the jagged reduction and every \LogUp{}-GKR layer run on the prover's polynomial plus $\rho\, g$, with $g(\bm x) = \sum_i g_i(x_i)$, $g_i(0) + g_i(1) = 0$, committed in the top $2^{14}$ cells of $R$ before $\rho$ is drawn~\citep{libra}. The children a \LogUp{} layer sends carry an offset that vanishes on the cube, and the circuit output is hidden behind two merge layers over a virtual slice of cancelling fractions, whose top layer is two simulatable fractions carrying the public-value balance.
   \item \emph{Cell claims.} Each value the verifier learns of $R$'s mask cells is a sparse linear functional of them, batched into the \WHIR{} claim with a fresh power of the batching challenge and checked in the final round as one multilinear fold of the region's combined weights.
 \end{enumerate}
+Figures~\ref{fig:zk-opening}--\ref{fig:zk-masks} draw the four additions.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/zk_opening}}
+\caption{The hiding opening. (a) Every stripe is committed over one more variable: the preprocessed round pads with zeros, the main round with uniform cells, and a uniform stripe $R$ joins the main round with the mask region in its top cells. (b) The per-stripe evaluations are replaced by one funnelled value $c$, and \WHIR{} runs on the batched polynomial $G$, which $R$ makes uniform. (c) Every leaf of the main round and of every folded oracle hashes a salt next to its row.}
+\label{fig:zk-opening}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/zk_rows}}
+\caption{Random rows. (a) A chip commits four random pairs past its real rows; a pair cancels in the \LogUp{} argument for every challenge when its sum and difference solve the two linear systems shown. (b) The zerocheck weighs the constraints by the equality table cut at the real height $h$, so no constraint sees a random row, and the verifier evaluates the cut table from the bits of $h$. (c) Each column's two openings carry a uniform summand from the random rows.}
+\label{fig:zk-rows}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/zk_masks}}
+\caption{Masks. (a) A sumcheck on $P + \rho g$ with a committed Libra mask $g$: every message is the true message plus a uniform polynomial, and the residue at the end is one linear claim on the mask's cells. (b) The \LogUp{} output is extended by a virtual slice of cancelling fractions and merged twice, so the verifier sees two uniform fractions; each layer's children carry an offset that vanishes on the cube. (c) The cell claims are checked in the final round as one multilinear fold of the region's combined weights.}
+\label{fig:zk-masks}
+\end{figure}
 
 \paragraph{Budgets.} Each source of randomness hides as many values as it has cells, so the construction is hiding only while what the verifier learns stays within what was committed. Table~\ref{tab:zk-budget} lists the four budgets with the figures of the measured instantiation; a census program kept with the source emits them from the schedule and the shrink machine, and a test asserts them. For the data stripes the bound is exact: the opened entries of a stripe are evaluations of $x^{2^{21}} r(x)$ at distinct domain points, which are independent uniform values while at most $2^{21}$ are opened. For $R$, every other value the verifier learns is a linear functional of the batched polynomial $G = \sum_j \gamma_j S_j + \gamma_R R$, which $R$ makes uniform; the table counts them.
 

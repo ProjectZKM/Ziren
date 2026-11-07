@@ -1,0 +1,34 @@
+% The zero-knowledge budgets: what the verifier learns against what the
+% prover committed, per source of randomness, on a log scale.
+\begin{tikzpicture}
+\begin{axis}[
+  xbar,
+  width=11.5cm, height=4.6cm,
+  xmode=log, log basis x=2,
+  xmin=1, xmax=2^24, clip=false,
+  xtick={1,2^4,2^8,2^12,2^16,2^20,2^24},
+  xticklabels={$2^{0}$,$2^{4}$,$2^{8}$,$2^{12}$,$2^{16}$,$2^{20}$,$2^{24}$},
+  xlabel={values (log scale)},
+  symbolic y coords={rows,mask,stripeR,padding},
+  ytick=data,
+  yticklabels={random rows of a column, mask cells of $R$, the stripe $R$, padding of a data stripe},
+  y tick label style={font=\scriptsize, align=right},
+  x tick label style={font=\scriptsize},
+  xlabel style={font=\scriptsize},
+  bar width=5pt,
+  enlarge y limits=0.22,
+  legend style={font=\scriptsize, at={(0.5,-0.36)}, anchor=north, legend columns=2, draw=zirenslate!45, fill=zirenlight},
+  legend cell align=left,
+  axis line style={zirenslate!70},
+  xmajorgrids, grid style={zirenslate!25},
+  point meta=rawx,
+  nodes near coords, nodes near coords style={font=\tiny, /pgf/number format/fixed, /pgf/number format/precision=0, /pgf/number format/set thousands separator={\,}},
+  nodes near coords align={horizontal},
+]
+\addplot[fill=zirenblue!25, draw=zirenblue!90] coordinates
+  {(2,rows) (9524,mask) (28625,stripeR) (992,padding)};
+\addplot[fill=white, draw=zirenslate!80, pattern=north east lines, pattern color=zirenslate!55] coordinates
+  {(4,rows) (16384,mask) (4194304,stripeR) (2097152,padding)};
+\legend{learned by the verifier, committed by the prover}
+\end{axis}
+\end{tikzpicture}
