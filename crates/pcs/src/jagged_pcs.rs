@@ -1265,7 +1265,7 @@ pub mod jagged {
             opened_main,
             challenger,
             crate::whir::jagged::WhirProfile::Core,
-            None,
+            &[],
         )
     }
 
@@ -1281,7 +1281,7 @@ pub mod jagged {
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut JaggedChallenger,
         profile: crate::whir::jagged::WhirProfile,
-        zk_claims: Option<&[crate::zk_mask::ZkCellClaim<InnerChallenge>]>,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
     ) -> bool {
         verify_jagged_inner_generic(
             chip_infos,
@@ -1442,7 +1442,7 @@ pub mod jagged {
     ///
     /// `zk_claims`: on the zk ring, the shard's claims on the mask region
     /// (the LogUp-GKR's and the zerocheck's, [`crate::zk_mask`]), which the
-    /// WHIR opening binds to the committed cells; `None` elsewhere.
+    /// WHIR opening binds to the committed cells; empty elsewhere.
     pub fn verify_jagged_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
@@ -1454,7 +1454,7 @@ pub mod jagged {
         profile: crate::whir::jagged::WhirProfile,
         preceding_rounds: &[(<MT as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
         opened_main: &[Vec<InnerChallenge>],
-        zk_claims: Option<&[crate::zk_mask::ZkCellClaim<InnerChallenge>]>,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
     ) -> bool
     where
         MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -1499,7 +1499,7 @@ pub mod jagged {
             return false;
         }
         let masked = profile.is_zk();
-        if masked != zk_claims.is_some() {
+        if masked == zk_claims.is_empty() {
             tracing::warn!("[jagged verify] zk mask claims supplied for the wrong ring");
             return false;
         }
@@ -1558,7 +1558,7 @@ pub mod jagged {
                 "stacked_proof": whir_proof,
             })
         });
-        let masks = jagged_rho.zip(zk_claims).map(|(rho, claims)| (claims, (rho, jagged_residue)));
+        let masks = jagged_rho.map(|rho| (zk_claims, (rho, jagged_residue)));
         let res = crate::whir::jagged::verify_whir_rounds_for_profile::<Challenger, MT>(
             profile,
             mmcs,

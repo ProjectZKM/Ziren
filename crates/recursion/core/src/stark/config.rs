@@ -478,7 +478,7 @@ mod whir_over_bn254_roundtrip_test {
             <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
             &[],
             &bundle.y_per_chip.clone(),
-            None,
+            &[],
         );
         assert!(ok, "jagged-WHIR full bundle pipeline should accept the honest proof over BN254");
 
@@ -497,7 +497,7 @@ mod whir_over_bn254_roundtrip_test {
                 <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[],
                 &honest,
-                None,
+                &[],
             ),
             "the cross-bind must accept openings that agree with the bundle's column claims"
         );
@@ -518,7 +518,7 @@ mod whir_over_bn254_roundtrip_test {
                 <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[],
                 &tampered,
-                None,
+                &[],
             ),
             "the cross-bind must REJECT openings that disagree with the bundle's column \
              claims — without it the zerocheck and the jagged phase can describe two \
@@ -681,7 +681,7 @@ mod whir_over_bn254_roundtrip_test {
                 <KoalaBearPoseidon2Outer as WhirRing>::WHIR_PROFILE,
                 &[(preceding_root.clone(), prep.prover_data.area)],
                 &b.y_per_chip.clone(),
-                None,
+                &[],
             )
         };
 

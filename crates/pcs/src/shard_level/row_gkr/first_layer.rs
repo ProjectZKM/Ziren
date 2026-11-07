@@ -76,15 +76,15 @@ pub fn build_chip_interaction_tables<
         preprocessed_trace,
         alpha,
         betas,
-        None,
+        (0, &[]),
     )
 }
 
 /// [`build_chip_interaction_tables`] with the zk shard's numerator mask:
-/// `mask = Some((constrained, masked))` zeroes, on every row at or past
+/// `mask = (constrained, masked)` zeroes, on every row at or past
 /// `constrained`, the numerator of each interaction whose `masked` flag is
 /// set (the lookups whose multiplicity ignores the main columns, see
-/// [`crate::shard_level::zk`]).  `None` is the plain table.
+/// [`crate::shard_level::zk`]).  An empty `masked` is the plain table.
 #[allow(clippy::too_many_arguments)]
 pub fn build_chip_interaction_tables_masked<
     F: PrimeField + Send + Sync,
@@ -96,8 +96,9 @@ pub fn build_chip_interaction_tables_masked<
     preprocessed_trace: Option<crate::whir::mle::TraceRef<'_, F>>,
     alpha: EF,
     betas: &[EF],
-    mask: Option<(usize, &[bool])>,
+    mask: (usize, &[bool]),
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
+    let (constrained, masked_interactions) = mask;
     let height = main_values.len().checked_div(main_width).unwrap_or(0);
     let num_interactions = interactions.len();
 
@@ -133,10 +134,9 @@ pub fn build_chip_interaction_tables_masked<
                         alpha,
                         betas,
                     );
-                    let masked = match mask {
-                        Some((constrained, masked)) => row_idx >= constrained && masked[col_idx],
-                        None => false,
-                    };
+                    let masked = !masked_interactions.is_empty()
+                        && row_idx >= constrained
+                        && masked_interactions[col_idx];
                     numer_row[col_idx] = if masked { F::ZERO } else { numer };
                     denom_row[col_idx] = denom;
                 }
@@ -285,19 +285,17 @@ where
 
         let masked: Vec<bool> =
             if zk_rows { crate::shard_level::zk::numerator_masks(chip) } else { Vec::new() };
-        let mask: Option<(usize, &[bool])> = if zk_rows {
+        let constrained = if zk_rows {
             let committed = mt_values.len().checked_div(mt_width).unwrap_or(0);
-            let constrained = crate::shard_level::zk::constrained_height(committed, mt_width)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "zk random rows: chip {} committed {committed} rows, fewer than the \
-                         random rows",
-                        chip.name()
-                    )
-                });
-            Some((constrained, masked.as_slice()))
+            crate::shard_level::zk::constrained_height(committed, mt_width).unwrap_or_else(|| {
+                panic!(
+                    "zk random rows: chip {} committed {committed} rows, fewer than the random \
+                     rows",
+                    chip.name()
+                )
+            })
         } else {
-            None
+            0
         };
         let (numer_mat, denom_mat) = build_chip_interaction_tables_masked::<F, EF>(
             &interactions,
@@ -306,7 +304,7 @@ where
             prep_trace.real_trace_ref(),
             alpha,
             betas,
-            mask,
+            (constrained, masked.as_slice()),
         );
 
         let chip_height: usize = numer_mat.values.len().checked_div(num_interactions).unwrap_or(0);

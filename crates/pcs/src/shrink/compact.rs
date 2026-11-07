@@ -819,7 +819,7 @@ mod tests {
                 <KoalaBearKeccak as WhirRing>::WHIR_PROFILE,
                 &[(prep_root.clone(), prep.prover_data.area)],
                 opened,
-                None,
+                &[],
             )
         };
         let honest = bundle.y_per_chip.clone();

@@ -309,7 +309,7 @@ impl JaggedShardVerifier {
                 )
             });
         let gkr_span = tracing::info_span!("verify_logup_gkr").entered();
-        let mut zk_claims: Option<Vec<crate::zk_mask::ZkCellClaim<Challenge<SC>>>> =
+        let mut zk_claims: Vec<crate::zk_mask::ZkCellClaim<Challenge<SC>>> =
             match (constrained_heights.as_deref(), zk_layout.as_ref()) {
                 (Some(heights), Some(layout)) => {
                     if proof.fold_orientation != FoldOrientation::Msb {
@@ -317,7 +317,7 @@ impl JaggedShardVerifier {
                             "a zk shard is folded MSB first".into(),
                         ));
                     }
-                    Some(crate::shard_level::row_gkr::zk::verify_logup_gkr_zk_host::<SC, A>(
+                    crate::shard_level::row_gkr::zk::verify_logup_gkr_zk_host::<SC, A>(
                         &proof.logup_gkr_proof,
                         chips,
                         &proof.opened_values,
@@ -328,7 +328,7 @@ impl JaggedShardVerifier {
                         challenger,
                         heights,
                         layout,
-                    )?)
+                    )?
                 }
                 _ => {
                     verify_logup_gkr_host::<SC, A>(
@@ -343,7 +343,7 @@ impl JaggedShardVerifier {
                         challenger,
                         None,
                     )?;
-                    None
+                    Vec::new()
                 }
             };
 
@@ -360,10 +360,8 @@ impl JaggedShardVerifier {
             constrained_heights.as_deref(),
         )?;
         drop(zerocheck_span);
-        if let (Some((rho, residue)), Some(layout), Some(claims)) =
-            (zerocheck_mask, zk_layout.as_ref(), zk_claims.as_mut())
-        {
-            claims.push(crate::zk_mask::ZkCellClaim {
+        if let (Some((rho, residue)), Some(layout)) = (zerocheck_mask, zk_layout.as_ref()) {
+            zk_claims.push(crate::zk_mask::ZkCellClaim {
                 value: residue,
                 weights: crate::zk_mask::mask_claim_weights::<Val<SC>, Challenge<SC>>(
                     layout.zerocheck,
@@ -445,7 +443,7 @@ impl JaggedShardVerifier {
             &proof.chip_heights,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
-            zk_claims.as_deref(),
+            &zk_claims,
         )?;
 
         Ok(())
@@ -498,7 +496,7 @@ fn verify_jagged_pcs_host<SC, A>(
     observed_chip_heights: &std::collections::BTreeMap<String, usize>,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
-    zk_claims: Option<&[crate::zk_mask::ZkCellClaim<Challenge<SC>>]>,
+    zk_claims: &[crate::zk_mask::ZkCellClaim<Challenge<SC>>],
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig + crate::WhirRing,
@@ -522,13 +520,12 @@ where
         return Ok(());
     }
 
-    let zk_claims: Option<&[crate::zk_mask::ZkCellClaim<InnerChallenge>]> =
-        zk_claims.map(|claims| unsafe {
-            core::slice::from_raw_parts(
-                claims.as_ptr() as *const crate::zk_mask::ZkCellClaim<InnerChallenge>,
-                claims.len(),
-            )
-        });
+    let zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>] = unsafe {
+        core::slice::from_raw_parts(
+            zk_claims.as_ptr() as *const crate::zk_mask::ZkCellClaim<InnerChallenge>,
+            zk_claims.len(),
+        )
+    };
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
