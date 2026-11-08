@@ -317,13 +317,27 @@ pub fn blake3_batch_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_BLAKE3_BATCH_GRINDING_BITS", 14)
 }
 
+/// The Johnson-bound multiplicity the core schedule counts queries with
+/// (BCHKS25, Theorem 4.2, as the compress schedule); zero selects the
+/// unique-decoding count.  Two keeps the folding grinds at 15-23 bits.
+pub fn blake3_johnson_m() -> usize {
+    crate::params::env_usize("ZIREN_BLAKE3_JOHNSON_M", 2)
+}
+
+/// Query-phase grinding of the core schedule, in bits.
+pub fn blake3_query_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_BLAKE3_QUERY_GRINDING_BITS", 0)
+}
+
 /// The schedule of the Blake3 ring at stacking height `lsh`: the compress
-/// schedule's folds and first rate, unique-decoding query counts solved to
-/// the per-component target with no query grind, and no folding grind.
+/// schedule's folds and first rate, query counts solved to the per-component
+/// target under the Johnson bound ([`blake3_johnson_m`]) with the folding
+/// grinds that accounting needs, and an optional query grind.
 ///
-/// The verifier of this schedule is the binary stage's Blake3 table, where a
-/// query costs Merkle paths of Blake3 compressions over bits, cheap beside
-/// any grind the host prover would have to run serially.
+/// The verifier of this schedule is the binary stage's leaf circuit, where
+/// every query costs Merkle paths of Blake3 compressions over bits and the
+/// folded leaves' combination; the query count is what the schedule spends
+/// its grinding to cut.
 pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
     let rate = blake3_log_inv_rate();
     assert!(
@@ -342,15 +356,28 @@ pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
     config.starting_log_inv_rate = rate;
     let num_rounds = config.round_parameters.len();
+    let m = blake3_johnson_m();
+    let pow = blake3_query_grinding_bits();
+    let target = per_component_target_bits();
+    let mut log_dim = lsh;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = rate + 3 * (r + 1);
-        rp.num_queries = min_queries(rate + 3 * r, 0);
-        rp.queries_pow_bits = 0;
+        rp.num_queries = min_queries_johnson_for_target(rate + 3 * r, pow, m, target);
+        rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
-        rp.pow_bits = alloc::vec![0; rp.folding_factor];
+        rp.pow_bits = (1..=rp.folding_factor)
+            .map(|s| {
+                if m == 0 {
+                    0
+                } else {
+                    fold_grinding_bits_for_target(rate + 3 * r, log_dim - s, m, target)
+                }
+            })
+            .collect();
+        log_dim -= rp.folding_factor;
     }
-    config.final_queries = min_queries(rate + 3 * num_rounds, 0);
-    config.final_pow_bits = 0;
+    config.final_queries = min_queries_johnson_for_target(rate + 3 * num_rounds, pow, m, target);
+    config.final_pow_bits = pow;
     config.batch_pow_bits = blake3_batch_grinding_bits();
     config
 }
