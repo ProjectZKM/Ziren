@@ -88,7 +88,8 @@ fn check_tape(
         return Err(stage(format!("leaf {shard}: the program's tape differs from its lowering")));
     }
     let built = &lowered.built;
-    if public.len() != built.public.len() || public.iter().zip(&built.public).any(|(a, b)| *a != b.get())
+    if public.len() != built.public.len()
+        || public.iter().zip(&built.public).any(|(a, b)| *a != b.get())
     {
         return Err(stage(format!("leaf {shard}: the tape's public words differ")));
     }
@@ -168,11 +169,7 @@ struct MadeKey {
 /// How many new leaf programs are lowered and keyed at once: `ZIREN_WORD_KEY_BUILDS`, else 2.
 /// Each holds its program's lowered relations and key in host memory while it works.
 fn key_builders() -> usize {
-    std::env::var("ZIREN_WORD_KEY_BUILDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2)
-        .max(1)
+    std::env::var("ZIREN_WORD_KEY_BUILDS").ok().and_then(|v| v.parse().ok()).unwrap_or(2).max(1)
 }
 
 /// The memory blocks of a leaf's run, as canonical words.
@@ -184,6 +181,16 @@ fn block_words(blocks: &[zkm_recursion_core::air::Block<KoalaBear>]) -> Vec<u32>
 /// `ZIREN_WORD_COMPOSED`.
 fn composed_leaves() -> bool {
     std::env::var_os("ZIREN_WORD_COMPOSED").is_some()
+}
+
+/// The most consecutive core shards of one structure a leaf verifies,
+/// `ZIREN_WORD_LEAF_SHARDS` (one).
+fn leaf_shards() -> usize {
+    std::env::var("ZIREN_WORD_LEAF_SHARDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|&shards| shards > 0)
+        .unwrap_or(1)
 }
 
 /// `program`'s relations, lowered over the memory its run left, as a composition when leaves
@@ -213,16 +220,16 @@ fn prove_leaf(
     let ReadyLeaf { shard, index, key, tape, lowered, new, memory, public_values, ran, keyed } =
         leaf;
     let constants: Vec<u64> = key.tape_constants().iter().map(|w| w.get()).collect();
-    let public = tape.public(&constants, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]));
+    let public =
+        tape.public(&constants, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]));
     let devices = backend.word_devices(key.cap_height());
     let held = devices.is_some() && key.routing().is_some();
     let witness = backend.witness(&tape, &public, &memory, held);
     if let (true, Some(lowered)) = (check, &lowered) {
         let words = match &witness {
             LeafWitness::Host(words) => words.clone(),
-            LeafWitness::Held(_) => {
-                tape.evaluate(&public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient]))
-            }
+            LeafWitness::Held(_) => tape
+                .evaluate(&public, &|addr, coefficient| u64::from(memory[4 * addr + coefficient])),
         };
         check_tape(shard, &tape, lowered, &public, &words)?;
     }
@@ -238,7 +245,9 @@ fn prove_leaf(
         }
         LeafWitness::Host(witness) => {
             let witness: Vec<Word64> = witness.into_iter().map(Word64::new).collect();
-            let proved = key.prove_words(&public, &witness, devices, &mut backend.challenger()).map_err(stage)?;
+            let proved = key
+                .prove_words(&public, &witness, devices, &mut backend.challenger())
+                .map_err(stage)?;
             (witness.len(), proved)
         }
     };
@@ -376,8 +385,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(stage("deferred proofs are not supported by the word compress"));
         }
         let started = std::time::Instant::now();
-        let inputs = self.get_recursion_core_inputs(&vk.vk, &proof.proof.0, 1, false);
-        tracing::info!("word compress: {} leaves on {} devices", inputs.len(), backends.len());
+        let inputs = self.get_recursion_core_inputs(&vk.vk, &proof.proof.0, leaf_shards(), false);
+        tracing::info!(
+            "word compress: {} leaves over {} shards on {} devices",
+            inputs.len(),
+            proof.proof.0.len(),
+            backends.len()
+        );
         let check = std::env::var_os("ZIREN_WORD_TAPE_CHECK").is_some();
         let leaves = pipeline_unordered(
             backends,
@@ -420,9 +434,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             .collect()
                     } else {
                         let child_schedule = BinarySchedule::default();
-                        below[range].iter().map(|node| node.child(unplaced(), &child_schedule)).collect()
+                        below[range]
+                            .iter()
+                            .map(|node| node.child(unplaced(), &child_schedule))
+                            .collect()
                     };
-                    let node = record_node_with(children, complete, check_keys, chain).map_err(stage)?;
+                    let node =
+                        record_node_with(children, complete, check_keys, chain).map_err(stage)?;
                     if depth == 0 {
                         for (key, deferred) in &node.composed.claims {
                             chain = advance_claims_native(chain, *key, deferred);
@@ -513,7 +531,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     else {
                         break;
                     };
-                    let made = self.leaf_word_key(&inputs[shards[0]], &programs[shards[0]].0, maker, check);
+                    let made = self.leaf_word_key(
+                        &inputs[shards[0]],
+                        &programs[shards[0]].0,
+                        maker,
+                        check,
+                    );
                     if made_tx.send((digest, shards, made)).is_err() {
                         break;
                     }
@@ -523,7 +546,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let result = (|| {
                 for &shard in &known {
                     let (key, tape) = keys.program(&programs[shard].1).expect("a known program");
-                    let leaf = self.leaf_word_known(shard, &inputs[shard], &programs[shard].0, key, tape, keys, check)?;
+                    let leaf = self.leaf_word_known(
+                        shard,
+                        &inputs[shard],
+                        &programs[shard].0,
+                        key,
+                        tape,
+                        keys,
+                        check,
+                    )?;
                     if !send(shard, leaf) {
                         return Ok(());
                     }
@@ -616,7 +647,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let key = if lowered.composed.is_some() {
             WordKey::composed(&mut lowered, &leaf_schedule())
         } else if check {
-            maker.make(&lowered.built, relations_digest(&lowered.built, DIGEST_SIZE), &leaf_schedule())
+            maker.make(
+                &lowered.built,
+                relations_digest(&lowered.built, DIGEST_SIZE),
+                &leaf_schedule(),
+            )
         } else {
             let digest = relations_digest(&lowered.built, DIGEST_SIZE);
             maker.make_taking(&mut lowered.built, digest, &leaf_schedule())
