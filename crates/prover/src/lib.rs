@@ -12,7 +12,6 @@
 #![allow(clippy::collapsible_else_if)]
 
 pub mod binary_tree;
-pub mod word_tree;
 pub mod build;
 pub mod components;
 pub mod program_cache;
@@ -20,6 +19,7 @@ pub mod shapes;
 pub mod types;
 pub mod utils;
 pub mod verify;
+pub mod word_tree;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -47,9 +47,8 @@ use zkm_primitives::{io::ZKMPublicValues, types::RecursionProgramType};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
-        programs::build_normalize_program,
-        core_jagged::ZKMCoreWitnessValues, wrap::ZKMWrapWitnessValues,
-        PublicValuesOutputDigest, ZKMMerkleProofWitnessValues,
+        core_jagged::ZKMCoreWitnessValues, programs::build_normalize_program,
+        wrap::ZKMWrapWitnessValues, PublicValuesOutputDigest, ZKMMerkleProofWitnessValues,
     },
     merkle_tree::MerkleTree,
     witness::Witnessable,
@@ -911,9 +910,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    /// Wrap each batch of `ShardProof`s into a
-    /// `ZKMCoreWitnessValues`, taking the `JaggedShardProof` each
-    /// one carries.
+    /// The leaves' inputs: runs of consecutive shards of one structure, at most
+    /// `batch_size` long, each a `ZKMCoreWitnessValues` over the `JaggedShardProof`s
+    /// its shards carry.
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -922,27 +921,46 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
         let mut core_inputs = Vec::new();
-        for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
-            assert_eq!(
-                batch.len(),
-                1,
-                "normalize is single-shard: get_recursion_core_inputs \
-                 must be called with batch_size=1 (one core shard per normalize); \
-                 got a batch of {} shards",
-                batch.len()
-            );
-            let jagged_proofs =
-                batch.iter().map(|sp| (*sp.jagged_shard_proof).clone()).collect::<Vec<_>>();
+        let mut start = 0;
+        while start < shard_proofs.len() {
+            let structure = Self::shard_structure(&shard_proofs[start]);
+            let mut end = start + 1;
+            while end < shard_proofs.len()
+                && end - start < batch_size
+                && Self::shard_structure(&shard_proofs[end]) == structure
+            {
+                end += 1;
+            }
+            let jagged_proofs = shard_proofs[start..end]
+                .iter()
+                .map(|sp| (*sp.jagged_shard_proof).clone())
+                .collect::<Vec<_>>();
             core_inputs.push(ZKMCoreWitnessValues {
                 vk: vk.clone(),
                 shard_proofs: jagged_proofs,
                 is_complete,
-                is_first_shard: batch_idx == 0,
+                is_first_shard: start == 0,
                 vk_root: self.vk_root_felts(),
             });
+            start = end;
         }
 
         core_inputs
+    }
+
+    /// What a shard's leaf program is a function of: the structure of its proof and
+    /// its chip set.
+    fn shard_structure(proof: &ShardProof<CoreSC>) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        zkm_recursion_circuit::machine::shape_signature::hash_shard_proof_structure(
+            &proof.jagged_shard_proof,
+            &mut hasher,
+        );
+        for name in proof.jagged_shard_proof.chip_heights.keys() {
+            name.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Prove a leaf over bits: the normalize program that verifies `input`'s
@@ -1665,8 +1683,7 @@ pub mod tests {
             core_proof.proof.0.len(),
             started.elapsed().as_secs_f64()
         );
-        let inputs =
-            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
+        let inputs = prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let mut floor: Vec<(&'static str, usize)> = Vec::new();
         let mut shapes: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
         for (i, input) in inputs.iter().enumerate() {
@@ -1826,8 +1843,7 @@ pub mod tests {
             core_proof.proof.0.len(),
             started.elapsed().as_secs_f64()
         );
-        let inputs =
-            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
+        let inputs = prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
             .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
         let from: usize = std::env::var("ZIREN_BINARY_LEAF_FROM")
@@ -1883,8 +1899,7 @@ pub mod tests {
             ZKMProverOpts::default(),
             ZKMContext::default(),
         )?;
-        let inputs =
-            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
+        let inputs = prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let started = std::time::Instant::now();
         let lowered = prover.leaf_word(&inputs[0])?;
         tracing::info!("word leaf lowered in {:.1} s", started.elapsed().as_secs_f64());
@@ -1973,7 +1988,8 @@ pub mod tests {
         let claim = &mut forged.claims[0].1[0];
         claim.value += zkm_binary_recursion::F::ONE;
         assert!(
-            ZKMProver::<DefaultProverComponents>::verify_word_compressed(&forged, keys.as_slice()).is_err(),
+            ZKMProver::<DefaultProverComponents>::verify_word_compressed(&forged, keys.as_slice())
+                .is_err(),
             "a changed claim is refused"
         );
         Ok(())
@@ -1995,8 +2011,7 @@ pub mod tests {
         let (_, pk_d, program, vk) = prover.setup(elf);
         let core_proof =
             prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
-        let inputs =
-            prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
+        let inputs = prover.get_recursion_core_inputs(&vk.vk, &core_proof.proof.0, 1, false);
         let count: usize = std::env::var("ZIREN_BINARY_LEAVES")
             .map_or(1, |n| n.parse().expect("ZIREN_BINARY_LEAVES is a count"));
         let all = count > 1;

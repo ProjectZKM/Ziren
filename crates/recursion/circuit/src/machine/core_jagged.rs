@@ -140,7 +140,7 @@ pub fn verify_core_jagged<C, SC, A>(
 
     let mut initial_execution_shard: Felt<_> = builder.uninit();
     let mut current_execution_shard: Felt<_> = builder.uninit();
-    let contains_execution_shard: Felt<_>;
+    let mut contains_execution_shard: Felt<_> = builder.uninit();
 
     let mut start_pc: Felt<_> = builder.uninit();
     let mut current_pc: Felt<_> = builder.uninit();
@@ -159,14 +159,6 @@ pub fn verify_core_jagged<C, SC, A>(
         array::from_fn(|_| builder.uninit());
 
     let mut global_cumulative_sums = Vec::new();
-
-    assert_eq!(
-        shard_proof_tuples.len(),
-        1,
-        "normalize is single-shard: verify_core_jagged expects exactly \
-         one shard proof per normalize, got {}",
-        shard_proof_tuples.len()
-    );
 
     use zkm_recursion_compiler::ir::IrIter;
 
@@ -468,15 +460,16 @@ pub fn verify_core_jagged<C, SC, A>(
         });
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
-    {
-        let i = 0usize;
-        let mut public_values_raw = verify_outputs
-            .into_iter()
-            .next()
-            .expect("single-shard normalize has exactly one verify output");
+    for (i, mut public_values_raw) in verify_outputs.into_iter().enumerate() {
         let flags = public_values_raw.split_off(public_values_raw.len() - 3);
         let (cpu, memory_init, memory_finalize) = (flags[0], flags[1], flags[2]);
-        contains_execution_shard = cpu;
+        contains_execution_shard = if i == 0 {
+            cpu
+        } else {
+            builder.eval(
+                contains_execution_shard + cpu * (SymbolicFelt::ONE - contains_execution_shard),
+            )
+        };
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
 
@@ -543,7 +536,10 @@ pub fn verify_core_jagged<C, SC, A>(
             }
         }
 
-        builder.assert_felt_ne((SymbolicFelt::ONE - cpu) * (current_shard - C::F::ONE) + cpu, C::F::ZERO);
+        builder.assert_felt_ne(
+            (SymbolicFelt::ONE - cpu) * (current_shard - C::F::ONE) + cpu,
+            C::F::ZERO,
+        );
 
         builder.assert_felt_eq(current_shard, public_values.shard);
         current_shard = builder.eval(current_shard + C::F::ONE);
@@ -559,7 +555,8 @@ pub fn verify_core_jagged<C, SC, A>(
             (SymbolicFelt::ONE - cpu) * (public_values.start_pc - public_values.next_pc),
             C::F::ZERO,
         );
-        builder.assert_felt_ne(cpu * public_values.start_pc + (SymbolicFelt::ONE - cpu), C::F::ZERO);
+        builder
+            .assert_felt_ne(cpu * public_values.start_pc + (SymbolicFelt::ONE - cpu), C::F::ZERO);
         current_pc = public_values.next_pc;
 
         let four = C::F::from_u32(4);
@@ -589,10 +586,15 @@ pub fn verify_core_jagged<C, SC, A>(
         {
             builder.assert_felt_eq(*bit, *current_bit);
         }
-        for (prev_bit, last_bit) in
-            public_values.previous_init_addr_bits.iter().zip_eq(public_values.last_init_addr_bits.iter())
+        for (prev_bit, last_bit) in public_values
+            .previous_init_addr_bits
+            .iter()
+            .zip_eq(public_values.last_init_addr_bits.iter())
         {
-            builder.assert_felt_eq((SymbolicFelt::ONE - memory_init) * (*prev_bit - *last_bit), C::F::ZERO);
+            builder.assert_felt_eq(
+                (SymbolicFelt::ONE - memory_init) * (*prev_bit - *last_bit),
+                C::F::ZERO,
+            );
         }
         for (prev_bit, last_bit) in public_values
             .previous_finalize_addr_bits
@@ -898,11 +900,9 @@ fn any_rows<C: CircuitConfig<F = InnerVal>>(
     }
     let bits = max_log_row_count + 1 + heights.len().next_power_of_two().trailing_zeros() as usize;
     assert!(bits <= 30, "the summed heights of {} chips need {bits} bits", heights.len());
-    let sum: Felt<C::F> = builder.eval(heights.iter().copied().map(SymbolicFelt::from).sum::<SymbolicFelt<C::F>>());
-    let none: SymbolicFelt<C::F> = builder
-        .num2bits_v2_f(sum, bits)
-        .into_iter()
-        .map(|bit| SymbolicFelt::ONE - bit)
-        .product();
+    let sum: Felt<C::F> =
+        builder.eval(heights.iter().copied().map(SymbolicFelt::from).sum::<SymbolicFelt<C::F>>());
+    let none: SymbolicFelt<C::F> =
+        builder.num2bits_v2_f(sum, bits).into_iter().map(|bit| SymbolicFelt::ONE - bit).product();
     builder.eval(SymbolicFelt::ONE - none)
 }
