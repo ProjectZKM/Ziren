@@ -217,13 +217,44 @@ impl RecordedNode {
     }
 }
 
-/// The machines of the node programs proved so far, by [`program_fingerprint`]: the nodes of
-/// a level run one program, so its layout and preprocessed commitment are made once.
-static MACHINES: LazyLock<Mutex<HashMap<u64, Arc<TapeMachine>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The machines of the node programs proved so far, by [`program_fingerprint`], each with
+/// the tick of its last use: the nodes of a level run one program, so its layout and
+/// preprocessed commitment are made once.
+static MACHINES: LazyLock<Mutex<MachineCache>> =
+    LazyLock::new(|| Mutex::new(MachineCache::default()));
 
-/// The most machines [`MACHINES`] keeps: a tree has a program or two per level.
-const MAX_MACHINES: usize = 16;
+/// The most machines [`MACHINES`] keeps: a program per leaf class at the first level and a
+/// program or two per level above; past it the least recently used machine goes.
+const MAX_MACHINES: usize = 32;
+
+#[derive(Default)]
+struct MachineCache {
+    tick: u64,
+    machines: HashMap<u64, (u64, Arc<TapeMachine>)>,
+}
+
+impl MachineCache {
+    fn get(&mut self, fingerprint: u64) -> Option<Arc<TapeMachine>> {
+        self.tick += 1;
+        let (used, machine) = self.machines.get_mut(&fingerprint)?;
+        *used = self.tick;
+        Some(machine.clone())
+    }
+
+    fn insert(&mut self, fingerprint: u64, machine: Arc<TapeMachine>) {
+        if self.machines.len() == MAX_MACHINES {
+            let oldest = self
+                .machines
+                .iter()
+                .min_by_key(|(_, (used, _))| *used)
+                .map(|(fingerprint, _)| *fingerprint)
+                .expect("a full cache has an entry");
+            self.machines.remove(&oldest);
+        }
+        self.tick += 1;
+        self.machines.insert(fingerprint, (self.tick, machine));
+    }
+}
 
 /// The machine of `tape`'s program under `schedule` at `floor`, set up once per program.
 fn node_machine(
@@ -232,8 +263,8 @@ fn node_machine(
     floor: &[(&str, usize)],
 ) -> Result<Arc<TapeMachine>, String> {
     let fingerprint = program_fingerprint(tape, schedule, floor);
-    if let Some(machine) = MACHINES.lock().expect("the machine cache").get(&fingerprint) {
-        return Ok(machine.clone());
+    if let Some(machine) = MACHINES.lock().expect("the machine cache").get(fingerprint) {
+        return Ok(machine);
     }
     let program = tracing::info_span!("node program").in_scope(|| Program::new(tape, DIGEST_SIZE));
     tracing::debug!(
@@ -246,11 +277,7 @@ fn node_machine(
         .in_scope(|| TapeMachine::new_with_floor(program, schedule, floor))
         .map_err(|e| format!("{e:?}"))?;
     let machine = Arc::new(machine);
-    let mut machines = MACHINES.lock().expect("the machine cache");
-    if machines.len() == MAX_MACHINES {
-        machines.clear();
-    }
-    machines.insert(fingerprint, machine.clone());
+    MACHINES.lock().expect("the machine cache").insert(fingerprint, machine.clone());
     Ok(machine)
 }
 
