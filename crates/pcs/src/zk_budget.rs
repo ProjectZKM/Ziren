@@ -18,7 +18,9 @@
 //!   and the final polynomial.  Their count must stay below `R`'s
 //!   `2^{lsh+1}` cells.
 //! * **random rows** — each main column is opened at two points
-//!   ([`COLUMN_EVALUATIONS`]) and has `ZK_RANDOM_ROWS / 2` free pair sums
+//!   ([`COLUMN_EVALUATIONS`]), eight base-field coordinates, and its
+//!   [`ZK_RANDOM_ROWS`] random rows give it as many uniform scalars when it
+//!   is free in both a pair's sum and difference
 //!   ([`crate::shard_level::zk`]).
 //! * **salts** — every leaf of the main round and of every folded oracle
 //!   hashes [`ZK_SALT_WIDTH`] uniform cells, so a sibling digest on an
@@ -84,10 +86,10 @@ pub struct ZkBudget {
     /// Cells of the mask region and the cells the shard's layout uses.
     pub mask_cells: usize,
     pub mask_cells_used: usize,
-    /// Evaluations of each main column the verifier learns, and the free
-    /// pair sums the random rows give each column.
+    /// Evaluations of each main column the verifier learns, and the uniform
+    /// base-field scalars the random rows give each column.
     pub column_evaluations: usize,
-    pub random_row_pairs: usize,
+    pub random_row_scalars: usize,
     /// Entropy of a leaf's salt, in bits, and the salted leaves over all
     /// oracles.
     pub salt_bits: usize,
@@ -130,7 +132,7 @@ impl ZkBudget {
             mask_cells,
             mask_cells_used: layout.end,
             column_evaluations: COLUMN_EVALUATIONS,
-            random_row_pairs: ZK_RANDOM_ROWS / 2,
+            random_row_scalars: ZK_RANDOM_ROWS,
             salt_bits: floor_bits(ZK_SALT_WIDTH),
             salted_leaves,
         }
@@ -168,10 +170,10 @@ impl ZkBudget {
         );
         check(
             &mut out,
-            self.column_evaluations <= self.random_row_pairs,
-            "column evaluations",
-            self.column_evaluations,
-            self.random_row_pairs,
+            self.column_evaluations * EF_DIM <= self.random_row_scalars,
+            "column coordinates",
+            self.column_evaluations * EF_DIM,
+            self.random_row_scalars,
         );
         out
     }
@@ -211,8 +213,8 @@ impl fmt::Display for ZkBudget {
         writeln!(f, "column_evaluations = {}", self.column_evaluations)?;
         writeln!(
             f,
-            "random_row_pairs = {}   # free uniform summands per column",
-            self.random_row_pairs
+            "random_row_scalars = {}   # uniform base summands per column, must cover column_evaluations x 4",
+            self.random_row_scalars
         )?;
         writeln!(f, "salt_bits = {}   # entropy of every salted leaf", self.salt_bits)?;
         writeln!(

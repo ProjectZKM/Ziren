@@ -76,7 +76,7 @@ The proofs above are succinct but not hiding (\S\ref{sec:intro}): the opened val
 
 \paragraph{Construction.} The zk shrink is the shard protocol of Section~\ref{sec:argument} with four additions, each a committed source of randomness drawn before the challenge it meets:
 \begin{enumerate}
-  \item \emph{Random rows.} Every main trace commits eight uniformly random rows past its real ones. They come in pairs with equal lookup values and opposite multiplicities, so their fractions cancel in the \LogUp{} argument for every challenge; the zerocheck weighs the constraints by the equality table cut at the real height, so no constraint sees them. Each column is opened at two points, the \LogUp{} anchor and the zerocheck point, and has four free pair sums, so both openings carry a uniform summand.
+  \item \emph{Random rows.} Every main trace commits eight uniformly random rows past its real ones. They come in pairs with equal lookup values and opposite multiplicities, so their fractions cancel in the \LogUp{} argument for every challenge; the zerocheck weighs the constraints by the equality table cut at the real height, so no constraint sees them. Each column is opened at two points, the \LogUp{} anchor and the zerocheck point, and is free in both the sum and the difference of every pair, so the eight base-field coordinates of its two openings carry a uniform summand.
   \item \emph{Hiding commitment.} Every stripe of the jagged layer is padded to one more variable with uniform cells, a uniform stripe $R$ joins the batch, and the per-stripe evaluations the opening would send are replaced by one claim $\sum_j \lambda^j e_j$ that $R$ randomises. Every leaf of the main round's Merkle tree and of every folded oracle's tree hashes eight uniform cells (247 bits) next to its row.
   \item \emph{Masked sumchecks.} The zerocheck, the jagged reduction and every \LogUp{}-GKR layer run on the prover's polynomial plus $\rho\, g$, with $g(\bm x) = \sum_i g_i(x_i)$, $g_i(0) + g_i(1) = 0$, committed in the top $2^{14}$ cells of $R$ before $\rho$ is drawn~\citep{libra}. The children a \LogUp{} layer sends carry an offset that vanishes on the cube, and the circuit output is hidden behind two merge layers over a virtual slice of cancelling fractions, whose top layer is two simulatable fractions carrying the public-value balance.
   \item \emph{Cell claims.} Each value the verifier learns of $R$'s mask cells is a sparse linear functional of them, batched into the \WHIR{} claim with a fresh power of the batching challenge and checked in the final round as one multilinear fold of the region's combined weights.
@@ -118,7 +118,7 @@ Randomness & learned & committed \\
 Padding of a data stripe (entries opened by the round-0 queries) & 992 & $2^{21}$ \\
 The stripe $R$ (functionals of $G$, its rows and its mask cells) & 28\,625 & $2^{22}$ \\
 Mask cells of $R$ (the shrink shard's layout, 29 masked \LogUp{} rounds) & 9\,524 & $2^{14}$ \\
-Random rows (openings of a column, free pair sums) & 2 & 4 \\
+Random rows (base coordinates of a column's openings, random scalars) & 8 & 8 \\
 \bottomrule
 \end{tabular}
 \end{table}

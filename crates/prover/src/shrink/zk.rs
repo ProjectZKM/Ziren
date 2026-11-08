@@ -178,8 +178,8 @@ mod tests {
     use zkm_core_machine::utils::setup_logger;
 
     /// Every chip of the shrink machine admits cancelling random-row pairs
-    /// and none of its main columns is pinned by its lookups, so the zk
-    /// shard hides every opening.
+    /// and none of its main columns is pinned by its lookups in a pair's sum
+    /// or difference, so the zk shard hides every opening.
     #[test]
     fn every_shrink_chip_admits_hidden_random_rows() {
         use p3_air::BaseAir;
@@ -194,6 +194,12 @@ mod tests {
                 "chip {}: lookups pin columns {:?}",
                 chip.name(),
                 plan.exposed_columns()
+            );
+            assert!(
+                plan.half_hidden_columns().is_empty(),
+                "chip {}: lookups pin columns {:?} on one side",
+                chip.name(),
+                plan.half_hidden_columns()
             );
             assert_eq!(
                 plan.exposed_dimension(),

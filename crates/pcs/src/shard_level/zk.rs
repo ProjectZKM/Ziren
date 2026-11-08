@@ -33,10 +33,12 @@
 //!   multiplicity on the random rows and the verifier reconstructs that
 //!   leaf with the constrained height ([`multiplicity_is_constant_on_main`]).
 //!
-//! Every column's random summand is uniform as long as the column is free
-//! in the pair's sum or difference; [`RandomRowPlan::exposed_columns`]
-//! names the columns a chip's lookups pin on both, for the tests to assert
-//! empty.
+//! A column's two extension-field openings are eight base-field values, so
+//! its random summand is uniform only when the column is free in both the
+//! pair's sum and its difference: two scalars per pair, eight over the four
+//! pairs.  [`RandomRowPlan::exposed_columns`] names the columns a chip's
+//! lookups pin on both and [`RandomRowPlan::half_hidden_columns`] those
+//! pinned on one, for the tests to assert both empty.
 //!
 //! A chip without main columns commits no random rows and is proved and
 //! verified as on a plain shard.
@@ -51,7 +53,8 @@ use crate::lookup::Lookup;
 use crate::Chip;
 
 /// Random rows appended to every main trace of a zk shard: four pairs,
-/// twice what two openings per column need for a uniform summand.
+/// two free scalars each, the eight base-field coordinates of a column's
+/// two openings.
 pub const ZK_RANDOM_ROWS: usize = 8;
 
 /// Does a ring's shard carry the random rows?  The zk shrink ring's does;
@@ -262,6 +265,18 @@ impl<F: Field> RandomRowPlan<F> {
             .collect()
     }
 
+    /// The main columns free in just one of a pair's sum and difference:
+    /// one random scalar per pair, four over the four pairs, where the
+    /// eight base-field coordinates of two openings need eight.
+    pub fn half_hidden_columns(&self) -> Vec<usize> {
+        (0..self.width)
+            .filter(|&k| {
+                self.sum_null.iter().any(|v| v[k] != F::ZERO)
+                    != self.diff_null.iter().any(|v| v[k] != F::ZERO)
+            })
+            .collect()
+    }
+
     /// `pairs` cancelling pairs of rows, row-major, drawn with `random`.
     pub fn sample(&self, pairs: usize, mut random: impl FnMut() -> F) -> Vec<F> {
         let half = F::TWO.inverse();
@@ -349,11 +364,10 @@ pub fn numerator_masks<F: Field, A: MachineAir<F>>(chip: &Chip<F, A>) -> Vec<boo
         .collect()
 }
 
-/// A uniform element of `F` from a 64-bit draw: the bias of the reduction
-/// is `2^-33` for a 31-bit field.
+/// A uniform element of `F`: a uniform draw below the field order.
 #[cfg(feature = "zk")]
-pub fn random_element<F: Field>(rng: &mut impl rand::Rng) -> F {
-    F::from_u64(rng.gen::<u64>())
+pub fn random_element<F: p3_field::PrimeField64>(rng: &mut impl rand::Rng) -> F {
+    F::from_u64(rng.gen_range(0..F::ORDER_U64))
 }
 
 /// Append [`ZK_RANDOM_ROWS`] random rows to every main trace of a shard,
@@ -370,7 +384,7 @@ pub fn append_random_rows<F, A>(
     rng: &mut impl rand::Rng,
 ) -> crate::traces::Traces<F>
 where
-    F: Field,
+    F: p3_field::PrimeField64,
     A: MachineAir<F>,
 {
     use crate::multilinear::PaddedMle;
@@ -396,10 +410,12 @@ where
             let plan =
                 RandomRowPlan::new(chip, width).unwrap_or_else(|e| panic!("zk random rows: {e}"));
             let exposed = plan.exposed_columns();
-            if !exposed.is_empty() {
+            let half_hidden = plan.half_hidden_columns();
+            if !exposed.is_empty() || !half_hidden.is_empty() {
                 tracing::warn!(
                     chip = %name,
-                    columns = ?exposed,
+                    pinned = ?exposed,
+                    half_hidden = ?half_hidden,
                     "zk random rows: the chip's lookups pin these main columns, their openings \
                      are not hidden"
                 );
@@ -580,6 +596,23 @@ mod tests {
             lookup(Vec::new(), VirtualPairCol::new_main(alloc::vec![(0, F::ONE)], F::TWO)),
         ];
         assert!(plan_of(&contradictory, 1).is_err());
+    }
+
+    #[test]
+    fn a_column_pinned_on_one_side_is_half_hidden() {
+        let lookups = alloc::vec![lookup(
+            alloc::vec![VirtualPairCol::single_main(1)],
+            VirtualPairCol::single_main(0)
+        )];
+        let plan = plan_of(&lookups, 3).unwrap();
+        assert!(plan.exposed_columns().is_empty());
+        assert_eq!(plan.exposed_dimension(), 0);
+        assert_eq!(plan.half_hidden_columns(), alloc::vec![0, 1]);
+        let masked = alloc::vec![lookup(
+            alloc::vec![VirtualPairCol::single_main(1)],
+            VirtualPairCol::constant(F::ONE)
+        )];
+        assert!(plan_of(&masked, 3).unwrap().half_hidden_columns().is_empty());
     }
 
     /// The closed form agrees with the brute-force sum over the cube at every
