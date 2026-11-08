@@ -376,7 +376,8 @@ pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
             .collect();
         log_dim -= rp.folding_factor;
     }
-    config.final_queries = min_queries_johnson_for_target(rate + 3 * num_rounds, pow, m, target);
+    config.final_queries =
+        min_queries_johnson_for_target(rate + 3 * (num_rounds - 1), pow, m, target);
     config.final_pow_bits = pow;
     config.batch_pow_bits = blake3_batch_grinding_bits();
     config
@@ -904,10 +905,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        bits_per_query, bits_per_query_johnson, compress_johnson_m, compress_whir_config,
-        core_whir_config, min_queries, min_queries_compress, min_queries_johnson,
-        per_component_target_bits, size_tuned_whir_config_for_target, wrap_whir_config,
-        SizeTunedParams, DEFAULT_PER_COMPONENT_TARGET_BITS,
+        bits_per_query, bits_per_query_johnson, blake3_johnson_m, blake3_whir_config,
+        compress_johnson_m, compress_whir_config, core_whir_config, min_queries,
+        min_queries_compress, min_queries_johnson, per_component_target_bits,
+        size_tuned_whir_config_for_target, wrap_whir_config, SizeTunedParams,
+        DEFAULT_PER_COMPONENT_TARGET_BITS,
     };
     use crate::whir::config::WhirConfig;
 
@@ -977,6 +979,28 @@ mod tests {
                 &compress_whir_config(lsh),
                 bits,
                 min_queries_compress,
+            );
+        }
+    }
+
+    /// The same for the core Blake3 schedule, under its own multiplicity: the final
+    /// queries open the oracle the second-to-last round committed.
+    #[test]
+    fn blake3_query_counts_are_the_johnson_minimum() {
+        let m = blake3_johnson_m();
+        let bits = |rate: usize| {
+            if m == 0 {
+                bits_per_query(rate)
+            } else {
+                bits_per_query_johnson(rate, m)
+            }
+        };
+        for lsh in [16usize, 19, 21] {
+            check_query_counts(
+                &format!("blake3 lsh {lsh}"),
+                &blake3_whir_config(lsh),
+                bits,
+                |rate, pow| min_queries_johnson(rate, pow, m),
             );
         }
     }
