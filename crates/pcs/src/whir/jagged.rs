@@ -324,9 +324,12 @@ pub fn blake3_johnson_m() -> usize {
     crate::params::env_usize("ZIREN_BLAKE3_JOHNSON_M", 2)
 }
 
-/// Query-phase grinding of the core schedule, in bits.
+/// Query-phase grinding of the core schedule, in bits: each bit removes
+/// one bit of query work from every round the leaf verifies, and the grind
+/// itself is cheap on the core prover.  The witness is a field element, so
+/// the bits stay below the field's thirty-one.
 pub fn blake3_query_grinding_bits() -> usize {
-    crate::params::env_usize("ZIREN_BLAKE3_QUERY_GRINDING_BITS", 0)
+    crate::params::env_usize("ZIREN_BLAKE3_QUERY_GRINDING_BITS", 26)
 }
 
 /// The schedule of the Blake3 ring at stacking height `lsh`: the compress
