@@ -9,11 +9,20 @@
 //! A program has to have one shape for every proof.  So the check here
 //! takes, for every query, its whole path as prover hints, recovered from
 //! the pruned proof by Plonky3's own reconstruction, and checks each path
-//! from its leaf to the root on its own.  That binds every opened row to
-//! the commitment exactly as the pruned check does, at a fixed cost per
-//! query; the pruned proof itself never enters the program.
+//! from its leaf upward.  That binds every opened row to the commitment
+//! exactly as the pruned check does, at a fixed cost per query; the pruned
+//! proof itself never enters the program.
+//!
+//! The queries are drawn in strata: the top bits of a query's index are
+//! constants of the program ([`crate::queries`]), so the node its path
+//! reaches once every bit above is constant sits at a position the
+//! protocol fixes.  A path is hashed only up to that node; the nodes the
+//! queries reach are gathered by position, a node two queries reach is
+//! asserted equal once, and the top of the tree is hashed once from them
+//! to the root, with a sibling no query reached read as a hint.
 
 use core::marker::PhantomData;
+use std::collections::BTreeMap;
 
 use p3_binary_field::{BinaryField128, TowerLevel};
 use p3_blake3::Blake3;
@@ -134,15 +143,90 @@ impl TracedMmcs {
         bits: &[Traced],
         roots: &[[Traced; 2]],
     ) {
-        let pieces: Vec<Piece> = leaf.iter().map(|&x| Piece::Element(x)).collect();
-        let mut digest = blake3(&pieces);
+        let mut digest = hash_leaf(leaf);
         for (&sibling, &bit) in siblings.iter().zip(bits) {
             digest = merkle_node(bit, digest, sibling);
         }
         let cap_bits = &bits[siblings.len()..];
         let root = select_root(roots, cap_bits);
-        for (d, r) in digest.iter().zip(&root) {
-            d.assert_eq(r);
+        assert_digest_eq(&digest, &root);
+    }
+}
+
+fn hash_leaf(leaf: &[Traced]) -> [Traced; 2] {
+    let pieces: Vec<Piece> = leaf.iter().map(|&x| Piece::Element(x)).collect();
+    blake3(&pieces)
+}
+
+fn assert_digest_eq(digest: &[Traced; 2], expected: &[Traced; 2]) {
+    for (d, e) in digest.iter().zip(expected) {
+        d.assert_eq(e);
+    }
+}
+
+/// The lowest level from which every bit of a path is a constant: the
+/// height of the first node on the path whose position the program fixes.
+fn fixed_level(bits: &[Traced]) -> usize {
+    bits.iter().rposition(|bit| !bit.is_constant()).map_or(0, |last_drawn| last_drawn + 1)
+}
+
+/// The nodes of one tree the queries' paths reached, by height and
+/// position, and the hashing of the fixed top of the tree above them.
+struct SharedTop<'a> {
+    nodes: BTreeMap<(usize, usize), [Traced; 2]>,
+    /// Each query's index and native siblings, leaf upward: the hint for a
+    /// sibling at a fixed position no query reached.
+    hints: &'a [(usize, Vec<[u8; 32]>)],
+}
+
+impl SharedTop<'_> {
+    /// Place `digest` at `(height, position)`, or assert it equal to the
+    /// node already there.
+    fn place(&mut self, height: usize, position: usize, digest: [Traced; 2]) {
+        match self.nodes.entry((height, position)) {
+            std::collections::btree_map::Entry::Occupied(placed) => {
+                assert_digest_eq(&digest, placed.get());
+            }
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(digest);
+            }
+        }
+    }
+
+    /// The sibling of the node at `(height, position)`: placed, or read
+    /// from the path of a query through that node.
+    fn sibling(&self, height: usize, position: usize) -> [Traced; 2] {
+        if let Some(&placed) = self.nodes.get(&(height, position ^ 1)) {
+            return placed;
+        }
+        let (_, siblings) = self
+            .hints
+            .iter()
+            .find(|(index, _)| index >> height == position)
+            .expect("a placed node lies on a queried path");
+        TracedDigest::read(siblings[height]).0
+    }
+
+    /// Hash every placed level up to `top`, the height of the cap roots.
+    fn hash_to(&mut self, top: usize) {
+        let Some(&(lowest, _)) = self.nodes.keys().next() else { return };
+        for height in lowest..top {
+            let level: Vec<(usize, [Traced; 2])> = self
+                .nodes
+                .range((height, 0)..(height + 1, 0))
+                .map(|(&(_, position), &digest)| (position, digest))
+                .collect();
+            for (position, digest) in level {
+                if position % 2 == 1 && self.nodes.contains_key(&(height, position - 1)) {
+                    continue;
+                }
+                let sibling = self.sibling(height, position);
+                let (left, right) =
+                    if position % 2 == 0 { (digest, sibling) } else { (sibling, digest) };
+                let pieces: Vec<Piece> =
+                    left.iter().chain(&right).map(|&x| Piece::Element(x)).collect();
+                self.place(height + 1, position >> 1, blake3(&pieces));
+            }
         }
     }
 }
@@ -201,8 +285,9 @@ impl Mmcs<Traced> for TracedMmcs {
         panic!("the recorded verifier does not open")
     }
 
-    /// Check every query's path on its own, with the paths recovered from
-    /// the pruned proof as hints.
+    /// Check every query's path up to the first node at a fixed position,
+    /// with the paths recovered from the pruned proof as hints, then the
+    /// fixed top of the tree once.
     fn verify_multi_batch<R: AsRef<[Traced]> + PartialEq>(
         &self,
         commit: &Self::Commitment,
@@ -227,14 +312,41 @@ impl Mmcs<Traced> for TracedMmcs {
         let roots = commit.roots();
         let depth = dims.height.next_power_of_two().trailing_zeros() as usize;
         let bits = queries::take_paths(indices, depth);
-        for ((&index, rows), bits) in indices.iter().zip(opened_values).zip(bits) {
-            let path = paths
-                .iter()
-                .find(|path| path.leaf_index == index)
-                .expect("the reconstruction covers every queried index");
-            let siblings: Vec<[Traced; 2]> =
-                path.siblings.iter().map(|&digest| TracedDigest::read(digest).0).collect();
-            Self::check_path(rows[0].as_ref(), &siblings, &bits, &roots);
+        let hints: Vec<(usize, Vec<[u8; 32]>)> = indices
+            .iter()
+            .map(|&index| {
+                let path = paths
+                    .iter()
+                    .find(|path| path.leaf_index == index)
+                    .expect("the reconstruction covers every queried index");
+                (index, path.siblings.clone())
+            })
+            .collect();
+        let mut shared = SharedTop { nodes: BTreeMap::new(), hints: &hints };
+        let mut top = None;
+        for (((&index, rows), bits), (_, siblings)) in
+            indices.iter().zip(opened_values).zip(&bits).zip(&hints)
+        {
+            let fixed = fixed_level(bits);
+            if fixed >= siblings.len() {
+                let siblings: Vec<[Traced; 2]> =
+                    siblings.iter().map(|&digest| TracedDigest::read(digest).0).collect();
+                Self::check_path(rows[0].as_ref(), &siblings, bits, &roots);
+                continue;
+            }
+            top = Some(siblings.len());
+            let mut digest = hash_leaf(rows[0].as_ref());
+            for (&sibling, &bit) in siblings[..fixed].iter().zip(bits) {
+                digest = merkle_node(bit, digest, TracedDigest::read(sibling).0);
+            }
+            shared.place(fixed, index >> fixed, digest);
+        }
+        if let Some(top) = top {
+            shared.hash_to(top);
+            for (&(height, position), digest) in shared.nodes.range((top, 0)..(top + 1, 0)) {
+                debug_assert_eq!(height, top);
+                assert_digest_eq(digest, &roots[position]);
+            }
         }
         Ok(())
     }

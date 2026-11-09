@@ -11,13 +11,22 @@
 //!
 //! Shape philosophy: everything
 //! structural (round count, folding factor, stripe counts, domain sizes, PoW
-//! bit budgets, path depths) is COMPILE-TIME from the `WhirConfig` + the
-//! round stripe counts, so the emitted program is value-independent; only
-//! field elements and digests are witnessed.
+//! bit budgets, path depths, query strata) is COMPILE-TIME from the
+//! `WhirConfig` + the round stripe counts, so the emitted program is
+//! value-independent; only field elements and digests are witnessed.
+//!
+//! Under stratified queries ([`zkm_pcs::whir::queries`]) a query's top index
+//! bits are protocol constants, so its path is hashed only up to the node
+//! those bits name, and the fixed top of each tree is hashed once from the
+//! nodes the queries reached ([`TreeBinder`]); the host mirror carries no
+//! siblings for those levels ([`prune_stratified_paths`]).
+
+use std::collections::BTreeMap;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_field::TwoAdicField;
 use zkm_pcs::whir::config::WhirConfig;
+use zkm_pcs::whir::queries::{query_phases, query_strata, QueryStratum};
 use zkm_pcs::{InnerChallenge, InnerVal};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
@@ -39,7 +48,9 @@ pub struct RecursiveWhirLeafOpening<F, EF, Dig> {
     /// for the leaf hash — `CircuitFelts2Ext` is gnark-only, so the EF
     /// values are witnessed directly).  Empty for round-0 leaves.
     pub ef_values: Vec<EF>,
-    /// Sibling digests, leaf-to-root.
+    /// Sibling digests, leaf upward: to the root, or under stratified
+    /// queries to the node the query's stratum names
+    /// ([`prune_stratified_paths`]).
     pub path: Vec<Dig>,
 }
 
@@ -432,27 +443,222 @@ fn exp_bits_lsb<C: CircuitConfig>(
     result
 }
 
-/// Walk a Merkle path from a hashed leaf and bind the root to `commitment`.
-/// Direction bit at level `k` = index bit `k` (LSB-first, full-height tree
-/// — mirror of the host `MerkleTreeMmcs::verify_batch`).
-fn merkle_bind_leaf<C, HV>(
+/// One query's index over `2^domain_log` leaves: the drawn low bits under
+/// the constant stratum (depth zero, every bit drawn, without strata).
+struct QueryBits<B> {
+    low: Vec<B>,
+    stratum: QueryStratum,
+    domain_log: usize,
+}
+
+impl<B> QueryBits<B> {
+    /// The levels a path is hashed before it reaches the stratum's node.
+    fn hashed_levels(&self) -> usize {
+        self.stratum.drawn_bits(self.domain_log)
+    }
+}
+
+/// Draw one phase's query indices as the host does
+/// ([`zkm_pcs::whir::queries::draw_query_indices`]): one draw per query,
+/// of the bits below its stratum.
+fn sample_query_bits<C, FC>(
+    builder: &mut Builder<C>,
+    challenger: &mut FC,
+    domain_log: usize,
+    num_queries: usize,
+    stratified: bool,
+) -> Vec<QueryBits<C::Bit>>
+where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+{
+    query_strata(num_queries, stratified)
+        .into_iter()
+        .map(|stratum| {
+            assert!(
+                stratum.depth < domain_log,
+                "whir stratum of depth {} over 2^{domain_log} leaves",
+                stratum.depth
+            );
+            let bits = stratum.drawn_bits(domain_log);
+            QueryBits { low: challenger.sample_bits(builder, bits), stratum, domain_log }
+        })
+        .collect()
+}
+
+/// `g` to the query's index: the drawn bits by selects, the stratum's bits
+/// as one constant factor.
+fn query_point<C: CircuitConfig>(
+    builder: &mut Builder<C>,
+    g: C::F,
+    query: &QueryBits<C::Bit>,
+) -> Felt<C::F> {
+    let low = exp_bits_lsb::<C>(builder, g, &query.low);
+    if query.stratum.depth == 0 {
+        return low;
+    }
+    let high = g.exp_u64((query.stratum.stratum << query.hashed_levels()) as u64);
+    builder.eval(low * high)
+}
+
+/// Hash a leaf up its path for the query's hashed levels: the direction at
+/// level `k` is drawn bit `k`, and the result is the node of the tree at
+/// that height whose position is the query's stratum.
+fn hash_path<C, HV>(
     builder: &mut Builder<C>,
     leaf_felts: &[Felt<C::F>],
     path: &[HV::DigestVariable],
-    index_bits: &[C::Bit],
-    commitment: &HV::DigestVariable,
+    query: &QueryBits<C::Bit>,
+) -> HV::DigestVariable
+where
+    C: CircuitConfig,
+    HV: FieldHasherVariable<C>,
+{
+    let levels = query.hashed_levels();
+    assert_eq!(path.len(), levels, "whir merkle path must reach the query's stratum node");
+    let mut digest = HV::hash(builder, leaf_felts);
+    for (level, sibling) in path.iter().enumerate() {
+        let pair = HV::select_chain_digest(builder, query.low[level], [digest, *sibling]);
+        digest = HV::compress(builder, pair);
+    }
+    digest
+}
+
+/// The Merkle binding of one tree's query openings.  Every query's path
+/// ends at a node whose height and position the protocol fixes
+/// ([`hash_path`]); the nodes are placed here, a node two queries reach is
+/// asserted equal, and the top of the tree is hashed once from the lowest
+/// placed level to the root, which is bound to the commitment.  Without
+/// strata every path ends at the root and the top is empty.
+struct TreeBinder<D> {
+    domain_log: usize,
+    nodes: BTreeMap<(usize, usize), D>,
+}
+
+impl<D: Copy> TreeBinder<D> {
+    fn new(domain_log: usize) -> Self {
+        Self { domain_log, nodes: BTreeMap::new() }
+    }
+
+    /// Place the node `query` reached at `(height, position)`, or bind it to
+    /// the node already there.
+    fn place<C, HV>(&mut self, builder: &mut Builder<C>, height: usize, position: usize, digest: D)
+    where
+        C: CircuitConfig,
+        HV: FieldHasherVariable<C, DigestVariable = D>,
+    {
+        match self.nodes.entry((height, position)) {
+            std::collections::btree_map::Entry::Occupied(placed) => {
+                HV::assert_digest_eq(builder, digest, *placed.get());
+            }
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(digest);
+            }
+        }
+    }
+
+    fn reached<C, HV>(&mut self, builder: &mut Builder<C>, query: &QueryBits<C::Bit>, digest: D)
+    where
+        C: CircuitConfig,
+        HV: FieldHasherVariable<C, DigestVariable = D>,
+    {
+        self.place::<C, HV>(builder, query.hashed_levels(), query.stratum.stratum, digest);
+    }
+
+    /// Hash the fixed top of the tree and bind its root to `commitment`.
+    fn finish<C, HV>(mut self, builder: &mut Builder<C>, commitment: &D)
+    where
+        C: CircuitConfig,
+        HV: FieldHasherVariable<C, DigestVariable = D>,
+    {
+        let lowest = self.nodes.keys().next().expect("a bound tree has an opening").0;
+        for height in lowest..self.domain_log {
+            let level: Vec<(usize, D)> = self
+                .nodes
+                .range((height, 0)..(height + 1, 0))
+                .map(|(&(_, position), &digest)| (position, digest))
+                .collect();
+            for pair in level.chunks(2) {
+                let [(left, left_digest), (right, right_digest)] = pair else {
+                    panic!("whir strata leave height {height} of the tree without a sibling pair")
+                };
+                assert!(
+                    left % 2 == 0 && *right == left + 1,
+                    "whir strata leave height {height} of the tree without a sibling pair"
+                );
+                let parent = HV::compress(builder, [*left_digest, *right_digest]);
+                self.place::<C, HV>(builder, height + 1, left >> 1, parent);
+            }
+        }
+        let root = self.nodes[&(self.domain_log, 0)];
+        HV::assert_digest_eq(builder, root, *commitment);
+    }
+}
+
+/// Bind one phase's openings: `reached[q][t]` is the node query `q` reached
+/// in tree `t`, whose root is `roots[t]`.
+fn bind_trees<C, HV>(
+    builder: &mut Builder<C>,
+    domain_log: usize,
+    queries: &[QueryBits<C::Bit>],
+    reached: &[Vec<HV::DigestVariable>],
+    roots: &[&HV::DigestVariable],
 ) where
     C: CircuitConfig,
     HV: FieldHasherVariable<C>,
 {
-    assert_eq!(path.len(), index_bits.len(), "whir merkle path must consume every index bit");
-    let mut digest = HV::hash(builder, leaf_felts);
-    for (level, sibling) in path.iter().enumerate() {
-        let bit = index_bits[level];
-        let pair = HV::select_chain_digest(builder, bit, [digest, *sibling]);
-        digest = HV::compress(builder, pair);
+    for (t, root) in roots.iter().enumerate() {
+        let mut binder = TreeBinder::new(domain_log);
+        for (query, nodes) in queries.iter().zip(reached) {
+            binder.reached::<C, HV>(builder, query, nodes[t]);
+        }
+        binder.finish::<C, HV>(builder, root);
     }
-    HV::assert_digest_eq(builder, digest, *commitment);
+}
+
+/// Drop from a host mirror the siblings above each query's stratum node:
+/// the circuit hashes the top of every tree once, so it reads none of them.
+/// A schedule without strata is left as it is.
+pub fn prune_stratified_paths<F, EF, Dig>(
+    proof: &mut RecursiveStackedWhirProof<F, EF, Dig>,
+    config: &WhirConfig,
+    lsh: usize,
+) {
+    if !config.stratified_queries {
+        return;
+    }
+    let phases = query_phases(config, lsh);
+    assert_eq!(phases.len(), proof.round_query_openings.len(), "whir query phases");
+    for (phase, openings) in phases.iter().zip(proof.round_query_openings.iter_mut()) {
+        let strata = query_strata(phase.num_queries, true);
+        assert!(
+            !strata.is_empty() && openings.leaves.len() % strata.len() == 0,
+            "whir query openings come in whole queries"
+        );
+        let per_query = openings.leaves.len() / strata.len();
+        for (leaf, stratum) in openings
+            .leaves
+            .iter_mut()
+            .zip(strata.iter().flat_map(|s| core::iter::repeat_n(*s, per_query)))
+        {
+            leaf.path.truncate(stratum.drawn_bits(phase.domain_log));
+        }
+    }
+}
+
+/// The host mirror of a core shard's Blake3-ring WHIR proof, its paths cut
+/// to what the circuit hashes.
+pub fn blake3_whir_mirror(
+    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>,
+) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 16]> {
+    let lsh = bundle.commit.log_stacking_height as usize;
+    let config = zkm_pcs::whir::jagged::whir_config_for_profile(
+        zkm_pcs::whir::jagged::WhirProfile::Blake3,
+        lsh,
+    );
+    let mut mirror = host_stacked_whir_to_recursive_blake3(&bundle.whir_proof);
+    prune_stratified_paths(&mut mirror, &config, lsh);
+    mirror
 }
 
 /// A deferred terminal constraint (mirror of the host verifier's `C` enum).
@@ -613,76 +819,71 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             let query_pow = proof.folding_pow[pow_flat];
             pow_flat += 1;
             challenger.check_witness(builder, round_cfg.queries_pow_bits, query_pow);
-            let index_bit_vecs: Vec<Vec<C::Bit>> = (0..round_cfg.num_queries)
-                .map(|_| challenger.sample_bits(builder, prev_domain_log))
-                .collect();
+            let queries = sample_query_bits::<C, FC>(
+                builder,
+                challenger,
+                prev_domain_log,
+                round_cfg.num_queries,
+                self.config.stratified_queries,
+            );
 
             let openings = &proof.round_query_openings[r];
             let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
             assert_eq!(
                 openings.leaves.len(),
-                index_bit_vecs.len() * leaves_per_query,
+                queries.len() * leaves_per_query,
                 "whir query openings"
             );
             let g_prev = C::F::two_adic_generator(prev_domain_log);
-            let stir_pairs: Vec<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>)> = index_bit_vecs
-                .iter()
-                .enumerate()
-                .ir_par_map_collect(builder, |builder, (qi, bits)| {
-                    let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
-                        let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << ff];
-                        for (ri, commitment) in commitments.iter().enumerate() {
-                            let leaf = &openings.leaves[qi * leaves_per_query + ri];
-                            assert_eq!(
-                                leaf.values.len(),
-                                round_stripe_counts[ri],
-                                "whir stripe rows"
-                            );
-                            let leaf_felts: Vec<Felt<C::F>> =
-                                leaf.values.iter().flatten().copied().collect();
-                            merkle_bind_leaf::<C, HV>(
-                                builder,
-                                &leaf_felts,
-                                &leaf.path,
-                                bits,
-                                commitment,
-                            );
-                            for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
-                                assert_eq!(row.len(), 1usize << ff, "whir stripe row width");
-                                for (a, &s) in acc.iter_mut().zip(row.iter()) {
-                                    *a += SymbolicExt::from(lp) * s;
-                                }
+            let (stir_pairs, reached): (
+                Vec<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>)>,
+                Vec<Vec<HV::DigestVariable>>,
+            ) = queries.iter().enumerate().ir_par_map_collect(builder, |builder, (qi, query)| {
+                let mut reached = Vec::with_capacity(leaves_per_query);
+                let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
+                    let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << ff];
+                    for ri in 0..commitments.len() {
+                        let leaf = &openings.leaves[qi * leaves_per_query + ri];
+                        assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir stripe rows");
+                        let leaf_felts: Vec<Felt<C::F>> =
+                            leaf.values.iter().flatten().copied().collect();
+                        reached.push(hash_path::<C, HV>(builder, &leaf_felts, &leaf.path, query));
+                        for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
+                            assert_eq!(row.len(), 1usize << ff, "whir stripe row width");
+                            for (a, &s) in acc.iter_mut().zip(row.iter()) {
+                                *a += SymbolicExt::from(lp) * s;
                             }
                         }
-                        acc.into_iter().map(|a| builder.eval(a)).collect()
-                    } else {
-                        let leaf = &openings.leaves[qi];
-                        assert_eq!(
-                            leaf.ef_values.len(),
-                            1usize << round_cfg.folding_factor,
-                            "whir ef leaf width"
-                        );
-                        let leaf_felts: Vec<Felt<C::F>> =
-                            leaf.ef_values.iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
-                        merkle_bind_leaf::<C, HV>(
-                            builder,
-                            &leaf_felts,
-                            &leaf.path,
-                            bits,
-                            &proof.round_commitments[r - 1],
-                        );
-                        leaf.ef_values.clone()
-                    };
-                    let stir = evaluate_mle_ext::<C>(builder, &virt_leaf, &this_round_randomness);
-                    let x_felt = exp_bits_lsb::<C>(builder, g_prev, bits);
-                    let mut pt = Vec::with_capacity(rem);
-                    let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
-                    for _ in 0..rem {
-                        pt.push(cur);
-                        cur = builder.eval(cur * cur);
                     }
-                    (stir, pt)
-                });
+                    acc.into_iter().map(|a| builder.eval(a)).collect()
+                } else {
+                    let leaf = &openings.leaves[qi];
+                    assert_eq!(
+                        leaf.ef_values.len(),
+                        1usize << round_cfg.folding_factor,
+                        "whir ef leaf width"
+                    );
+                    let leaf_felts: Vec<Felt<C::F>> =
+                        leaf.ef_values.iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
+                    reached.push(hash_path::<C, HV>(builder, &leaf_felts, &leaf.path, query));
+                    leaf.ef_values.clone()
+                };
+                let stir = evaluate_mle_ext::<C>(builder, &virt_leaf, &this_round_randomness);
+                let x_felt = query_point::<C>(builder, g_prev, query);
+                let mut pt = Vec::with_capacity(rem);
+                let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
+                for _ in 0..rem {
+                    pt.push(cur);
+                    cur = builder.eval(cur * cur);
+                }
+                ((stir, pt), reached)
+            });
+            let roots: Vec<&HV::DigestVariable> = if prev_round0 {
+                commitments.iter().collect()
+            } else {
+                vec![&proof.round_commitments[r - 1]]
+            };
+            bind_trees::<C, HV>(builder, prev_domain_log, &queries, &reached, &roots);
 
             let round_batch = challenger.sample_ext(builder);
             let mut cc = round_batch;
@@ -721,26 +922,24 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         let g_final = C::F::two_adic_generator(prev_domain_log);
         let last_ff = *folds.last().unwrap();
         let last_randomness = all_fr[all_fr.len() - last_ff..].to_vec();
-        let final_index_bits: Vec<Vec<C::Bit>> = (0..self.config.final_queries)
-            .map(|_| challenger.sample_bits(builder, prev_domain_log))
-            .collect();
-        final_index_bits.iter().enumerate().ir_par_map_collect::<Vec<()>, _, _>(
+        let final_queries = sample_query_bits::<C, FC>(
             builder,
-            |builder, (q, bits)| {
+            challenger,
+            prev_domain_log,
+            self.config.final_queries,
+            self.config.stratified_queries,
+        );
+        let reached: Vec<Vec<HV::DigestVariable>> =
+            final_queries.iter().enumerate().ir_par_map_collect(builder, |builder, (q, query)| {
+                let mut reached = Vec::with_capacity(leaves_per_query);
                 let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
                     let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << last_ff];
-                    for (ri, commitment) in commitments.iter().enumerate() {
+                    for ri in 0..commitments.len() {
                         let leaf = &final_openings.leaves[q * leaves_per_query + ri];
                         assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir final rows");
                         let leaf_felts: Vec<Felt<C::F>> =
                             leaf.values.iter().flatten().copied().collect();
-                        merkle_bind_leaf::<C, HV>(
-                            builder,
-                            &leaf_felts,
-                            &leaf.path,
-                            bits,
-                            commitment,
-                        );
+                        reached.push(hash_path::<C, HV>(builder, &leaf_felts, &leaf.path, query));
                         for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
                             for (a, &s) in acc.iter_mut().zip(row.iter()) {
                                 *a += SymbolicExt::from(lp) * s;
@@ -753,17 +952,11 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                     assert_eq!(leaf.ef_values.len(), 1usize << last_ff, "whir final leaf width");
                     let leaf_felts: Vec<Felt<C::F>> =
                         leaf.ef_values.iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
-                    merkle_bind_leaf::<C, HV>(
-                        builder,
-                        &leaf_felts,
-                        &leaf.path,
-                        bits,
-                        &proof.round_commitments[self.config.round_parameters.len() - 2],
-                    );
+                    reached.push(hash_path::<C, HV>(builder, &leaf_felts, &leaf.path, query));
                     leaf.ef_values.clone()
                 };
                 let folded = evaluate_mle_ext::<C>(builder, &virt_leaf, &last_randomness);
-                let x_felt = exp_bits_lsb::<C>(builder, g_final, bits);
+                let x_felt = query_point::<C>(builder, g_final, query);
                 let mut pt = Vec::with_capacity(final_log);
                 let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
                 for _ in 0..final_log {
@@ -772,8 +965,14 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                 }
                 let expected = Self::mono_eval_lsb::<C>(builder, &proof.final_poly, &pt);
                 builder.assert_ext_eq(folded, expected);
-            },
-        );
+                reached
+            });
+        let roots: Vec<&HV::DigestVariable> = if prev_round0 {
+            commitments.iter().collect()
+        } else {
+            vec![&proof.round_commitments[self.config.round_parameters.len() - 2]]
+        };
+        bind_trees::<C, HV>(builder, prev_domain_log, &final_queries, &reached, &roots);
 
         let mut total = SymbolicExt::<C::F, C::EF>::ZERO;
         for c in &constraints {
@@ -962,6 +1161,7 @@ mod tests {
             .expect("host verify must accept before the circuit test means anything");
 
         let mut host_mirror = host_stacked_whir_to_recursive(&proof);
+        prune_stratified_paths(&mut host_mirror, &cfg, lsh);
         tamper(&mut host_mirror);
         let commitment_roots: Vec<[F; 8]> = commitments
             .iter()
@@ -1024,6 +1224,59 @@ mod tests {
     #[test]
     fn whir_circuit_roundtrip_verifies() {
         run_whir_circuit_roundtrip(|_| {});
+    }
+
+    /// A schedule whose queries are drawn in strata of several depths
+    /// (`5 = 4 + 1` per round, `6 = 4 + 2` final).
+    fn stratified_config(lsh: usize) -> zkm_pcs::whir::config::WhirConfig {
+        let mut cfg = whir_config_for_stack(lsh, 3, 0);
+        for r in cfg.round_parameters.iter_mut() {
+            r.num_queries = 5;
+        }
+        cfg.final_queries = 6;
+        cfg.stratified_queries = true;
+        cfg
+    }
+
+    /// POSITIVE: stratified queries verify in-circuit, with the paths cut
+    /// at the stratum nodes and the tree tops hashed once.
+    #[test]
+    fn whir_circuit_roundtrip_stratified_queries() {
+        run_whir_circuit_roundtrip_with(9, stratified_config(9), |host| {
+            let phases = query_phases(&stratified_config(9), 9);
+            for (phase, openings) in phases.iter().zip(&host.round_query_openings) {
+                let deepest = phase.num_queries.ilog2() as usize;
+                let shallowest = phase.num_queries.trailing_zeros() as usize;
+                assert_eq!(openings.leaves[0].path.len(), phase.domain_log - deepest);
+                assert_eq!(
+                    openings.leaves.last().unwrap().path.len(),
+                    phase.domain_log - shallowest
+                );
+            }
+        });
+    }
+
+    /// NEGATIVE: under strata a tampered sibling on a cut path is rejected
+    /// where the fixed top of the tree meets the commitment.
+    #[test]
+    #[should_panic]
+    fn whir_circuit_rejects_tampered_sibling_under_strata() {
+        use p3_field::PrimeCharacteristicRing;
+        run_whir_circuit_roundtrip_with(9, stratified_config(9), |host| {
+            host.round_query_openings[0].leaves[0].path[0][0] += InnerVal::ONE;
+        });
+    }
+
+    /// NEGATIVE: under strata a tampered leaf of a query whose stratum node
+    /// another query also reaches is rejected where the two meet.
+    #[test]
+    #[should_panic]
+    fn whir_circuit_rejects_tampered_leaf_under_strata() {
+        use p3_field::PrimeCharacteristicRing;
+        run_whir_circuit_roundtrip_with(9, stratified_config(9), |host| {
+            let last = host.round_query_openings[0].leaves.len() - 1;
+            host.round_query_openings[0].leaves[last].values[0][0] += InnerVal::ONE;
+        });
     }
 
     /// Tampering an echoed batch evaluation is rejected: the λ-batched claim

@@ -401,21 +401,39 @@ fn interleaved_roundtrip_verifies() {
 /// instance; honest verify + tamper rejection on a stripe leaf.
 #[test]
 fn stacked_roundtrip_verifies() {
+    stacked_roundtrip(false, 3, 4, 4);
+}
+
+/// The same under stratified queries, with counts whose strata are of
+/// several depths (`5 = 4 + 1`, `6 = 4 + 2`), over two rounds so the final
+/// codeword, of `2^4` leaves, has room for a stratum of depth two.
+#[test]
+fn stacked_roundtrip_verifies_with_stratified_queries() {
+    stacked_roundtrip(true, 2, 5, 6);
+}
+
+fn stacked_roundtrip(
+    stratified: bool,
+    num_rounds: usize,
+    num_queries: usize,
+    final_queries: usize,
+) {
     use crate::whir::stacked::{StackedWhirProof, StackedWhirProver, StackedWhirVerifier};
 
     type F = InnerVal;
     type EF = InnerChallenge;
 
-    let (lsh, ff, num_rounds) = (9usize, 3usize, 3usize);
+    let (lsh, ff) = (9usize, 3usize);
     let mut rng = StdRng::seed_from_u64(0x57AC);
 
     let mut cfg = tower_config(lsh, ff, num_rounds);
     cfg.starting_ood_samples = 0;
     for r in cfg.round_parameters.iter_mut() {
-        r.num_queries = 4;
+        r.num_queries = num_queries;
     }
-    cfg.final_queries = 4;
+    cfg.final_queries = final_queries;
     cfg.batch_pow_bits = 4;
+    cfg.stratified_queries = stratified;
 
     let dft = Arc::new(Radix2DitParallel::<F>::default());
     let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());

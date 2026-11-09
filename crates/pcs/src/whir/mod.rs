@@ -19,8 +19,9 @@
 //! coset point-map that turns an opened coset into a STIR constraint.
 //! Around them sit the Reed-Solomon codeword ([`code`]) and its DFT encoder
 //! ([`encoder`]), the multilinear type ([`mle`]), Merkle opening types
-//! ([`merkle`]), proof-of-work grinding ([`grind`]) and the stripe layout of
-//! the stacked dense polynomial ([`stripes`]).
+//! ([`merkle`]), the query index schedule ([`queries`]), proof-of-work
+//! grinding ([`grind`]) and the stripe layout of the stacked dense
+//! polynomial ([`stripes`]).
 //!
 //! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
 //! the earlier single-polynomial (non-stacked) prover and verifier variants.
@@ -44,6 +45,7 @@ pub mod monomial;
 pub mod proof;
 #[cfg(test)]
 pub mod prover;
+pub mod queries;
 #[cfg(test)]
 pub mod round_prover;
 pub mod stacked;
