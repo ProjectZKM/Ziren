@@ -703,6 +703,11 @@ where
         }
         let lambda: EF<SC> = challenger.sample_algebra_element::<EF<SC>>();
         let rho: EF<SC> = challenger.sample_algebra_element::<EF<SC>>();
+        if rho == EF::<SC>::ZERO {
+            return Err(JaggedShardVerifyError::DegenerateChallenge(alloc::format!(
+                "LogUp-GKR round {k}: the mask challenge is zero"
+            )));
+        }
         if round.sumcheck_proof.claimed_sum != lambda * masked_n + masked_d {
             return Err(fail(alloc::format!("round {k}: sumcheck claimed_sum mismatch")));
         }
@@ -713,6 +718,11 @@ where
             GKR_MASK_DEGREE,
         )?;
         let reduced = &round.sumcheck_proof.point_and_eval.0;
+        if reduced[0] == EF::<SC>::ZERO || reduced[0] == EF::<SC>::ONE {
+            return Err(JaggedShardVerifyError::DegenerateChallenge(alloc::format!(
+                "LogUp-GKR round {k}: the children's offsets vanish at the first challenge"
+            )));
+        }
         let final_eval = round.sumcheck_proof.point_and_eval.1;
         let eq_val = eq_eval_host(reduced, &point);
         let residue = final_eval - scale * eq_val * layer_combination(round, lambda);

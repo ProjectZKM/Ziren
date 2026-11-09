@@ -1465,15 +1465,66 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
             + 'static,
     {
+        verify_jagged_inner_generic_result::<Challenger, MT>(
+            chip_infos,
+            r_row_per_chip,
+            z_row,
+            bundle,
+            challenger,
+            mmcs,
+            skip_commit_observe,
+            profile,
+            preceding_rounds,
+            opened_main,
+            zk_claims,
+        )
+        .is_ok()
+    }
+
+    /// Why a jagged bundle was rejected.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum JaggedRejection {
+        /// A challenge of the zk ring under which a mask degenerates: the
+        /// jagged reduction's mask challenge or a WHIR batching challenge is
+        /// zero.  The bundle may be honest; the prover proves again.
+        DegenerateChallenge(alloc::string::String),
+        /// The bundle does not verify, for the reason logged.
+        Invalid,
+    }
+
+    /// [`verify_jagged_inner_generic`] with the reason a bundle is rejected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_inner_generic_result<Challenger, MT>(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        bundle: &JaggedPcsProofGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        skip_commit_observe: bool,
+        profile: crate::whir::jagged::WhirProfile,
+        preceding_rounds: &[(<MT as p3_commit::Mmcs<JaggedVal>>::Commitment, usize)],
+        opened_main: &[Vec<InnerChallenge>],
+        zk_claims: &[crate::zk_mask::ZkCellClaim<InnerChallenge>],
+    ) -> Result<(), JaggedRejection>
+    where
+        MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+            + Clone
+            + Sync
+            + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+            + 'static,
+    {
         if let Err(why) =
             crate::jagged_pcs::check_canonical_packing(&bundle.packing, "jagged verify")
         {
             tracing::info!("[jagged verify] {why}");
-            return false;
+            return Err(JaggedRejection::Invalid);
         }
 
         if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
-            return false;
+            return Err(JaggedRejection::Invalid);
         }
         let config = crate::whir::jagged::whir_config_for_profile(
             profile,
@@ -1496,15 +1547,20 @@ pub mod jagged {
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
         if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
             tracing::warn!("[jagged verify] cross-bind failed: {why}");
-            return false;
+            return Err(JaggedRejection::Invalid);
         }
         let masked = profile.is_zk();
         if masked == zk_claims.is_empty() {
             tracing::warn!("[jagged verify] zk mask claims supplied for the wrong ring");
-            return false;
+            return Err(JaggedRejection::Invalid);
         }
         let jagged_rho: Option<InnerChallenge> =
             masked.then(|| challenger.sample_algebra_element());
+        if jagged_rho == Some(InnerChallenge::ZERO) {
+            return Err(JaggedRejection::DegenerateChallenge(
+                "the jagged reduction's mask challenge is zero".into(),
+            ));
+        }
         let red_result = crate::jagged_sumcheck::verify_jagged_reduction_masked(
             &bundle.reduction,
             &packing,
@@ -1517,7 +1573,7 @@ pub mod jagged {
         );
         let Some((z_star, q_at_z, _w_at_z, jagged_residue)) = red_result else {
             tracing::warn!("[jagged verify] jagged sumcheck reduction rejected");
-            return false;
+            return Err(JaggedRejection::Invalid);
         };
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
             &bundle.jagged_eval,
@@ -1572,10 +1628,16 @@ pub mod jagged {
             masks,
             challenger,
         );
-        if let Err(e) = &res {
-            tracing::warn!("[jagged verify] WHIR opening rejected: {:?}", e);
+        match res {
+            Ok(()) => Ok(()),
+            Err(crate::whir::error::WhirVerifierError::DegenerateChallenge(why)) => {
+                Err(JaggedRejection::DegenerateChallenge(why))
+            }
+            Err(e) => {
+                tracing::warn!("[jagged verify] WHIR opening rejected: {:?}", e);
+                Err(JaggedRejection::Invalid)
+            }
         }
-        res.is_ok()
     }
 }
 

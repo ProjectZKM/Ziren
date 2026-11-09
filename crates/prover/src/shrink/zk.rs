@@ -20,7 +20,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_core_executor::ZKMReduceProof;
 use zkm_pcs::{
     CpuProver, MachineProof, MachineProver, MachineVerificationError, StarkGenericConfig,
-    StarkVerifyingKey, ZKMProverOpts,
+    StarkVerifyingKey, VerificationError, ZKMProverOpts,
 };
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_recursion_circuit::machine::{
@@ -42,6 +42,14 @@ pub type ZkShrinkSC = zkm_pcs::zk::KoalaBearPoseidon2ZkShrink;
 /// The zk shrink strategy; see the module documentation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ZkShrink;
+
+/// How many times the zk shrink proves a shard before giving up: each proof
+/// is verified, and one whose transcript drew a degenerate challenge
+/// ([`VerificationError::DegenerateChallenge`]) is proved again with fresh
+/// random rows, masks and salts.  An honest proof is rejected with
+/// probability below `2^-20`, so a second attempt is rare and a fourth
+/// failure is a bug.
+pub const ZK_SHRINK_ATTEMPTS: usize = 4;
 
 /// The shard prover of the zk shrink machine.
 pub fn zk_shrink_prover() -> CpuProver<ZkShrinkSC, ShrinkAir<KoalaBear>> {
@@ -102,13 +110,38 @@ impl ShrinkStrategy for ZkShrink {
         let zk_prover = zk_shrink_prover();
         let (pk, vk) =
             tracing::debug_span!("setup zk shrink").in_scope(|| zk_prover.setup(&program));
-        let mut challenger = zk_prover.machine().config().challenger();
-        let mut proof = tracing::debug_span!("prove zk shrink").in_scope(|| {
-            zk_prover
-                .prove(&pk, vec![runtime.record], &mut challenger, opts.recursion_opts)
-                .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))
-        })?;
-        Ok(ZKMReduceProof { vk, proof: proof.shard_proofs.pop().expect("one zk shrink shard") })
+        let record = runtime.record;
+        for attempt in 1..=ZK_SHRINK_ATTEMPTS {
+            let mut challenger = zk_prover.machine().config().challenger();
+            let proof = tracing::debug_span!("prove zk shrink").in_scope(|| {
+                zk_prover
+                    .prove(&pk, vec![record.clone()], &mut challenger, opts.recursion_opts)
+                    .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))
+            })?;
+            let mut challenger = zk_prover.machine().config().challenger();
+            match tracing::debug_span!("verify zk shrink")
+                .in_scope(|| zk_prover.machine().verify(&vk, &proof, &mut challenger))
+            {
+                Ok(()) => {
+                    let mut proof = proof;
+                    return Ok(ZKMReduceProof {
+                        vk,
+                        proof: proof.shard_proofs.pop().expect("one zk shrink shard"),
+                    });
+                }
+                Err(MachineVerificationError::InvalidShardProof(
+                    VerificationError::DegenerateChallenge(why),
+                )) => {
+                    tracing::info!(
+                        "zk shrink attempt {attempt} drew a degenerate challenge: {why}"
+                    );
+                }
+                Err(e) => return Err(ZKMRecursionProverError::RuntimeError(e.to_string())),
+            }
+        }
+        Err(ZKMRecursionProverError::RuntimeError(format!(
+            "{ZK_SHRINK_ATTEMPTS} zk shrink proofs in a row drew a degenerate challenge"
+        )))
     }
 }
 

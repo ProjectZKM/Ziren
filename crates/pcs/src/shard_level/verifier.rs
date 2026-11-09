@@ -86,6 +86,14 @@ pub enum JaggedShardVerifyError {
     Zerocheck(String),
     /// Jagged-PCS opening verification failed.
     JaggedPcs(String),
+    /// A challenge of a zk shard under which a mask degenerates: a zero mask
+    /// challenge, a LogUp-GKR layer challenge at which `Z(X) = X(1 − X)`
+    /// vanishes, or two opening points whose random-row weight matrix has
+    /// rank below eight ([`crate::shard_level::zk::random_rows_hide`]).  The
+    /// proof reveals nothing wrong, but such a transcript could leave a
+    /// function of the witness in the clear, so the verifier rejects it and
+    /// an honest prover proves again with fresh randomness.
+    DegenerateChallenge(String),
     /// An unsupported proof sub-flow, named by the payload.  No verifier
     /// path constructs it.
     Unimplemented(&'static str),
@@ -109,6 +117,7 @@ impl core::fmt::Display for JaggedShardVerifyError {
             Self::LogupGkr(msg) => write!(f, "LogUp-GKR: {msg}"),
             Self::Zerocheck(msg) => write!(f, "zerocheck: {msg}"),
             Self::JaggedPcs(msg) => write!(f, "jagged-PCS: {msg}"),
+            Self::DegenerateChallenge(msg) => write!(f, "degenerate challenge: {msg}"),
             Self::Unimplemented(phase) => {
                 write!(f, "host-side JaggedShardVerifier: {phase} not yet implemented")
             }
@@ -529,7 +538,8 @@ where
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
+            build_jagged_verify_inputs, verify_jagged_inner_generic_result, JaggedPcsProofGeneric,
+            JaggedRejection,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
@@ -711,7 +721,10 @@ where
         }
 
         let mmcs = <SC as crate::WhirRing>::whir_mmcs();
-        let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::WhirRing>::WhirMmcs>(
+        let verdict = verify_jagged_inner_generic_result::<
+            SC::Challenger,
+            <SC as crate::WhirRing>::WhirMmcs,
+        >(
             &chip_infos,
             &r_row_per_chip,
             &z_row,
@@ -739,11 +752,14 @@ where
             &opened_main,
             zk_claims,
         );
-        return if ok {
-            Ok(())
-        } else {
-            Err(JaggedShardVerifyError::JaggedPcs("outer jagged bundle rejected".into()))
-        };
+        return verdict.map_err(|rejection| match rejection {
+            JaggedRejection::DegenerateChallenge(why) => {
+                JaggedShardVerifyError::DegenerateChallenge(why)
+            }
+            JaggedRejection::Invalid => {
+                JaggedShardVerifyError::JaggedPcs("outer jagged bundle rejected".into())
+            }
+        });
     }
 
     let bundle = match evaluation_proof {
@@ -1190,6 +1206,33 @@ where
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let rho: Option<Challenge<SC>> =
         constrained_heights.is_some().then(|| challenger.sample_algebra_element::<Challenge<SC>>());
+    if rho == Some(Challenge::<SC>::ZERO) {
+        return Err(JaggedShardVerifyError::DegenerateChallenge(
+            "the zerocheck mask challenge is zero".to_string(),
+        ));
+    }
+    if let Some(heights) = constrained_heights {
+        let z_star = &zerocheck_proof.point_and_eval.0;
+        let anchor: Vec<Challenge<SC>> = gkr_evaluations.point.iter().rev().copied().collect();
+        if anchor.len() == z_star.len() {
+            for ((chip, opening), &height) in
+                chips.iter().zip(opened_values.chips.iter()).zip(heights)
+            {
+                if !opening.main.local.is_empty()
+                    && !crate::shard_level::zk::random_rows_hide::<Val<SC>, Challenge<SC>>(
+                        &anchor, z_star, height,
+                    )
+                {
+                    return Err(JaggedShardVerifyError::DegenerateChallenge(format!(
+                        "chip {}: the random rows' weight matrix at its two opening points has \
+                         rank below {}",
+                        chip.name(),
+                        crate::shard_level::zk::ZK_RANDOM_ROWS
+                    )));
+                }
+            }
+        }
+    }
 
     let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
         chips,

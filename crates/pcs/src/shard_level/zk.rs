@@ -46,7 +46,7 @@
 use alloc::vec::Vec;
 
 use p3_air::{PairCol, VirtualPairCol};
-use p3_field::Field;
+use p3_field::{BasedVectorSpace, ExtensionField, Field};
 
 use crate::air::MachineAir;
 use crate::lookup::Lookup;
@@ -318,6 +318,54 @@ pub fn constraint_weight_table<EF: Field>(
     table
 }
 
+/// Whether the random rows hide a column opened at `anchor` and `z`: the
+/// eight base-field coordinates of its two openings are `A·w + B·r` for the
+/// real rows `w` and the random rows `r` of rows `constrained..constrained +
+/// ZK_RANDOM_ROWS`, and `B` is the square matrix of the two equality
+/// weights' coordinates at those rows.  `B` of full rank makes the eight
+/// coordinates uniform; a rank below eight leaves a linear functional of
+/// the real rows in the clear, so the verifier rejects the challenges
+/// ([`crate::shard_level::verifier::JaggedShardVerifyError::DegenerateChallenge`]).
+/// Both points are big-endian as in [`masked_eq_eval`].
+///
+/// Uniform points give a singular `B` with probability below `2^-23` by
+/// Schwartz–Zippel (its determinant has degree at most eight times the
+/// dimension in the points' coordinates) and about `2^-31` in a census of
+/// ten thousand random slices.  When `constrained` is a multiple of eight
+/// the rows share their high bits, whose weight scales each point's four
+/// coordinates invertibly, so the rank is that of the two points' last
+/// three coordinates alone.
+///
+/// # Panics
+/// Panics if the points disagree on dimension or the random rows do not fit
+/// the cube.
+#[must_use]
+pub fn random_rows_hide<F: Field, EF: ExtensionField<F>>(
+    anchor: &[EF],
+    z: &[EF],
+    constrained: usize,
+) -> bool {
+    let m = anchor.len();
+    assert_eq!(z.len(), m, "random_rows_hide: anchor and point disagree on dimension");
+    assert!(constrained + ZK_RANDOM_ROWS <= 1usize << m, "random_rows_hide: rows do not fit");
+    let weight = |point: &[EF], row: usize| -> EF {
+        point.iter().enumerate().fold(EF::ONE, |acc, (k, &x)| {
+            acc * if (row >> (m - 1 - k)) & 1 == 1 { x } else { EF::ONE - x }
+        })
+    };
+    let dim = <EF as BasedVectorSpace<F>>::DIMENSION;
+    let mut rows: Vec<Vec<F>> = alloc::vec![Vec::with_capacity(ZK_RANDOM_ROWS); 2 * dim];
+    for row in constrained..constrained + ZK_RANDOM_ROWS {
+        for (p, point) in [anchor, z].into_iter().enumerate() {
+            let coordinates = weight(point, row);
+            for (c, &coordinate) in coordinates.as_basis_coefficients_slice().iter().enumerate() {
+                rows[p * dim + c].push(coordinate);
+            }
+        }
+    }
+    rank(rows, ZK_RANDOM_ROWS) == 2 * dim
+}
+
 /// `Σ_{b < rows} eq(anchor, b) · eq(z, b)` over the big-endian rows `b` of
 /// the cube (`anchor[0]` and `z[0]` pair with the row's top bit): the value
 /// at `z` of the multilinear extension of [`constraint_weight_table`].
@@ -501,6 +549,102 @@ mod tests {
         let exposed_dimension = sum_rank + diff_rank - joint_rank;
         Ok(RandomRowPlan { width, sum_particular, sum_null, diff_null, exposed_dimension })
     }
+
+    /// Two opening points met in a production zk shrink proof whose random
+    /// rows sit at `262144..262152`: the weight matrix has rank seven there
+    /// and at every other run of eight rows aligned to eight, since the
+    /// matrices at two aligned offsets differ by an invertible scaling of
+    /// each point's four coordinates; runs across an alignment boundary and
+    /// a shifted anchor have full rank.
+    #[test]
+    fn random_rows_hide_rejects_the_rank_seven_points() {
+        let raw = RAW_POINTS;
+        let points: Vec<Vec<EF>> = raw
+            .iter()
+            .map(|point| {
+                point
+                    .iter()
+                    .map(|a| {
+                        <EF as BasedVectorSpace<F>>::from_basis_coefficients_slice(
+                            &a.map(F::from_u32),
+                        )
+                        .unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+        let (anchor, z) = (&points[0], &points[1]);
+        assert!(!random_rows_hide::<F, EF>(anchor, z, 1 << 18));
+        for aligned in [0, 8, (1 << 18) + 8] {
+            assert!(!random_rows_hide::<F, EF>(anchor, z, aligned));
+        }
+        for unaligned in [3, 5, (1 << 18) + 3, (1 << 18) + 11] {
+            assert!(random_rows_hide::<F, EF>(anchor, z, unaligned));
+        }
+        let mut shifted = anchor.clone();
+        shifted[21] += EF::ONE;
+        assert!(random_rows_hide::<F, EF>(&shifted, z, 1 << 18));
+        let mut seed = 11u64;
+        let mut point = || -> Vec<EF> {
+            (0..22).map(|_| EF::from_basis_coefficients_fn(|_| lcg(&mut seed))).collect()
+        };
+        for _ in 0..16 {
+            let (a, b) = (point(), point());
+            assert!(random_rows_hide::<F, EF>(&a, &b, 1 << 18));
+            assert!(random_rows_hide::<F, EF>(&a, &b, 1 << 17 | 5));
+        }
+    }
+
+    const RAW_POINTS: [[[u32; 4]; 22]; 2] = [
+        [
+            [394431667, 102234520, 1051859102, 623088223],
+            [1329505860, 296427003, 910866976, 797484707],
+            [391604959, 17529306, 1869066624, 1000181783],
+            [1883084723, 204804436, 2022824412, 440445757],
+            [1058962287, 459151456, 800495850, 2094959690],
+            [1799556956, 346461355, 683917093, 1399203552],
+            [2034106560, 1808091439, 1998386945, 649616054],
+            [1724006961, 1974488290, 346699082, 795788994],
+            [909990322, 858968075, 467165057, 1243281614],
+            [1326284453, 900221624, 1848231681, 1504453775],
+            [1664969617, 2085606265, 186445823, 402977461],
+            [396852701, 1497359147, 543867422, 341323510],
+            [1220090041, 1815798290, 975276521, 285684283],
+            [637597905, 679612583, 765803392, 1359989500],
+            [1026567590, 1645564873, 382876011, 990094598],
+            [300688619, 1186044219, 1857707032, 403768908],
+            [713875109, 2054157406, 1494184150, 171550328],
+            [123240265, 310910995, 1315246590, 1988192704],
+            [1474835735, 511366049, 127174084, 837470695],
+            [545911966, 1884199111, 1283074703, 632661949],
+            [1456447037, 679689936, 1749543787, 1719326024],
+            [137791609, 351359303, 945332215, 1957360455],
+        ],
+        [
+            [553145838, 526341834, 1763063501, 651408548],
+            [1873948846, 1177547373, 2049068056, 1915837064],
+            [1322127252, 325122829, 1408225907, 1101286757],
+            [1468286719, 1341382662, 1485694544, 965339362],
+            [1573152842, 843611517, 1627425351, 1451904561],
+            [1055787759, 1700071114, 1951225095, 55932990],
+            [965367463, 1081453401, 395641942, 222950980],
+            [532713988, 1553606, 1801072267, 1856705481],
+            [97239574, 424411437, 2062017418, 151002078],
+            [251139980, 106793538, 865314555, 278690234],
+            [145849050, 928396206, 236951904, 1506638643],
+            [417509909, 13855291, 639309701, 1717713341],
+            [1687101625, 1458745219, 1034782106, 891114684],
+            [772222591, 1439561767, 1292187358, 915186893],
+            [1409043577, 460707592, 1638460255, 1763328156],
+            [1864549138, 1324873990, 540793457, 1886503682],
+            [573731266, 2126939951, 1077062612, 443860498],
+            [1301559594, 637818775, 2052042034, 939783762],
+            [348358083, 1691320963, 1824953184, 1867840320],
+            [1057936610, 1930554977, 637540858, 1022778162],
+            [1977657886, 992300603, 1429169515, 1774429275],
+            [662037850, 64021988, 1571832050, 1097744268],
+        ],
+    ];
 
     #[test]
     fn constrained_height_rule() {

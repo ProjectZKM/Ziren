@@ -32,6 +32,17 @@
 //! `1/|EF|`, and the simulation error of the compiled proof in the random
 //! oracle model.  The soundcalc census prints both for the production
 //! schedule; the tests assert the budgets hold there.
+//!
+//! The counts assume the challenges do not degenerate: a mask challenge of
+//! zero, a LogUp-GKR layer challenge in `{0, 1}` or two opening points whose
+//! random-row weight matrix is singular would leave a function of the
+//! witness in the clear.  The verifier rejects such a transcript
+//! ([`crate::shard_level::verifier::JaggedShardVerifyError::DegenerateChallenge`])
+//! and an honest prover proves again with fresh randomness, so the
+//! rejection costs no simulation error: the simulator draws its challenges
+//! from the same non-degenerate set.  An honest prover meets a rejection
+//! with probability below `2^-20` per proof (the weight matrices; the zero
+//! and `{0, 1}` events are `1/|EF|` each).
 
 use alloc::string::String;
 use alloc::vec::Vec;

@@ -791,6 +791,11 @@ where
     let lambda: EF = challenger.sample_algebra_element();
     challenger.observe_algebra_element(funnelled);
     let mu: EF = challenger.sample_algebra_element();
+    if lambda == EF::ZERO || mu == EF::ZERO {
+        return Err(WhirVerifierError::DegenerateChallenge(
+            "a batching challenge of the zk opening is zero".into(),
+        ));
+    }
     let coefficients = layout.coefficients(&eq_table(bp.len(), bp), lambda, mu);
     let mut claim = evaluation_claim + mu * funnelled;
     let _batch: EF = challenger.sample_algebra_element();
