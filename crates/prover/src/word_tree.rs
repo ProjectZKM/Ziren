@@ -193,6 +193,14 @@ fn leaf_shards() -> usize {
         .unwrap_or(1)
 }
 
+/// The schedule a word tree's nodes are proved under.  A node's parent records its verifier
+/// from the node's proof itself, so nothing pins the nodes to the default schedule the fixed
+/// binary tree's verifiers are built for, and they trade queries for grinding under the
+/// Johnson bound as the root does: half the queries, so half the opening a parent verifies.
+fn node_schedule() -> BinarySchedule {
+    root_schedule()
+}
+
 /// Whether a device readies the next leaf's tape while it proves the one before,
 /// `ZIREN_WORD_TAPE_PREFETCH` (on).
 fn tape_prefetch() -> bool {
@@ -434,7 +442,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut chain = [0u32; DIGEST_SIZE];
         for (depth, groups) in levels.iter().enumerate() {
             let complete = depth + 1 == top;
-            let schedule = if complete { root_schedule() } else { BinarySchedule::default() };
+            let schedule = if complete { root_schedule() } else { node_schedule() };
             let level = pipeline(
                 backends,
                 groups.len(),
@@ -459,7 +467,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             })
                             .collect()
                     } else {
-                        let child_schedule = BinarySchedule::default();
+                        let child_schedule = node_schedule();
                         below[range]
                             .iter()
                             .map(|node| node.child(unplaced(), &child_schedule))
@@ -479,9 +487,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let begun = std::time::Instant::now();
                     let node = node.prove(&[], &schedule, backend).map_err(stage)?;
                     tracing::info!(
-                        "word compress: node at depth {depth} over {:?} in {:.1} s",
+                        "word compress: node at depth {depth} over {:?} in {:.1} s, {} bytes",
                         groups[index],
-                        begun.elapsed().as_secs_f64()
+                        begun.elapsed().as_secs_f64(),
+                        node.to_root().proof.len()
                     );
                     Ok(node)
                 },
