@@ -198,7 +198,7 @@ where
             } else {
                 &eval_point[..]
             };
-            let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
+            let chip_main_width = <_ as p3_air::BaseAir<F>>::width(chip.air.as_ref());
             let prep_ref = prep_trace.real_trace_ref();
 
             let main_evals_full: Option<Vec<EF>> = if pm.inner().is_some() {

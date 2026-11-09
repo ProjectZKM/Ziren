@@ -70,18 +70,16 @@ where
     use zkm_pcs::shard_level::ceil_log2;
     use zkm_pcs::shard_level::verifier::JaggedShardVerifier;
 
-    let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = rows
+    let chips_and_heights: Vec<(Chip<KoalaBear, A>, usize)> = rows
         .iter()
-        .filter_map(|(name, rows)| {
-            machine.chips().iter().find(|c| c.name() == name.as_str()).map(|c| (c, *rows))
-        })
+        .filter_map(|(name, rows)| machine.chip_instance(name).map(|c| (c, *rows)))
         .collect();
-    let chips: Vec<&Chip<KoalaBear, A>> = chips_and_heights.iter().map(|(c, _)| *c).collect();
+    let chips: Vec<&Chip<KoalaBear, A>> = chips_and_heights.iter().map(|(c, _)| c).collect();
 
     let chip_heights_pairs: Vec<(String, usize)> = chips_and_heights
         .iter()
         .map(|(chip, rows)| {
-            let name = MachineAir::<KoalaBear>::name(*chip);
+            let name = MachineAir::<KoalaBear>::name(chip);
             (name, *rows)
         })
         .collect();
@@ -128,7 +126,7 @@ where
             .filter_map(|(name, rows)| {
                 let chip = chips.iter().find(|c| c.name() == name.as_str())?;
                 let pw = p3_air::BaseAir::<KoalaBear>::preprocessed_width(*chip);
-                if pw > 0 {
+                if pw > 0 && chip.instance() == 0 {
                     Some((name.clone(), pw, *rows))
                 } else {
                     None

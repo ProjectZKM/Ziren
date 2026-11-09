@@ -304,6 +304,62 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
 
+    /// Commit to `traces` named by chip, with `public_values` and the main
+    /// round's `main_pin`, as [`Self::commit`] does from a record.  A prover
+    /// that proves several shards as one proof implements this; the default
+    /// does not.
+    #[allow(unused_variables)]
+    fn commit_named(
+        &self,
+        traces: crate::Traces<Val<SC>>,
+        public_values: Vec<Val<SC>>,
+        main_pin: Option<crate::jagged::AreaPin>,
+        cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+    ) -> PcsMainTraceData<SC, Self::Pcs> {
+        unimplemented!("this prover commits to one shard at a time")
+    }
+
+    /// Commit to `records` as ONE shard proof: the `j`th record's chips are
+    /// instance `j` of the machine's, its traces named `"{chip}@{j}"`, its
+    /// public values the `j`th slice of the proof's.  One record commits as
+    /// [`Self::commit`] does.
+    fn commit_group(
+        &self,
+        records: &[A::Record],
+        traces: Vec<crate::Traces<Val<SC>>>,
+        cluster_widths: Vec<Option<std::collections::BTreeMap<String, usize>>>,
+    ) -> PcsMainTraceData<SC, Self::Pcs> {
+        assert_eq!(records.len(), traces.len(), "one trace set per record");
+        assert_eq!(records.len(), cluster_widths.len(), "one cluster per record");
+        if records.len() == 1 {
+            let traces = traces.into_iter().next().expect("one record");
+            let widths = cluster_widths.into_iter().next().expect("one record");
+            return self.commit(&records[0], traces, widths);
+        }
+        let mut named_traces = std::collections::BTreeMap::new();
+        let mut public_values = Vec::new();
+        let mut widths: Option<std::collections::BTreeMap<String, usize>> = None;
+        let mut cells = 0usize;
+        for (instance, ((record, traces), cluster)) in
+            records.iter().zip(traces).zip(cluster_widths).enumerate()
+        {
+            let instance = instance as u32;
+            for (name, trace) in traces {
+                cells += trace.real_trace_ref().map_or(0, |real| real.values.len());
+                named_traces.insert(crate::chip::instance_name(&name, instance), trace);
+            }
+            if let Some(cluster) = cluster {
+                let widths = widths.get_or_insert_with(Default::default);
+                for (name, width) in cluster {
+                    widths.insert(crate::chip::instance_name(&name, instance), width);
+                }
+            }
+            public_values.extend(record.public_values::<Val<SC>>());
+        }
+        let main_pin = self.machine().main_area_pin_for(cells);
+        self.commit_named(crate::Traces { named_traces }, public_values, main_pin, widths)
+    }
+
     /// The SHRINK-stage jagged shard proof for `record`, for a backend whose
     /// `open()` does not produce one.
     ///
@@ -439,7 +495,25 @@ where
     fn commit(
         &self,
         record: &A::Record,
+        named_traces: crate::Traces<Val<SC>>,
+        cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+    ) -> PcsMainTraceData<SC, Self::Pcs> {
+        let main_pin = record.area_pins().map(|p| p.main).or_else(|| {
+            self.machine().main_area_pin_for(
+                named_traces
+                    .values()
+                    .map(|t| t.real_trace_ref().map_or(0, |r| r.values.len()))
+                    .sum(),
+            )
+        });
+        self.commit_named(named_traces, record.public_values(), main_pin, cluster_widths)
+    }
+
+    fn commit_named(
+        &self,
         mut named_traces: crate::Traces<Val<SC>>,
+        public_values: Vec<Val<SC>>,
+        main_pin: Option<crate::jagged::AreaPin>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
         let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
@@ -459,17 +533,8 @@ where
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                let (main_commitment, precomputed) = crate::shard_level::prover::commit_traces::<SC>(
-                    &named_traces,
-                    record.area_pins().map(|p| p.main).or_else(|| {
-                        self.machine().main_area_pin_for(
-                            named_traces
-                                .values()
-                                .map(|t| t.real_trace_ref().map_or(0, |r| r.values.len()))
-                                .sum(),
-                        )
-                    }),
-                );
+                let (main_commitment, precomputed) =
+                    crate::shard_level::prover::commit_traces::<SC>(&named_traces, main_pin);
                 Some(RetainedJaggedCommit {
                     main_commitment,
                     precomputed,
@@ -481,12 +546,7 @@ where
             }
         };
 
-        MainTraceData {
-            traces: Vec::new(),
-            main_data: retained,
-            chip_ordering,
-            public_values: record.public_values(),
-        }
+        MainTraceData { traces: Vec::new(), main_data: retained, chip_ordering, public_values }
     }
 
     /// Prove the program for the given shard and given a commitment to the main data.
@@ -499,9 +559,10 @@ where
         data: PcsMainTraceData<SC, Self::Pcs>,
         challenger: &mut <SC as StarkGenericConfig>::Challenger,
     ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>> {
-        let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
+        let chips = self.machine().shard_chips_ordered(&data.chip_ordering);
+        let chips: Vec<&MachineChip<SC, A>> = chips.iter().collect();
 
-        challenger.observe_slice(&data.public_values[0..self.machine().num_pv_elts()]);
+        challenger.observe_slice(&data.public_values);
 
         let jagged_challenger_snapshot: SC::Challenger = challenger.clone();
 
@@ -676,7 +737,7 @@ where
     );
     let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
-        .map(|chip| match pk_chip_ordering.get(chip.name().as_str()) {
+        .map(|chip| match pk_chip_ordering.get(chip.base_name().as_str()) {
             Some(&idx) => crate::multilinear::PaddedMle::padded_with_zeros(
                 pk_preprocessed_mles[idx].clone(),
                 max_log_row_count as u32,

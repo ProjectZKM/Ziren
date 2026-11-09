@@ -308,6 +308,7 @@ mod tests {
             ),
             kind: crate::lookup::LookupKind::Byte,
             scope: crate::air::LookupScope::Local,
+            instance: 0,
         };
         let main_row = vec![KoalaBear::from_u32(7)];
 
@@ -347,6 +348,7 @@ mod tests {
             ),
             kind: crate::lookup::LookupKind::Byte,
             scope: crate::air::LookupScope::Local,
+            instance: 0,
         };
         let interaction_range = Lookup {
             values: vec![],
@@ -356,6 +358,7 @@ mod tests {
             ),
             kind: crate::lookup::LookupKind::Range,
             scope: crate::air::LookupScope::Local,
+            instance: 0,
         };
         let main_row = vec![KoalaBear::ONE];
         let alpha = EF::ZERO;

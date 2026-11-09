@@ -106,6 +106,8 @@ where
     };
 
     let n_chips = chips.len();
+    let instances = crate::chip::chip_instances(chips);
+    let shard_public_values = public_values;
     let mut zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, Val<SC>, Challenge<SC>, A>> =
         Vec::with_capacity(n_chips);
     let mut chip_sumcheck_claims: Vec<Challenge<SC>> = Vec::with_capacity(n_chips);
@@ -114,6 +116,8 @@ where
         let chip = chips[chip_idx];
         let pm = &shared_trace_mles[chip_idx];
         let name = chip.name().to_string();
+        let public_values =
+            crate::chip::instance_public_values(shard_public_values, chip.instance(), instances);
         let opening = logup_evaluations
             .chip_openings
             .get(&name)

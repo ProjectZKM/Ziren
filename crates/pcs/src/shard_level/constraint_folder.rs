@@ -207,7 +207,7 @@ where
     use p3_air::BaseAir;
 
     let main_width = <Chip<F, A> as BaseAir<F>>::width(chip);
-    let preproc_width = <A as p3_air::BaseAir<F>>::preprocessed_width(&chip.air);
+    let preproc_width = <A as p3_air::BaseAir<F>>::preprocessed_width(chip.air.as_ref());
     let preproc_row: Vec<EF> = vec![EF::ZERO; preproc_width];
     let main_row: Vec<EF> = vec![EF::ZERO; main_width];
     let mut folder = ShardConstraintFolder::<F, EF, EF> {

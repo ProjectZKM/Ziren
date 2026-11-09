@@ -98,7 +98,7 @@ where
             .iter()
             .map(|chip| {
                 let name = MachineAir::<F>::name(*chip);
-                let main_width = <_ as BaseAir<F>>::width(&chip.air);
+                let main_width = <_ as BaseAir<F>>::width(chip.air.as_ref());
                 let preprocessed_width = p3_air::BaseAir::<F>::preprocessed_width(*chip);
                 (
                     name,
@@ -169,7 +169,7 @@ where
     MT::Proof: serde::Serialize + for<'d> serde::Deserialize<'d>,
     Dg: Copy + Default + 'static,
 {
-    let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS];
+    let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS * zkm_pcs::chip_instances(chips)];
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
 
     let logup_gkr_proof = dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
@@ -185,7 +185,7 @@ where
             .iter()
             .map(|chip| {
                 let prep_w = p3_air::BaseAir::<F>::preprocessed_width(**chip);
-                let main_w = <_ as BaseAir<F>>::width(&chip.air);
+                let main_w = <_ as BaseAir<F>>::width(chip.air.as_ref());
                 let name = MachineAir::<F>::name(**chip);
                 let rows = heights_map.get(&name).copied().unwrap_or(0);
                 let log_h = zkm_pcs::shard_level::ceil_log2(rows);
@@ -239,7 +239,7 @@ where
             .iter()
             .map(|chip| {
                 let name = MachineAir::<F>::name(**chip);
-                let w = <_ as BaseAir<F>>::width(&chip.air);
+                let w = <_ as BaseAir<F>>::width(chip.air.as_ref());
                 let rows = heights.get(&name).copied().unwrap_or(0);
                 (w, rows)
             })
@@ -248,7 +248,7 @@ where
             .iter()
             .filter_map(|chip| {
                 let w = p3_air::BaseAir::<F>::preprocessed_width(**chip);
-                if w == 0 {
+                if w == 0 || chip.instance() != 0 {
                     return None;
                 }
                 let name = MachineAir::<F>::name(**chip);
@@ -279,8 +279,12 @@ where
         }
     };
 
-    let n_prep =
-        chips.iter().filter(|c| <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air) > 0).count();
+    let n_prep = chips
+        .iter()
+        .filter(|c| {
+            c.instance() == 0 && <A as p3_air::BaseAir<F>>::preprocessed_width(c.air.as_ref()) > 0
+        })
+        .count();
     let preprocessed_row_counts: Vec<F> =
         if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep] };
     let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
@@ -298,9 +302,13 @@ where
             .iter()
             .map(|c| {
                 let w = if preprocessed {
-                    <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air)
+                    if c.instance() == 0 {
+                        <A as p3_air::BaseAir<F>>::preprocessed_width(c.air.as_ref())
+                    } else {
+                        0
+                    }
                 } else {
-                    <_ as BaseAir<F>>::width(&c.air)
+                    <_ as BaseAir<F>>::width(c.air.as_ref())
                 };
                 let rows = heights_by_name.get(&MachineAir::<F>::name(*c)).copied().unwrap_or(0);
                 w * rows

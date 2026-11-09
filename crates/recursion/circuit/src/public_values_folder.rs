@@ -56,6 +56,9 @@ pub struct RecursivePublicValuesConstraintFolder<'a, C: Config> {
     /// accumulate into this; the verifier later compares it
     /// against the LogUp-GKR-derived value.
     pub local_interaction_digest: SymbolicExt<C::F, C::EF>,
+    /// The chip instance whose public values these are; its lookups carry
+    /// the instance in their argument index.
+    pub instance: u32,
     /// Phantom for the circuit-config parameter.
     pub _marker: PhantomData<C>,
 }
@@ -138,8 +141,10 @@ where
     ) -> SymbolicExt<C::F, C::EF> {
         let mut denominator: SymbolicExt<C::F, C::EF> = (*self.perm_challenges.0).into();
         let mut betas = self.perm_challenges.1.iter();
+        let argument_index =
+            message.kind as usize + zkm_pcs::INSTANCE_STRIDE * self.instance as usize;
         denominator +=
-            *betas.next().expect("beta_0 (kind term)") * C::F::from_usize(message.kind as usize);
+            *betas.next().expect("beta_0 (kind term)") * C::F::from_usize(argument_index);
         for value in message.values {
             denominator += value * *betas.next().expect("beta_i (value term)");
         }
@@ -194,6 +199,7 @@ mod tests {
             accumulator: SymbolicExt::ZERO,
             public_values: &public_values,
             local_interaction_digest: SymbolicExt::ZERO,
+            instance: 0,
             _marker: PhantomData,
         };
 

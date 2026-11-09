@@ -56,7 +56,7 @@ fn core_chip_dims(machine: &CoreMachine) -> Vec<CoreChipDims> {
         .iter()
         .map(|c| CoreChipDims {
             name: <_ as MachineAir<KoalaBear>>::name(c),
-            main_width: <_ as BaseAir<KoalaBear>>::width(&c.air),
+            main_width: <_ as BaseAir<KoalaBear>>::width(c.air.as_ref()),
             prep_width: <_ as p3_air::BaseAir<KoalaBear>>::preprocessed_width(c),
         })
         .collect()
@@ -323,7 +323,10 @@ mod normalize_enumeration_tests {
             .filter(|c| c.0 == class.0)
             .map(|c| (c.1, c.2))
             .collect();
-        assert!(same_chips.contains(&(class.1, class.2)), "enumerated for these chips: {same_chips:?}");
+        assert!(
+            same_chips.contains(&(class.1, class.2)),
+            "enumerated for these chips: {same_chips:?}"
+        );
     }
 
     /// Every leaf the production census recorded (`ZIREN_CENSUS_FILE`, lines
@@ -347,7 +350,10 @@ mod normalize_enumeration_tests {
         let leaves: Vec<CensusLeaf> = parse_census(&path)
             .into_iter()
             .map(|leaf| CensusLeaf {
-                rows: clustered(machine, &leaf.rows.iter().filter(|(_, h)| *h > 0).cloned().collect::<Vec<_>>()),
+                rows: clustered(
+                    machine,
+                    &leaf.rows.iter().filter(|(_, h)| *h > 0).cloned().collect::<Vec<_>>(),
+                ),
                 ..leaf
             })
             .collect();

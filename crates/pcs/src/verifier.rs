@@ -62,7 +62,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         }
         let shard_verifier =
             crate::shard_level::verifier::JaggedShardVerifier::production_default();
-        let num_pv_elts = proof.public_values.len();
+        let num_pv_elts = proof.public_values.len() / crate::chip::chip_instances(chips).max(1);
         shard_verifier
             .verify_shard::<SC, A>(
                 vk,

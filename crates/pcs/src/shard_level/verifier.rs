@@ -194,9 +194,12 @@ impl JaggedShardVerifier {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
-        if proof.public_values.len() != num_pv_elts {
+        let instances = crate::chip::chip_instances(chips);
+        if !proof.public_values.len().is_multiple_of(instances)
+            || proof.public_values.len() / instances < num_pv_elts
+        {
             return Err(JaggedShardVerifyError::PublicValuesLengthMismatch {
-                expected: num_pv_elts,
+                expected: num_pv_elts * instances,
                 got: proof.public_values.len(),
             });
         }
@@ -209,7 +212,7 @@ impl JaggedShardVerifier {
         }
 
         for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
-            let expected_main = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
+            let expected_main = <A as p3_air::BaseAir<Val<SC>>>::width(chip.air.as_ref());
             if opening.main.local.len() != expected_main {
                 return Err(JaggedShardVerifyError::OpeningWidthMismatch {
                     chip: chip.name(),
@@ -225,6 +228,26 @@ impl JaggedShardVerifier {
                     round: "preprocessed",
                     expected: expected_prep,
                     got: opening.preprocessed.local.len(),
+                });
+            }
+        }
+
+        for (i, chip) in chips.iter().enumerate() {
+            if chip.instance() == 0 || opening_prep_width(chip) == 0 {
+                continue;
+            }
+            let base = chip.base_name();
+            let first = chips.iter().position(|c| c.instance() == 0 && c.name() == base);
+            let shared = first.is_some_and(|j| {
+                proof.opened_values.chips[j].preprocessed.local
+                    == proof.opened_values.chips[i].preprocessed.local
+            });
+            if !shared {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
+                    chip: chip.name(),
+                    round: "preprocessed (instance)",
+                    expected: 0,
+                    got: proof.opened_values.chips[i].preprocessed.local.len(),
                 });
             }
         }
@@ -448,8 +471,7 @@ where
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, verify_jagged_inner_generic,
-            JaggedPcsProofGeneric,
+            build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
@@ -687,7 +709,9 @@ where
 
     let n_prep = chips
         .iter()
-        .filter(|c| <_ as p3_air::BaseAir<Val<SC>>>::preprocessed_width(**c) > 0)
+        .filter(|c| {
+            c.instance() == 0 && <_ as p3_air::BaseAir<Val<SC>>>::preprocessed_width(**c) > 0
+        })
         .count();
     let combined_packing = &bundle.packing;
     let log_stack = bundle.commit.log_stacking_height as usize;
@@ -1078,6 +1102,10 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 /// [`crate::recursion_circuit::zerocheck::ShardZerocheckVerifier::verify_zerocheck`])
 /// against the direct `Σ_b C(b) == 0` sumcheck the shard-level prover
 /// ([`crate::shard_level::zerocheck_prover::prove_shard_zerocheck`]) emits.
+fn opening_prep_width<F: p3_field::Field, A: MachineAir<F>>(chip: &Chip<F, A>) -> usize {
+    p3_air::BaseAir::<F>::preprocessed_width(chip)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn verify_zerocheck_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1137,7 +1165,7 @@ where
             .iter()
             .map(|chip| {
                 <_ as BaseAir<Val<SC>>>::width(*chip)
-                    + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&chip.air)
+                    + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(chip.air.as_ref())
             })
             .max()
             .unwrap_or(0);
@@ -1248,7 +1276,7 @@ where
         .iter()
         .map(|chip| {
             <_ as BaseAir<Val<SC>>>::width(*chip)
-                + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&chip.air)
+                + <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(chip.air.as_ref())
         })
         .max()
         .unwrap_or(0);
@@ -1267,7 +1295,11 @@ where
 
     let mut rlc_eval = Challenge::<SC>::ZERO;
 
+    let instances = crate::chip::chip_instances(chips);
+    let shard_public_values = public_values;
     for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
+        let public_values =
+            crate::chip::instance_public_values(shard_public_values, chip.instance(), instances);
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
 
@@ -1544,6 +1576,7 @@ where
                 &beta_powers,
                 alpha,
                 public_values,
+                crate::chip::chip_instances(chips),
             )
         } else {
             Challenge::<SC>::ZERO
@@ -1677,7 +1710,7 @@ where
     let mut denominator_values: Vec<Challenge<SC>> = Vec::new();
 
     for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
-        let name = <A as MachineAir<Val<SC>>>::name(&chip.air);
+        let name = chip.name();
 
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);

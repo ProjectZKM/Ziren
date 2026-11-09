@@ -165,6 +165,20 @@ pub fn verify_core_jagged<C, SC, A>(
     let jagged_vk_ref = &jagged_vk;
     let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
 
+    let instances_per_shard: Vec<usize> = shard_proof_tuples
+        .iter()
+        .map(|tuple| {
+            tuple
+                .2
+                .logup_evaluations
+                .chip_openings
+                .keys()
+                .map(|name| zkm_pcs::split_instance_name(name).1 as usize + 1)
+                .max()
+                .unwrap_or(1)
+        })
+        .collect();
+
     let verify_outputs: Vec<Vec<Felt<C::F>>> = shard_proof_tuples
         .into_iter()
         .enumerate()
@@ -182,15 +196,12 @@ pub fn verify_core_jagged<C, SC, A>(
             let chip_names: Vec<String> =
                 logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-            let mut shard_chips_pre: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
-                .chips()
-                .iter()
-                .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
-                .collect();
-            shard_chips_pre.sort_by(|a, b| {
-                MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
-                    .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
-            });
+            let mut shard_chips_owned: Vec<zkm_pcs::MachineChip<SC, A>> =
+                chip_names.iter().filter_map(|name| machine.chip_instance(name)).collect();
+            shard_chips_owned.sort_by_key(|chip| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(chip));
+            let shard_chips_pre: Vec<&zkm_pcs::MachineChip<SC, A>> =
+                shard_chips_owned.iter().collect();
+            let instances = zkm_pcs::chip_instances(&shard_chips_pre);
             let main_widths_pre: Vec<usize> = shard_chips_pre
                 .iter()
                 .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
@@ -230,25 +241,32 @@ pub fn verify_core_jagged<C, SC, A>(
                 );
                 hs
             });
-            let flags = {
+            let flags: Vec<Felt<C::F>> = {
                 let heights = chip_height_felts_pre.as_deref().unwrap_or(&[]);
                 let main_heights = &heights[preprocessed_round.row_counts.len()..];
                 let mut sorted_names = chip_names.clone();
                 sorted_names.sort();
-                let of = |pick: &dyn Fn(&str) -> bool| -> Vec<Felt<C::F>> {
+                let of = |instance: u32, pick: &dyn Fn(&str) -> bool| -> Vec<Felt<C::F>> {
                     sorted_names
                         .iter()
                         .zip(main_heights.iter())
-                        .filter(|(name, _)| pick(name.as_str()))
+                        .filter(|(name, _)| {
+                            let (base, i) = zkm_pcs::split_instance_name(name);
+                            i == instance && pick(base)
+                        })
                         .map(|(_, h)| *h)
                         .collect()
                 };
-                [
-                    of(&|n| zkm_pcs::EXECUTION_CHIP_NAMES.contains(&n)),
-                    of(&|n| n == "MemoryGlobalInit"),
-                    of(&|n| n == "MemoryGlobalFinalize"),
-                ]
-                .map(|heights| any_rows::<C>(builder, &heights, max_log_row_count))
+                (0..instances as u32)
+                    .flat_map(|instance| {
+                        [
+                            of(instance, &|n| zkm_pcs::EXECUTION_CHIP_NAMES.contains(&n)),
+                            of(instance, &|n| n == "MemoryGlobalInit"),
+                            of(instance, &|n| n == "MemoryGlobalFinalize"),
+                        ]
+                        .map(|heights| any_rows::<C>(builder, &heights, max_log_row_count))
+                    })
+                    .collect()
             };
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
             let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
@@ -341,15 +359,7 @@ pub fn verify_core_jagged<C, SC, A>(
                     &proof_opened_values,
                     max_log_row_count,
                 );
-            let mut shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
-                .chips()
-                .iter()
-                .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
-                .collect();
-            shard_chips.sort_by(|a, b| {
-                MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
-                    .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
-            });
+            let shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = shard_chips_owned.iter().collect();
             use p3_air::BaseAir;
             let _preprocessed_widths: Vec<usize> = shard_chips
                 .iter()
@@ -410,9 +420,8 @@ pub fn verify_core_jagged<C, SC, A>(
 
             {
                 use crate::challenger::CanObserveVariable;
-                let num_pv = machine.num_pv_elts();
                 vk_legacy.observe_into(builder, &mut challenger);
-                for &pv in public_values_raw[0..num_pv].iter() {
+                for &pv in public_values_raw.iter() {
                     CanObserveVariable::observe(&mut challenger, builder, pv);
                 }
             }
@@ -459,8 +468,24 @@ pub fn verify_core_jagged<C, SC, A>(
             out
         });
 
+    let shard_outputs: Vec<Vec<Felt<C::F>>> = verify_outputs
+        .into_iter()
+        .zip(instances_per_shard)
+        .flat_map(|(out, instances)| {
+            let (public_values, flags) = out.split_at(out.len() - 3 * instances);
+            let stride = public_values.len() / instances;
+            (0..instances)
+                .map(|j| {
+                    let mut shard = public_values[j * stride..(j + 1) * stride].to_vec();
+                    shard.extend_from_slice(&flags[j * 3..(j + 1) * 3]);
+                    shard
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
-    for (i, mut public_values_raw) in verify_outputs.into_iter().enumerate() {
+    for (i, mut public_values_raw) in shard_outputs.into_iter().enumerate() {
         let flags = public_values_raw.split_off(public_values_raw.len() - 3);
         let (cpu, memory_init, memory_finalize) = (flags[0], flags[1], flags[2]);
         contains_execution_shard = if i == 0 {

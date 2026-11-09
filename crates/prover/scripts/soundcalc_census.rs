@@ -64,16 +64,16 @@ where
             println!(
                 "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
                 chip.name(),
-                BaseAir::width(&chip.air),
+                BaseAir::width(chip.air.as_ref()),
                 chip.preprocessed_width(),
                 chip.sends().len(),
                 chip.receives().len(),
                 fields
             );
         }
-        main_width += BaseAir::width(&chip.air);
+        main_width += BaseAir::width(chip.air.as_ref());
         pre_width += chip.preprocessed_width();
-        let n = capture_machine_constraints(&chip.air).constraint_counts().base;
+        let n = capture_machine_constraints(chip.air.as_ref()).constraint_counts().base;
         constraints += n;
         // log_quotient_degree = log2(max_constraint_degree - 1)
         let degree = (1usize << chip.log_quotient_degree()) + 1;

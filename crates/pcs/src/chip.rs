@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::sync::Arc;
 
 use p3_air::{Air, BaseAir};
 use p3_field::{ExtensionField, Field, PrimeField, PrimeField32};
@@ -19,14 +20,71 @@ use super::{eval_permutation_constraints, generate_permutation_trace};
 
 /// An Air that encodes lookups based on lookups.
 pub struct Chip<F: Field, A> {
-    /// The underlying AIR of the chip for constraint evaluation.
-    pub air: A,
+    /// The underlying AIR of the chip for constraint evaluation, shared by the
+    /// chip's instances.
+    pub air: Arc<A>,
     /// The lookups that the chip sends.
     pub sends: Vec<Lookup<F>>,
     /// The lookups that the chip receives.
     pub receives: Vec<Lookup<F>>,
     /// The relative log degree of the quotient polynomial, i.e. `log2(max_constraint_degree - 1)`.
     pub log_quotient_degree: usize,
+    /// Which instance of the AIR this is.  A shard proof over several shards
+    /// holds one instance of a chip per shard that has it; instance 0 is the
+    /// machine's own chip and is named after its AIR, instance `i > 0` is
+    /// named `"{air}@{i}"`, reads the `i`th shard's public values, and tags
+    /// its lookups with `i` so the shards' buses stay disjoint.
+    pub instance: u32,
+}
+
+/// The name of instance `instance` of the chip named `base`.
+#[must_use]
+pub fn instance_name(base: &str, instance: u32) -> String {
+    if instance == 0 {
+        base.to_string()
+    } else {
+        format!("{base}@{instance}")
+    }
+}
+
+/// The AIR's name and the instance a chip's name denotes: the inverse of
+/// [`instance_name`].
+#[must_use]
+pub fn split_instance_name(name: &str) -> (&str, u32) {
+    match name.rsplit_once('@') {
+        Some((base, instance)) => match instance.parse() {
+            Ok(instance) => (base, instance),
+            Err(_) => (name, 0),
+        },
+        None => (name, 0),
+    }
+}
+
+/// The public values of instance `instance` among the `instances` whose public
+/// values `public_values` concatenates.
+#[must_use]
+pub fn instance_public_values<T>(public_values: &[T], instance: u32, instances: usize) -> &[T] {
+    let each = public_values.len() / instances.max(1);
+    let start = (instance as usize * each).min(public_values.len());
+    &public_values[start..(start + each).min(public_values.len())]
+}
+
+/// How many instances `chips` span: one more than the highest instance.
+#[must_use]
+pub fn chip_instances<F: Field, A>(chips: &[&Chip<F, A>]) -> usize {
+    chips.iter().map(|chip| chip.instance as usize + 1).max().unwrap_or(1)
+}
+
+impl<F: Field, A> Clone for Chip<F, A> {
+    fn clone(&self) -> Self {
+        Self {
+            air: Arc::clone(&self.air),
+            sends: self.sends.clone(),
+            receives: self.receives.clone(),
+            log_quotient_degree: self.log_quotient_degree,
+            instance: self.instance,
+        }
+    }
 }
 
 impl<F: Field, A> Chip<F, A> {
@@ -46,8 +104,20 @@ impl<F: Field, A> Chip<F, A> {
     }
 
     /// Consumes the chip and returns the underlying air.
+    /// The AIR, of a chip whose AIR no other instance shares.
+    ///
+    /// # Panics
+    /// Panics if another instance of the chip holds the AIR.
     pub fn into_inner(self) -> A {
-        self.air
+        Arc::try_unwrap(self.air).unwrap_or_else(|_| panic!("the chip's AIR is shared"))
+    }
+
+    /// The AIR's name, whichever instance this chip is.
+    pub fn base_name(&self) -> String
+    where
+        A: MachineAir<F>,
+    {
+        self.air.name()
     }
 }
 
@@ -88,7 +158,29 @@ where
         }
         let log_quotient_degree = log2_ceil_usize(max_constraint_degree - 1);
 
-        Self { air, sends, receives, log_quotient_degree }
+        Self { air: Arc::new(air), sends, receives, log_quotient_degree, instance: 0 }
+    }
+
+    /// Which instance of the AIR this chip is.
+    #[inline]
+    pub const fn instance(&self) -> u32 {
+        self.instance
+    }
+
+    /// This chip as instance `instance`: the same AIR, its lookups tagged
+    /// with the instance.
+    #[must_use]
+    pub fn with_instance(&self, instance: u32) -> Self {
+        let tag = |lookups: &[Lookup<F>]| -> Vec<Lookup<F>> {
+            lookups.iter().map(|lookup| lookup.clone().with_instance(instance)).collect()
+        };
+        Self {
+            air: Arc::clone(&self.air),
+            sends: tag(&self.sends),
+            receives: tag(&self.receives),
+            log_quotient_degree: self.log_quotient_degree,
+            instance,
+        }
     }
 
     /// Returns the number of lookups in the chip.
@@ -181,7 +273,7 @@ where
 impl<F, A> BaseAir<F> for Chip<F, A>
 where
     F: Field,
-    A: BaseAir<F>,
+    A: BaseAir<F> + Send + Sync,
 {
     fn width(&self) -> usize {
         self.air.width()
@@ -212,7 +304,7 @@ where
     type Error = A::Error;
 
     fn name(&self) -> String {
-        self.air.name()
+        instance_name(&self.air.name(), self.instance)
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
@@ -290,7 +382,7 @@ where
     A: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.air == other.air
+        self.air == other.air && self.instance == other.instance
     }
 }
 
@@ -303,5 +395,6 @@ where
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.air.hash(state);
+        self.instance.hash(state);
     }
 }
