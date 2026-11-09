@@ -140,6 +140,30 @@ where
     P::NextRoundPoly: Send + Sync,
     Challenger: FieldChallenger<F>,
 {
+    reduce_sumcheck_to_evaluation_masked(polys, challenger, claims, t, lambda, None)
+}
+
+/// [`reduce_sumcheck_to_evaluation`] with an optional sumcheck mask `(g,
+/// ρ)` ([`crate::zk_mask`]): the wire message of the round that binds
+/// variable `v` is the RLC message plus `ρ` times the mask's message for
+/// `g_v`, the claimed sum is unchanged (`g` sums to zero) and the final
+/// evaluation is the RLC of the component evaluations plus `ρ·g(point)`.
+/// The per-poly claim chain stays unmasked.
+pub fn reduce_sumcheck_to_evaluation_masked<F, EF, P, Challenger>(
+    polys: Vec<P>,
+    challenger: &mut Challenger,
+    claims: Vec<EF>,
+    t: usize,
+    lambda: EF,
+    mask: Option<(&crate::zk_mask::LibraMask<EF>, EF)>,
+) -> (PartialSumcheckProof<EF>, Vec<Vec<EF>>)
+where
+    F: Field,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    P: SumcheckPolyFirstRound<EF> + Send + Sync,
+    P::NextRoundPoly: Send + Sync,
+    Challenger: FieldChallenger<F>,
+{
     assert!(!polys.is_empty(), "reduce_sumcheck_to_evaluation: empty input");
 
     let num_variables = polys[0].num_variables();
@@ -150,6 +174,27 @@ where
     assert!(num_variables >= t as u32, "reduce_sumcheck_to_evaluation: t > num_variables");
     assert!(num_variables > 0, "reduce_sumcheck_to_evaluation: zero-variable poly");
     assert_eq!(claims.len(), polys.len());
+    assert!(t == 1 || mask.is_none(), "a masked sumcheck binds one variable per round");
+    if let Some((g, _)) = mask {
+        assert!(
+            g.num_variables() >= num_variables as usize,
+            "mask over {} variables for a {num_variables}-variable sumcheck",
+            g.num_variables()
+        );
+    }
+    let m = num_variables as usize;
+    let mut bound_sum = EF::ZERO;
+    let add_mask = |poly: &mut UnivariatePolynomial<EF>, round: usize, bound_sum: EF| {
+        if let Some((g, rho)) = mask {
+            let message = g.round_message(m - 1 - round, m - 1 - round, bound_sum);
+            if poly.coefficients.len() < message.coefficients.len() {
+                poly.coefficients.resize(message.coefficients.len(), EF::ZERO);
+            }
+            for (c, mc) in poly.coefficients.iter_mut().zip(&message.coefficients) {
+                *c += rho * *mc;
+            }
+        }
+    };
 
     let mut point: Vec<EF> = Vec::with_capacity(num_variables as usize);
 
@@ -165,6 +210,7 @@ where
         .collect();
 
     let mut rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
+    add_mask(&mut rlc_uni_poly, 0, bound_sum);
     for c in &rlc_uni_poly.coefficients {
         observe_ext::<F, EF, _>(challenger, *c);
     }
@@ -172,11 +218,14 @@ where
 
     let mut alpha: EF = challenger.sample_algebra_element::<EF>();
     point.insert(0, alpha);
+    if let Some((g, _)) = mask {
+        bound_sum += g.univariate_at(m - 1, alpha);
+    }
 
     let mut polys_cursor: Vec<P::NextRoundPoly> =
         polys.into_par_iter().map(|poly| poly.fix_t_variables(alpha, t)).collect();
 
-    for _ in t..num_variables as usize {
+    for round in t..num_variables as usize {
         let alpha_prev = *point.first().unwrap();
         let round_claims: Vec<EF> =
             uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_prev)).collect();
@@ -187,6 +236,7 @@ where
             .map(|(poly, &round_claim)| poly.sum_as_poly_in_last_variable(Some(round_claim)))
             .collect();
         rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
+        add_mask(&mut rlc_uni_poly, round, bound_sum);
         for c in &rlc_uni_poly.coefficients {
             observe_ext::<F, EF, _>(challenger, *c);
         }
@@ -194,6 +244,9 @@ where
 
         alpha = challenger.sample_algebra_element::<EF>();
         point.insert(0, alpha);
+        if let Some((g, _)) = mask {
+            bound_sum += g.univariate_at(m - 1 - round, alpha);
+        }
 
         polys_cursor =
             polys_cursor.into_par_iter().map(|poly| poly.fix_last_variable(alpha)).collect();
@@ -207,7 +260,7 @@ where
         polys_cursor.iter().map(|poly| poly.get_component_poly_evals()).collect();
 
     let claimed_sum = rlc_eval(&claims, lambda);
-    let final_eval = rlc_eval(&evals, lambda);
+    let final_eval = rlc_eval(&evals, lambda) + mask.map_or(EF::ZERO, |(_, rho)| rho * bound_sum);
 
     (
         PartialSumcheckProof {
@@ -417,6 +470,51 @@ mod tests {
         assert_eq!(proof.claimed_sum, claim);
         assert_eq!(evals.len(), 1);
         assert_eq!(evals[0], vec![c]);
+    }
+
+    /// The masked driver's messages chain like a sumcheck of the masked
+    /// polynomial: same claimed sum, round identities hold, and the final
+    /// evaluation is the unmasked one plus `ρ·g(point)`.
+    #[test]
+    fn masked_driver_chains_to_the_masked_evaluation() {
+        use crate::zk_mask::{mask_cells, LibraMask};
+        let n: u32 = 5;
+        let c = EF::from_u32(7);
+        let claim = c * EF::from_u32(1 << n);
+        let cells: Vec<KoalaBear> = (0..mask_cells(1, 4))
+            .map(|i| KoalaBear::from_u32((i as u32 * 7919 + 13) % 1000))
+            .collect();
+        let mask = LibraMask::<EF>::from_cells(&cells, 1);
+        let rho = EF::from_u32(31);
+
+        let (plain, _) = reduce_sumcheck_to_evaluation::<KoalaBear, EF, _, _>(
+            vec![ConstantPoly { n, c }],
+            &mut test_challenger(),
+            vec![claim],
+            1,
+            EF::ONE,
+        );
+        let (masked, evals) = reduce_sumcheck_to_evaluation_masked::<KoalaBear, EF, _, _>(
+            vec![ConstantPoly { n, c }],
+            &mut test_challenger(),
+            vec![claim],
+            1,
+            EF::ONE,
+            Some((&mask, rho)),
+        );
+        assert_eq!(masked.claimed_sum, claim);
+        assert_eq!(evals[0], vec![c]);
+        assert_ne!(masked.univariate_polys, plain.univariate_polys);
+        let mut expected = claim;
+        let mut last = EF::ZERO;
+        for (k, p) in masked.univariate_polys.iter().enumerate() {
+            assert_eq!(p.eval_at_point(EF::ZERO) + p.eval_at_point(EF::ONE), expected);
+            let alpha = masked.point_and_eval.0[n as usize - 1 - k];
+            expected = p.eval_at_point(alpha);
+            last = expected;
+        }
+        assert_eq!(last, masked.point_and_eval.1);
+        assert_eq!(masked.point_and_eval.1, c + rho * mask.evaluate(&masked.point_and_eval.0));
     }
 
     /// `rlc_univariate_polynomials` with one poly is identity.
