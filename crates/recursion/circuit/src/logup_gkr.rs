@@ -214,30 +214,40 @@ pub fn verify_public_values<C, F>(
     alpha: &Ext<C::F, C::EF>,
     beta_seed: &[Ext<C::F, C::EF>],
     public_values: &[Felt<C::F>],
+    instances: usize,
     eval_public_values_fn: F,
 ) -> SymbolicExt<C::F, C::EF>
 where
     C: CircuitConfig,
-    F: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+    F: Fn(&mut RecursivePublicValuesConstraintFolder<C>),
 {
     let beta_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
         beta_seed.iter().map(|e| SymbolicExt::from(*e)).collect();
     let betas = partial_lagrange_symbolic::<C>(&beta_symbolic);
 
-    let mut folder = RecursivePublicValuesConstraintFolder::<C> {
-        perm_challenges: (alpha, &betas),
-        alpha: challenge,
-        accumulator: SymbolicExt::ZERO,
-        public_values,
-        local_interaction_digest: SymbolicExt::ZERO,
-        _marker: PhantomData,
-    };
+    let mut digest = SymbolicExt::ZERO;
+    for instance in 0..instances {
+        let mut folder = RecursivePublicValuesConstraintFolder::<C> {
+            perm_challenges: (alpha, &betas),
+            alpha: challenge,
+            accumulator: SymbolicExt::ZERO,
+            public_values: zkm_pcs::instance_public_values(
+                public_values,
+                instance as u32,
+                instances,
+            ),
+            local_interaction_digest: SymbolicExt::ZERO,
+            instance: instance as u32,
+            _marker: PhantomData,
+        };
 
-    eval_public_values_fn(&mut folder);
+        eval_public_values_fn(&mut folder);
 
-    builder.assert_ext_eq(folder.accumulator, SymbolicExt::ZERO);
+        builder.assert_ext_eq(folder.accumulator, SymbolicExt::ZERO);
+        digest += folder.local_interaction_digest;
+    }
 
-    folder.local_interaction_digest
+    digest
 }
 
 /// Number of grinding bits for the LogUp-GKR challenge.
@@ -331,7 +341,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
     FC: FieldChallengerVariable<C, C::Bit>,
-    EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+    EVPV: Fn(&mut RecursivePublicValuesConstraintFolder<C>),
     SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
     let crate::logup_proof::LogupGkrProof {
@@ -360,6 +370,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         &alpha,
         &beta_seed,
         public_values,
+        zkm_pcs::chip_instances(shard_chips),
         eval_public_values_fn,
     );
     let cumulative_sum: SymbolicExt<C::F, C::EF> = -local_interaction_digest;
@@ -650,6 +661,7 @@ mod tests {
             &alpha,
             &beta_seed,
             &public_values,
+            1,
             |_folder| {},
         );
     }
@@ -809,6 +821,7 @@ mod tests {
             multiplicity: VirtualPairCol::single_main(0),
             kind: LookupKind::Byte,
             scope: LookupScope::Local,
+            instance: 0,
         }
     }
 

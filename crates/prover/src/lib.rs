@@ -1974,6 +1974,10 @@ pub mod tests {
             ZKMProverOpts::default(),
             ZKMContext::default(),
         )?;
+        if std::env::var_os("ZIREN_VERIFY_CORE").is_some() {
+            prover.verify(&core_proof.proof, &vk)?;
+            tracing::info!("core proof verified on the host");
+        }
         let mut keys = zkm_recursion_r1cs::prove::WordKeys::new(None);
         let compressed =
             prover.compress_word(&vk, &core_proof, &mut keys, &p3_multi_stark::HostProver)?;

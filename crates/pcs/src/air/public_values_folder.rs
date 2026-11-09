@@ -41,6 +41,9 @@ pub struct PublicValuesConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     /// Accumulated local-scope interaction digest (compared against the
     /// LogUp-GKR-derived cumulative sum).
     pub local_interaction_digest: EF,
+    /// The chip instance whose public values these are; its lookups carry
+    /// the instance in their argument index.
+    pub instance: u32,
     /// Phantom for the field parameters.
     pub _marker: PhantomData<(F, EF)>,
 }
@@ -100,8 +103,9 @@ impl<F: Field, EF: ExtensionField<F>> PublicValuesConstraintFolder<'_, F, EF> {
     fn interaction_denominator(&self, message: &AirLookup<EF>) -> EF {
         let mut denominator = *self.perm_challenges.0;
         let mut betas = self.perm_challenges.1.iter();
-        denominator +=
-            *betas.next().expect("beta_0 (kind term)") * EF::from_usize(message.kind as usize);
+        let argument_index =
+            message.kind as usize + crate::lookup::INSTANCE_STRIDE * self.instance as usize;
+        denominator += *betas.next().expect("beta_0 (kind term)") * EF::from_usize(argument_index);
         for value in message.values.iter() {
             denominator += *value * *betas.next().expect("beta_i (value term)");
         }
@@ -133,20 +137,30 @@ pub fn eval_public_values_digest_host<F: Field, EF: ExtensionField<F>>(
     beta_powers: &[EF],
     constraint_alpha: EF,
     public_values: &[F],
+    instances: usize,
 ) -> EF {
-    let mut folder = PublicValuesConstraintFolder::<F, EF> {
-        perm_challenges: (perm_alpha, beta_powers),
-        alpha: constraint_alpha,
-        accumulator: EF::ZERO,
-        public_values,
-        local_interaction_digest: EF::ZERO,
-        _marker: PhantomData,
-    };
-    crate::air::eval_public_values(&mut folder);
-    debug_assert_eq!(
-        folder.accumulator,
-        EF::ZERO,
-        "public-values constraint accumulator must be zero",
-    );
-    folder.local_interaction_digest
+    let mut digest = EF::ZERO;
+    for instance in 0..instances {
+        let mut folder = PublicValuesConstraintFolder::<F, EF> {
+            perm_challenges: (perm_alpha, beta_powers),
+            alpha: constraint_alpha,
+            accumulator: EF::ZERO,
+            public_values: crate::chip::instance_public_values(
+                public_values,
+                instance as u32,
+                instances,
+            ),
+            local_interaction_digest: EF::ZERO,
+            instance: instance as u32,
+            _marker: PhantomData,
+        };
+        crate::air::eval_public_values(&mut folder);
+        debug_assert_eq!(
+            folder.accumulator,
+            EF::ZERO,
+            "public-values constraint accumulator must be zero",
+        );
+        digest += folder.local_interaction_digest;
+    }
+    digest
 }

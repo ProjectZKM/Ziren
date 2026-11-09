@@ -150,6 +150,29 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     fn has_rows(&self, chip: &str) -> bool {
         self.jagged_shard_proof.chip_heights.get(chip).is_some_and(|h| *h > 0)
     }
+
+    /// How many core shards this proof proves as chip instances (one unless
+    /// the shards were grouped).
+    pub fn instance_count(&self) -> usize {
+        self.jagged_shard_proof
+            .chip_heights
+            .keys()
+            .map(|name| crate::chip::split_instance_name(name).1 as usize + 1)
+            .max()
+            .unwrap_or(1)
+    }
+
+    pub fn contains_execution_at(&self, instance: u32) -> bool {
+        EXECUTION_CHIP_NAMES.iter().any(|n| self.has_rows(&crate::chip::instance_name(n, instance)))
+    }
+
+    pub fn contains_global_memory_init_at(&self, instance: u32) -> bool {
+        self.has_rows(&crate::chip::instance_name("MemoryGlobalInit", instance))
+    }
+
+    pub fn contains_global_memory_finalize_at(&self, instance: u32) -> bool {
+        self.has_rows(&crate::chip::instance_name("MemoryGlobalFinalize", instance))
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

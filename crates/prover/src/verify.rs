@@ -52,6 +52,15 @@ pub enum Groth16VerificationError {
     InvalidPublicValues,
 }
 
+/// One core shard as the verifier walks it: its public values and which of
+/// its chips have rows.  A grouped shard proof yields one per instance.
+struct ShardView<'a> {
+    public_values: &'a PublicValues<Word<KoalaBear>, KoalaBear>,
+    execution: bool,
+    memory_init: bool,
+    memory_finalize: bool,
+}
+
 impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a core proof by verifying the shards, verifying lookup bus, verifying that the
     /// shards are contiguous and complete.
@@ -77,10 +86,27 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             ));
         }
 
+        let shards: Vec<ShardView<'_>> = proof
+            .0
+            .iter()
+            .flat_map(|shard_proof| {
+                let instances = shard_proof.instance_count();
+                let stride = shard_proof.public_values.len() / instances;
+                (0..instances as u32).map(move |instance| {
+                    let at = instance as usize * stride;
+                    ShardView {
+                        public_values: shard_proof.public_values[at..at + num_pv_elts].borrow(),
+                        execution: shard_proof.contains_execution_at(instance),
+                        memory_init: shard_proof.contains_global_memory_init_at(instance),
+                        memory_finalize: shard_proof.contains_global_memory_finalize_at(instance),
+                    }
+                })
+            })
+            .collect();
+
         let mut current_shard = KoalaBear::ZERO;
-        for shard_proof in proof.0.iter() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
+        for shard in shards.iter() {
+            let public_values = shard.public_values;
             current_shard += KoalaBear::ONE;
             if public_values.shard != current_shard {
                 return Err(MachineVerificationError::InvalidPublicValues(
@@ -90,10 +116,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let mut current_execution_shard = KoalaBear::ZERO;
-        for shard_proof in proof.0.iter() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
-            if shard_proof.contains_execution() {
+        for shard in shards.iter() {
+            let public_values = shard.public_values;
+            if shard.execution {
                 current_execution_shard += KoalaBear::ONE;
                 if public_values.execution_shard != current_execution_shard {
                     return Err(MachineVerificationError::InvalidPublicValues(
@@ -104,9 +129,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let mut prev_next_pc = KoalaBear::ZERO;
-        for (i, shard_proof) in proof.0.iter().enumerate() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
+        for (i, shard) in shards.iter().enumerate() {
+            let public_values = shard.public_values;
             if i == 0 && public_values.start_pc != vk.vk.pc_start {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != vk.start_pc: program counter should start at vk.start_pc",
@@ -115,18 +139,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc_prev: start_pc should equal next_pc_prev for all shards",
                 ));
-            } else if !shard_proof.contains_execution()
-                && public_values.start_pc != public_values.next_pc
-            {
+            } else if !shard.execution && public_values.start_pc != public_values.next_pc {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc: start_pc should equal next_pc for non-cpu shards",
                 ));
-            } else if shard_proof.contains_execution() && public_values.start_pc == KoalaBear::ZERO
-            {
+            } else if shard.execution && public_values.start_pc == KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
                 ));
-            } else if shard_proof.contains_execution()
+            } else if shard.execution
                 && (public_values.start_next_pc != public_values.start_pc + KoalaBear::from_u32(4)
                     || public_values.next_next_pc != public_values.next_pc + KoalaBear::from_u32(4))
             {
@@ -134,14 +155,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     "start_next_pc != start_pc + 4 or next_next_pc != next_pc + 4: \
                      an execution shard enters and exits outside a delay slot",
                 ));
-            } else if !shard_proof.contains_execution()
-                && public_values.start_next_pc != public_values.next_next_pc
+            } else if !shard.execution && public_values.start_next_pc != public_values.next_next_pc
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_next_pc != next_next_pc: a non-execution shard's State-bus \
                      endpoints must cancel",
                 ));
-            } else if i == proof.0.len() - 1 && public_values.next_pc != KoalaBear::ZERO {
+            } else if i == shards.len() - 1 && public_values.next_pc != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "next_pc != 0: execution should have halted",
                 ));
@@ -149,9 +169,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             prev_next_pc = public_values.next_pc;
         }
 
-        for shard_proof in proof.0.iter() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
+        for shard in shards.iter() {
+            let public_values = shard.public_values;
             if public_values.exit_code != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "exit_code != 0: exit code should be zero for all shards",
@@ -161,9 +180,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut last_init_addr_bits_prev = [KoalaBear::ZERO; 32];
         let mut last_finalize_addr_bits_prev = [KoalaBear::ZERO; 32];
-        for shard_proof in proof.0.iter() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
+        for shard in shards.iter() {
+            let public_values = shard.public_values;
             if public_values.previous_init_addr_bits != last_init_addr_bits_prev {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "previous_init_addr_bits != last_init_addr_bits_prev",
@@ -172,13 +190,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "last_init_addr_bits != last_finalize_addr_bits_prev",
                 ));
-            } else if !shard_proof.contains_global_memory_init()
+            } else if !shard.memory_init
                 && public_values.previous_init_addr_bits != public_values.last_init_addr_bits
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "previous_init_addr_bits != last_init_addr_bits",
                 ));
-            } else if !shard_proof.contains_global_memory_finalize()
+            } else if !shard.memory_finalize
                 && public_values.previous_finalize_addr_bits
                     != public_values.last_finalize_addr_bits
             {
@@ -194,9 +212,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let zero_deferred_proofs_digest = [KoalaBear::ZERO; POSEIDON_NUM_WORDS];
         let mut committed_value_digest_prev = zero_committed_value_digest;
         let mut deferred_proofs_digest_prev = zero_deferred_proofs_digest;
-        for shard_proof in proof.0.iter() {
-            let public_values: &PublicValues<Word<_>, _> =
-                shard_proof.public_values.as_slice().borrow();
+        for shard in shards.iter() {
+            let public_values = shard.public_values;
             if committed_value_digest_prev != zero_committed_value_digest
                 && public_values.committed_value_digest != committed_value_digest_prev
             {
@@ -209,13 +226,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "deferred_proofs_digest != deferred_proofs_digest_prev",
                 ));
-            } else if !shard_proof.contains_execution()
+            } else if !shard.execution
                 && public_values.committed_value_digest != committed_value_digest_prev
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "committed_value_digest != committed_value_digest_prev",
                 ));
-            } else if !shard_proof.contains_execution()
+            } else if !shard.execution
                 && public_values.deferred_proofs_digest != deferred_proofs_digest_prev
             {
                 return Err(MachineVerificationError::InvalidPublicValues(

@@ -713,7 +713,7 @@ pub fn verify_compress_jagged<C, SC, A>(
 /// pubvals were constraint-checked at production time; the
 /// recursion AIR's transition constraints handle the rest.
 pub fn noop_eval_public_values_fn<C: CircuitConfig>(
-) -> impl FnOnce(&mut RecursivePublicValuesConstraintFolder<C>) {
+) -> impl Fn(&mut RecursivePublicValuesConstraintFolder<C>) {
     |_folder: &mut RecursivePublicValuesConstraintFolder<C>| {}
 }
 

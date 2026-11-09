@@ -330,7 +330,7 @@ impl<P> JaggedShardVerifier<P> {
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         HV::DigestVariable: Copy,
         P: RecursiveMultilinearPcsVerifier<C, FC, Commitment = HV::DigestVariable> + Clone,
-        EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+        EVPV: Fn(&mut RecursivePublicValuesConstraintFolder<C>),
         JE: FnOnce(
             &mut Builder<C>,
             &JaggedDimensionMetadata<Felt<C::F>>,
@@ -389,7 +389,27 @@ impl<P> JaggedShardVerifier<P> {
             }
         }
 
-        let _ = num_pv_elts;
+        let instances = zkm_pcs::chip_instances(shard_chips);
+        assert!(
+            public_values.len() % instances == 0 && public_values.len() / instances >= num_pv_elts,
+            "the shard's public values are one set per chip instance",
+        );
+        for (i, chip) in shard_chips.iter().enumerate() {
+            if chip.instance() == 0 || opened_values.chips[i].preprocessed.local.is_empty() {
+                continue;
+            }
+            let base = chip.base_name();
+            let first = shard_chips
+                .iter()
+                .position(|c| c.instance() == 0 && c.name() == base)
+                .expect("instance 0 of a chip with preprocessed columns is in the shard");
+            let shared = &opened_values.chips[first].preprocessed.local;
+            let own = &opened_values.chips[i].preprocessed.local;
+            assert_eq!(shared.len(), own.len(), "preprocessed widths of a chip's instances");
+            for (a, b) in shared.iter().zip(own.iter()) {
+                builder.assert_ext_eq(*a, *b);
+            }
+        }
 
         builder.cycle_tracker_v2_enter("verify_logup_gkr".to_string());
         verify_logup_gkr::<C, SC, A, FC, EVPV>(
@@ -426,7 +446,8 @@ impl<P> JaggedShardVerifier<P> {
             .iter()
             .enumerate()
             .filter(|(_, c)| {
-                p3_air::BaseAir::<p3_koala_bear::KoalaBear>::preprocessed_width(**c) > 0
+                c.instance() == 0
+                    && p3_air::BaseAir::<p3_koala_bear::KoalaBear>::preprocessed_width(**c) > 0
             })
             .map(|(i, _)| i)
             .collect();
@@ -548,7 +569,7 @@ mod tests {
     ///   3. `insertion_points: &[usize]` — derived via
     ///      [`JaggedShardVerifier::insertion_points_from_column_counts`]
     ///      from the machine's per-round column-count table.
-    ///   4. `eval_public_values_fn: FnOnce(&mut RecursivePublicValuesConstraintFolder)`
+    ///   4. `eval_public_values_fn: Fn(&mut RecursivePublicValuesConstraintFolder)`
     ///      — machine-specific public-values constraint closure.
     ///   5. `jagged_evaluator_fn: JE` — construct from
     ///      `RecursiveJaggedEvalSumcheckConfig::new(

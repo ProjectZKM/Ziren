@@ -1,7 +1,6 @@
 use core::cmp::Reverse;
 
 use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
@@ -82,9 +81,8 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// The pin a main round of `total_values` cells commits under on this
     /// machine: the recursion pin, else the core class it fits, else `None`.
     pub fn main_area_pin_for(&self, total_values: usize) -> Option<crate::jagged::AreaPin> {
-        self.main_area_pin().or_else(|| {
-            self.core_main_pins.then(|| crate::jagged::core_main_pin(total_values))
-        })
+        self.main_area_pin()
+            .or_else(|| self.core_main_pins.then(|| crate::jagged::core_main_pin(total_values)))
     }
 
     /// The area pins this machine's proofs commit under (`None` = natural).
@@ -453,9 +451,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
         let (mut main, mut prep) = (0usize, 0usize);
         for (name, r) in rows {
-            if let Some(chip) = self.chips().iter().find(|c| c.name() == *name) {
-                main += r * <A as BaseAir<Val<SC>>>::width(&chip.air);
-                prep += r * chip.preprocessed_width();
+            if let Some(chip) = self.chip_instance(name) {
+                main += r * <A as BaseAir<Val<SC>>>::width(chip.air.as_ref());
+                if chip.instance() == 0 {
+                    prep += r * chip.preprocessed_width();
+                }
             }
         }
         let main_c = crate::jagged::committed_dense_len(main, log_stack);
@@ -503,35 +503,34 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         self.chips.iter().filter(|chip| chip.included(shard))
     }
 
-    /// Returns an iterator over the chips in the machine that are included in the given shard.
-    pub fn shard_chips_ordered<'a, 'b>(
-        &'a self,
-        chip_ordering: &'b HashMap<String, usize>,
-    ) -> impl Iterator<Item = &'b MachineChip<SC, A>>
-    where
-        'a: 'b,
-    {
-        self.chips
-            .iter()
-            .filter(|chip| chip_ordering.contains_key(&chip.name()))
-            .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
+    /// The chips named by `chip_ordering`, in its order: instance `i` of a
+    /// machine chip for a name `"{chip}@{i}"`, the chip itself for its own name.
+    pub fn shard_chips_ordered(
+        &self,
+        chip_ordering: &HashMap<String, usize>,
+    ) -> Vec<MachineChip<SC, A>> {
+        let mut named: Vec<(&String, &usize)> = chip_ordering.iter().collect();
+        named.sort_by_key(|(_, index)| **index);
+        named.into_iter().filter_map(|(name, _)| self.chip_instance(name)).collect()
+    }
+
+    /// Instance `i` of the machine chip a name `"{chip}@{i}"` (or `"{chip}"`,
+    /// instance 0) denotes; `None` if the machine has no such chip.
+    pub fn chip_instance(&self, name: &str) -> Option<MachineChip<SC, A>> {
+        let (base, instance) = crate::chip::split_instance_name(name);
+        let chip = self.chips.iter().find(|chip| chip.name() == base)?;
+        Some(if instance == 0 { chip.clone() } else { chip.with_instance(instance) })
     }
 
     /// Returns the machine chips present in a shard, keyed by the proof's
     /// per-chip log-height map, in the shard's chip order.  Shard chip
     /// order IS name order (`commit()` sorts the shard's traces by chip
     /// name), so the name-sorted `BTreeMap` keys reproduce it exactly.
-    pub fn shard_chips_named<'a, 'b, V>(
-        &'a self,
-        chip_heights: &'b std::collections::BTreeMap<String, V>,
-    ) -> impl Iterator<Item = &'b MachineChip<SC, A>>
-    where
-        'a: 'b,
-    {
-        self.chips
-            .iter()
-            .filter(|chip| chip_heights.contains_key(&chip.name()))
-            .sorted_by_key(|chip| chip.name())
+    pub fn shard_chips_named<V>(
+        &self,
+        chip_heights: &std::collections::BTreeMap<String, V>,
+    ) -> Vec<MachineChip<SC, A>> {
+        chip_heights.keys().filter_map(|name| self.chip_instance(name)).collect()
     }
 
     /// Returns the config of the machine.
@@ -725,7 +724,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         );
 
                         let num_main_constraints =
-                            capture_machine_constraints(&chip.air).constraint_counts().base;
+                            capture_machine_constraints(chip.air.as_ref()).constraint_counts().base;
 
                         let num_permutation_constraints = count_permutation_constraints(
                             &chip.sends,
@@ -838,7 +837,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         );
 
                         let num_main_constraints =
-                            capture_machine_constraints(&chip.air).constraint_counts().base;
+                            capture_machine_constraints(chip.air.as_ref()).constraint_counts().base;
 
                         let num_permutation_constraints = count_permutation_constraints(
                             &chip.sends,
@@ -933,8 +932,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .chips()
             .iter()
             .filter_map(|c| {
-                let w = <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&c.air);
-                (w > 0).then(|| (<A as MachineAir<Val<SC>>>::name(&c.air), w))
+                let w = <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(c.air.as_ref());
+                (w > 0).then(|| (<A as MachineAir<Val<SC>>>::name(c.air.as_ref()), w))
             })
             .collect();
         dims.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1109,12 +1108,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
-                    let chips = self
-                        .shard_chips_named(&shard_proof.jagged_shard_proof.chip_heights)
-                        .collect::<Vec<_>>();
+                    let chips =
+                        self.shard_chips_named(&shard_proof.jagged_shard_proof.chip_heights);
+                    let chips: Vec<&MachineChip<SC, A>> = chips.iter().collect();
                     let mut shard_challenger = base_challenger.clone();
-                    shard_challenger
-                        .observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
+                    shard_challenger.observe_slice(&shard_proof.public_values);
                     Verifier::verify_shard(
                         &self.config,
                         vk,
@@ -1170,8 +1168,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             let shard_sums = proof
                 .shard_proofs
                 .iter()
-                .map(|shard_proof| {
-                    crate::air::public_values_from_slice(&shard_proof.public_values)
+                .flat_map(|shard_proof| {
+                    let stride = shard_proof.public_values.len() / shard_proof.instance_count();
+                    shard_proof.public_values.chunks(stride)
+                })
+                .map(|public_values| {
+                    crate::air::public_values_from_slice(public_values)
                         .map(|public_values| public_values.global_cumulative_sum)
                         .ok_or(MachineVerificationError::InvalidPublicValues(
                             "public values do not hold a core public-values layout",

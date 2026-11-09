@@ -17,7 +17,16 @@ pub struct Lookup<F: Field> {
     pub kind: LookupKind,
     /// The scope of the lookup.
     pub scope: LookupScope,
+    /// The chip instance the lookup belongs to: a shard proof over several
+    /// shards gives each shard's chips their own instance, and the instance
+    /// enters the bus fingerprint through [`Self::argument_index`], so the
+    /// shards' buses stay disjoint.
+    pub instance: u32,
 }
+
+/// The bus fingerprint's argument index of instance `i` of kind `k` is
+/// `k + INSTANCE_STRIDE * i`; every [`LookupKind`] is below the stride.
+pub const INSTANCE_STRIDE: usize = 32;
 
 /// The type of a lookup argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -125,12 +134,22 @@ impl<F: Field> Lookup<F> {
         kind: LookupKind,
         scope: LookupScope,
     ) -> Self {
-        Self { values, multiplicity, kind, scope }
+        Self { values, multiplicity, kind, scope, instance: 0 }
     }
 
-    /// The index of the argument in the lookup table.
+    /// The lookup as instance `instance`'s.
+    #[must_use]
+    pub fn with_instance(mut self, instance: u32) -> Self {
+        self.instance = instance;
+        self
+    }
+
+    /// The index of the argument in the lookup table: the kind, offset by the
+    /// instance's stride.
     pub const fn argument_index(&self) -> usize {
-        self.kind as usize
+        let instance =
+            if matches!(self.scope, LookupScope::Local) { self.instance as usize } else { 0 };
+        self.kind as usize + INSTANCE_STRIDE * instance
     }
 
     /// Evaluate this lookup's `(numerator, denominator)` fraction from a
@@ -194,6 +213,7 @@ impl<F: Field> Debug for Lookup<F> {
         f.debug_struct("Lookup")
             .field("kind", &self.kind)
             .field("scope", &self.scope)
+            .field("instance", &self.instance)
             .finish_non_exhaustive()
     }
 }
@@ -239,6 +259,7 @@ mod eval_tests {
             multiplicity: VirtualPairCol::single_main(0),
             kind: LookupKind::Byte,
             scope: LookupScope::Local,
+            instance: 0,
         };
 
         let main_base: Vec<KoalaBear> =

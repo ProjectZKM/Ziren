@@ -466,7 +466,7 @@ pub mod tests {
             println!(
                 "[WIDTHS] {} main={} prep={}",
                 MachineAir::<F>::name(chip),
-                BaseAir::<F>::width(&chip.air),
+                BaseAir::<F>::width(chip.air.as_ref()),
                 BaseAir::<F>::preprocessed_width(chip)
             );
         }

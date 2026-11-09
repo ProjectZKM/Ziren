@@ -61,6 +61,53 @@ where
     prove_with_context::<SC, _>(&prover, &pk, program, stdin, opts, Default::default())
 }
 
+/// How many consecutive core shards of one chip set are proved as one shard
+/// proof: `ZIREN_CORE_GROUP`, one by default.
+fn core_group_size() -> usize {
+    std::env::var("ZIREN_CORE_GROUP")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|&size| size > 0)
+        .unwrap_or(1)
+}
+
+/// Runs of at most `group_size` records with consecutive shard numbers and
+/// the same `chip_set` (the shard cluster when one applies), among those
+/// `keep` admits, each with its traces.  The leaf chains a proof's instances
+/// by shard number, so a run never skips one.
+fn group_records<F>(
+    records: Vec<ExecutionRecord>,
+    traces: Vec<zkm_pcs::Traces<F>>,
+    group_size: usize,
+    mut keep: impl FnMut(&ExecutionRecord, &zkm_pcs::Traces<F>) -> bool,
+    chip_set: impl Fn(&ExecutionRecord, &zkm_pcs::Traces<F>) -> Vec<String>,
+) -> Vec<(Vec<ExecutionRecord>, Vec<zkm_pcs::Traces<F>>)> {
+    let mut groups: Vec<(Vec<ExecutionRecord>, Vec<zkm_pcs::Traces<F>>)> = Vec::new();
+    let mut last_chips: Option<Vec<String>> = None;
+    for (record, traces) in records.into_iter().zip(traces) {
+        if !keep(&record, &traces) {
+            continue;
+        }
+        let chips = chip_set(&record, &traces);
+        let extend = last_chips.as_ref() == Some(&chips)
+            && groups.last().is_some_and(|(records, _)| {
+                records.len() < group_size
+                    && records.last().is_some_and(|last| {
+                        last.public_values.shard + 1 == record.public_values.shard
+                    })
+            });
+        if extend {
+            let group = groups.last_mut().expect("a group to extend");
+            group.0.push(record);
+            group.1.push(traces);
+        } else {
+            groups.push((vec![record], vec![traces]));
+        }
+        last_chips = Some(chips);
+    }
+    groups
+}
+
 pub fn prove_with_context<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     pk: &P::DeviceProvingKey,
@@ -312,6 +359,7 @@ where
         let shard_clusters = ShardClusters::<SC::Val>::new();
 
         let dump_shapes = std::env::var_os("ZIREN_CORE_SHAPE_DUMP").is_some();
+        let group_size = core_group_size();
         let shard_limit: Option<u32> =
             std::env::var("ZIREN_CORE_SHARD_LIMIT").ok().and_then(|limit| limit.parse().ok());
         let p2_prover_span = tracing::Span::current().clone();
@@ -322,51 +370,65 @@ where
                 for (records, traces) in p2_records_and_traces_rx.into_iter() {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
-                        shard_proofs.par_extend(
-                            records
-                                .into_par_iter()
-                                .zip(traces.into_par_iter())
-                                .inspect(|(record, traces)| {
-                                    if dump_shapes {
-                                        dump_shape(record, traces, &shard_clusters);
-                                    }
-                                })
-                                .filter(|(record, _)| {
-                                    shard_limit
-                                        .is_none_or(|limit| record.public_values.shard <= limit)
-                                })
-                                .map(|(record, main_traces)| {
-                                    let _span = span.enter();
-
-                                    let cluster_widths = shard_clusters.cluster_widths(&record);
-
-                                    let t_commit = std::time::Instant::now();
-                                    let main_data =
-                                        prover.commit(&record, main_traces, cluster_widths);
-                                    let commit_ms = t_commit.elapsed().as_millis();
-
-                                    let opening_span = tracing::debug_span!("opening").entered();
-                                    let t_open = std::time::Instant::now();
-                                    let proof = prover
-                                        .open(pk, main_data, &mut challenger.clone())
-                                        .unwrap();
-                                    let open_ms = t_open.elapsed().as_millis();
-                                    opening_span.exit();
-
-                                    tracing::info!(
-                                        "PCS timing: commit={}ms open={}ms total={}ms",
-                                        commit_ms,
-                                        open_ms,
-                                        commit_ms + open_ms
-                                    );
-
-                                    rayon::spawn(move || {
-                                        drop(record);
-                                    });
-
-                                    proof
-                                }),
+                        let groups = group_records(
+                            records,
+                            traces,
+                            group_size,
+                            |record, traces| {
+                                if dump_shapes {
+                                    dump_shape(record, traces, &shard_clusters);
+                                }
+                                shard_limit.is_none_or(|limit| record.public_values.shard <= limit)
+                            },
+                            |record, traces| {
+                                shard_clusters
+                                    .cluster_widths(record)
+                                    .map(|widths| widths.into_keys().collect())
+                                    .unwrap_or_else(|| traces.keys().cloned().collect())
+                            },
                         );
+                        if group_size > 1 {
+                            tracing::info!(
+                                "core: {} shards in {} grouped proofs",
+                                groups.iter().map(|(records, _)| records.len()).sum::<usize>(),
+                                groups.len()
+                            );
+                        }
+                        shard_proofs.par_extend(groups.into_par_iter().map(
+                            |(records, main_traces)| {
+                                let _span = span.enter();
+
+                                let cluster_widths = records
+                                    .iter()
+                                    .map(|record| shard_clusters.cluster_widths(record))
+                                    .collect();
+
+                                let t_commit = std::time::Instant::now();
+                                let main_data =
+                                    prover.commit_group(&records, main_traces, cluster_widths);
+                                let commit_ms = t_commit.elapsed().as_millis();
+
+                                let opening_span = tracing::debug_span!("opening").entered();
+                                let t_open = std::time::Instant::now();
+                                let proof =
+                                    prover.open(pk, main_data, &mut challenger.clone()).unwrap();
+                                let open_ms = t_open.elapsed().as_millis();
+                                opening_span.exit();
+
+                                tracing::info!(
+                                    "PCS timing: commit={}ms open={}ms total={}ms",
+                                    commit_ms,
+                                    open_ms,
+                                    commit_ms + open_ms
+                                );
+
+                                rayon::spawn(move || {
+                                    drop(records);
+                                });
+
+                                proof
+                            },
+                        ));
                     });
                 }
             });

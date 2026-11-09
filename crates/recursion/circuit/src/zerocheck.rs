@@ -419,10 +419,17 @@ where
 
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
+        let instances = zkm_pcs::chip_instances(shard_chips);
+        let shard_public_values = public_values;
         let chip_contributions: Vec<Ext<C::F, C::EF>> = shard_chips
             .iter()
             .zip(opened_values.chips.iter())
             .ir_par_map_collect(builder, |builder, (chip, opening)| {
+                let public_values = zkm_pcs::instance_public_values(
+                    shard_public_values,
+                    chip.instance(),
+                    instances,
+                );
                 let degree = &opening.degree;
 
                 verify_opening_shape_jagged::<C, SC, A>(chip, opening)
