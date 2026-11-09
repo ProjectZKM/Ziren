@@ -193,6 +193,12 @@ fn leaf_shards() -> usize {
         .unwrap_or(1)
 }
 
+/// Whether a device readies the next leaf's tape while it proves the one before,
+/// `ZIREN_WORD_TAPE_PREFETCH` (on).
+fn tape_prefetch() -> bool {
+    std::env::var("ZIREN_WORD_TAPE_PREFETCH").map_or(true, |value| value != "0")
+}
+
 /// `program`'s relations, lowered over the memory its run left, as a composition when leaves
 /// are composed.
 fn lower_leaf(
@@ -284,17 +290,20 @@ fn pipeline<P: Send, T: Send>(
             }
             Ok(())
         },
+        |_, _| {},
         consume,
     )
 }
 
 /// [`pipeline`] with `produce` handing over each of the `count` items with its index, in any
 /// order, through the sender it is given, which answers false once an item failed and
-/// production should stop.
+/// production should stop; each backend runs `prepare` on its next item, on a thread of its
+/// own bound to the device, while it consumes the one before.
 fn pipeline_unordered<P: Send, T: Send>(
     backends: &[&(dyn TapeBackend + Sync)],
     count: usize,
     produce: impl FnOnce(&dyn Fn(usize, P) -> bool) -> Result<(), ZKMRecursionProverError>,
+    prepare: impl Fn(&dyn TapeBackend, &P) + Sync,
     consume: impl Fn(&dyn TapeBackend, P) -> Result<T, ZKMRecursionProverError> + Sync,
 ) -> Result<Vec<T>, ZKMRecursionProverError> {
     let failed = AtomicBool::new(false);
@@ -304,12 +313,23 @@ fn pipeline_unordered<P: Send, T: Send>(
     let receiver = Mutex::new(receiver);
     let produced = std::thread::scope(|scope| {
         for &backend in backends {
-            let (receiver, results, failed, consume) = (&receiver, &results, &failed, &consume);
+            let (receiver, results, failed) = (&receiver, &results, &failed);
+            let (prepare, consume) = (&prepare, &consume);
+            let (prepared_tx, prepared_rx) = std::sync::mpsc::sync_channel::<(usize, P)>(0);
             scope.spawn(move || {
                 backend.bind();
                 loop {
                     let next = receiver.lock().expect("the work queue").recv();
                     let Ok((index, item)) = next else { break };
+                    prepare(backend, &item);
+                    if prepared_tx.send((index, item)).is_err() {
+                        break;
+                    }
+                }
+            });
+            scope.spawn(move || {
+                backend.bind();
+                for (index, item) in prepared_rx {
                     let result = consume(backend, item);
                     if result.is_err() {
                         failed.store(true, Ordering::Relaxed);
@@ -393,10 +413,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             backends.len()
         );
         let check = std::env::var_os("ZIREN_WORD_TAPE_CHECK").is_some();
+        let prefetch = tape_prefetch();
         let leaves = pipeline_unordered(
             backends,
             inputs.len(),
             |send| self.leaves_word_ready(&inputs, keys, check, send),
+            |backend, leaf| {
+                if prefetch {
+                    backend.prefetch(&leaf.tape);
+                }
+            },
             |backend, leaf| prove_leaf(leaf, backend, check),
         )?;
 
@@ -512,7 +538,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             groups.into_iter().partition(|(digest, _)| keys.program(digest).is_some());
         new.sort_by_key(|(_, shards)| std::cmp::Reverse(programs[shards[0]].0.total_memory));
         let mut known: Vec<usize> = known.into_iter().flat_map(|(_, shards)| shards).collect();
-        known.sort_unstable();
+        known.sort_by_key(|&shard| (keys.program(&programs[shard].1).map(|(key, _)| key), shard));
 
         let maker = keys.maker();
         let builders = key_builders().min(new.len());

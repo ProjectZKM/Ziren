@@ -325,6 +325,11 @@ pub trait TapeBackend: ProverBackend<MachineConfig, TapeAir> {
     /// Makes the backend's device the calling thread's, before the thread proves on it.
     fn bind(&self) {}
 
+    /// Readies `tape` on the backend's device for the leaf it computes next, from a thread
+    /// of its own while the device proves the leaf before it; a backend that readies nothing
+    /// ahead does nothing.
+    fn prefetch(&self, _tape: &Arc<WordTape>) {}
+
     /// The Blake3 round table of `air` over the compressions that start from `inputs`, their
     /// states and blocks, with each compression's final state.
     fn rounds_table(
