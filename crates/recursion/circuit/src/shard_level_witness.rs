@@ -392,74 +392,73 @@ where
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
         use zkm_pcs::shard_level::shard_proof::EvaluationProof as HostEvalProof;
-        let evaluation_proof =
-            if let Some(outer) = C::read_outer_eval_bundle(builder, &self.evaluation_proof) {
-                outer
-            } else {
-                match &self.evaluation_proof {
-                    HostEvalProof::Empty => {
-                        panic!("an inner-ring shard proof must carry its jagged-WHIR bundle")
-                    }
-                    HostEvalProof::Bytes(b) => {
-                        let bundle = blake3_whir_bundle_from_bytes(b).expect(
+        let evaluation_proof = if let Some(outer) =
+            C::read_outer_eval_bundle(builder, &self.evaluation_proof)
+        {
+            outer
+        } else {
+            match &self.evaluation_proof {
+                HostEvalProof::Empty => {
+                    panic!("an inner-ring shard proof must carry its jagged-WHIR bundle")
+                }
+                HostEvalProof::Bytes(b) => {
+                    let bundle = blake3_whir_bundle_from_bytes(b).expect(
                             "an inner-ring shard proof's bytes carry the Blake3 ring's jagged-WHIR bundle",
                         );
-                        let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_blake3(
-                            &bundle.whir_proof,
-                        );
-                        let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
-                            &whir_host, builder,
-                        );
-                        let sumcheck = read_sumcheck_from_stream::<C>(
-                            &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
-                            builder,
-                        );
-                        let jagged_eval = read_sumcheck_from_stream::<C>(
-                            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
-                            builder,
-                        );
-                        let expected_eval = bundle.reduction.q_at_z.read(builder);
-                        let commit_root = crate::blake3_circuit::digest_limbs(
-                            &bundle.commit.original_commitment.roots()[0],
-                        )
-                        .read(builder);
-                        LiftedEvalProof::WhirBundleBlake3 {
-                            host: bundle,
-                            whir_proof,
-                            sumcheck,
-                            jagged_eval,
-                            expected_eval,
-                            commit_root,
-                            main_commitment: main_commitment_arr,
-                        }
-                    }
-                    HostEvalProof::Bundle(bundle) => {
-                        let whir_host =
-                            crate::whir_circuit::host_stacked_whir_to_recursive(&bundle.whir_proof);
-                        let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
-                            &whir_host, builder,
-                        );
-                        let sumcheck = read_sumcheck_from_stream::<C>(
-                            &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
-                            builder,
-                        );
-                        let jagged_eval = read_sumcheck_from_stream::<C>(
-                            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
-                            builder,
-                        );
-                        let expected_eval = bundle.reduction.q_at_z.read(builder);
-                        LiftedEvalProof::WhirBundle {
-                            host: bundle.clone(),
-                            whir_proof: Box::new(whir_proof),
-                            sumcheck,
-                            jagged_eval,
-                            expected_eval,
-                            commit_root: jagged_original_commitment_arr,
-                            modified_commitment: main_commitment_arr,
-                        }
+                    let whir_host = crate::whir_circuit::blake3_whir_mirror(&bundle);
+                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
+                        &whir_host, builder,
+                    );
+                    let sumcheck = read_sumcheck_from_stream::<C>(
+                        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                        builder,
+                    );
+                    let jagged_eval = read_sumcheck_from_stream::<C>(
+                        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                        builder,
+                    );
+                    let expected_eval = bundle.reduction.q_at_z.read(builder);
+                    let commit_root = crate::blake3_circuit::digest_limbs(
+                        &bundle.commit.original_commitment.roots()[0],
+                    )
+                    .read(builder);
+                    LiftedEvalProof::WhirBundleBlake3 {
+                        host: bundle,
+                        whir_proof,
+                        sumcheck,
+                        jagged_eval,
+                        expected_eval,
+                        commit_root,
+                        main_commitment: main_commitment_arr,
                     }
                 }
-            };
+                HostEvalProof::Bundle(bundle) => {
+                    let whir_host =
+                        crate::whir_circuit::host_stacked_whir_to_recursive(&bundle.whir_proof);
+                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
+                        &whir_host, builder,
+                    );
+                    let sumcheck = read_sumcheck_from_stream::<C>(
+                        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                        builder,
+                    );
+                    let jagged_eval = read_sumcheck_from_stream::<C>(
+                        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                        builder,
+                    );
+                    let expected_eval = bundle.reduction.q_at_z.read(builder);
+                    LiftedEvalProof::WhirBundle {
+                        host: bundle.clone(),
+                        whir_proof: Box::new(whir_proof),
+                        sumcheck,
+                        jagged_eval,
+                        expected_eval,
+                        commit_root: jagged_original_commitment_arr,
+                        modified_commitment: main_commitment_arr,
+                    }
+                }
+            }
+        };
         let opened_values = opened_values_from_host(&self.opened_values).read(builder);
         (
             main_commitment_arr,
@@ -497,9 +496,7 @@ where
         if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(b) = &self.evaluation_proof
         {
             if let (false, Some(bundle)) = (handled_outer, blake3_whir_bundle_from_bytes(b)) {
-                let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_blake3(
-                    &bundle.whir_proof,
-                );
+                let whir_host = crate::whir_circuit::blake3_whir_mirror(&bundle);
                 crate::whir_circuit::write_stacked_whir_to_stream::<C, _>(&whir_host, witness);
                 write_sumcheck_to_stream::<C>(
                     &jagged_reduction_to_partial_sumcheck(&bundle.reduction),

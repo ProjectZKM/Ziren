@@ -630,10 +630,12 @@ where
                     round_cfg.queries_pow_bits,
                 )));
             }
-            let mask = (1usize << prev_domain_log) - 1;
-            let indices: Vec<usize> = (0..round_cfg.num_queries)
-                .map(|_| challenger.sample_bits(prev_domain_log) & mask)
-                .collect();
+            let indices = crate::whir::queries::draw_query_indices(
+                prev_domain_log,
+                round_cfg.num_queries,
+                self.config.stratified_queries,
+                |bits| challenger.sample_bits(bits),
+            );
 
             let g_prev = EF::two_adic_generator(prev_domain_log);
             let mut leaves_open = Vec::with_capacity(indices.len());
@@ -785,12 +787,14 @@ where
                 self.config.final_pow_bits,
             ))
         };
-        let final_mask = (1usize << prev_domain_log) - 1;
         let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
-        let final_indices: Vec<usize> = (0..self.config.final_queries)
-            .map(|_| challenger.sample_bits(prev_domain_log) & final_mask)
-            .collect();
+        let final_indices = crate::whir::queries::draw_query_indices(
+            prev_domain_log,
+            self.config.final_queries,
+            self.config.stratified_queries,
+            |bits| challenger.sample_bits(bits),
+        );
         if let PrevTree::Engine = &prev_single {
             final_leaves = engine
                 .as_deref_mut()
@@ -1042,10 +1046,12 @@ where
             if !challenger.check_witness(round_cfg.queries_pow_bits, query_pow.0) {
                 return Err(WhirVerifierError::PowMismatch { round: r, var: usize::MAX });
             }
-            let mask = (1usize << prev_domain_log) - 1;
-            let indices: Vec<usize> = (0..round_cfg.num_queries)
-                .map(|_| challenger.sample_bits(prev_domain_log) & mask)
-                .collect();
+            let indices = crate::whir::queries::draw_query_indices(
+                prev_domain_log,
+                round_cfg.num_queries,
+                self.config.stratified_queries,
+                |bits| challenger.sample_bits(bits),
+            );
 
             let openings =
                 whir.round_query_openings.get(r).ok_or_else(|| shape("round query openings"))?;
@@ -1140,7 +1146,6 @@ where
         if !challenger.check_witness(self.config.final_pow_bits, whir.final_pow.0) {
             return Err(WhirVerifierError::PowMismatch { round: num_rounds, var: usize::MAX });
         }
-        let final_mask = (1usize << prev_domain_log) - 1;
         let final_openings = whir
             .round_query_openings
             .get(num_rounds - 1)
@@ -1152,8 +1157,13 @@ where
         let g_final = EF::two_adic_generator(prev_domain_log);
         let last_ff = *folds.last().unwrap();
         let last_randomness = &all_fr[all_fr.len() - last_ff..];
-        for q in 0..self.config.final_queries {
-            let idx = challenger.sample_bits(prev_domain_log) & final_mask;
+        let final_indices = crate::whir::queries::draw_query_indices(
+            prev_domain_log,
+            self.config.final_queries,
+            self.config.stratified_queries,
+            |bits| challenger.sample_bits(bits),
+        );
+        for (q, &idx) in final_indices.iter().enumerate() {
             let virt_leaf: Vec<EF> = if prev_round0 {
                 let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << last_ff];
                 for (ri, commitment) in commitments.iter().enumerate() {

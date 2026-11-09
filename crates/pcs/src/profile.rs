@@ -207,6 +207,7 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
         final_pow_bits,
         final_folding_pow_bits,
         batch_pow_bits,
+        stratified_queries,
     } = cfg;
 
     push_u64(felts, *starting_ood_samples as u64);
@@ -238,6 +239,7 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
     push_u64(felts, *final_pow_bits as u64);
     push_usizes(felts, final_folding_pow_bits);
     push_u64(felts, *batch_pow_bits as u64);
+    push_u64(felts, u64::from(*stratified_queries));
 }
 
 /// The profile digest as a lowercase hex string, for logs, deployment metadata
@@ -312,7 +314,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "5d87a7341fd94e3c5387812b649cacb112dbb4b867fc44d6496fef870aaf8794",
+            "6d8c47961d9a29bf2353a46b137cf7c05d3430815bc8c4fd40eadc4b618ff1ed",
             "the transcript profile changed -- see this test's documentation",
         );
     }
@@ -443,6 +445,7 @@ mod tests {
             ("final_queries", |c| c.final_queries += 1),
             ("final_pow_bits", |c| c.final_pow_bits += 1),
             ("final_folding_pow_bits", |c| c.final_folding_pow_bits.push(1)),
+            ("stratified_queries", |c| c.stratified_queries = !c.stratified_queries),
         ];
         for (name, mutate) in mutations {
             let mut cfg = base.clone();

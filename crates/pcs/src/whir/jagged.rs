@@ -332,6 +332,14 @@ pub fn blake3_query_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_BLAKE3_QUERY_GRINDING_BITS", 26)
 }
 
+/// Whether the core schedule draws its queries in strata
+/// ([`crate::whir::queries`]), on by default: the leaf then hashes the top
+/// levels of each opened tree once instead of once per query, at no cost in
+/// soundness.  Zero draws every query independently.
+pub fn blake3_stratified_queries() -> bool {
+    crate::params::env_usize("ZIREN_BLAKE3_STRATIFIED_QUERIES", 1) != 0
+}
+
 /// The schedule of the Blake3 ring at stacking height `lsh`: the compress
 /// schedule's folds and first rate, query counts solved to the per-component
 /// target under the Johnson bound ([`blake3_johnson_m`]) with the folding
@@ -340,7 +348,8 @@ pub fn blake3_query_grinding_bits() -> usize {
 /// The verifier of this schedule is the binary stage's leaf circuit, where
 /// every query costs Merkle paths of Blake3 compressions over bits and the
 /// folded leaves' combination; the query count is what the schedule spends
-/// its grinding to cut.
+/// its grinding to cut, and the queries are drawn in strata
+/// ([`blake3_stratified_queries`]) so the top of every path is hashed once.
 pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
     let rate = blake3_log_inv_rate();
     assert!(
@@ -383,6 +392,7 @@ pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
         min_queries_johnson_for_target(rate + 3 * (num_rounds - 1), pow, m, target);
     config.final_pow_bits = pow;
     config.batch_pow_bits = blake3_batch_grinding_bits();
+    config.stratified_queries = blake3_stratified_queries();
     config
 }
 
@@ -1006,6 +1016,16 @@ mod tests {
                 |rate, pow| min_queries_johnson(rate, pow, m),
             );
         }
+    }
+
+    /// The core Blake3 schedule draws its queries in strata by default, and
+    /// the schedules the other circuits verify do not.
+    #[test]
+    fn only_the_blake3_schedule_is_stratified() {
+        assert!(blake3_whir_config(21).stratified_queries);
+        assert!(!core_whir_config(21).stratified_queries);
+        assert!(!compress_whir_config(21).stratified_queries);
+        assert!(!wrap_whir_config(21).stratified_queries);
     }
 
     /// The same for the wrap schedule, under its own multiplicity.

@@ -61,6 +61,16 @@ pub struct WhirConfig {
     /// of one challenge the batching error is `(t - 1) · L / |F|` for list
     /// size `L`; the grind divides it by `2^bits`.
     pub batch_pow_bits: usize,
+    /// Whether a query phase draws its indices in strata: a count `q` is
+    /// written as a sum of powers of two, and a summand `2^c` places one
+    /// uniform index in each of the `2^c` subtrees of depth `c`.  The
+    /// summand misses a set of relative density `delta` with probability at
+    /// most `(1 - delta)^(2^c)`, by the AM-GM inequality over the subtrees'
+    /// densities, so the phase is at least as sound as `q` independent
+    /// draws.  What it buys is structure: the top `c` levels of every
+    /// opened path are the same nodes in every proof, so a verifier hashes
+    /// them once (see [`crate::whir::queries`]).
+    pub stratified_queries: bool,
 }
 
 impl WhirConfig {
@@ -100,6 +110,7 @@ impl WhirConfig {
             final_pow_bits: 10,
             final_folding_pow_bits: vec![10; 8],
             batch_pow_bits: 0,
+            stratified_queries: false,
         }
     }
 }
