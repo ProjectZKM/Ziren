@@ -136,7 +136,11 @@ struct Lowering<'a> {
 
 /// Lowers `program` again as gadgets, composes them, and proves and verifies the composition
 /// on the host, logging its size and times beside the flat lowering's `flat` words.
-fn compose_experiment(program: &RecursionProgram<F>, memory: Option<&[Block<F>]>, flat: (usize, usize)) {
+fn compose_experiment(
+    program: &RecursionProgram<F>,
+    memory: Option<&[Block<F>]>,
+    flat: (usize, usize),
+) {
     use p3_word_backend::{PackedWitness, WordProofKey};
     use zkm_binary_stark::{challenger, config::bit_commitment, F as Gf};
 
@@ -185,7 +189,8 @@ fn compose_experiment(program: &RecursionProgram<F>, memory: Option<&[Block<F>]>
             return;
         }
     };
-    let pcs = bit_commitment(key.trace_variables(), &crate::prove::schedule()).expect("a commitment");
+    let pcs =
+        bit_commitment(key.trace_variables(), &crate::prove::schedule()).expect("a commitment");
     let routing = key
         .port_commitment::<Gf, _, _>(&pcs, &mut challenger())
         .expect("the routing commits")
@@ -323,7 +328,7 @@ impl Lowering<'_> {
 
     /// Reads `value` from coefficient `coefficient` at `addr` if the instruction committed
     /// it: the runtime left it there, so it depends on no other word.
-    fn from_memory(&mut self, value: Val, addr: usize, coefficient: usize) {
+    fn read_from_memory(&mut self, value: Val, addr: usize, coefficient: usize) {
         if let Some(term) = value.plain() {
             let index = term.index();
             let position = index.position() as usize;
@@ -337,7 +342,7 @@ impl Lowering<'_> {
         let mut computed = self.memory(addr);
         computed[0] = value.value;
         self.check(addr, computed)?;
-        self.from_memory(value, addr, 0);
+        self.read_from_memory(value, addr, 0);
         self.slots[addr] = if self.is_ext[addr] {
             Slot::Ext(Box::new(Builder::embed(value)))
         } else {
@@ -349,7 +354,7 @@ impl Lowering<'_> {
     fn set_ext(&mut self, addr: usize, value: Ext) -> Result<(), LowerError> {
         self.check(addr, value.map(|v| v.value))?;
         for (coefficient, value) in value.into_iter().enumerate() {
-            self.from_memory(value, addr, coefficient);
+            self.read_from_memory(value, addr, coefficient);
         }
         self.slots[addr] = Slot::Ext(Box::new(value));
         Ok(())
@@ -448,7 +453,8 @@ impl Lowering<'_> {
             instr.flags.as_canonical_u32(),
         );
         for (word, pair) in out.into_iter().zip(addrs.output.chunks(2)) {
-            let position = word.plain().expect("a compression's output is a fresh word").index().position();
+            let position =
+                word.plain().expect("a compression's output is a fresh word").index().position();
             let limbs = pair[0].as_usize() as u64 | ((pair[1].as_usize() as u64) << 32);
             self.builder.tape.redefine(position as usize, Op::Limbs, limbs);
             let [low, high] = self.builder.word_to_limbs(word);
@@ -658,11 +664,10 @@ fn lower_as(
     }
     if let Some(dump) = &templates {
         let dump = (dump != "1").then(|| std::path::Path::new(dump));
-        tracing::info_span!("template census")
-            .in_scope(|| {
-                lowering.builder.template_census(DIGEST_SIZE, dump, false);
-                lowering.builder.template_census(DIGEST_SIZE, dump, true);
-            });
+        tracing::info_span!("template census").in_scope(|| {
+            lowering.builder.template_census(DIGEST_SIZE, dump, false);
+            lowering.builder.template_census(DIGEST_SIZE, dump, true);
+        });
     }
     if composed {
         let digest = lowering.digest;
