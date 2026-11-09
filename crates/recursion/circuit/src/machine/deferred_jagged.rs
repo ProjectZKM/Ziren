@@ -304,13 +304,14 @@ pub fn verify_deferred_jagged<C, SC, A>(
                     host.packing.offsets.len().saturating_sub(1),
                     host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                 );
-                let preceding_roots: Vec<<SC as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
-                    if prep_widths.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+                let preceding_roots: Vec<
+                    <SC as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+                > = if prep_widths.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
                 let lifted =
                     <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
                         builder,
                         host,
-                        whir_proof.clone(),
+                        whir_proof.as_ref().clone(),
                         sumcheck.clone(),
                         jagged_eval.clone(),
                         *expected_eval,

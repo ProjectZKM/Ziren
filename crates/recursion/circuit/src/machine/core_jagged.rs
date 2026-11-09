@@ -311,7 +311,7 @@ pub fn verify_core_jagged<C, SC, A>(
                         <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
                             builder,
                             host,
-                            whir_proof.clone(),
+                            whir_proof.as_ref().clone(),
                             sumcheck.clone(),
                             jagged_eval.clone(),
                             *expected_eval,

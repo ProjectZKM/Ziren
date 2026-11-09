@@ -245,11 +245,15 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     /// witnessed main root; `main_commitment` is the observed eight-element
     /// form the lift binds it to.
     WhirBundleBlake3 {
-        host: zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>,
-        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-            [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+        host: Box<
+            zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>,
+        >,
+        whir_proof: Box<
+            crate::whir_circuit::RecursiveStackedWhirProof<
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
+                [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+            >,
         >,
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -423,8 +427,8 @@ where
                     )
                     .read(builder);
                     LiftedEvalProof::WhirBundleBlake3 {
-                        host: bundle,
-                        whir_proof,
+                        host: Box::new(bundle),
+                        whir_proof: Box::new(whir_proof),
                         sumcheck,
                         jagged_eval,
                         expected_eval,

@@ -294,23 +294,21 @@ pub fn verify_compress_jagged<C, SC, A>(
             } => {
                 let preceding_roots: Vec<<SC as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
                     if prep_widths_pre.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
-                let lifted =
-                    <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
-                        builder,
-                        host,
-                        whir_proof.clone(),
-                        sumcheck.clone(),
-                        jagged_eval.clone(),
-                        *expected_eval,
-                        *commit_root,
-                        *main_commitment,
-                        &preceding_roots,
-                        &preprocessed_round.padding_heights,
-                        max_log_row_count,
-                        &column_counts_by_round_pre,
-                        cps_heights,
-                    );
-                lifted
+                <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                    builder,
+                    host,
+                    whir_proof.as_ref().clone(),
+                    sumcheck.clone(),
+                    jagged_eval.clone(),
+                    *expected_eval,
+                    *commit_root,
+                    *main_commitment,
+                    &preceding_roots,
+                    &preprocessed_round.padding_heights,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                    cps_heights,
+                )
             }
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("compress path never carries an OUTER (gnark) bundle")
