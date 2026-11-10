@@ -296,6 +296,31 @@ class PinTest(unittest.TestCase):
                           "outputs": [(5, "state_send[0]"), (3, "mem_write[0].val[0]")]},
                          "output state_send[0] is carried by another column: derived -> clk")
 
+    def test_swapped_distinct_derived_output_ports_are_weakening(self):
+        # Both witness columns have the same `derived` base but different
+        # constraint-defined values. A swap changes the positional output API.
+        # This is the reduction of AddSub_is_add's state_send[1]/[3] case.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"), (4, None), (5, None)],
+            "constraints": ["(w.v4 - (w.v0 + (4 : F))) = 0",
+                            "(w.v5 - (w.v0 + (5 : F))) = 0",
+                            "(w.v3 - (w.v1 + w.v2)) = 0",
+                            "(w.v1).val ≤ 255", "byte_and.rel [w.v1, w.v2] [w.v3]"],
+            "outputs": [(4, "state_send[1]"), (5, "state_send[3]")],
+        }
+        old = chip_file(**kw)
+        new = chip_file(**{**kw, "outputs": [(5, "state_send[1]"), (4, "state_send[3]")]})
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertGreater(n, 0, "swapping distinguishable output bindings must require review:\n" + report)
+
+    def test_unused_same_base_column_insertion_is_not_weakening(self):
+        # Merely adding an unreferenced derived witness must not force review.
+        old = chip_file()
+        new = chip_file(fields=[(0, "pc_0"), (1, "a_1"), (2, "a_2"),
+                                (3, "b_3"), (5, None), (4, None)])
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertEqual(n, 0, report)
+
     def test_helper_redefined_is_weakening(self):
         self.assert_weak({"helper": "def rel : List F → List F → Prop := fun _ _ => True"},
                          "helper relation redefined")
