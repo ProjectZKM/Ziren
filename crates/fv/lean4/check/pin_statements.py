@@ -22,8 +22,9 @@ index suffix removed, numbered by order among the columns of that name (`derived
 unnamed columns the extractor introduces for expressions). A port is recorded as
 `provenance <- column`, plus a source-constrained binding identity relative to the whole
 constraint expression. Consistent field renumbering or insertion of unused fields changes
-neither receipt. Old manifests cannot supply this source identity and must be regenerated
-from the matching generator and snippets before comparing. See ../README.md."""
+neither receipt. Old manifests cannot supply this identity from their summaries; the baseline
+needs source-qualified receipts from unchanged AIR before comparing. Such receipts do not
+recheck generated proof bodies. See ../README.md."""
 import hashlib
 import json
 import re
@@ -448,8 +449,8 @@ def load(path):
     if p.is_file():
         data = json.loads(p.read_text())
         if data.get("format") == LEGACY_FORMAT:
-            raise Usage("baseline lacks source port bindings; regenerate the authoritative "
-                        "statement manifest from the matching generator and snippets")
+            raise Usage("baseline lacks source port bindings; source-qualify the baseline "
+                        "against unchanged authoritative AIR before comparing")
         if data.get("format") != FORMAT:
             raise Usage(f"{path}: not a {FORMAT} manifest")
         return data
@@ -503,8 +504,8 @@ def compare_module(old, new):
     renames = rename_map(old["witness"], new["witness"])
     old_sources, new_sources = old.get("port_sources"), new.get("port_sources")
     if old_sources is None or new_sources is None:
-        raise Usage("baseline lacks source port bindings; regenerate the authoritative "
-                    "statement manifest from the matching generator and snippets")
+        raise Usage("baseline lacks source port bindings; source-qualify the baseline "
+                    "against unchanged authoritative AIR before comparing")
     if old_sources["constraint_shape"] == new_sources["constraint_shape"]:
         for kind in PORT_DEFS:
             old_ports = {rename_label(label, renames): identity for label, identity

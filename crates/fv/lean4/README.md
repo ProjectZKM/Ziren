@@ -237,9 +237,19 @@ and adding an unused field do not change these receipts. This is an exact source
 **not** a proof that a flagged swap is semantically weakening or an equivalence check across
 different constraints. Constraint edits remain informational under the existing policy; source
 binding identities are not compared when the full normalized constraints differ. Fields absent
-from all constraints have no such identity. A format-1 baseline cannot be upgraded from its
-lossy summaries: `compare` exits 2 until `statements.json` is regenerated using the authoritative
-matching generator and snippets. Do not replace it with an older archive merely because some
+from all constraints have no such identity. A format-1 baseline cannot establish these bindings
+from its lossy summaries alone: `compare` exits 2 until source-qualified receipts are supplied.
+Full regeneration with the matching generator and snippets remains the route to rechecking
+generated proofs. Where archived snippet generators are no longer compatible, a **source-only
+migration** can preserve the format-1 proof inventory and attach receipts from freshly generated,
+unchanged AIR only after independently confirming that the file and module sets, theorem
+statements, interfaces, constraints, and every other non-proof-inventory field match exactly.
+This qualifies source bindings, **not** the historical proof bodies. The isolated
+[format-2 qualification run](https://github.com/metalogiclabs/Ziren/actions/runs/42960264966)
+checked 62 chip files, 155 module records, 129 native source-binding receipts, conservation of
+every format-1 field, and zero reported weakenings. The source-only extractor's differences in
+104 proof-lemma inventories and 28 snippet-section inventories were explicitly excluded from
+the equality claim. Do not replace the baseline with an older archive merely because some
 module hashes match.
 
 `compare` classifies each difference:
