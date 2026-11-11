@@ -235,6 +235,22 @@ class PinTest(unittest.TestCase):
         self.assert_info_only({"outputs": [(4, "state_send[0]"), (3, "mem_write[0].val[0]"),
                                            (2, "mem_write[0].val[1]")]}, "outputs gained 1")
 
+    def test_input_reordering_requires_review(self):
+        # `rel` takes a positional List F: moving both labels and fields together
+        # still changes which input value the consumer sends at each position.
+        ports = [(0, "state_recv[0]"), (1, "mem_read[0].val[0]"),
+                 (2, "mem_read[0].val[1]")]
+        self.assert_weak({"inputs": list(reversed(ports))}, "inputs reordered")
+
+    def test_output_reordering_requires_review(self):
+        # Both origin labels and their fields move, so source mappings remain
+        # identical even though the output List F positions change.
+        ports = [(4, "state_send[0]"), (3, "mem_write[0].val[0]")]
+        self.assert_weak({"outputs": list(reversed(ports))}, "outputs reordered")
+
+    def test_assumed_reordering_requires_review(self):
+        self.assert_weak({"assumed": [2, 1]}, "assumed reordered", old_kw={"assumed": [1, 2]})
+
     def test_new_hypothesis_is_weakening(self):
         extra = HYP.replace("byte_and", "byte_xor")
         self.assert_weak({"hyps": [HYP, extra]}, "hypothesis added: (∀ i o o', byte_xor.rel")
@@ -295,6 +311,116 @@ class PinTest(unittest.TestCase):
         self.assert_weak({"fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"), (4, None), (5, "clk_5")],
                           "outputs": [(5, "state_send[0]"), (3, "mem_write[0].val[0]")]},
                          "output state_send[0] is carried by another column: derived -> clk")
+
+    def test_swapped_distinct_derived_output_ports_are_weakening(self):
+        # Both witness columns have the same `derived` base but different
+        # constraint-defined values. A swap changes the positional output API.
+        # This is the reduction of AddSub_is_add's state_send[1]/[3] case.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"), (4, None), (5, None)],
+            "constraints": ["(w.v4 - (w.v0 + (4 : F))) = 0",
+                            "(w.v5 - (w.v0 + (5 : F))) = 0",
+                            "(w.v3 - (w.v1 + w.v2)) = 0",
+                            "(w.v1).val ≤ 255", "byte_and.rel [w.v1, w.v2] [w.v3]"],
+            "outputs": [(4, "state_send[1]"), (5, "state_send[3]")],
+        }
+        old = chip_file(**kw)
+        new = chip_file(**{**kw, "outputs": [(5, "state_send[1]"), (4, "state_send[3]")]})
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertGreater(n, 0, "swapping distinguishable output bindings must require review:\n" + report)
+
+    def test_swapped_opcode_and_memory_input_ports_are_weakening(self):
+        # Reduction of AddSub_is_add: program.opcode is fixed to zero by a
+        # constraint, while a memory-read byte may be nonzero. Both have the
+        # same `frame` base but swapping them changes the input relation.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
+                       (4, None), (5, "frame_5"), (6, "frame_6")],
+            "constraints": ["(w.v4 - (w.v0 + (4 : F))) = 0",
+                            "(w.v3 - (w.v1 + w.v2)) = 0",
+                            "w.v5 = 0", "(w.v6).val ≤ 255"],
+            "inputs": [(0, "state_recv[0]"), (5, "program.opcode"),
+                       (6, "mem_read[2].val[0]")],
+        }
+        old = chip_file(**kw)
+        new_inputs = [(0, "state_recv[0]"), (6, "program.opcode"),
+                      (5, "mem_read[2].val[0]")]
+        new = chip_file(**{**kw, "inputs": new_inputs})
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertGreater(n, 0, "swapping distinguishable input bindings must require review:\n" + report)
+
+    def test_constraint_only_edit_cannot_mask_same_base_input_swap(self):
+        # Even a semantically inert constraint edit changes the whole-module
+        # fingerprint. It must not turn an otherwise detectable port swap into
+        # INFO: the old relation admits (opcode, byte) = (0, 7), whereas the
+        # swapped one constrains the byte-position carrier to zero.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
+                       (4, None), (5, "frame_5"), (6, "frame_6")],
+            "constraints": ["w.v5 = 0", "w.v6 = 7"],
+            "inputs": [(5, "program.opcode"), (6, "mem_read[2].val[0]")],
+        }
+        original = pin.snapshot(self.tree("original", {"Toy": chip_file(**kw)}))
+        inert_constraints = kw["constraints"] + ["w.v5 = w.v5"]
+        control = pin.snapshot(self.tree("control", {"Toy": chip_file(
+            **{**kw, "constraints": inert_constraints})}))
+        mutated = pin.snapshot(self.tree("mutated", {"Toy": chip_file(
+            **{**kw, "constraints": inert_constraints,
+               "inputs": [(6, "program.opcode"), (5, "mem_read[2].val[0]")]})}))
+
+        self.assertEqual(pin.compare(original, control, out=io.StringIO()), 0)
+        report = io.StringIO()
+        count = pin.compare(original, mutated, all_info=True, out=report)
+        self.assertGreater(count, 0,
+                           "a tautology must not mask a constraint-distinguishable port swap:\n"
+                           + report.getvalue())
+
+    def test_unused_same_base_column_insertion_is_not_weakening(self):
+        # Merely adding an unreferenced derived witness must not force review.
+        old = chip_file()
+        new = chip_file(fields=[(0, "pc_0"), (1, "a_1"), (2, "a_2"),
+                                (3, "b_3"), (5, None), (4, None)])
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertEqual(n, 0, report)
+
+    def test_transitive_same_base_port_swap_requires_review(self):
+        # The two frame columns have identical immediate constraint contexts.
+        # Their source identities differ through v7=0 and v8=1, however.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
+                       (4, None), (5, "frame_5"), (6, "frame_6"),
+                       (7, "frame_7"), (8, "frame_8")],
+            "constraints": ["w.v5 = w.v7", "w.v6 = w.v8", "w.v7 = 0", "w.v8 = 1"],
+            "inputs": [(5, "left"), (6, "right")],
+        }
+        old = chip_file(**kw)
+        new = chip_file(**{**kw, "inputs": [(6, "left"), (5, "right")]})
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertGreater(n, 0, report)
+        self.assertIn("source-constrained field changed", report)
+
+    def test_legacy_baseline_cannot_certify_source_port_identity(self):
+        old = pin.snapshot(self.tree("old", {"Toy": chip_file()}))
+        new = pin.snapshot(self.tree("new", {"Toy": chip_file()}))
+        del old["modules"]["Toy/Toy_is_op"]["port_sources"]
+        with self.assertRaisesRegex(pin.Usage, "baseline lacks source port bindings"):
+            pin.compare(old, new, out=io.StringIO())
+
+    def test_legacy_manifest_requires_authoritative_regeneration(self):
+        legacy = self.root / "legacy.json"
+        legacy.write_text(json.dumps({"format": "ziren-fv-statements/1", "files": {}, "modules": {}}))
+        with self.assertRaisesRegex(pin.Usage, "baseline lacks source port bindings"):
+            pin.load(legacy)
+
+    def test_constraint_reordering_with_unchanged_ports_is_not_weakening(self):
+        # Source occurrence numbers cannot be aligned across distinct full
+        # constraint expressions. This is a constraint edit, not a port edit.
+        old = chip_file()
+        reordered = ["byte_and.rel [w.v1, w.v2] [w.v3]", "(w.v1).val ≤ 255",
+                     "(w.v3 - (w.v1 + w.v2)) = 0", "(w.v4 - (w.v0 + (4 : F))) = 0"]
+        n, report = self.run_compare({"Toy": old}, {"Toy": chip_file(constraints=reordered)})
+        self.assertEqual(n, 0, report)
+        self.assertIn("constraints changed", report)
 
     def test_helper_redefined_is_weakening(self):
         self.assert_weak({"helper": "def rel : List F → List F → Prop := fun _ _ => True"},

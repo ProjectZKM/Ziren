@@ -228,18 +228,44 @@ every AIR edit; their hashes and counts are recorded for information only. The c
 the AIR itself and every proof is re-checked against them: dropping a constraint weakens the
 theorem's hypotheses, which makes the claim harder to prove, not weaker.
 
+**Source-binding receipt (manifest format 2).** For each labeled port, the snapshot also records
+the field's first-occurrence identity in the *entire* generated constraint expression, plus a
+SHA-256 of that expression after consistently renumbering its variables on first use. When the
+full normalized expressions agree, a port moved to a different source-constrained field now
+requires review even if both fields have the same base name. Mere generated field renumbering
+and adding an unused field do not change these receipts. This is an exact source-binding check,
+**not** a proof that a flagged swap is semantically weakening or an equivalence check across
+different constraints. Constraint edits remain informational under the existing policy; source
+binding identities are not compared when the full normalized constraints differ. Fields absent
+from all constraints have no such identity. A format-1 baseline cannot establish these bindings
+from its lossy summaries alone: `compare` exits 2 until source-qualified receipts are supplied.
+Full regeneration with the matching generator and snippets remains the route to rechecking
+generated proofs. Where archived snippet generators are no longer compatible, a **source-only
+migration** can preserve the format-1 proof inventory and attach receipts from freshly generated,
+unchanged AIR only after independently confirming that the file and module sets, theorem
+statements, interfaces, constraints, and every other non-proof-inventory field match exactly.
+This qualifies source bindings, **not** the historical proof bodies. The isolated
+[format-2 qualification run](https://github.com/metalogiclabs/Ziren/actions/runs/42960264966)
+checked 62 chip files, 155 module records, 129 native source-binding receipts, conservation of
+every format-1 field, and zero reported weakenings. The source-only extractor's differences in
+104 proof-lemma inventories and 28 snippet-section inventories were explicitly excluded from
+the equality claim. Do not replace the baseline with an older archive merely because some
+module hashes match.
+
 `compare` classifies each difference:
 
 | Class | Differences |
 |---|---|
-| WEAKENING (exit 1) | a module or a pinned theorem removed; `inputs` or `assumed` gained a port; `outputs` lost a port; a port now carried by a different column, or now sharing a column with another port; a helper hypothesis added; binders, conclusion or interface definitions changed; a postcondition conjunct lost; a helper relation redefined; an `axiom` declared |
-| INFO (exit 0) | a module, theorem or helper added, a helper removed; the opposite port, sharing and hypothesis changes, which strengthen the statement; ports reordered; constraint bodies, range facts and helper calls; witness columns added, removed or renamed one to one; proof lemmas and snippet sections |
+| WEAKENING (exit 1) | a module or a pinned theorem removed; `inputs` or `assumed` gained a port; `outputs` lost a port; a port now carried by a different column, source-constrained field under unchanged normalized constraints, or now sharing a column with another port; a positional `inputs`, `outputs`, or `assumed` list reordered; a helper hypothesis added; binders, conclusion or interface definitions changed; a postcondition conjunct lost; a helper relation redefined; an `axiom` declared |
+| INFO (exit 0) | a module, theorem or helper added, a helper removed; the opposite port, sharing and hypothesis changes, which strengthen the statement; constraint bodies, range facts and helper calls; witness columns added, removed or renamed one to one; proof lemmas and snippet sections |
 
 A weakening is not necessarily wrong, but it changes what is proved, so it needs a reviewer who
 reads the reported difference against the AIR change that caused it: a dropped output must no
 longer be sent anywhere, a selector split must cover the module it replaces, and a port moved to
-another column must carry the same value on every satisfying row. The pull request that causes
-it states that review and updates `statements.json` itself; a weakening never lands through a
+another column must carry the same value on every satisfying row. Coordinated reordering of
+port labels and fields must also be reviewed: `rel` consumes positional `List F` values, and
+the origin labels are metadata rather than a replacement for list positions. The pull request
+that causes it states that review and updates `statements.json` itself; a weakening never lands through a
 later manifest refresh. Any pull request that changes a chip's AIR, the extractor or a snippet
 also refreshes the manifest, so that it always describes `main`; `snapshot` of a regeneration is
 byte-identical for identical checkout and snippet inputs.
