@@ -19,10 +19,11 @@ exit 2.
 
 Columns are named `base#k`: the column's field name from the generator's doc comment with its
 index suffix removed, numbered by order among the columns of that name (`derived` for the
-unnamed columns the extractor introduces for expressions).  A port is recorded as
-`provenance <- column`: its lookup provenance (`input_origins`, `output_origins`) and the name,
-without the number, of the column that carries it.  Renumbering or inserting columns therefore
-changes nothing that is pinned.  See ../README.md."""
+unnamed columns the extractor introduces for expressions). A port is recorded as
+`provenance <- column`, plus a source-constrained binding identity relative to the whole
+constraint expression. Consistent field renumbering or insertion of unused fields changes
+neither receipt. Old manifests cannot supply this source identity and must be regenerated
+from the matching generator and snippets before comparing. See ../README.md."""
 import hashlib
 import json
 import re
@@ -30,7 +31,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-FORMAT = "ziren-fv-statements/1"
+FORMAT = "ziren-fv-statements/2"
+LEGACY_FORMAT = "ziren-fv-statements/1"
 PINNED_THEOREMS = ("deterministic", "postconditions")
 INTERFACE_DEFS = ("inputs", "outputs", "assumed", "rel", "constraints")
 PORT_DEFS = ("inputs", "outputs", "assumed")
@@ -306,6 +308,36 @@ def canonical(text, names):
     return VAR.sub(lambda m: f"{m.group(1)}.⟨{names.get(int(m.group(2)), 'v' + m.group(2))}⟩", text)
 
 
+def source_port_bindings(mod, ports):
+    """Pin source variable identity relative to the *whole* constraint expression.
+
+    Number fields on first occurrence in the constraints, not by generated vN or
+    witness declaration position.  Unused witness insertions and consistent vN
+    renumberings therefore leave the receipt unchanged.  A binding number is
+    comparable only when the entire alpha-normalized constraints are identical;
+    local per-field constraint fingerprints are insufficient (transitive chains).
+    This checks exact source provenance, not semantic inequivalence of values.
+    """
+    known = {idx for idx, _ in mod.fields}
+    ids = {}
+
+    def normalize(match):
+        idx = int(match.group(2))
+        if idx not in known:
+            raise ValueError(f"{mod.namespace}: constraint references undeclared v{idx}")
+        if idx not in ids:
+            ids[idx] = len(ids)
+        return f"{match.group(1)}.⟨source#{ids[idx]}⟩"
+
+    shape = [squash(VAR.sub(normalize, c)) for c in mod.constraint_lines]
+    shape_json = json.dumps(shape, ensure_ascii=False, separators=(",", ":"))
+    return {
+        "constraint_shape": hashlib.sha256(shape_json.encode()).hexdigest(),
+        "bindings": {kind: [[label, ids.get(idx)] for label, idx in ports[kind]]
+                     for kind in PORT_DEFS},
+    }
+
+
 def summarize(mod):
     """The manifest entry of one module."""
     if not mod.fields:
@@ -371,6 +403,7 @@ def summarize(mod):
         },
         "other_theorems": dict(sorted(mod.other.items())),
         "sections": mod.sections,
+        "port_sources": source_port_bindings(mod, ports),
     }
     entry["hashes"] = {
         "statement": digest(theorems),
@@ -414,6 +447,9 @@ def load(path):
     p = Path(path)
     if p.is_file():
         data = json.loads(p.read_text())
+        if data.get("format") == LEGACY_FORMAT:
+            raise Usage("baseline lacks source port bindings; regenerate the authoritative "
+                        "statement manifest from the matching generator and snippets")
         if data.get("format") != FORMAT:
             raise Usage(f"{path}: not a {FORMAT} manifest")
         return data
@@ -465,6 +501,20 @@ def compare_module(old, new):
     for name in sorted(set(new["theorems"]) - set(old["theorems"])):
         info.append(f"theorem {name} added")
     renames = rename_map(old["witness"], new["witness"])
+    old_sources, new_sources = old.get("port_sources"), new.get("port_sources")
+    if old_sources is None or new_sources is None:
+        raise Usage("baseline lacks source port bindings; regenerate the authoritative "
+                    "statement manifest from the matching generator and snippets")
+    if old_sources["constraint_shape"] == new_sources["constraint_shape"]:
+        for kind in PORT_DEFS:
+            old_ports = {rename_label(label, renames): identity for label, identity
+                         in old_sources["bindings"][kind]}
+            new_ports = dict(new_sources["bindings"][kind])
+            for label in sorted(old_ports.keys() & new_ports.keys()):
+                before, after = old_ports[label], new_ports[label]
+                if before != after:
+                    weak.append(f"{kind[:-1]} {label}: source-constrained field changed: "
+                                f"{before} -> {after} (same alpha-normalized constraints)")
     for kind, bad in (("inputs", "gained"), ("outputs", "lost"), ("assumed", "gained")):
         oports = dict(split_port(rename_label(p, renames)) for p in old[kind])
         nports = dict(split_port(p) for p in new[kind])
@@ -616,7 +666,11 @@ def compare(old, new, all_info=False, out=None):
     n_weak = sum(len(v) for v in weak.values())
     stmt = sum(1 for k in set(om) & set(nm) if om[k]["hashes"].get("statement") != nm[k]["hashes"].get("statement")
                or any(om[k]["hashes"].get(p) != nm[k]["hashes"].get(p)
-                      for p in ("inputs", "outputs", "assumed", "aliases", "interface", "decl")))
+                      for p in ("inputs", "outputs", "assumed", "aliases", "interface", "decl"))
+               or (om[k]["kind"] == "module" and
+                   om[k].get("port_sources", {}).get("constraint_shape") ==
+                   nm[k].get("port_sources", {}).get("constraint_shape") and
+                   om[k]["port_sources"]["bindings"] != nm[k]["port_sources"]["bindings"]))
     print(f"{len(om)} -> {len(nm)} modules; {stmt} with a changed pinned part; "
           f"{n_weak} weakening(s) in {len(weak)} module(s); {len(info)} module(s) with info", file=out)
     return n_weak
