@@ -341,6 +341,45 @@ class PinTest(unittest.TestCase):
         n, report = self.run_compare({"Toy": old}, {"Toy": new})
         self.assertEqual(n, 0, report)
 
+    def test_transitive_same_base_port_swap_requires_review(self):
+        # The two frame columns have identical immediate constraint contexts.
+        # Their source identities differ through v7=0 and v8=1, however.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
+                       (4, None), (5, "frame_5"), (6, "frame_6"),
+                       (7, "frame_7"), (8, "frame_8")],
+            "constraints": ["w.v5 = w.v7", "w.v6 = w.v8", "w.v7 = 0", "w.v8 = 1"],
+            "inputs": [(5, "left"), (6, "right")],
+        }
+        old = chip_file(**kw)
+        new = chip_file(**{**kw, "inputs": [(6, "left"), (5, "right")]})
+        n, report = self.run_compare({"Toy": old}, {"Toy": new})
+        self.assertGreater(n, 0, report)
+        self.assertIn("source-constrained field changed", report)
+
+    def test_legacy_baseline_cannot_certify_source_port_identity(self):
+        old = pin.snapshot(self.tree("old", {"Toy": chip_file()}))
+        new = pin.snapshot(self.tree("new", {"Toy": chip_file()}))
+        del old["modules"]["Toy/Toy_is_op"]["port_sources"]
+        with self.assertRaisesRegex(pin.Usage, "baseline lacks source port bindings"):
+            pin.compare(old, new, out=io.StringIO())
+
+    def test_legacy_manifest_requires_authoritative_regeneration(self):
+        legacy = self.root / "legacy.json"
+        legacy.write_text(json.dumps({"format": "ziren-fv-statements/1", "files": {}, "modules": {}}))
+        with self.assertRaisesRegex(pin.Usage, "baseline lacks source port bindings"):
+            pin.load(legacy)
+
+    def test_constraint_reordering_with_unchanged_ports_is_not_weakening(self):
+        # Source occurrence numbers cannot be aligned across distinct full
+        # constraint expressions. This is a constraint edit, not a port edit.
+        old = chip_file()
+        reordered = ["byte_and.rel [w.v1, w.v2] [w.v3]", "(w.v1).val ≤ 255",
+                     "(w.v3 - (w.v1 + w.v2)) = 0", "(w.v4 - (w.v0 + (4 : F))) = 0"]
+        n, report = self.run_compare({"Toy": old}, {"Toy": chip_file(constraints=reordered)})
+        self.assertEqual(n, 0, report)
+        self.assertIn("constraints changed", report)
+
     def test_helper_redefined_is_weakening(self):
         self.assert_weak({"helper": "def rel : List F → List F → Prop := fun _ _ => True"},
                          "helper relation redefined")
