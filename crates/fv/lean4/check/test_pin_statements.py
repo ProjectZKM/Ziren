@@ -313,21 +313,22 @@ class PinTest(unittest.TestCase):
         n, report = self.run_compare({"Toy": old}, {"Toy": new})
         self.assertGreater(n, 0, "swapping distinguishable output bindings must require review:\n" + report)
 
-    def test_swapped_distinct_frame_input_ports_are_weakening(self):
-        # Reduction of AddSub_is_add: independent, bounded input bytes
-        # mem_read[2].val[0]/[1] have the same `frame` base but distinct values.
+    def test_swapped_opcode_and_memory_input_ports_are_weakening(self):
+        # Reduction of AddSub_is_add: program.opcode is fixed to zero by a
+        # constraint, while a memory-read byte may be nonzero. Both have the
+        # same `frame` base but swapping them changes the input relation.
         kw = {
             "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
                        (4, None), (5, "frame_5"), (6, "frame_6")],
             "constraints": ["(w.v4 - (w.v0 + (4 : F))) = 0",
                             "(w.v3 - (w.v1 + w.v2)) = 0",
-                            "(w.v5).val ≤ 255", "(w.v6).val ≤ 255"],
-            "inputs": [(0, "state_recv[0]"), (1, "mem_read[0].val[0]"),
-                       (2, "mem_read[0].val[1]"), (5, "mem_read[2].val[0]"),
-                       (6, "mem_read[2].val[1]")],
+                            "w.v5 = 0", "(w.v6).val ≤ 255"],
+            "inputs": [(0, "state_recv[0]"), (5, "program.opcode"),
+                       (6, "mem_read[2].val[0]")],
         }
         old = chip_file(**kw)
-        new_inputs = kw["inputs"][:3] + [(6, "mem_read[2].val[0]"), (5, "mem_read[2].val[1]")]
+        new_inputs = [(0, "state_recv[0]"), (6, "program.opcode"),
+                      (5, "mem_read[2].val[0]")]
         new = chip_file(**{**kw, "inputs": new_inputs})
         n, report = self.run_compare({"Toy": old}, {"Toy": new})
         self.assertGreater(n, 0, "swapping distinguishable input bindings must require review:\n" + report)
