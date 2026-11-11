@@ -235,6 +235,22 @@ class PinTest(unittest.TestCase):
         self.assert_info_only({"outputs": [(4, "state_send[0]"), (3, "mem_write[0].val[0]"),
                                            (2, "mem_write[0].val[1]")]}, "outputs gained 1")
 
+    def test_input_reordering_requires_review(self):
+        # `rel` takes a positional List F: moving both labels and fields together
+        # still changes which input value the consumer sends at each position.
+        ports = [(0, "state_recv[0]"), (1, "mem_read[0].val[0]"),
+                 (2, "mem_read[0].val[1]")]
+        self.assert_weak({"inputs": list(reversed(ports))}, "inputs reordered")
+
+    def test_output_reordering_requires_review(self):
+        # Both origin labels and their fields move, so source mappings remain
+        # identical even though the output List F positions change.
+        ports = [(4, "state_send[0]"), (3, "mem_write[0].val[0]")]
+        self.assert_weak({"outputs": list(reversed(ports))}, "outputs reordered")
+
+    def test_assumed_reordering_requires_review(self):
+        self.assert_weak({"assumed": [2, 1]}, "assumed reordered", old_kw={"assumed": [1, 2]})
+
     def test_new_hypothesis_is_weakening(self):
         extra = HYP.replace("byte_and", "byte_xor")
         self.assert_weak({"hyps": [HYP, extra]}, "hypothesis added: (∀ i o o', byte_xor.rel")

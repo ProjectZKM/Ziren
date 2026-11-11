@@ -13,7 +13,8 @@ change with every AIR edit, so they are recorded for information only.
 `compare` classifies every difference per module.  A WEAKENING (a module or a pinned theorem
 removed, an input, assumed value or helper hypothesis gained, an output or a postcondition
 conjunct lost, a port carried by another column or newly sharing a column with another port, a
-statement or interface definition reshaped, a helper relation redefined, an axiom declared)
+    statement or interface definition reshaped, a positional port list reordered, a helper
+    relation redefined, an axiom declared)
 exits 1; everything else is reported as INFO and exits 0.  Bad arguments or an unreadable tree
 exit 2.
 
@@ -531,7 +532,10 @@ def compare_module(old, new):
                             f"{oports[label]} -> {nports[label]}")
         same = [split_port(rename_label(p, renames))[0] for p in old[kind]]
         if not gained and not lost and same != [split_port(p)[0] for p in new[kind]]:
-            info.append(f"{kind} reordered")
+            # `rel` relates positional List F values, not a mapping from origin
+            # labels to fields. Moving each label together with its field can
+            # preserve every source-binding receipt while changing the relation.
+            weak.append(f"{kind} reordered (positional port interface)")
     kept = {f"{prefix}:{split_port(rename_label(p, renames))[0]}"
             for kind, prefix in (("inputs", "in"), ("outputs", "out"), ("assumed", "assumed"))
             for p in old[kind]}

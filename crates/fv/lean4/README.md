@@ -256,14 +256,16 @@ module hashes match.
 
 | Class | Differences |
 |---|---|
-| WEAKENING (exit 1) | a module or a pinned theorem removed; `inputs` or `assumed` gained a port; `outputs` lost a port; a port now carried by a different column, source-constrained field under unchanged normalized constraints, or now sharing a column with another port; a helper hypothesis added; binders, conclusion or interface definitions changed; a postcondition conjunct lost; a helper relation redefined; an `axiom` declared |
-| INFO (exit 0) | a module, theorem or helper added, a helper removed; the opposite port, sharing and hypothesis changes, which strengthen the statement; ports reordered; constraint bodies, range facts and helper calls; witness columns added, removed or renamed one to one; proof lemmas and snippet sections |
+| WEAKENING (exit 1) | a module or a pinned theorem removed; `inputs` or `assumed` gained a port; `outputs` lost a port; a port now carried by a different column, source-constrained field under unchanged normalized constraints, or now sharing a column with another port; a positional `inputs`, `outputs`, or `assumed` list reordered; a helper hypothesis added; binders, conclusion or interface definitions changed; a postcondition conjunct lost; a helper relation redefined; an `axiom` declared |
+| INFO (exit 0) | a module, theorem or helper added, a helper removed; the opposite port, sharing and hypothesis changes, which strengthen the statement; constraint bodies, range facts and helper calls; witness columns added, removed or renamed one to one; proof lemmas and snippet sections |
 
 A weakening is not necessarily wrong, but it changes what is proved, so it needs a reviewer who
 reads the reported difference against the AIR change that caused it: a dropped output must no
 longer be sent anywhere, a selector split must cover the module it replaces, and a port moved to
-another column must carry the same value on every satisfying row. The pull request that causes
-it states that review and updates `statements.json` itself; a weakening never lands through a
+another column must carry the same value on every satisfying row. Coordinated reordering of
+port labels and fields must also be reviewed: `rel` consumes positional `List F` values, and
+the origin labels are metadata rather than a replacement for list positions. The pull request
+that causes it states that review and updates `statements.json` itself; a weakening never lands through a
 later manifest refresh. Any pull request that changes a chip's AIR, the extractor or a snippet
 also refreshes the manifest, so that it always describes `main`; `snapshot` of a regeneration is
 byte-identical for identical checkout and snippet inputs.
