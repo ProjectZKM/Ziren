@@ -349,6 +349,32 @@ class PinTest(unittest.TestCase):
         n, report = self.run_compare({"Toy": old}, {"Toy": new})
         self.assertGreater(n, 0, "swapping distinguishable input bindings must require review:\n" + report)
 
+    def test_constraint_only_edit_cannot_mask_same_base_input_swap(self):
+        # Even a semantically inert constraint edit changes the whole-module
+        # fingerprint. It must not turn an otherwise detectable port swap into
+        # INFO: the old relation admits (opcode, byte) = (0, 7), whereas the
+        # swapped one constrains the byte-position carrier to zero.
+        kw = {
+            "fields": [(0, "pc_0"), (1, "a_1"), (2, "a_2"), (3, "b_3"),
+                       (4, None), (5, "frame_5"), (6, "frame_6")],
+            "constraints": ["w.v5 = 0", "w.v6 = 7"],
+            "inputs": [(5, "program.opcode"), (6, "mem_read[2].val[0]")],
+        }
+        original = pin.snapshot(self.tree("original", {"Toy": chip_file(**kw)}))
+        inert_constraints = kw["constraints"] + ["w.v5 = w.v5"]
+        control = pin.snapshot(self.tree("control", {"Toy": chip_file(
+            **{**kw, "constraints": inert_constraints})}))
+        mutated = pin.snapshot(self.tree("mutated", {"Toy": chip_file(
+            **{**kw, "constraints": inert_constraints,
+               "inputs": [(6, "program.opcode"), (5, "mem_read[2].val[0]")]})}))
+
+        self.assertEqual(pin.compare(original, control, out=io.StringIO()), 0)
+        report = io.StringIO()
+        count = pin.compare(original, mutated, all_info=True, out=report)
+        self.assertGreater(count, 0,
+                           "a tautology must not mask a constraint-distinguishable port swap:\n"
+                           + report.getvalue())
+
     def test_unused_same_base_column_insertion_is_not_weakening(self):
         # Merely adding an unreferenced derived witness must not force review.
         old = chip_file()
