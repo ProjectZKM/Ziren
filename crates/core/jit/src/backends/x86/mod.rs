@@ -115,6 +115,10 @@ pub(crate) const TOUCHED_OFFSET: i32 = offset_of!(JitContext, touched) as i32;
 pub(crate) const CLK_LIMIT_OFFSET: i32 = offset_of!(JitContext, clk_limit) as i32;
 /// Offset of `shard`.
 pub(crate) const SHARD_OFFSET: i32 = offset_of!(JitContext, shard) as i32;
+/// See [`JitContext::undo_tail`].
+pub(crate) const UNDO_TAIL_OFFSET: i32 = offset_of!(JitContext, undo_tail) as i32;
+/// See [`JitContext::undo_end`].
+pub(crate) const UNDO_END_OFFSET: i32 = offset_of!(JitContext, undo_end) as i32;
 
 /// Producer `exit_code`s. The `0x5000_0000` prefix keeps them apart from
 /// the halt sentinels and [`JIT_EXIT_BAD_JUMP`]; none of these is an

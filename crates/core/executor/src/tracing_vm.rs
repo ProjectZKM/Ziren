@@ -793,7 +793,7 @@ mod tests {
     /// gate of the flat producer: its records, touched charges (= shard
     /// boundaries), oracle and final memory against the paged executor's.
     /// Run on a program with hint reads and one with unconstrained blocks
-    /// (a COW view in the flat memory, a `memory_diff` in the paged table).
+    /// (an undo log in the flat memory, a `memory_diff` in the paged table).
     #[test]
     fn minimal_chunks_match_checkpoint_chunks() {
         minimal_chunks_match_checkpoint_chunks_on(
