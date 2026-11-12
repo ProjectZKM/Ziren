@@ -10,7 +10,7 @@ pub mod event_vec;
 pub mod events;
 mod executor;
 /// Flat guest memory for the minimal-trace producer (one 16-byte
-/// `{value, timestamp, shard}` entry per word, COW unconstrained blocks).
+/// `{value, timestamp, shard}` entry per word, undo-logged unconstrained blocks).
 pub mod flat_mem;
 pub mod hook;
 mod instruction;
