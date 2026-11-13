@@ -100,6 +100,10 @@ fn sync_in(exec: &mut Executor<'_>, ctx: &JitContext, br: &mut Bridge<'_>) {
     let len = (ctx.oracle_tail as usize - br.oracle_base as usize) / ORACLE_ENTRY;
     debug_assert!(len <= exec.recording_chunk_mem_reads.capacity());
     unsafe { exec.recording_chunk_mem_reads.set_len(len) };
+    if !ctx.undo_tail.is_null() {
+        let flat = exec.flat_mem.as_deref_mut().expect("producer runs on the flat memory");
+        unsafe { flat.set_undo_tail(ctx.undo_tail) };
+    }
     br.clk_base = clk_now;
 }
 
@@ -141,8 +145,10 @@ fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) 
         ctx.clk_limit = clk_limit(exec);
         exec.split_acct.export_budgets(&mut ctx.area_left, &mut ctx.height_left, &mut ctx.touched);
     }
-    let flat = exec.flat_mem.as_deref().expect("producer runs on the flat memory");
+    let flat = exec.flat_mem.as_deref_mut().expect("producer runs on the flat memory");
     ctx.memory = NonNull::new(flat.as_ptr().cast::<u8>());
+    (ctx.undo_tail, ctx.undo_end) =
+        flat.undo_cursor().unwrap_or((std::ptr::null_mut(), std::ptr::null_mut()));
     let oracle = &mut exec.recording_chunk_mem_reads;
     if oracle.capacity() == oracle.len() {
         oracle.reserve(oracle.len().max(1 << 16));

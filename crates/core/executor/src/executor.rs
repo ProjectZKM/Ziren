@@ -229,14 +229,9 @@ pub struct Executor<'a> {
     /// The collected records, split by cpu cycles.
     pub records: Vec<ExecutionRecord>,
 
-    /// Local memory access events.
-    ///
-    /// switched from `HashMap<…>` (ahash)
-    /// to `IntMap<…>` (NoHashHasher) — u32 keys don't need hash mixing
-    /// since the HashMap probe sequence handles collision distribution.
-    /// Cuts per-cycle HashMap overhead in half for user-memory accesses
-    /// (addresses >= 36) that bypass the register-slot fast path.
-    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    /// The shard's local memory events of user addresses (>= 36), in
+    /// first-touch order, indexed by address. See [`LocalMemEvents`].
+    pub local_memory_access: LocalMemEvents,
 
     /// fast-path register-slot mirror
     /// of `local_memory_access`. MIPS register addresses are 0..36
@@ -244,9 +239,8 @@ pub struct Executor<'a> {
     /// patterns. Every ALU is 3 register touches; every memory op is
     /// 2-3 register touches + 1 user-memory touch. Mirroring registers
     /// into a fixed `[Option<MemoryLocalEvent>; 36]` skips the
-    /// HashMap hash + probe for the ~95% case. User-memory addresses
-    /// (>= 36) still flow through the HashMap. Drained alongside the
-    /// HashMap at `bump_record`.
+    /// lookup for the ~95% case. User-memory addresses (>= 36) go to
+    /// `local_memory_access`. Drained alongside it at `bump_record`.
     pub local_reg_access: [Option<MemoryLocalEvent>; 36],
 
     /// A counter for the number of cycles that have been executed in certain functions.
@@ -377,6 +371,63 @@ pub struct Executor<'a> {
     pub captured_trace_chunk: Option<crate::minimal_trace::TraceChunk>,
 }
 
+/// A shard's local memory events of user addresses, in first-touch order.
+///
+/// Each access updates its address's event in place: a direct-mapped page
+/// index finds it, where a hash map keyed by word addresses spent most of
+/// the replay's memory-access time probing. An event a syscall takes out
+/// (see [`Self::take`]) leaves a hole, and the address's next access opens
+/// a new one.
+#[derive(Default)]
+pub struct LocalMemEvents {
+    events: Vec<Option<MemoryLocalEvent>>,
+    slot: crate::memory::PagedMemory<u32>,
+}
+
+impl LocalMemEvents {
+    /// Record an access of the word at `addr`: open its event, or move the
+    /// event's end.
+    #[inline]
+    pub fn upsert(&mut self, addr: u32, prev_record: MemoryRecord, record: MemoryRecord) {
+        debug_assert!(addr.is_multiple_of(4), "local memory event at unaligned address {addr:#x}");
+        match self.slot.entry(addr) {
+            Entry::Occupied(e) => {
+                if let Some(ev) = &mut self.events[*e.get() as usize] {
+                    ev.final_mem_access = record;
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert(self.events.len() as u32);
+                self.events.push(Some(MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: prev_record,
+                    final_mem_access: record,
+                }));
+            }
+        }
+    }
+
+    /// Take `addr`'s open event out. An unaligned address (a register's) has
+    /// none: the page index ignores the low two bits.
+    #[inline]
+    pub fn take(&mut self, addr: u32) -> Option<MemoryLocalEvent> {
+        if !addr.is_multiple_of(4) {
+            return None;
+        }
+        let i = self.slot.remove(addr)?;
+        self.events[i as usize].take()
+    }
+
+    /// Move every open event into `out`, in first-touch order.
+    pub fn drain_into(&mut self, out: &mut Vec<MemoryLocalEvent>) {
+        out.reserve(self.events.len());
+        for ev in self.events.drain(..).flatten() {
+            self.slot.remove(ev.addr);
+            out.push(ev);
+        }
+    }
+}
+
 /// dispatch helper that picks the
 /// fastest sink for a local-memory-access update.
 ///
@@ -384,14 +435,13 @@ pub struct Executor<'a> {
 ///   wins (syscall context never touches registers but must use its
 ///   own map for precompile lifetime).
 /// - `reg_slots`: fixed `[Option<MemoryLocalEvent>; 36]` mirror for
-///   register addresses (0..36). Skips HashMap hash + probe entirely.
-/// - `fallback_map`: executor's main HashMap; used for user-memory
-///   addresses (>= 36).
+///   register addresses (0..36).
+/// - `fallback`: the executor's events of user-memory addresses (>= 36).
 #[inline]
 fn upsert_local_mem(
     override_map: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     reg_slots: &mut [Option<MemoryLocalEvent>; 36],
-    fallback_map: &mut nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    fallback: &mut LocalMemEvents,
     addr: u32,
     prev_record: MemoryRecord,
     record: MemoryRecord,
@@ -415,9 +465,7 @@ fn upsert_local_mem(
             });
         }
     } else {
-        fallback_map.entry(addr).and_modify(|e| e.final_mem_access = record).or_insert(
-            MemoryLocalEvent { addr, initial_mem_access: prev_record, final_mem_access: record },
-        );
+        fallback.upsert(addr, prev_record, record);
     }
 }
 
@@ -645,7 +693,7 @@ impl<'a> Executor<'a> {
             },
             memory_checkpoint: Memory::default(),
             uninitialized_memory_checkpoint: Memory::default(),
-            local_memory_access: nohash_hasher::IntMap::default(),
+            local_memory_access: LocalMemEvents::default(),
             local_reg_access: std::array::from_fn(|_| None),
             ramp_shards: RAMP_SHARDS,
             minimal_trace_collector: None,
@@ -910,6 +958,7 @@ impl<'a> Executor<'a> {
 
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) if replay_prev.is_some() => entry.insert(MemoryRecord::default()),
             Entry::Vacant(entry) => {
                 let value = self.state.uninitialized_memory.page_table.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
@@ -1027,6 +1076,19 @@ impl<'a> Executor<'a> {
     ) -> MemoryReadRecord {
         let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
+        if !is_syscall_access && !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
+            if let Some((prev, cur)) = self.touch_register(addr, None, shard, timestamp) {
+                let (prev_shard, prev_timestamp) =
+                    self.bump_register_timestamp(addr, shard, prev, false);
+                return MemoryReadRecord::new(
+                    cur.value,
+                    cur.shard,
+                    cur.timestamp,
+                    prev_shard,
+                    prev_timestamp,
+                );
+            }
+        }
         let entry = self.state.memory.registers.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match entry {
@@ -1081,6 +1143,40 @@ impl<'a> Executor<'a> {
             prev_shard,
             prev_timestamp,
         )
+    }
+
+    /// A traced CPU access of a register that already holds a record: move
+    /// the record to `(shard, timestamp)` (and `value`, for a write) and the
+    /// register's local event with it. Returns the records before and after,
+    /// or `None` for a register never written, which takes the general path.
+    #[inline(always)]
+    fn touch_register(
+        &mut self,
+        addr: u32,
+        value: Option<u32>,
+        shard: u32,
+        timestamp: u32,
+    ) -> Option<(MemoryRecord, MemoryRecord)> {
+        let i = addr as usize;
+        let slot = self.state.memory.registers.registers.get_mut(i)?.as_mut()?;
+        let prev = *slot;
+        if let Some(v) = value {
+            slot.value = v;
+        }
+        slot.shard = shard;
+        slot.timestamp = timestamp;
+        let cur = *slot;
+        match &mut self.local_reg_access[i] {
+            Some(e) => e.final_mem_access = cur,
+            e @ None => {
+                *e = Some(MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: prev,
+                    final_mem_access: cur,
+                });
+            }
+        }
+        Some((prev, cur))
     }
 
     /// Emit a register timestamp bump (a "shadow read") if this is the first touch of `addr` in
@@ -1193,6 +1289,7 @@ impl<'a> Executor<'a> {
 
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) if replay_prev.is_some() => entry.insert(MemoryRecord::default()),
             Entry::Vacant(entry) => {
                 let value = self.state.uninitialized_memory.page_table.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
@@ -1367,6 +1464,20 @@ impl<'a> Executor<'a> {
     ) -> MemoryWriteRecord {
         let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
+        if !is_syscall_access && !self.unconstrained {
+            if let Some((prev, cur)) = self.touch_register(addr, Some(value), shard, timestamp) {
+                let (prev_shard, prev_timestamp) =
+                    self.bump_register_timestamp(addr, shard, prev, false);
+                return MemoryWriteRecord::new(
+                    cur.value,
+                    cur.shard,
+                    cur.timestamp,
+                    prev.value,
+                    prev_shard,
+                    prev_timestamp,
+                );
+            }
+        }
 
         let entry = self.state.memory.registers.entry(addr);
         if self.unconstrained {
@@ -2812,9 +2923,7 @@ impl<'a> Executor<'a> {
                     self.record.cpu_local_memory_access.push(event);
                 }
             }
-            for (_, event) in self.local_memory_access.drain() {
-                self.record.cpu_local_memory_access.push(event);
-            }
+            self.local_memory_access.drain_into(&mut self.record.cpu_local_memory_access);
         }
 
         let event_reservation = if self.executor_mode == ExecutorMode::Trace {

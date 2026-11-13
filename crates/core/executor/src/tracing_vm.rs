@@ -165,6 +165,7 @@ impl<'a> TracingVM<'a> {
         }
 
         sub.executor_mode = crate::ExecutorMode::Trace;
+        sub.record.cpu_events.reserve(chunk.num_cycles().min(1 << 25) as usize);
         sub.max_cycles = Some(chunk.clk_end);
         sub.skip_replay_bookkeeping = true;
         sub.hint_stream_prerecorded = stream_prerecorded;
@@ -261,8 +262,15 @@ impl<'a> TracingVM<'a> {
         if !chunk.final_memory.is_empty() {
             use crate::events::{MemoryInitializeFinalizeEvent, MemoryRecord};
             let image = &self.program.image;
-            let uninit: std::collections::HashMap<u32, u32> =
-                chunk.final_uninit_memory.iter().copied().collect();
+            let ascending = chunk.final_memory.windows(2).all(|w| w[0].0 < w[1].0)
+                && chunk.final_uninit_memory.windows(2).all(|w| w[0].0 < w[1].0);
+            let uninit: std::collections::HashMap<u32, u32> = if ascending {
+                std::collections::HashMap::new()
+            } else {
+                chunk.final_uninit_memory.iter().copied().collect()
+            };
+            let mut image_keys = image.keys().copied().peekable();
+            let mut uninit_rows = chunk.final_uninit_memory.iter().copied().peekable();
 
             let addr0 = chunk
                 .final_memory
@@ -281,8 +289,17 @@ impl<'a> TracingVM<'a> {
                 if addr == 0 {
                     continue;
                 }
-                if !image.contains_key(&addr) {
-                    let initial_value = uninit.get(&addr).copied().unwrap_or(0);
+                let (in_image, initial_value) = if ascending {
+                    while image_keys.next_if(|&k| k < addr).is_some() {}
+                    while uninit_rows.next_if(|&(a, _)| a < addr).is_some() {}
+                    (
+                        image_keys.peek() == Some(&addr),
+                        uninit_rows.peek().filter(|(a, _)| *a == addr).map_or(0, |&(_, v)| v),
+                    )
+                } else {
+                    (image.contains_key(&addr), uninit.get(&addr).copied().unwrap_or(0))
+                };
+                if !in_image {
                     self.record
                         .global_memory_initialize_events
                         .push(MemoryInitializeFinalizeEvent::initialize(addr, initial_value));
@@ -793,7 +810,7 @@ mod tests {
     /// gate of the flat producer: its records, touched charges (= shard
     /// boundaries), oracle and final memory against the paged executor's.
     /// Run on a program with hint reads and one with unconstrained blocks
-    /// (a COW view in the flat memory, a `memory_diff` in the paged table).
+    /// (an undo log in the flat memory, a `memory_diff` in the paged table).
     #[test]
     fn minimal_chunks_match_checkpoint_chunks() {
         minimal_chunks_match_checkpoint_chunks_on(

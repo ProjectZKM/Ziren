@@ -29,7 +29,7 @@ impl Syscall for EnterUnconstrainedSyscall {
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
         if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
-            flat.enter_unconstrained().expect("flat memory: unconstrained COW view");
+            flat.enter_unconstrained();
         }
         Ok(Some(1))
     }

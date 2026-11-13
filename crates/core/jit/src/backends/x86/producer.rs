@@ -33,7 +33,9 @@
 //! addresses `>= 36` exactly as the flat `mr`/`mw` do, charge a touched
 //! address when the entry's shard differs from the current one or a
 //! precompile reopened it ([`FLAT_REOPEN`], cleared by the charge), and
-//! stamp the entry with `(clk, shard)`.
+//! stamp the entry with `(clk, shard)`. Inside an unconstrained block
+//! (`ctx.undo_tail` non-null) the entry is first pushed to the undo log, so
+//! the host can roll the block back.
 //!
 //! Anything the interpreter can fail on (division by zero, TEQ, an
 //! out-of-bounds or misaligned address, an unlowerable operand form)
@@ -67,7 +69,7 @@ use super::{
     JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_ORACLE_FULL, JIT_EXIT_SHARD_FENCE, JUMP_TABLE,
     JUMP_TABLE_LEN_OFFSET, JUMP_TABLE_OFFSET, MEMORY_OFFSET, MEMORY_PTR, ORACLE_END_OFFSET,
     ORACLE_TAIL_OFFSET, PC_OFFSET, PENDING_JUMP_AT_START_OFFSET, REG_STAMPS_OFFSET, SHARD_OFFSET,
-    TEMP_A, TEMP_B, TOUCHED_OFFSET,
+    TEMP_A, TEMP_B, TOUCHED_OFFSET, UNDO_END_OFFSET, UNDO_TAIL_OFFSET,
 };
 use crate::driver::{lower_one, DriverError, DriverInstruction, JitOpcode};
 use crate::risc::MipsRegister;
@@ -602,6 +604,19 @@ fn emit_memory_op(
         ; add Rq(TEMP_B), Rq(MEMORY_PTR)
         ; cmp Rq(ORACLE_TAIL), QWORD [Rq(CONTEXT) + ORACLE_END_OFFSET]
         ; ja =>full
+        ; mov rcx, QWORD [Rq(CONTEXT) + UNDO_TAIL_OFFSET]
+        ; test rcx, rcx
+        ; jz >no_undo
+        ; cmp rcx, QWORD [Rq(CONTEXT) + UNDO_END_OFFSET]
+        ; ja =>full
+        ; mov QWORD [rcx], Rq(TEMP_B)
+        ; mov rdx, QWORD [Rq(TEMP_B)]
+        ; mov QWORD [rcx + 8], rdx
+        ; mov rdx, QWORD [Rq(TEMP_B) + 8]
+        ; mov QWORD [rcx + 16], rdx
+        ; add rcx, 24
+        ; mov QWORD [Rq(CONTEXT) + UNDO_TAIL_OFFSET], rcx
+        ; no_undo:
         ; mov rcx, QWORD [Rq(TEMP_B)]
         ; mov edx, DWORD [Rq(TEMP_B) + 8]
         ; cmp Rd(TEMP_A), 36
