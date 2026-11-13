@@ -127,7 +127,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
         if !self.rt.unconstrained && self.rt.executor_mode == ExecutorMode::Trace {
             for (addr, event) in self.local_memory_access.drain() {
-                let local_mem_access = self.rt.local_memory_access.remove(&addr);
+                let local_mem_access = self.rt.local_memory_access.take(addr);
 
                 if let Some(local_mem_access) = local_mem_access {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
