@@ -32,7 +32,7 @@ fn census(label: &str, tape: &Tape) {
 /// rate and folding `ZIREN_B_SCHEDULE` names, as `johnson,8,4`.
 fn narrow_schedule() -> BinarySchedule {
     let mut schedule = narrow_schedule_base();
-    // whir-gc experiment: `ZIREN_B_NARROW=merge,forms,short,joint,gruen` and `ZIREN_B_FOLDS=f0,f1,..;kept`.
+    // whir-gc experiment: `ZIREN_B_NARROW=merge,forms,short,joint,gruen,closing` and `ZIREN_B_FOLDS=f0,f1,..;kept`.
     let levers = std::env::var("ZIREN_B_NARROW").unwrap_or_default();
     schedule.narrow.merge_claims = levers.split(',').any(|l| l == "merge");
     schedule.narrow.forms = levers.split(',').any(|l| l == "forms");
@@ -41,6 +41,7 @@ fn narrow_schedule() -> BinarySchedule {
     }
     schedule.narrow.joint_switch = levers.split(',').any(|l| l == "joint");
     schedule.narrow.factored_bus = levers.split(',').any(|l| l == "gruen");
+    schedule.narrow.closing = levers.split(',').any(|l| l == "closing");
     if let Ok(spec) = std::env::var("ZIREN_B_FOLDS") {
         let (folds, kept) = spec.split_once(';').unwrap_or((&spec, "0"));
         for (slot, fold) in schedule.narrow.round_folds.iter_mut().zip(folds.split(',')) {

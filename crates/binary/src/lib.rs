@@ -122,6 +122,10 @@ pub struct NarrowOptions {
     /// The bus's product reduction sends each sumcheck round with the bound coordinate's
     /// equality factor divided out: four values a radix-four round where it sends five.
     pub factored_bus: bool,
+    /// The pair opening proves the shared sumcheck's closing check by a column sumcheck
+    /// over the committed columns and sends no opened value: a hundred and twenty-odd
+    /// values in place of every column a table opens.
+    pub closing: bool,
 }
 
 impl BinarySchedule {
@@ -214,12 +218,14 @@ impl BinarySchedule {
 /// reads tables through linear forms starts each table at a multiple of its padded width, so
 /// every block of its columns is aligned in the table's own column index too; any other lays
 /// them back to back, as every proof before it was made.  A schedule with a factored bus
-/// builds its product reductions to send factored rounds.  Plonky3 sees only shapes and holds
-/// both process-wide, so a caller sets them before each setup, proof and verification under
+/// builds its product reductions to send factored rounds, and one with the closing sumcheck
+/// closes its pair openings by a column sumcheck.  Plonky3 sees only shapes and holds these
+/// process-wide, so a caller sets them before each setup, proof and verification under
 /// `schedule`.
 pub fn use_protocol_of(schedule: &BinarySchedule) {
     p3_sumcheck::layout::set_aligned_layout(schedule.narrow.forms);
     p3_bus::set_factored_rounds(schedule.narrow.factored_bus);
+    p3_multi_stark::closing::set_closing_sumcheck(schedule.narrow.closing);
 }
 
 /// A fresh transcript of the stage.
