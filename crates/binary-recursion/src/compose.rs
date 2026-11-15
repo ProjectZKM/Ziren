@@ -483,6 +483,12 @@ pub struct Compose<'a> {
     /// proof, read as inputs: the chain the nodes before it in execution
     /// order end with.  Zero for the first node.
     pub claims_start: [u32; DIGEST_SIZE],
+    /// A wrap node re-proves its one child, as a shrink level does.  It
+    /// commits to the same public values a compose node over that child
+    /// would, but checks the shard chain in binary-field arithmetic and
+    /// takes the child's digest as the sum, so its tape has no KoalaBear
+    /// operations and its machine no KoalaBear table.
+    pub wrap: bool,
 }
 
 /// What a compose node commits to.
@@ -558,6 +564,37 @@ pub fn record_compose(node: &Compose<'_>) -> (Result<Composed, String>, Tape) {
 
 fn constant(value: u32) -> Traced {
     Traced::constant(kb_value(value))
+}
+
+/// A wrap node's shard chain, in binary-field arithmetic.
+///
+/// A canonical KoalaBear element is embedded as its bits, so on the flags 0 and 1 the
+/// field machine's KoalaBear checks and these agree: a product with a flag selects, one
+/// minus a flag is one plus it, and a product with a difference vanishes exactly when the
+/// flag is zero or the two elements are equal, since the binary difference of canonical
+/// elements is zero exactly when they are equal.  Each flag is checked boolean first.
+#[derive(Clone, Copy)]
+struct BinaryChain;
+
+impl BinaryChain {
+    fn new() -> Self {
+        assert!(kb_value(1) == Traced::ONE.value(), "one embeds as the binary field's one");
+        Self
+    }
+
+    /// `1 - flag`.
+    fn not(self, flag: Traced) -> Traced {
+        flag + constant(1)
+    }
+
+    fn assert_boolean(self, flag: Traced) {
+        (flag * self.not(flag)).assert_eq(&Traced::ZERO);
+    }
+
+    /// `if flag { yes } else { no }`.
+    fn select(self, flag: Traced, yes: Traced, no: Traced) -> Traced {
+        flag * yes + self.not(flag) * no
+    }
 }
 
 fn add(a: Traced, b: Traced) -> Traced {
@@ -768,6 +805,9 @@ fn sum_digests(digests: &[Point]) -> Point {
 /// public inputs against, or `None` on the run that finds it.
 fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Composed, String> {
     assert!(!node.children.is_empty(), "a compose node has children");
+    if node.wrap && node.children.len() != 1 {
+        return Err(format!("a wrap node has one child, not {}", node.children.len()));
+    }
     let digest_inputs: [Traced; DIGEST_SIZE] =
         core::array::from_fn(|w| Traced::input(kb_value(public.map_or(0, |p| p[w]))));
 
@@ -872,18 +912,29 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         range_check(current.next_shard, node.max_log_shards);
 
         let contains = current.contains_execution_shard;
-        assert_zero(mul(contains, sub(constant(1), contains)));
-        let first_seen = mul(contains, sub(constant(1), contains_execution_shard));
-        let not_first_seen = sub(constant(1), first_seen);
-        start_execution_shard = add(
-            mul(current.start_execution_shard, first_seen),
-            mul(start_execution_shard, not_first_seen),
-        );
-        execution_shard = add(
-            mul(current.start_execution_shard, first_seen),
-            mul(execution_shard, not_first_seen),
-        );
-        assert_zero(mul(contains, sub(execution_shard, current.start_execution_shard)));
+        if node.wrap {
+            let chain = BinaryChain::new();
+            chain.assert_boolean(contains);
+            let first_seen = contains * chain.not(contains_execution_shard);
+            start_execution_shard =
+                chain.select(first_seen, current.start_execution_shard, start_execution_shard);
+            execution_shard =
+                chain.select(first_seen, current.start_execution_shard, execution_shard);
+            (contains * (execution_shard + current.start_execution_shard)).assert_eq(&Traced::ZERO);
+        } else {
+            assert_zero(mul(contains, sub(constant(1), contains)));
+            let first_seen = mul(contains, sub(constant(1), contains_execution_shard));
+            let not_first_seen = sub(constant(1), first_seen);
+            start_execution_shard = add(
+                mul(current.start_execution_shard, first_seen),
+                mul(start_execution_shard, not_first_seen),
+            );
+            execution_shard = add(
+                mul(current.start_execution_shard, first_seen),
+                mul(execution_shard, not_first_seen),
+            );
+            assert_zero(mul(contains, sub(execution_shard, current.start_execution_shard)));
+        }
 
         for (bit, current) in init_addr_bits.iter().zip(&current.previous_init_addr_bits) {
             bit.assert_eq(current);
@@ -894,13 +945,15 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
 
         let current_committed: Vec<Traced> =
             current.committed_value_digest.iter().flat_map(|word| word.0).collect();
-        for &is_non_zero in &committed_value_digest {
+        // A wrap node's only child is the first: its digests are the accumulated ones.
+        let accumulated = !node.wrap;
+        for &is_non_zero in committed_value_digest.iter().filter(|_| accumulated) {
             for (&accumulated, &public) in committed_value_digest.iter().zip(&current_committed) {
                 assert_zero(mul(is_non_zero, sub(accumulated, public)));
             }
         }
         committed_value_digest = current_committed;
-        for &is_non_zero in &deferred_proofs_digest {
+        for &is_non_zero in deferred_proofs_digest.iter().filter(|_| accumulated) {
             for (&accumulated, &public) in
                 deferred_proofs_digest.iter().zip(&current.deferred_proofs_digest)
             {
@@ -909,14 +962,21 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         }
         deferred_proofs_digest = current.deferred_proofs_digest.to_vec();
 
-        contains_execution_shard = add(
-            contains_execution_shard,
-            mul(contains, sub(constant(1), contains_execution_shard)),
-        );
-        execution_shard = add(
-            mul(current.next_execution_shard, contains),
-            mul(execution_shard, sub(constant(1), contains)),
-        );
+        if node.wrap {
+            let chain = BinaryChain::new();
+            contains_execution_shard =
+                contains_execution_shard + contains * chain.not(contains_execution_shard);
+            execution_shard = chain.select(contains, current.next_execution_shard, execution_shard);
+        } else {
+            contains_execution_shard = add(
+                contains_execution_shard,
+                mul(contains, sub(constant(1), contains_execution_shard)),
+            );
+            execution_shard = add(
+                mul(current.next_execution_shard, contains),
+                mul(execution_shard, sub(constant(1), contains)),
+            );
+        }
         reconstruct_deferred_digest = end_reconstruct;
         pc = current.next_pc;
         shard = current.next_shard;
@@ -927,7 +987,9 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
             y: current.global_cumulative_sum.0.y.0,
         });
     }
-    let sum = sum_digests(&sums);
+    // A wrap node's one digest is its sum, which `sum_digests` reaches through two hinted
+    // additions that cancel.
+    let sum = if node.wrap { sums[0] } else { sum_digests(&sums) };
 
     {
         let parent: &mut RecursionPublicValues<Traced> = out.as_mut_slice().borrow_mut();
@@ -953,7 +1015,7 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
         parent.vk_root = vk_root;
     }
     if node.is_complete {
-        assert_complete(&out);
+        assert_complete(&out, node.wrap);
     }
 
     let digest = hashed(&out);
@@ -976,11 +1038,19 @@ fn compose(node: &Compose<'_>, public: Option<[u32; DIGEST_SIZE]>) -> Result<Com
 
 /// The boundary conditions of a proof of the whole execution, as the field
 /// machine's `assert_complete` checks them.
-fn assert_complete(values: &[Traced]) {
+///
+/// `binary`: check that the next shard is not one in binary-field arithmetic,
+/// where a canonical element differs from one exactly when its sum with one
+/// is nonzero.
+fn assert_complete(values: &[Traced], binary: bool) {
     let pv: &RecursionPublicValues<Traced> = values.borrow();
     assert_zero(pv.next_pc);
     pv.start_shard.assert_eq(&constant(1));
-    sub(pv.next_shard, constant(1)).assert_nonzero();
+    if binary {
+        (pv.next_shard + constant(1)).assert_nonzero();
+    } else {
+        sub(pv.next_shard, constant(1)).assert_nonzero();
+    }
     pv.contains_execution_shard.assert_eq(&constant(1));
     pv.start_execution_shard.assert_eq(&constant(1));
     for &word in &pv.start_reconstruct_deferred_digest {

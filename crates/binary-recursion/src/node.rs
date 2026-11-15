@@ -101,6 +101,7 @@ pub fn record_node(children: Vec<Child<'_>>, is_complete: bool) -> Result<Progra
         max_log_shards: MAX_LOG_SHARDS,
         check_keys: true,
         claims_start: [0; DIGEST_SIZE],
+        wrap: false,
     };
     let (composed, tape) = record_compose(&node);
     if tape.ops.is_empty() {
@@ -176,7 +177,7 @@ pub fn record_node_with(
     claims_start: [u32; DIGEST_SIZE],
 ) -> Result<RecordedNode, String> {
     let node =
-        Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS, check_keys, claims_start };
+        Compose { children, is_complete, max_log_shards: MAX_LOG_SHARDS, check_keys, claims_start, wrap: false };
     let (composed, tape) = tracing::info_span!("node record").in_scope(|| record_compose(&node));
     Ok(RecordedNode { composed: composed?, tape })
 }
