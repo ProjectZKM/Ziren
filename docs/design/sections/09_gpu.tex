@@ -1,0 +1,19 @@
+\section{GPU prover}\label{sec:gpu}
+
+The core stage already runs on GPUs. This section is about the compress stage, whose prover today runs on the CPU except for its encoding.
+
+\subsection{$\Ft$ multiplication without a carry-less instruction}
+
+Recent NVIDIA GPUs expose a carry-less multiply-add in their instruction set, which \Flock{}'s CUDA prover uses for $\Ft$; it needs a newer compiler toolchain than the one our prover is built with. Without it, a carry-less $32\times 32$ product is computed from four integer multiplications on masked operands: splitting each operand into the bits at positions congruent to $0,1,2,3 \bmod 4$ keeps every carry of an integer product out of the bits that are kept, and four such products recombine into the carry-less one. A $64\times 64$ product is three of these by Karatsuba, a $128\times 128$ product three of those, and the reduction modulo $x^{128}+x^7+x^2+x+1$ is shifts and \XOR{}s. The kernels work in the polynomial basis and convert from and to the tower basis with byte-indexed tables: sixteen lookups and \XOR{}s per element.
+
+\subsection{Additive NTT}
+
+The commitment's encoding is an additive NTT~\citep{fri-binius}. Coset $c$ of the codeword is the message evaluated over $s_c + S$, where $S$ is the message's subspace and $s_c$ the coset's shift. Stage $j$, from the top down, pairs rows $2^j$ apart; the butterfly of block $b$ uses the twiddle $W_j(s_c) + \omega_{2b}$, where $W_j$ is the stage's subspace polynomial and $\omega_{2b}$ a domain point, both computed on the host and assembled on the device from one base per coset and stage and the Cantor basis. The butterfly is $u \mathrel{+}= t\,v$, $v \mathrel{+}= u$.
+
+The kernel is byte-for-byte equal to the CPU encoder on every tested shape, from $2^1\times 1$ to $2^{20}\times 16$ at rates $1$ to $1/4$. For a message of $2^{20}$ rows of $16$ elements at rate $1/4$ (a $1$\,GiB codeword), the kernels take $30.5$\,ms and the transfers $24$\,ms; the CPU encoder took $26$\,s on a loaded machine. Inside the prover, a leaf's first commitment, $2^{22}\times 16$ at rate $1/8$, takes $1.2$--$1.4$\,s including both transfers. Codewords that exceed the device's free memory are encoded a few cosets at a time, since cosets are independent.
+
+\subsection{What remains on the CPU}
+
+Moving the encoding cut the leaf stage from $76$ to $70$ minutes. The rest of a leaf's time is trace generation (about $33$\,s per leaf in the prototype), the zerocheck, the bus and lookup arguments, the openings and the \Blake{} Merkle trees. Under the compiler the list becomes: witness generation for three table classes, the zerocheck with univariate skip, the lincheck, the \MUL{} GKR, the wiring grand product, and the \WHIR{} rounds. Each is a data-parallel pass over a table: zerocheck and lincheck rounds are reductions over rows, the \MUL{} GKR is a product tree per row, and the wiring grand product is a product tree over cells. The \Blake{} Merkle tree over rows of $\Ft$ elements reuses the core stage's \Blake{} kernels with $256$-byte leaves.
+
+\paragraph{Parallelism across the tree.} Leaves are independent. With one leaf per device and leaves started as soon as their shard proofs exist, the compress stage overlaps the core stage instead of following it. Memory, not compute, limits this today: a prototype leaf peaks above $100$\,GB of host memory, mostly in its committed matrices. The compiled leaf's smaller witness (\S\ref{sec:cost}) is what makes several concurrent leaves feasible.

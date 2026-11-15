@@ -90,6 +90,11 @@ pub struct ZKMWrapWitnessVariable<
 ///
 /// Terminal-stage single-proof verify over
 /// the whir shard proof shape.
+///
+/// The key tree's root is bound to the `vk_root` the verified proof's public
+/// values carry, except for the stage that carries its digest: it pins the
+/// key it verifies as a constant, and its one-leaf key tree only gives the
+/// witness its shape.
 pub fn verify_wrap_jagged<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMWrapWitnessVariable<C, SC>,
@@ -98,12 +103,10 @@ pub fn verify_wrap_jagged<C, SC, A>(
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
 ) where
-    SC: KoalaBearFriParametersVariable<
-            C,
-            DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
-            Val = InnerVal,
-        > + FieldHasherVariable<C, DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8]>
+    SC: KoalaBearFriParametersVariable<C, Val = InnerVal>
+        + FieldHasherVariable<C>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    <SC as FieldHasherVariable<C>>::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
@@ -120,6 +123,8 @@ pub fn verify_wrap_jagged<C, SC, A>(
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
+    let vk_root = (!matches!(output_digest_kind, PublicValuesOutputDigest::Carried))
+        .then(|| SC::digest_public_felts(builder, &vk_root));
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
     verify_wrap_jagged_core::<C, SC, A>(
         builder,
@@ -130,7 +135,7 @@ pub fn verify_wrap_jagged<C, SC, A>(
         machine,
         max_log_row_count,
         output_digest_kind,
-        Some(vk_root),
+        vk_root,
     );
 }
 
@@ -273,6 +278,33 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
             None,
             Some(&chip_height_felts_pre),
         ),
+        LiftedEvalProof::WhirBundleBlake3 {
+            host,
+            whir_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            main_commitment,
+        } => {
+            let preceding_roots: Vec<<SC as FieldHasherVariable<C>>::DigestVariable> =
+                if prep_widths.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+            <SC as FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                builder,
+                host,
+                whir_proof.clone(),
+                sumcheck.clone(),
+                jagged_eval.clone(),
+                *expected_eval,
+                *commit_root,
+                *main_commitment,
+                &preceding_roots,
+                &preprocessed_round.padding_heights,
+                max_log_row_count,
+                &column_counts_by_round,
+                Some(&chip_height_felts_pre),
+            )
+        }
         LiftedEvalProof::OuterBundle {
             host,
             whir_proof,
@@ -375,6 +407,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
 
     let lsh = match &evaluation_proof {
         LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+        LiftedEvalProof::WhirBundleBlake3 { host, .. } => host.commit.log_stacking_height,
         LiftedEvalProof::OuterBundle { host, .. } => host.commit.log_stacking_height,
     };
     let whir_verifier = crate::shard::JaggedShardVerifier::<
@@ -440,6 +473,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
             }
             inner.digest = expected;
         }
+        PublicValuesOutputDigest::Carried => {}
     }
 
     if zkm_imm_wrap_vk_mode() {
@@ -467,25 +501,23 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
 /// cache.
 const WRAP_SHAPE_KEY_DOMAIN: u32 = 0x3A_FE_BA_61;
 
-impl<const P: u8> ZKMWrapWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>> {
+impl<SC> ZKMWrapWitnessValues<SC>
+where
+    SC: zkm_pcs::WhirRing
+        + zkm_pcs::StarkGenericConfig<Val = p3_koala_bear::KoalaBear, Challenge = InnerChallenge>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    SC::Pcs: zkm_pcs::ZeroCommitment<SC>,
+{
     /// Construct a dummy wrap witness for a given compress shape.
     /// Wrap takes a single `(vk, root-proof)` pair, so the input
     /// shape's first proof_shape drives the dummy proof construction.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<SC, A>,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
         A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
-            + for<'b> p3_air::Air<
-                zkm_pcs::folder::VerifierConstraintFolder<
-                    'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-                >,
-            >,
+            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, SC>>,
     {
         let vks_and_proofs: Vec<_> = shape
             .compress_shape

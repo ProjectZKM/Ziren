@@ -311,6 +311,9 @@ where
 
         let shard_clusters = ShardClusters::<SC::Val>::new();
 
+        let dump_shapes = std::env::var_os("ZIREN_CORE_SHAPE_DUMP").is_some();
+        let shard_limit: Option<u32> =
+            std::env::var("ZIREN_CORE_SHARD_LIMIT").ok().and_then(|limit| limit.parse().ok());
         let p2_prover_span = tracing::Span::current().clone();
         let p2_prover_handle = s.spawn(move || {
             let _span = p2_prover_span.enter();
@@ -322,6 +325,14 @@ where
                         let proofs = records
                             .into_par_iter()
                             .zip(traces.into_par_iter())
+                            .inspect(|(record, traces)| {
+                                if dump_shapes {
+                                    dump_shape(record, traces, &shard_clusters);
+                                }
+                            })
+                            .filter(|(record, _)| {
+                                shard_limit.is_none_or(|limit| record.public_values.shard <= limit)
+                            })
                             .map(|(record, main_traces)| {
                                 let _span = span.enter();
 
@@ -484,4 +495,38 @@ pub fn trace_checkpoint(
     let (records, _) = runtime.execute_record(true).unwrap();
 
     (records, runtime.report)
+}
+
+/// Append a shard's chip heights to the file `ZIREN_CORE_SHAPE_DUMP` names,
+/// a line per shard: its number, then `chip:rows` for each trace and `chip:0`
+/// for each chip of its canonical cluster it lacks, the heights its proof
+/// would carry.  Shards run in parallel, so each line is one write.
+fn dump_shape<F: p3_field::PrimeField32>(
+    record: &ExecutionRecord,
+    traces: &zkm_pcs::Traces<F>,
+    clusters: &ShardClusters<F>,
+) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("ZIREN_CORE_SHAPE_DUMP") else {
+        return;
+    };
+    let mut heights: std::collections::BTreeMap<String, usize> = traces
+        .named_traces
+        .iter()
+        .map(|(name, mle)| (name.clone(), zkm_pcs::shard_level::prover::raw_chip_height(mle)))
+        .collect();
+    if let Some(cluster) = clusters.cluster_widths(record) {
+        for name in cluster.into_keys() {
+            heights.entry(name).or_insert(0);
+        }
+    }
+    let heights: Vec<String> =
+        heights.iter().map(|(name, rows)| format!("{name}:{rows}")).collect();
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("the shape dump opens");
+    let line = format!("{} {}\n", record.public_values.shard, heights.join(","));
+    file.write_all(line.as_bytes()).expect("the shape dump writes");
 }

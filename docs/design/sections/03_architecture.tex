@@ -1,0 +1,40 @@
+\section{Architecture}\label{sec:arch}
+
+Figure~\ref{fig:pipeline} shows the pipeline. An execution of $T$ cycles is cut into shards of at most $2^{24}$ cycles. Each shard is proved by the core stage over \KB{}. The compress stage then proves, for each shard, a \emph{leaf}: a proof over $\Ft$ that the shard proof verifies. Leaves are combined pairwise by \emph{nodes}, each a proof over $\Ft$ that two child proofs verify and that their public values chain, until one \emph{root} remains. The root's verifier is the Boolean circuit that a garbled verifier evaluates.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw, rounded corners=2pt, minimum height=7mm, minimum width=19mm, align=center, fill=zirenlight},
+  stage/.style={draw=zirenslate, dashed, rounded corners=4pt, inner sep=6pt},
+  arr/.style={-{Stealth[length=2mm]}},
+]
+\node[box] (exec) {MIPS32\\execution};
+\node[box, right=8mm of exec, yshift=9mm] (s1) {shard $1$};
+\node[box, right=8mm of exec, yshift=-9mm] (sn) {shard $n$};
+\node at ($(s1)!0.5!(sn)$) {$\vdots$};
+\node[box, right=8mm of s1] (l1) {leaf $1$};
+\node[box, right=8mm of sn] (ln) {leaf $n$};
+\node at ($(l1)!0.5!(ln)$) {$\vdots$};
+\node[box, right=8mm of $(l1)!0.5!(ln)$] (nodes) {nodes\\(arity 2)};
+\node[box, right=8mm of nodes] (root) {root};
+\node[box, right=8mm of root] (gc) {Boolean\\verifier};
+\draw[arr] (exec) -- (s1); \draw[arr] (exec) -- (sn);
+\draw[arr] (s1) -- (l1); \draw[arr] (sn) -- (ln);
+\draw[arr] (l1) -- (nodes); \draw[arr] (ln) -- (nodes);
+\draw[arr] (nodes) -- (root); \draw[arr] (root) -- (gc);
+\begin{scope}[on background layer]
+\node[stage, fit=(s1)(sn), label={[font=\footnotesize]above:core: $\KB$, \Blake{}}] {};
+\node[stage, fit=(l1)(ln)(nodes)(root), label={[font=\footnotesize]above:compress: $\Ft$, \Blake{}}] {};
+\end{scope}
+\end{tikzpicture}
+\caption{The two stages. Every proof is committed with \Blake{} Merkle trees and opened with \WHIR{}; the core stage works over \KB{}, the compress stage over $\Ft$.}
+\label{fig:pipeline}
+\end{figure}
+
+\paragraph{Statements.} A core shard proof attests that a shard's trace satisfies the core machine's AIR and buses for a committed program, and exposes the shard's public values: the program counter pair at entry and exit, the shard index, the memory digest contribution and the committed output. A leaf attests that a core shard proof verifies against a verifying key from an enumerated allowlist and exposes the same public values. A node attests that its two children verify and that the exit state of the left child is the entry state of the right child. The root's public values are those of the whole execution.
+
+\paragraph{Why a tree and not a chain.} Leaves are independent and can be proved in parallel, on any number of devices, as soon as their shard proofs exist. A tree of arity two over $n$ leaves has depth $\lceil \log_2 n \rceil$; in the measured block $n = 34$ (\S\ref{sec:cost-baseline}).
+
+\paragraph{Fields across the boundary.} The leaf is the only place where the two fields meet. Its circuit verifies a \KB{} proof and must therefore perform \KB{} and $\EF$ arithmetic, \Blake{} compressions over the proof's Merkle paths, and the transcript's conversion of \Blake{} digests into \KB{} challenges. A node verifies $\Ft$ proofs, so its arithmetic is native. The design of \S\ref{sec:compiler} exists to make the leaf cheap; the node's cost follows from \Flock{}'s existing techniques.

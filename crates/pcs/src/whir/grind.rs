@@ -38,7 +38,7 @@ static GRIND_ACCELERATORS: std::sync::RwLock<
 /// [`GrindAccelerator`] for the contract an accelerator must honour.
 pub fn register_grind_accelerator<C>(accelerator: fn(&mut C, usize) -> C::Witness)
 where
-    C: GrindingChallenger + 'static,
+    C: GrindingChallenger + Clone + Sync + 'static,
 {
     let mut registered = GRIND_ACCELERATORS.write().expect("grind accelerator registry poisoned");
     if registered.iter().any(|a| a.is::<GrindAccelerator<C>>()) {
@@ -81,7 +81,7 @@ where
 /// The registered accelerator for `C`, if one was registered for exactly `C`.
 fn grind_accelerator_for<C>() -> Option<fn(&mut C, usize) -> C::Witness>
 where
-    C: GrindingChallenger + 'static,
+    C: GrindingChallenger + Clone + Sync + 'static,
 {
     GRIND_ACCELERATORS
         .read()

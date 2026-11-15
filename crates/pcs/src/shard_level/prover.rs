@@ -808,7 +808,10 @@ where
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
 /// WHIR root (`jagged_original_commitment`) from `evaluation_proof`, then
-/// moves every piece into the proof.  PURE DATA — no transcript.
+/// moves every piece into the proof.  PURE DATA — no transcript.  A ring
+/// that opens under the inner WHIR PCS but carries its bundle serialized
+/// (the Blake3 ring) is decoded for the same geometry; the wrap ring's bytes
+/// are left alone, its circuit deriving the geometry its own way.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
     public_values: Vec<Val<SC>>,
@@ -825,8 +828,18 @@ pub fn assemble_jagged_shard_proof<SC>(
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::WhirRing,
 {
+    let serialized_inner =
+        match &evaluation_proof {
+            crate::shard_level::shard_proof::EvaluationProof::Bytes(bytes) => {
+                crate::jagged_pcs::jagged::JaggedPcsProofGeneric::<
+                    <SC as crate::WhirRing>::WhirMmcs,
+                >::from_bytes(bytes)
+            }
+            _ => None,
+        };
+
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
     {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -837,7 +850,17 @@ where
             );
             (vec![rc], vec![pcc])
         }
-        _ => (Vec::new(), Vec::new()),
+        _ => match &serialized_inner {
+            Some(bundle) => {
+                let (rc, pcc) = crate::jagged::derive_row_and_padding_counts(
+                    &bundle.packing.column_counts,
+                    &bundle.packing.offsets,
+                    bundle.packing.total_values,
+                );
+                (vec![rc], vec![pcc])
+            }
+            None => (Vec::new(), Vec::new()),
+        },
     };
 
     let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
@@ -845,7 +868,16 @@ where
             let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
         }
-        _ => main_commitment,
+        _ => match &serialized_inner {
+            Some(bundle) => {
+                let raw_inner =
+                    <SC as crate::WhirRing>::digest_felts(&bundle.commit.original_commitment);
+                unsafe {
+                    core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
+                }
+            }
+            None => main_commitment,
+        },
     };
 
     let (preprocessed_original_commitment, preprocessed_row_counts): ([Val<SC>; 8], Vec<Val<SC>>) =
@@ -865,7 +897,24 @@ where
                     .collect();
                 (raw, heights)
             }
-            _ => ([Val::<SC>::ZERO; 8], Vec::new()),
+            _ => match &serialized_inner {
+                Some(bundle)
+                    if !bundle.preceding_commits.is_empty()
+                        && bundle.packing.round_counts.len() >= 2 =>
+                {
+                    let raw_inner =
+                        <SC as crate::WhirRing>::digest_felts(&bundle.preceding_commits[0]);
+                    let raw = unsafe {
+                        core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
+                    };
+                    let heights: Vec<Val<SC>> = bundle.packing.round_counts[0]
+                        .iter()
+                        .map(|(h, _w)| Val::<SC>::from_usize(*h))
+                        .collect();
+                    (raw, heights)
+                }
+                _ => ([Val::<SC>::ZERO; 8], Vec::new()),
+            },
         };
 
     let padding_row_heights: Vec<Vec<Val<SC>>> = match &evaluation_proof {
@@ -875,7 +924,15 @@ where
             .iter()
             .map(|round| round.iter().map(|h| Val::<SC>::from_usize(*h)).collect())
             .collect(),
-        _ => Vec::new(),
+        _ => match &serialized_inner {
+            Some(bundle) => bundle
+                .packing
+                .padding_heights
+                .iter()
+                .map(|round| round.iter().map(|h| Val::<SC>::from_usize(*h)).collect())
+                .collect(),
+            None => Vec::new(),
+        },
     };
 
     JaggedShardProof {

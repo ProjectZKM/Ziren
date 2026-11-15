@@ -1,0 +1,51 @@
+\section{Comparison with \Flock{} and \Binius{}}\label{sec:comparison}
+
+Both systems prove large computations over binary fields, and the compiler borrows from each. This section states what is borrowed, what differs, and why. Table~\ref{tab:comparison} summarises. Our descriptions of \Flock{} are taken from its paper~\citep{flock} and its source code; those of \Binius{} from its architecture notes and protocol blueprint~\citep{binius64}.
+
+\begin{table}[t]
+\centering\small
+\caption{\Flock{}, \Binius{} and the compress compiler.}
+\label{tab:comparison}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{2.6cm}XXX}
+\toprule
+ & \Flock{} & \Binius{} & this design \\
+\midrule
+statement & batches of one Boolean circuit (hash compressions), plus heterogeneous tables joined by wiring & one constraint system over 64-bit words & a fixed verifier program per proof shape \\
+witness & bits; $\Ft$ elements in large-field tables & 64-bit words & bits, 64-bit words and $\Ft$ elements, by table \\
+nonlinear constraints & \AND{} over $\GFtwo$; $\Ft$ product in element tables & word \AND{}; 64-bit integer \MUL{} & all three \\
+integer / prime-field arithmetic & none & 64-bit \MUL{} & \KB{} and $\EF$ lowered to \MUL{} \\
+lincheck & block-diagonal, cost of one block & none (constraints reference shifted words) & block-diagonal per table \\
+cross-table dataflow & copy constraints by product GKR & within one system & copy constraints by product GKR \\
+lookups and buses & declared in the circuit language, not proved & none & none; range checks by \AND{} \\
+polynomial commitment & Ligerito over $\Ft$, $\F_{2^{256}}$ folding challenges & ring-switched, over a binary tower & \WHIR{} over $\Ft$ \\
+Merkle hash, transcript & \Blake{} or SHA-256 & --- & \Blake{} \\
+recursion & tower verifying its own proofs & --- & tree; leaves verify \KB{} proofs \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{\Flock{}}
+
+\paragraph{What is borrowed.} The circuit form (rank-one over $\GFtwo$ with identity output, \XOR{} substituted into the matrices), the batching of identical blocks with a lincheck whose cost is that of one block, the large-field table class, the registry of heterogeneous tables, the product-GKR wiring argument without a committed oracle, the jagged packing merged with ring switching, and the identity-padded dead rows that keep padding satisfying.
+
+\paragraph{The statement is a program, not a batch.} \Flock{}'s headline workloads are batches of one hash function: $2^{18}$ \Blake{} compressions are one block repeated $2^{18}$ times. A recursion verifier is a single, heterogeneous computation. The compiler recovers \Flock{}'s structure by \emph{transposing} the program: each operation type becomes a table whose rows are identical, and the program's heterogeneity moves into the wiring permutation. This is how \Flock{}'s own recursion tower and its multi-table circuits are built; the difference is that our programs are produced from an existing verifier rather than written in a circuit language.
+
+\paragraph{Prime-field arithmetic.} \Flock{} never verifies a proof over a prime field: its recursion tower verifies \Flock{} proofs, whose arithmetic is native. Our leaves must verify \KB{} proofs. In \Flock{}'s classes that arithmetic would be Boolean emulation, about $2{,}000$ \AND{} constraints per base-field multiplication, which is exactly the cost of our prototype. The word tables are the addition that \Flock{} does not have.
+
+\paragraph{Commitment.} \Flock{} commits with Ligerito, a recursive multilinear commitment, with folding challenges in $\F_{2^{256}}$ for its 128-bit profile. We use \WHIR{} over $\Ft$ in both stages, so that the core and compress stages share one opening protocol and one proximity-gap analysis~\citep{proximity-gaps,proximity-gaps-2025}. Whether $\Ft$ challenges reach the soundness target or an extension is needed for some rounds is a parameter question (\S\ref{sec:soundness}).
+
+\paragraph{Lookups.} \Flock{}'s circuit language lets a chip declare interactions with a channel, a message, a multiplicity and a selector, but no prover in its repository consumes them; its virtual-machine pilot checks one chip's rows and nothing across chips. We do not need them: a fixed program has a fixed dataflow, which the wiring argument covers.
+
+\subsection{\Binius{}}
+
+\paragraph{What is borrowed.} The \MUL{} constraint $p\cdot q = 2^{64}h + \ell$ and its proof in the exponent of $\Ft^{*}$ by a product GKR of height six, the parity check that closes the wraparound case, the treatment of shifts and \XOR{}s as free operand formers, and the shift reduction that moves claims on shifted words to the committed words.
+
+\paragraph{Everything is not a word.} \Binius{} expresses every computation in 64-bit words. Hashes are then word circuits, and \Flock{} reports SHA-256 proving more than nine times faster than \Binius{}~\citep{flock}; bit-level circuits with carry-save adders suit hashes better. We use words only where integer multiplication is needed and keep hashes in Boolean tables.
+
+\paragraph{No batch structure.} \Binius{} has one global constraint system and no notion of a repeated block. Our word tables are uniform per table, which gives them the same lincheck and layout as the other classes and lets the wiring argument join them.
+
+\paragraph{Recursion and arithmetic of the verifier.} The \Binius{} documentation we consulted does not describe recursion. In our design the verifier of every compress-stage proof, including the \MUL{} GKR's, is native $\Ft$ arithmetic plus \Blake{}, so it compiles into element and Boolean tables at the next level.
+
+\subsection{Differences from the prototype}
+
+The prototype compress stage is an AIR-based multi-STARK over $\Ft$ that executes the verifier program. Compared with it, the compiler removes the instruction ledger and the memory tables (\S\ref{sec:compiler-wiring}), replaces the bit-emulated \KB{} multiplication table by word \MUL{} constraints, and replaces the logarithmic-derivative buses, which need care in characteristic two, by one grand-product wiring argument.

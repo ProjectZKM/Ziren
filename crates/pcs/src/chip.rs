@@ -194,6 +194,10 @@ where
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         panic!("Chip should not use the `BaseAir` method, but the `MachineAir` method.")
     }
+
+    fn num_public_values(&self) -> usize {
+        self.air.num_public_values()
+    }
 }
 
 impl<F, A> MachineAir<F> for Chip<F, A>

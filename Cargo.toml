@@ -9,6 +9,8 @@ categories = ["cryptography"]
 [workspace]
 members = [
     "crates/build",
+    "crates/binary",
+    "crates/binary-recursion",
     "crates/cli",
     "crates/core/executor",
     "crates/core/instruction-test-defs",
@@ -25,6 +27,7 @@ members = [
     "crates/recursion/compiler",
     "crates/recursion/core",
     "crates/recursion/derive",
+    "crates/recursion/r1cs",
     "crates/recursion/gnark-ffi",
     "crates/sdk",
     "crates/pcs",
@@ -49,30 +52,68 @@ debug-assertions = true
 
 [workspace.dependencies]
 rustc-hash = "2.1.0"
-# These crates define the fields, challengers and Merkle trees used by the transcript.
-# For Git dependencies, Cargo.lock records the revisions selected during resolution.
-# Enabling the local path overrides below uses checkout contents instead. Dependency 
-# changes can change the transcript and verifying keys.
-p3-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-field = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-commit = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-dft = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-util = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-fri = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-circle = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", package = "p3-bn254" }
-p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3" }
+# Pinned to a rev, not a branch. These crates supply the field, the challenger and
+# the Merkle tree -- the transcript -- so a branch pin lets `cargo update` change
+# every challenge, hence every vk, with no diff to review. This rev is fork branch
+# `zkm/binary-whir`: upstream 3acc8b70 plus the fork's coset serde, VirtualPairCol
+# accessors, MerkleTree::from_parts, sequential find_first shim and the hooks a
+# recording value type needs to run the binary verifier.
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-commit = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-dft = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-util = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-pcs = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-multi-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-sumcheck = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-blake3 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-binary-dft = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-whir = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-multilinear-util = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-blake3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-bus = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-lookup = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-examples = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-fri = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-circle = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020", package = "p3-bn254" }
+p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-word = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+p3-word-backend = { git = "https://github.com/ProjectZKM/Plonky3", rev = "fb5d0d8976dcc6b94d11f08de98be0f285450020" }
+
+# p3-air = { path = "../patch/Plonky3/air" }
+# p3-field = { path = "../patch/Plonky3/field" }
+# p3-challenger = { path = "../patch/Plonky3/challenger" }
+# p3-commit = { path = "../patch/Plonky3/commit" }
+# p3-dft = { path = "../patch/Plonky3/dft" }
+# p3-matrix = { path = "../patch/Plonky3/matrix" }
+# p3-maybe-rayon = { path = "../patch/Plonky3/maybe-rayon" }
+# p3-util = { path = "../patch/Plonky3/util" }
+# p3-fri = { path = "../patch/Plonky3/fri" }
+# p3-koala-bear = { path = "../patch/Plonky3/koala-bear" }
+# p3-circle = { path = "../patch/Plonky3/circle" }
+# p3-keccak = { path = "../patch/Plonky3/keccak" }
+# p3-keccak-air = { path = "../patch/Plonky3/keccak-air" }
+# p3-mds = { path = "../patch/Plonky3/mds" }
+# p3-merkle-tree = { path = "../patch/Plonky3/merkle-tree" }
+# p3-mersenne-31 = { path = "../patch/Plonky3/mersenne-31" }
+# p3-monty-31 = { path = "../patch/Plonky3/monty-31" }
+# p3-poseidon2 = { path = "../patch/Plonky3/poseidon2" }
+# p3-symmetric = { path = "../patch/Plonky3/symmetric" }
+# p3-bn254-fr = { path = "../patch/Plonky3/bn254-fr" }
+# p3-uni-stark = { path = "../patch/Plonky3/uni-stark" }
 
 itertools = "0.13.0"
 tracing = "0.1.37"
@@ -88,7 +129,10 @@ anyhow = "1.0.75"
 zkm-recursion-derive = { path = "crates/recursion/derive", default-features = false }
 zkm-recursion-circuit = { path = "crates/recursion/circuit", default-features = false }
 zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-features = false }
+zkm-recursion-r1cs = { path = "crates/recursion/r1cs", default-features = false }
 zkm-recursion-compiler = { path = "crates/recursion/compiler" }
+zkm-binary-stark = { path = "crates/binary" }
+zkm-binary-recursion = { path = "crates/binary-recursion" }
 zkm-recursion-core = { path = "crates/recursion/core" }
 zkm-core-executor = { path = "crates/core/executor", default-features = false }
 zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }
@@ -110,6 +154,8 @@ test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
+
+blake3 = { version = "1.8.5", default-features = false }
 
 [patch."https://github.com/ProjectZKM/Ziren.git"]
 zkm-lib = { path = "crates/zkvm/lib" }

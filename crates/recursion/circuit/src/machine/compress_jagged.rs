@@ -131,11 +131,8 @@ pub fn verify_compress_jagged<C, SC, A>(
     kind: super::compress::PublicValuesOutputDigest,
     max_log_row_count: usize,
 ) where
-    SC: KoalaBearFriParametersVariable<
-            C,
-            Val = zkm_pcs::InnerVal,
-            DigestVariable = [Felt<zkm_pcs::InnerVal>; 8],
-        > + FieldHasherVariable<C>,
+    SC: KoalaBearFriParametersVariable<C, Val = zkm_pcs::InnerVal> + FieldHasherVariable<C>,
+    <SC as FieldHasherVariable<C>>::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     C: CircuitConfig<F = zkm_pcs::InnerVal, EF = zkm_pcs::InnerChallenge>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
@@ -149,7 +146,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         is_complete,
     } = input;
 
-    let vk_root = vk_merkle_data.root;
+    let vk_root = SC::digest_public_felts(builder, &vk_merkle_data.root);
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
@@ -268,7 +265,7 @@ pub fn verify_compress_jagged<C, SC, A>(
                 commit_root,
                 modified_commitment,
             } => {
-                crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
+                <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
                     builder,
                     host,
                     whir_proof.as_ref().clone(),
@@ -285,6 +282,35 @@ pub fn verify_compress_jagged<C, SC, A>(
                     None,
                     cps_heights,
                 )
+            }
+            LiftedEvalProof::WhirBundleBlake3 {
+                host,
+                whir_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                main_commitment,
+            } => {
+                let preceding_roots: Vec<<SC as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
+                    if prep_widths_pre.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+                let lifted =
+                    <SC as crate::hash::FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                        builder,
+                        host,
+                        whir_proof.clone(),
+                        sumcheck.clone(),
+                        jagged_eval.clone(),
+                        *expected_eval,
+                        *commit_root,
+                        *main_commitment,
+                        &preceding_roots,
+                        &preprocessed_round.padding_heights,
+                        max_log_row_count,
+                        &column_counts_by_round_pre,
+                        cps_heights,
+                    );
+                lifted
             }
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("compress path never carries an OUTER (gnark) bundle")
@@ -382,6 +408,7 @@ pub fn verify_compress_jagged<C, SC, A>(
 
         let lsh = match &evaluation_proof {
             LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+            LiftedEvalProof::WhirBundleBlake3 { host, .. } => host.commit.log_stacking_height,
             _ => unreachable!("whir proof variable implies a WhirBundle"),
         };
         let whir_verifier = crate::shard::JaggedShardVerifier::<
@@ -673,6 +700,9 @@ pub fn verify_compress_jagged<C, SC, A>(
         | super::compress::PublicValuesOutputDigest::ReduceToRoot => {
             crate::machine::root_public_values_digest::<C, SC>(builder, _compress_public_values)
         }
+        super::compress::PublicValuesOutputDigest::Carried => {
+            unreachable!("a compose stage recomputes its public values digest")
+        }
     };
 
     crate::machine::assert_complete(builder, _compress_public_values, is_complete);
@@ -958,8 +988,12 @@ where
 /// program cache.
 const COMPRESS_SHAPE_KEY_DOMAIN: u32 = 0xC0_FE_BA_61;
 
-impl<const P: u8>
-    ZKMCompressWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+impl<SC> ZKMCompressWitnessValues<SC>
+where
+    SC: zkm_pcs::WhirRing
+        + zkm_pcs::StarkGenericConfig<Val = p3_koala_bear::KoalaBear, Challenge = InnerChallenge>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    SC::Pcs: zkm_pcs::ZeroCommitment<SC>,
 {
     /// Construct a dummy compress witness for a given compress shape.
     /// Drives the multi-chip whir dummy
@@ -970,20 +1004,12 @@ impl<const P: u8>
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness
     /// (vk-root from witness, not a baked constant).
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<SC, A>,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
         A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
-            + for<'b> p3_air::Air<
-                zkm_pcs::folder::VerifierConstraintFolder<
-                    'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
-                >,
-            >,
+            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, SC>>,
     {
         let vks_and_proofs: Vec<_> = shape
             .compress_shape

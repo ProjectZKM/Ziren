@@ -1,0 +1,124 @@
+\documentclass[10pt,letterpaper]{article}
+
+% ---------- Encoding & fonts ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% ---------- Page geometry ----------
+\usepackage[margin=1in]{geometry}
+
+% ---------- Math ----------
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}
+
+% ---------- Tables & figures ----------
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{caption}
+\captionsetup{font=small}
+\usepackage[section,above]{placeins}
+\usepackage{xcolor}
+
+% ---------- TikZ ----------
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,shapes,backgrounds,calc}
+\definecolor{zirenlight}{HTML}{F2F2F2}
+\definecolor{zirenslate}{HTML}{999999}
+
+% ---------- Authors ----------
+\usepackage{authblk}
+\renewcommand\Authfont{\normalsize}
+\renewcommand\Affilfont{\small}
+
+% ---------- References & hyperlinks ----------
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdftitle={Hash-Only Recursion for Ziren: KoalaBear--Blake3 Core Proofs and a Compiled Compress Stage over GF(2^128)},
+  pdfauthor={ZKM Team},
+}
+\usepackage{url}
+
+% ---------- Theorem environments ----------
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\theoremstyle{plain}
+
+% ---------- Macros ----------
+\newcommand{\F}{\ensuremath{\mathbb{F}}}
+\newcommand{\Fp}{\ensuremath{\mathbb{F}_{p}}}
+\newcommand{\EF}{\ensuremath{\mathbb{F}_{p^4}}}
+\newcommand{\Ft}{\ensuremath{\mathbb{F}_{2^{128}}}}
+\newcommand{\GFtwo}{\ensuremath{\mathbb{F}_{2}}}
+\newcommand{\KB}{\ensuremath{\mathsf{KoalaBear}}}
+\newcommand{\WHIR}{\ensuremath{\mathsf{WHIR}}}
+\newcommand{\Blake}{\ensuremath{\mathsf{Blake3}}}
+\newcommand{\Poseidon}{\ensuremath{\mathsf{Poseidon2}}}
+\newcommand{\LogUp}{\ensuremath{\mathsf{LogUp\text{-}GKR}}}
+\newcommand{\eqf}{\ensuremath{\mathsf{eq}}}
+\newcommand{\RS}{\ensuremath{\mathsf{RS}}}
+\newcommand{\AND}{\ensuremath{\mathsf{AND}}}
+\newcommand{\MUL}{\ensuremath{\mathsf{MUL}}}
+\newcommand{\XOR}{\ensuremath{\mathsf{XOR}}}
+\newcommand{\Ziren}{\textsc{Ziren}}
+\newcommand{\Flock}{\textsc{Flock}}
+\newcommand{\Binius}{\textsc{Binius64}}
+\newcommand{\zkVM}{zkVM}
+\newcommand{\Mbit}{\,\text{Mbit}}
+\newcommand{\Gbit}{\,\text{Gbit}}
+
+\title{Hash-Only Recursion for \Ziren{}: \KB{}--\Blake{} Core Proofs and a Compiled Compress Stage over $\Ft$\\[0.4em]\large Design paper}
+
+\author[1]{Stephen Duan\thanks{Corresponding author: \texttt{stephen.d@zkm.io}}}
+\affil[1]{ZKM Team}
+
+\date{October 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We describe the design of a two-stage proof pipeline for the \Ziren{} MIPS32 \zkVM{} in which no stage uses an algebraic hash. The \emph{core} stage keeps \Ziren{}'s existing arithmetisation over \KB{} and replaces \Poseidon{} with \Blake{} in both the Merkle commitments and the Fiat--Shamir transcript, under the same jagged \WHIR{} opening. The \emph{compress} stage aggregates the core shard proofs in a binary tree whose proofs live over $\Ft$, are committed with \Blake{} Merkle trees and are opened with \WHIR{} over $\Ft$; its verifier is therefore a Boolean circuit of \Blake{} compressions and $\Ft$ arithmetic, the shape a garbled-circuit verifier consumes.
+
+We report measurements from a working prototype of both stages. On an Ethereum mainnet block of $1.10\times 10^8$ MIPS cycles proved on two RTX~5090 GPUs, the \Blake{} core matches the \Poseidon{} configuration cold ($16.7$\,s against $16.5$\,s) and trails it warm ($15.0$\,s against $11.5$\,s), with all of the difference in the \WHIR{} commitments; its shard proofs are $11\%$ smaller. The prototype compress stage, a multi-STARK over $\Ft$ that emulates \KB{} arithmetic bit by bit, needs $2$\,h\,$58$\,min for the same block. We trace that cost to its leaves, where an emulated \KB{} multiplication costs about two thousand \AND{} constraints and the multiplication table holds roughly two thirds of the committed bits.
+
+The main contribution is the design of a \emph{compress compiler} that replaces the emulated machine. It lowers each recursion verifier, which is a straight-line program fixed by the shape of the proof it verifies, into a registry of uniform gate tables in the style of \Flock{}: Boolean tables in rank-one form over $\GFtwo$ for hashing and bit manipulation, $\Ft$ element tables for the native arithmetic of the tree's own verifier, and 64-bit word tables with an integer-multiplication constraint, proved in the exponent as in \Binius{}, for \KB{} arithmetic. A static copy-constraint argument replaces the memory and bus tables of the emulated machine. We state the protocol stack, compare it with \Flock{} and \Binius{}, estimate its cost from measured operation counts, and list what remains to be measured.
+\end{abstract}
+
+\noindent\textbf{Index terms:} binary fields, garbled circuits, GKR, polynomial commitment schemes, recursive proof composition, R1CS, WHIR, zero-knowledge virtual machines.
+
+\input{sections/01_introduction}
+\input{sections/02_preliminaries}
+\input{sections/03_architecture}
+\input{sections/04_core}
+\input{sections/05_compiler}
+\input{sections/06_protocol}
+\input{sections/07_comparison}
+\input{sections/08_cost}
+\input{sections/09_gpu}
+\input{sections/10_soundness}
+\input{sections/11_status}
+
+\FloatBarrier
+\appendix
+\input{sections/appendix_lowering}
+
+\clearpage
+\bibliographystyle{alpha}
+\bibliography{references}
+
+\end{document}

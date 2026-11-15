@@ -6,10 +6,8 @@ use p3_symmetric::{Hash, MerkleCap};
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_pcs::{
-    koala_bear_poseidon2::{
-        KoalaBearPoseidon2, KoalaBearPoseidon2Compress, KoalaBearPoseidon2Ring,
-    },
-    Com, InnerChallenge, InnerPerm, InnerVal, StarkVerifyingKey, Word,
+    koala_bear_poseidon2::KoalaBearPoseidon2Ring, Com, InnerChallenge, InnerPerm, InnerVal,
+    StarkVerifyingKey, Word,
 };
 use zkm_recursion_compiler::ir::Builder;
 
@@ -58,42 +56,101 @@ where
     }
 }
 
+/// A commitment digest's witness form: the array of elements a ring's
+/// Merkle root is made of, read and written as the ring's in-circuit
+/// digest.  Implemented per root type rather than for every array of
+/// witnessable elements, so that the Blake3 ring's byte roots can take the
+/// limb form the circuit hashes.
+pub trait DigestWitness<C: CircuitConfig> {
+    type Variable;
+
+    fn read_digest(&self, builder: &mut Builder<C>) -> Self::Variable;
+
+    fn write_digest(&self, witness: &mut impl WitnessWriter<C>);
+}
+
+impl<C, const N: usize> DigestWitness<C> for [KoalaBear; N]
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type Variable = [Felt<InnerVal>; N];
+
+    fn read_digest(&self, builder: &mut Builder<C>) -> Self::Variable {
+        self.read(builder)
+    }
+
+    fn write_digest(&self, witness: &mut impl WitnessWriter<C>) {
+        self.write(witness);
+    }
+}
+
+impl<C, const N: usize> DigestWitness<C> for [p3_bn254_fr::Bn254; N]
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = p3_bn254_fr::Bn254>,
+{
+    type Variable = [zkm_recursion_compiler::ir::Var<p3_bn254_fr::Bn254>; N];
+
+    fn read_digest(&self, builder: &mut Builder<C>) -> Self::Variable {
+        self.read(builder)
+    }
+
+    fn write_digest(&self, witness: &mut impl WitnessWriter<C>) {
+        self.write(witness);
+    }
+}
+
+/// A Blake3 root is witnessed as its sixteen 16-bit limbs.
+impl<C> DigestWitness<C> for zkm_pcs::kb31_blake3::Blake3Digest
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type Variable = [Felt<InnerVal>; crate::blake3_circuit::DIGEST_LIMBS];
+
+    fn read_digest(&self, builder: &mut Builder<C>) -> Self::Variable {
+        crate::blake3_circuit::digest_limbs(self).read(builder)
+    }
+
+    fn write_digest(&self, witness: &mut impl WitnessWriter<C>) {
+        crate::blake3_circuit::digest_limbs(self).write(witness);
+    }
+}
+
 impl<C, F, W, const DIGEST_ELEMENTS: usize> Witnessable<C> for Hash<F, W, DIGEST_ELEMENTS>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    W: Witnessable<C>,
+    [W; DIGEST_ELEMENTS]: DigestWitness<C>,
 {
-    type WitnessVariable = [W::WitnessVariable; DIGEST_ELEMENTS];
+    type WitnessVariable = <[W; DIGEST_ELEMENTS] as DigestWitness<C>>::Variable;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let array: &[W; DIGEST_ELEMENTS] = self.borrow();
-        array.read(builder)
+        array.read_digest(builder)
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         let array: &[W; DIGEST_ELEMENTS] = self.borrow();
-        array.write(witness);
+        array.write_digest(witness);
     }
 }
 
 impl<C, F, W, const DIGEST_ELEMENTS: usize> Witnessable<C> for MerkleCap<F, [W; DIGEST_ELEMENTS]>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    W: Witnessable<C> + Copy,
-    [W; DIGEST_ELEMENTS]: Borrow<[W; DIGEST_ELEMENTS]>,
+    W: Copy,
+    [W; DIGEST_ELEMENTS]: DigestWitness<C>,
 {
-    type WitnessVariable = [W::WitnessVariable; DIGEST_ELEMENTS];
+    type WitnessVariable = <[W; DIGEST_ELEMENTS] as DigestWitness<C>>::Variable;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
         assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
-        cap[0].read(builder)
+        cap[0].read_digest(builder)
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
         assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
-        cap[0].write(witness);
+        cap[0].write_digest(witness);
     }
 }
 
@@ -220,11 +277,18 @@ mod jagged_witness {
         wrap::{ZKMWrapWitnessValues, ZKMWrapWitnessVariable},
     };
 
-    impl<C> Witnessable<C> for ZKMCoreWitnessValues<KoalaBearPoseidon2>
+    impl<C, SC> Witnessable<C> for ZKMCoreWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+        SC: zkm_pcs::StarkGenericConfig
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
-        type WitnessVariable = ZKMCoreWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMCoreWitnessVariable<C, SC>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
@@ -316,11 +380,18 @@ mod jagged_witness {
         }
     }
 
-    impl<C> Witnessable<C> for ZKMDeferredWitnessValues<KoalaBearPoseidon2Compress>
+    impl<C, SC> Witnessable<C> for ZKMDeferredWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+        SC: zkm_pcs::StarkGenericConfig
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
-        type WitnessVariable = ZKMDeferredWitnessVariable<C, KoalaBearPoseidon2Compress>;
+        type WitnessVariable = ZKMDeferredWitnessVariable<C, SC>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
@@ -382,6 +453,48 @@ mod jagged_witness {
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
         type WitnessVariable = ZKMWrapWitnessVariable<C, KoalaBearPoseidon2Ring<P>>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
+            ZKMWrapWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_heights_per_input,
+                vk_merkle_data,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+        }
+    }
+
+    /// The Blake3 ring's wrap witness: the inner read with the ring's
+    /// digest form.
+    impl<C> Witnessable<C> for ZKMWrapWitnessValues<zkm_pcs::KoalaBearBlake3>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable = ZKMWrapWitnessVariable<C, zkm_pcs::KoalaBearBlake3>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);

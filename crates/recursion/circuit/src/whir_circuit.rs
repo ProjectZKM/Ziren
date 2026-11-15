@@ -83,7 +83,8 @@ pub struct RecursiveStackedWhirProof<F, EF, Dig> {
     pub batch_grinding_witness: F,
 }
 
-/// Extract the host-value mirror from a host stacked-WHIR proof.
+/// Extract the host-value mirror from a host stacked-WHIR proof of the
+/// inner ring.
 pub fn host_stacked_whir_to_recursive(
     proof: &zkm_pcs::whir::stacked::StackedWhirProof<
         InnerVal,
@@ -161,6 +162,105 @@ where
                                 values: Vec::new(),
                                 ef_values,
                                 path: l.proof.clone(),
+                            }
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
+        final_poly: whir.final_poly.clone(),
+        final_sumcheck_polys: conv_msgs(&whir.final_sumcheck_polys),
+        folding_pow: whir.folding_pow.iter().map(|p| p.0).collect(),
+        final_pow: whir.final_pow.0,
+        batch_evaluations: proof.batch_evaluations.clone(),
+        batch_grinding_witness: proof.batch_grinding_witness,
+    }
+}
+
+/// Extract the host-value mirror from a host stacked-WHIR proof of the
+/// Blake3 ring, its roots as limbs.
+pub fn host_stacked_whir_to_recursive_blake3(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<
+        InnerVal,
+        InnerChallenge,
+        zkm_pcs::kb31_blake3::Blake3Mmcs,
+    >,
+) -> RecursiveStackedWhirProof<
+    InnerVal,
+    InnerChallenge,
+    [InnerVal; crate::blake3_circuit::DIGEST_LIMBS],
+> {
+    host_stacked_whir_to_recursive_with(proof, crate::blake3_circuit::digest_limbs)
+}
+
+/// Extract the host-value mirror from a host stacked-WHIR proof, each
+/// root and path digest mapped to the elements the circuit carries it as.
+pub fn host_stacked_whir_to_recursive_with<MT, D, const N: usize>(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
+    digest: impl Fn(&D) -> [InnerVal; N],
+) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; N]>
+where
+    D: Copy,
+    MT: p3_commit::Mmcs<
+        InnerVal,
+        Commitment = p3_symmetric::MerkleCap<InnerVal, D>,
+        Proof = Vec<D>,
+    >,
+{
+    let whir = &proof.whir_proof;
+    let conv_msgs = |msgs: &[zkm_pcs::whir::proof::SumcheckPoly<InnerChallenge>]| {
+        msgs.iter()
+            .map(|p| {
+                assert_eq!(p.0.len(), 3, "whir sumcheck message must be degree 2");
+                [p.0[0], p.0[1], p.0[2]]
+            })
+            .collect::<Vec<_>>()
+    };
+    RecursiveStackedWhirProof {
+        round_sumcheck_polys: whir.round_sumcheck_polys.iter().map(|r| conv_msgs(r)).collect(),
+        round_ood_answers: whir.round_ood_answers.clone(),
+        round_commitments: whir
+            .round_commitments
+            .iter()
+            .map(|c| {
+                let roots = c.roots();
+                assert_eq!(roots.len(), 1, "whir round commitment must be a height-0 cap");
+                digest(&roots[0])
+            })
+            .collect(),
+        round_query_openings: whir
+            .round_query_openings
+            .iter()
+            .enumerate()
+            .map(|(i, op)| RecursiveWhirMerkleOpening {
+                leaves: op
+                    .leaves
+                    .iter()
+                    .map(|l| {
+                        if i == 0 {
+                            RecursiveWhirLeafOpening {
+                                values: l.values.clone(),
+                                ef_values: Vec::new(),
+                                path: l.proof.iter().map(&digest).collect(),
+                            }
+                        } else {
+                            use p3_field::BasedVectorSpace;
+                            const EXT_DEGREE: usize = 4;
+                            assert_eq!(l.values.len(), 1, "whir ef leaf is one matrix");
+                            let ef_values = l.values[0]
+                                .as_chunks::<EXT_DEGREE>()
+                                .0
+                                .iter()
+                                .map(|c| {
+                                    <InnerChallenge as BasedVectorSpace<InnerVal>>::
+                                        from_basis_coefficients_iter(c.iter().copied())
+                                    .expect("EF parse")
+                                })
+                                .collect();
+                            RecursiveWhirLeafOpening {
+                                values: Vec::new(),
+                                ef_values,
+                                path: l.proof.iter().map(&digest).collect(),
                             }
                         }
                     })

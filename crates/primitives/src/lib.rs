@@ -2,7 +2,7 @@
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_poseidon2::{ExternalLayerConstants, Poseidon2};
 //use p3_monty_31::{Poseidon2InternalLayerMonty31, Poseidon2ExternalLayerMonty31};
@@ -1148,14 +1148,33 @@ lazy_static! {
 }
 
 /// Append a single deferred proof to a hash chain of deferred proofs.
+///
+/// The recursion rebuilds this chain from the deferred proofs with its ring's
+/// public digest, Blake3 of the elements' canonical little-endian bytes read
+/// as the low [`DEFERRED_DIGEST_WORD_BITS`] bits of each word, so the guest
+/// hashes the same way.
 pub fn hash_deferred_proof(
     prev_digest: &[KoalaBear; 8],
     vk_digest: &[KoalaBear; 8],
     pv_digest: &[KoalaBear; 32],
 ) -> [KoalaBear; 8] {
-    let mut inputs = Vec::with_capacity(48);
-    inputs.extend_from_slice(prev_digest);
-    inputs.extend_from_slice(vk_digest);
-    inputs.extend_from_slice(pv_digest);
-    poseidon2_hash(inputs.to_vec())
+    let mut hasher = blake3::Hasher::new();
+    for value in prev_digest.iter().chain(vk_digest).chain(pv_digest) {
+        hasher.update(&value.as_canonical_u32().to_le_bytes());
+    }
+    let digest = hasher.finalize();
+    let bytes = digest.as_bytes();
+    core::array::from_fn(|i| {
+        let word = u32::from_le_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
+        KoalaBear::from_u32(word & ((1 << DEFERRED_DIGEST_WORD_BITS) - 1))
+    })
 }
+
+/// Bits of each word of a deferred-proof digest an element keeps, as the
+/// recursion's Blake3 public digests do.
+pub const DEFERRED_DIGEST_WORD_BITS: u32 = 30;

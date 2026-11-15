@@ -40,7 +40,7 @@ pub fn compute_groth16_public_values(
     guest_committed_values: &[u8],
     vk: &ZKMVerifyingKey,
 ) -> [String; 2] {
-    let vk_hash = vk.vk.hash_bn254().as_canonical_biguint().to_string();
+    let vk_hash = vk.hash_bn254().as_canonical_biguint().to_string();
 
     let committed_public_values = committed_public_values(guest_committed_values);
 

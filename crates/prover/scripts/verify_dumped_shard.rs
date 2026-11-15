@@ -21,9 +21,7 @@ use core::borrow::Borrow;
 
 use p3_challenger::CanObserve;
 use zkm_pcs::{MachineProver, ShardProof, StarkGenericConfig, Verifier};
-use zkm_prover::{
-    components::DefaultProverComponents, CoreSC, HashableKey, ZKMProver, ZKMVerifyingKey,
-};
+use zkm_prover::{components::DefaultProverComponents, CoreSC, ZKMProver, ZKMVerifyingKey};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -62,7 +60,7 @@ fn main() {
             machine.recursion_pins(),
             machine.has_public_value_buses(),
         );
-        println!("vk[{label}] hash: {:?}", key.hash_koalabear());
+        println!("vk[{label}] hash: {:?}", zkm_prover::types::RingVkDigest::ring_digest(key));
         match result {
             Ok(()) => println!("  VERDICT: ACCEPT -- sound under this key; the circuit diverges"),
             Err(e) => println!("  VERDICT: REJECT -- {e:?}"),

@@ -17,7 +17,6 @@ use p3_air::BaseAir;
 use zkm_core_machine::mips::MipsAir;
 use zkm_pcs::{
     air::{capture_machine_constraints, MachineAir},
-    koala_bear_poseidon2::KoalaBearPoseidon2,
     StarkGenericConfig, Val,
 };
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
@@ -182,7 +181,7 @@ fn whir_schedule(
 }
 
 fn main() {
-    let core = MipsAir::<Val<CoreSC>>::machine(KoalaBearPoseidon2::default());
+    let core = MipsAir::<Val<CoreSC>>::machine(CoreSC::default());
     census("core", &core);
     let compress = CompressAir::<Val<InnerSC>>::compress_machine(InnerSC::default());
     census("compress", &compress);

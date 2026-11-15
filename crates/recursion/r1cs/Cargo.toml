@@ -1,0 +1,25 @@
+[package]
+name = "zkm-recursion-r1cs"
+description = "Compiles recursion programs into word-level constraint systems over binary fields"
+readme = "../../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+blake3 = { workspace = true, features = ["std"] }
+p3-binary-pcs = { workspace = true }
+p3-field = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-word = { workspace = true }
+p3-word-backend = { workspace = true }
+postcard = { version = "1.1", features = ["alloc"] }
+thiserror = "1.0.60"
+zkm-binary-stark = { workspace = true }
+zkm-recursion-core = { workspace = true }
+
+[dev-dependencies]
+rand = "0.8.5"

@@ -107,7 +107,7 @@ pub trait JaggedEvalRoundEngine {
     fn run_all_rounds_fs(
         &mut self,
         _claimed_sum: InnerChallenge,
-        _sponge: &DuplexSnapshot,
+        _sponge: &TranscriptSnapshot,
     ) -> Option<(Vec<InnerChallenge>, Vec<InnerChallenge>)> {
         None
     }
@@ -130,6 +130,28 @@ pub struct DuplexSnapshot {
     pub state: [InnerVal; 16],
     pub input: Vec<InnerVal>,
     pub output: Vec<InnerVal>,
+}
+
+/// The ring's transcript at sumcheck entry, for a device engine running the
+/// whole transcript: the Poseidon2 ring's duplex or the Blake3 ring's byte
+/// sponge.
+pub enum TranscriptSnapshot {
+    Duplex(DuplexSnapshot),
+    Blake3(crate::kb31_blake3::Blake3WordSnapshot),
+}
+
+/// The snapshot of `challenger` when its ring has a device transcript.
+fn transcript_snapshot<C: 'static>(challenger: &C) -> Option<TranscriptSnapshot> {
+    let any = challenger as &dyn core::any::Any;
+    if let Some(dc) = any.downcast_ref::<InnerChallenger>() {
+        return Some(TranscriptSnapshot::Duplex(DuplexSnapshot {
+            state: dc.sponge_state,
+            input: dc.input_buffer.clone(),
+            output: dc.output_buffer.clone(),
+        }));
+    }
+    any.downcast_ref::<crate::kb31_blake3::Blake3Challenger>()
+        .map(|b| TranscriptSnapshot::Blake3(b.word_snapshot()))
 }
 
 type JaggedEvalEngineFactory =
@@ -633,13 +655,7 @@ fn structural_jagged_eval_sumcheck_with_engine<
     };
 
     if !verify {
-        if let Some(dc) = (challenger as &mut dyn core::any::Any).downcast_mut::<InnerChallenger>()
-        {
-            let snap = DuplexSnapshot {
-                state: dc.sponge_state,
-                input: dc.input_buffer.clone(),
-                output: dc.output_buffer.clone(),
-            };
+        if let Some(snap) = transcript_snapshot(&*challenger) {
             if let Some((coeffs, alphas)) = engine.run_all_rounds_fs(claimed_sum, &snap) {
                 assert_eq!(coeffs.len(), 3 * n, "device-FS coeff count");
                 assert_eq!(alphas.len(), n, "device-FS alpha count");
@@ -649,9 +665,9 @@ fn structural_jagged_eval_sumcheck_with_engine<
                 for round in 0..n {
                     let poly = UnivariatePolynomial::new(coeffs[3 * round..3 * round + 3].to_vec());
                     for &c in &poly.coefficients {
-                        dc.observe_algebra_element(c);
+                        challenger.observe_algebra_element(c);
                     }
-                    let alpha: InnerChallenge = dc.sample_algebra_element();
+                    let alpha: InnerChallenge = challenger.sample_algebra_element();
                     assert_eq!(
                         alpha, alphas[round],
                         "device-FS transcript divergence at round {round}"

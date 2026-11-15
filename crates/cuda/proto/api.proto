@@ -8,6 +8,7 @@ service ProverService {
     rpc ProveCore(ProveCoreRequest) returns (ProveCoreResponse) {}
     rpc ProveCoreStateless(ProveCoreRequest) returns (ProveCoreResponse) {}
     rpc Compress(CompressRequest) returns (CompressResponse) {}
+    rpc CompressBinary(CompressRequest) returns (CompressResponse) {}
     rpc Shrink(ShrinkRequest) returns (ShrinkResponse) {}
     rpc Wrap(WrapRequest) returns (WrapResponse) {}
 }

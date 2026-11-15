@@ -1,0 +1,55 @@
+\section{The compress compiler}\label{sec:compiler}
+
+The compiler turns a recursion verifier into a circuit that the compress stage proves. Its input is a straight-line program; its output is a \emph{registry} of uniform gate tables, a \emph{wiring} that connects their cells, and a \emph{layout} of the committed witness. This section describes the three; \S\ref{sec:protocol} describes how the result is proved.
+
+\subsection{Why compile}
+
+The prototype compress stage proves the verifier by \emph{executing} it: its multi-STARK has an instruction ledger, memory tables for constants and variables, and one table per operation family, connected by buses. That design is general, but it pays twice for generality. The ledger and memory tables hold every read and write of the program ($2^{22}$ and $2^{19}$ rows in a measured leaf) only to establish a dataflow that is known before proving. And every \KB{} multiplication goes through a table that emulates it bit by bit.
+
+A recursion verifier needs neither kind of generality. For a fixed proof shape, the verifier is a fixed straight-line program: the same operations on the same operands in the same order, with only the values changing. The verifying keys of the core stage are enumerated in an allowlist, so the set of leaf programs is finite and known at key generation, and so is the set of node programs. A fixed program can be compiled to a fixed circuit once per shape, and its dataflow becomes a fixed permutation of cells instead of a memory argument.
+
+\subsection{Front end: verifier programs}
+
+\paragraph{Leaf programs.} The recursion compiler already turns the core verifier into a straight-line program over \KB{}, $\EF$, bits and \Blake{} compressions: $0.88$--$2.47$ million instructions per program in a measured block, $1.18$--$1.25$ million for a typical leaf (\S\ref{sec:cost}). The compress compiler takes this program as its input. Its operations are: \KB{} and $\EF$ addition, subtraction, multiplication and inversion; conversion between an $\EF$ element and its four \KB{} coordinates; bit decomposition of a \KB{} element; selection by a bit; equality assertion; \Blake{} compression; and the transcript's conversion of digests to \KB{} limbs.
+
+\paragraph{Node programs.} A node verifies proofs of the compress stage itself, so its verifier works in $\Ft$. Instead of writing that verifier twice, the node program is recorded by running the stage's own verifier over a value type that records every operation applied to it. The recording agrees with the verifier on every transcript step by construction. Its operations are $\Ft$ addition (free), $\Ft$ multiplication, \Blake{} compression, bit slicing of digests, and equality assertion. A measured second-level node program has $7.1\times 10^5$ operations, of which $2.4\times 10^5$ are multiplications and $3.2\times 10^5$ additions, and hashes $1.25$\,MB in $19{,}857$ compressions.
+
+\subsection{Middle: three table classes}
+
+Each operation of a program is assigned to one row of one \emph{gate table}. Every row of a table is the same small circuit; a table with $m$ rows is a batch of $m$ identical blocks, which is what makes it cheap to prove (\S\ref{sec:protocol-tables}). The compiler uses three classes, chosen by what the operation computes.
+
+\paragraph{Boolean tables (rank one over $\GFtwo$).} A Boolean table's block is an R1CS over $\GFtwo$ in identity-output form: each committed bit $z_i$ is defined by $(A_0 z)_i \cdot (B_0 z)_i = z_i$, where $A_0 z$ and $B_0 z$ are \XOR{}s of bits. \XOR{}s are substituted into the matrices and never committed; only inputs, outputs and \AND{} products are. This is \Flock{}'s circuit form~\citep{flock}. The compiler uses Boolean tables for \Blake{} compressions, for bit decompositions and slicing, for selection and for the parity checks of \S\ref{sec:compiler-words}. A \Blake{} compression block is \Flock{}'s, about $10^4$ \AND{} constraints with fused carry-save adders for the 32-bit additions.
+
+\paragraph{Element tables (rank one over $\Ft$).} An element table's block is an R1CS whose variables are whole $\Ft$ elements: $(A_0 z_j + a)\cdot(B_0 z_j + b) = z_j$ with sparse $A_0, B_0$ over $\Ft$ and constants with disjoint supports, so that an all-zero row is satisfying. One $\Ft$ multiplication is one constraint, where a Boolean table would need about $2{,}187$. The compiler uses element tables for the arithmetic of node programs. This is \Flock{}'s large-field table class.
+
+\paragraph{Word tables (64-bit \AND{} and \MUL{}).}\label{sec:compiler-words} A word table's variables are 64-bit words, and its constraints are of two kinds, as in \Binius{}~\citep{binius64}:
+\[
+\textstyle \AND:\ \big(\bigoplus_i w_{a_i} \ll s_i\big) \mathbin{\&} \big(\bigoplus_j w_{b_j} \ll t_j\big) = \bigoplus_k w_{c_k} \ll u_k,
+\qquad
+\MUL:\ p \cdot q = 2^{64}\,h + \ell,
+\]
+where each operand of a \MUL{} is likewise an \XOR{} of shifted words and the product is over the integers. Shifts and \XOR{}s are free. A 64-bit integer addition costs one \AND{} constraint on its carry word. The compiler uses word tables for all \KB{} and $\EF$ arithmetic.
+
+\subsection{Lowering \KB{} arithmetic}
+
+A \KB{} element is held as a word whose value is its canonical representative, below $p$. Every word that holds a \KB{} element is range-checked once, where it is produced; consumers rely on the wiring. With $\delta = 2^{64} - p$, the check $c < p$ is the absence of a carry in $c + \delta$, one \AND{} constraint.
+
+\paragraph{Multiplication.} To prove $c = a\cdot b \bmod p$ the prover supplies the quotient $k$ and the circuit checks
+\[
+a \cdot b = 2^{64}\cdot 0 + \ell, \qquad k \cdot p = 2^{64}\cdot 0 + \ell', \qquad \ell' + c = \ell, \qquad c < p .
+\]
+That is two \MUL{} constraints, one addition and one range check: two \MUL{}s and two \AND{}s. Both products are below $2^{62}$, so both high words are the constant zero.
+
+\paragraph{Extension multiplication.} For $x, y \in \EF$ with coordinates $x_i, y_j$, each output coordinate is $\sum_{i+j=t} x_i y_j + 3\sum_{i+j=t+4} x_i y_j$, a sum of four products. The circuit forms the sixteen products with \MUL{}s, multiplies the wrapped ones by three with a shift and an addition, accumulates each coordinate in two words (the sum is below $2^{66}$), and reduces each coordinate once with a \MUL{} against $p$ whose high word is now live. The total is twenty \MUL{}s and about thirty \AND{}s; Karatsuba's identity lowers the product count to nine at the price of signed intermediate sums, for thirteen \MUL{}s.
+
+\paragraph{Other operations.} Addition is one addition and one conditional subtraction of $p$, two \AND{}s. Inversion is a supplied inverse and a multiplication checked against one. Conversion between $\EF$ and its coordinates is wiring. Bit decomposition is free in a word, because a word's bits are its committed columns; it needs one \AND{} to show that the bits above $30$ are zero. Appendix~\ref{app:lowering} lists every operation with its class and cost.
+
+\subsection{Back end: wiring and layout}\label{sec:compiler-wiring}
+
+\paragraph{Cells and wires.} A \emph{cell} is one wireable committed value of one row of one table: an input or output port of a gate. The program's dataflow is a set of \emph{wires}, each the set of cells that must hold the same value: the producer of a value and every consumer. A wire's cells form one orbit of a permutation $\sigma$ on the cell space, and $\sigma$ is fixed by the program. Public inputs and outputs are cells of a public table whose values the verifier supplies.
+
+\paragraph{No memory.} The prototype's ledger and memory tables disappear. A read of a constant becomes a cell of the public table or a constant in a gate's matrix; a read of a variable becomes membership of the consumer's cell in the producer's wire. There is no address, no timestamp and no multiset of reads and writes.
+
+\paragraph{Cross-class wires.} A wire may cross table classes: a \KB{} product computed in a word table feeds a bit decomposition in a Boolean table, and a \Blake{} digest computed in a Boolean table feeds a transcript limb in a word table. The cell space is defined over \emph{words of the committed polynomial}, so that a 64-bit word, 64 packed bits and the low half of an $\Ft$ element are all comparable. The compiler places such ports at a common width and pads the rest with zeros.
+
+\paragraph{Layout.} Each table's witness is laid out batch-major, with the row index in the low bits, and the tables are stacked into one jagged commitment~\citep{jagged-pcs} so that each table pays for its real height. The registry, the heights, the layout and a commitment to $\sigma$ together form the circuit's verifying key.

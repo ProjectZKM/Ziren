@@ -11,7 +11,10 @@ use crate::{
     chips::{
         alu_base::{BaseAluChip, NUM_BASE_ALU_ENTRIES_PER_ROW},
         alu_ext::{ExtAluChip, NUM_EXT_ALU_ENTRIES_PER_ROW},
+        blake3::Blake3CompressChip,
+        byte::{ByteChip, NUM_BYTE_ROWS},
         ext2felt::Ext2FeltChip,
+        felt_limbs::FeltLimbsChip,
         mem::{
             constant::NUM_CONST_MEM_ENTRIES_PER_ROW, variable::NUM_VAR_MEM_ENTRIES_PER_ROW,
             MemoryConstChip, MemoryVarChip,
@@ -39,6 +42,9 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     BaseAlu(BaseAluChip),
     ExtAlu(ExtAluChip),
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
+    Blake3Compress(Blake3CompressChip),
+    FeltLimbs(FeltLimbsChip),
+    Byte(ByteChip),
     Select(SelectChip),
     Ext2Felt(Ext2FeltChip<F>),
     PrefixSumChecks(PrefixSumChecksChip),
@@ -54,6 +60,10 @@ pub struct RecursionAirEventCount {
     pub base_alu_events: usize,
     pub ext_alu_events: usize,
     pub poseidon2_wide_events: usize,
+    /// One per `Blake3Compress` instruction.
+    pub blake3_compress_events: usize,
+    /// One per `FeltLimbs` instruction.
+    pub felt_limbs_events: usize,
     pub fri_fold_events: usize,
     pub batch_fri_events: usize,
     pub select_events: usize,
@@ -79,6 +89,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::Blake3Compress(Blake3CompressChip),
+            RecursionAir::FeltLimbs(FeltLimbsChip),
+            RecursionAir::Byte(ByteChip),
             RecursionAir::Select(SelectChip),
             RecursionAir::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::PrefixSumChecks(PrefixSumChecksChip),
@@ -98,6 +111,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::Blake3Compress(Blake3CompressChip),
+            RecursionAir::FeltLimbs(FeltLimbsChip),
+            RecursionAir::Byte(ByteChip),
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
@@ -118,6 +134,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::Blake3Compress(Blake3CompressChip),
+            RecursionAir::FeltLimbs(FeltLimbsChip),
+            RecursionAir::Byte(ByteChip),
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
@@ -129,12 +148,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
 
     pub fn shrink_shape() -> RecursionShape {
         let shape: std::collections::BTreeMap<String, usize> = [
-            (Self::MemoryVar(MemoryVarChip::default()), 1 << 18),
+            (Self::MemoryVar(MemoryVarChip::default()), 1 << 19),
             (Self::Select(SelectChip), 1 << 18),
             (Self::MemoryConst(MemoryConstChip::default()), 1 << 17),
-            (Self::BaseAlu(BaseAluChip), 1 << 17),
-            (Self::ExtAlu(ExtAluChip), 1 << 15),
-            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 1 << 16),
+            (Self::BaseAlu(BaseAluChip), 1 << 18),
+            (Self::ExtAlu(ExtAluChip), 1 << 19),
+            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 1 << 5),
+            (Self::Blake3Compress(Blake3CompressChip), 1 << 15),
+            (Self::FeltLimbs(FeltLimbsChip), 1 << 18),
+            (Self::Byte(ByteChip), NUM_BYTE_ROWS),
             (Self::PublicValues(PublicValuesChip), 1 << PUB_VALUES_LOG_HEIGHT),
         ]
         .into_iter()
@@ -166,6 +188,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
                 heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
             ),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
+            (Self::Blake3Compress(Blake3CompressChip), heights.blake3_compress_events),
+            (Self::FeltLimbs(FeltLimbsChip), heights.felt_limbs_events),
+            (Self::Byte(ByteChip), NUM_BYTE_ROWS),
             (Self::Select(SelectChip), heights.select_events),
             (Self::Ext2Felt(Ext2FeltChip::default()), heights.ext2felt_events),
             (Self::PrefixSumChecks(PrefixSumChecksChip), heights.prefix_sum_checks_events),
@@ -184,6 +209,8 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::ExtAlu(_) => self.ext_alu_events += 1,
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
+            Instruction::Blake3Compress(_) => self.blake3_compress_events += 1,
+            Instruction::FeltLimbs(_) => self.felt_limbs_events += 1,
             Instruction::Select(_) => self.select_events += 1,
             Instruction::Hint(HintInstr { output_addrs_mults })
             | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
@@ -426,6 +453,23 @@ pub mod tests {
         }
 
         test_instructions(instructions);
+    }
+
+    /// The main and preprocessed width of every chip of the compress
+    /// machine, for sizing the recursion shape classes.
+    #[test]
+    fn chip_width_census() {
+        use p3_air::BaseAir;
+        use zkm_pcs::air::MachineAir;
+        let machine = A::compress_machine(KoalaBearPoseidon2::default());
+        for chip in machine.chips() {
+            println!(
+                "[WIDTHS] {} main={} prep={}",
+                MachineAir::<F>::name(chip),
+                BaseAir::<F>::width(&chip.air),
+                BaseAir::<F>::preprocessed_width(chip)
+            );
+        }
     }
 }
 

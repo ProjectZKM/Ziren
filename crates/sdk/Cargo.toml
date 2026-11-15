@@ -21,6 +21,7 @@ reqwest = { version = "0.11", default-features = false, features = [
 ], optional = true }
 anyhow = "1.0.83"
 zkm-prover = { workspace = true }
+zkm-recursion-core = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-build = { workspace = true }
 futures = "0.3.30"

@@ -215,7 +215,7 @@ pub fn whir_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 //     the SAME `packing.offsets` / `packing.column_counts` the recursion
 //     lift reconstructs (`shard_level_witness.rs` `packing_row_counts`),
 //     so the in-circuit recompute hashes the identical felt sequence.
-//   * felts are `from_canonical_usize` (wraps mod the field order — the
+//   * felts are `from_usize` (wraps mod the field order — the
 //     in-circuit verifier guards each count `< F::ORDER` so the wrap can
 //     never be exploited; see the recursion guards).
 
@@ -264,9 +264,9 @@ pub fn jagged_geometry_hash(row_counts: &[usize], column_counts: &[usize]) -> [J
     let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
     let hasher = crate::kb31_poseidon2::InnerHash::new(perm);
     let len = column_counts.len();
-    let iter = core::iter::once(JaggedVal::from_canonical_usize(len))
-        .chain(row_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)))
-        .chain(column_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)));
+    let iter = core::iter::once(JaggedVal::from_usize(len))
+        .chain(row_counts.iter().map(|&c| JaggedVal::from_usize(c)))
+        .chain(column_counts.iter().map(|&c| JaggedVal::from_usize(c)));
     hasher.hash_iter(iter)
 }
 

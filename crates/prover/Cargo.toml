@@ -14,11 +14,16 @@ p3-air = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-matrix = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
+zkm-binary-recursion = { workspace = true }
+zkm-binary-stark = { workspace = true }
 zkm-recursion-core = { workspace = true }
+zkm-recursion-r1cs = { workspace = true }
+p3-word = { workspace = true }
 zkm-recursion-circuit = { workspace = true }
 zkm-recursion-gnark-ffi = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-pcs = { workspace = true }
+p3-blake3 = { workspace = true }
 p3-symmetric = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-primitives = { workspace = true }
@@ -63,9 +68,6 @@ path = "scripts/build_plonk_bn254.rs"
 name = "build_groth16_bn254"
 path = "scripts/build_groth16_bn254.rs"
 
-[[bin]]
-name = "build_compress_vks"
-path = "scripts/build_compress_vks.rs"
 
 [[bin]]
 name = "verify_dumped_shard"
@@ -79,9 +81,6 @@ path = "scripts/list_shapes.rs"
 name = "merge_vk_maps"
 path = "scripts/merge_vk_maps.rs"
 
-[[bin]]
-name = "regen_vks_for_tests"
-path = "scripts/regen_vks_for_tests.rs"
 
 [[bin]]
 name = "time_prover_new"
@@ -95,13 +94,6 @@ path = "scripts/post_trusted_setup.rs"
 name = "check_vk_coverage"
 path = "scripts/check_vk_coverage.rs"
 
-[[bin]]
-name = "prove_dump"
-path = "scripts/prove_dump.rs"
-
-[[bin]]
-name = "find_recursion_shapes"
-path = "scripts/find_recursion_shapes.rs"
 
 [features]
 default = ["native-gnark"]
@@ -117,6 +109,3 @@ imm-wrap-vk = ["zkm-recursion-core/imm-wrap-vk"]
 # review needs to read off the signature.
 type_complexity = "allow"
 
-[[bin]]
-name = "proof_breakdown"
-path = "scripts/proof_breakdown.rs"

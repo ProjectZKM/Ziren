@@ -1,0 +1,17 @@
+\section{Soundness obligations}\label{sec:soundness}
+
+The design composes known arguments. This section lists what each contributes to the soundness error and the obligations the composition adds; it does not yet give a bound.
+
+\paragraph{Sumchecks over $\Ft$.} Every zerocheck, lincheck, GKR layer and the wiring grand product is a sumcheck over $\Ft$. A round with a degree-$d$ univariate message errs with probability at most $d/2^{128}$; with degrees at most four and fewer than $2^{12}$ rounds per proof, the total is below $2^{-114}$.
+
+\paragraph{The \MUL{} argument.} The exponent check proves $pq \equiv 2^{64}h + \ell \pmod{2^{128}-1}$. Equality over the integers follows from the bound $pq < 2^{128}-1$ and the parity check that excludes $h = \ell = 2^{64}-1$; the oblong batching of the 64 exponent bits adds an error of at most $64/2^{128}$.
+
+\paragraph{Range of \KB{} values.} The lowering of \S\ref{sec:compiler} is sound only if every word that holds a \KB{} element is below $p$, and every quotient below its stated bound. The compiler emits a range check at each producer; consumers inherit the bound through the wiring. An obligation for the compiler's implementation is that no producer omits the check, which is a property of the lowering rules and can be checked statically over the registry.
+
+\paragraph{Wiring.} The grand-product identity holds with probability at most $(\text{cells})/2^{128}$ for a wrong assignment, by the Schwartz--Zippel lemma on the product polynomial. Both sides' cell values must be bound to the committed witness; binding only one side leaves the other prover-chosen, a known pitfall that \Flock{}'s implementation tests against.
+
+\paragraph{\WHIR{} over $\Ft$.} The opening's soundness follows from the proximity-gap analysis of Reed--Solomon codes~\citep{proximity-gaps,proximity-gaps-2025} and the \WHIR{} round analysis~\citep{whir}, with $\Ft$ challenges. \Flock{} samples its folding challenges from $\F_{2^{256}}$ for its 128-bit profile. We target at least $100$ bits per stage, as the core stage does; whether $\Ft$ challenges suffice at our rates, or some rounds need an extension, is a parameter choice to be fixed with the same accounting the core stage uses.
+
+\paragraph{Transcript binding across the field boundary.} The core transcript binds $240$ bits of each \Blake{} root (\S\ref{sec:core}). The leaf circuit must reproduce exactly that conversion, so that the challenges it derives are the challenges the core prover used. The node circuit binds its children's roots in full.
+
+\paragraph{Preprocessed polynomials.} The base matrices of every table and the wiring permutation are committed as part of the verifying key. Their commitment must be bound into the transcript before any challenge, and the verifying key itself must be checked against the allowlist at each level, as in the core stage.

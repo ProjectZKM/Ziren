@@ -130,6 +130,10 @@ impl<'a> Prove<'a> {
 
         crate::utils::zkm_dump(&pk.elf, &stdin);
 
+        if kind != ZKMProofKind::Core && !stdin.proofs.is_empty() {
+            anyhow::bail!("deferred proofs are not supported by the binary compress");
+        }
+
         Ok(prover.prove_impl(pk, stdin, proof_opts, context, kind, None)?.0)
     }
 

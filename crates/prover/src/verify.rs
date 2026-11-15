@@ -17,19 +17,15 @@ use zkm_pcs::{
     StarkGenericConfig, VerificationError, Word,
 };
 use zkm_recursion_circuit::machine::RootPublicValues;
-use zkm_recursion_core::{
-    air::RecursionPublicValues, hash_vkey_with_part_vk, stark::KoalaBearPoseidon2Outer,
-};
+use zkm_recursion_core::{hash_vkey_with_part_vk, stark::KoalaBearPoseidon2Outer};
 use zkm_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
 };
 
 use crate::{
-    build::zkm_imm_wrap_vk_mode,
-    components::ZKMProverComponents,
-    utils::{is_recursion_public_values_valid, is_root_public_values_valid},
-    CompressedSC, CoreSC, HashableKey, OuterSC, ShrinkSC, ZKMCoreProofData, ZKMProver,
-    ZKMVerifyingKey,
+    build::zkm_imm_wrap_vk_mode, components::ZKMProverComponents, types::RingDigests,
+    utils::is_root_public_values_valid, CompressedSC, CoreSC, HashableKey, OuterSC, ShrinkSC,
+    ZKMCoreProofData, ZKMProver, ZKMVerifyingKey,
 };
 
 #[derive(Error, Debug)]
@@ -241,87 +237,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(())
     }
 
-    /// Verify a compressed proof.
-    pub fn verify_compressed(
-        &self,
-        proof: &ZKMReduceProof<CompressedSC>,
-        vk: &ZKMVerifyingKey,
-    ) -> Result<(), MachineVerificationError<CompressedSC>> {
-        let ZKMReduceProof { vk: compress_vk, proof } = proof;
-        let mut challenger = self.root_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
-        self.root_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
-
-        let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
-        if !is_recursion_public_values_valid(self.root_prover.machine().config(), public_values) {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "recursion public values are invalid",
-            ));
-        }
-
-        if public_values.vk_root != self.recursion_vk_root {
-            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
-        }
-
-        crate::vk_collect_record(&compress_vk.hash_koalabear());
-        if self.vk_verification
-            && !self.recursion_vk_map.contains_key(&compress_vk.hash_koalabear())
-        {
-            return Err(MachineVerificationError::InvalidVerificationKey);
-        }
-
-        if public_values.is_complete != KoalaBear::ONE {
-            return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
-        }
-
-        let vkey_hash = vk.hash_koalabear();
-        if public_values.zkm_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
-        }
-
-        Ok(())
-    }
-
-    /// Verify a shrink proof.
-    pub fn verify_shrink(
-        &self,
-        proof: &ZKMReduceProof<ShrinkSC>,
-        vk: &ZKMVerifyingKey,
-    ) -> Result<(), MachineVerificationError<ShrinkSC>> {
-        let mut challenger = self.shrink_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
-        self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
-
-        let public_values: &RecursionPublicValues<_> =
-            proof.proof.public_values.as_slice().borrow();
-        if !is_recursion_public_values_valid(self.compress_prover.machine().config(), public_values)
-        {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "recursion public values are invalid",
-            ));
-        }
-
-        if public_values.vk_root != self.recursion_vk_root {
-            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
-        }
-
-        crate::vk_collect_record(&proof.vk.hash_koalabear());
-        if self.vk_verification && !self.recursion_vk_map.contains_key(&proof.vk.hash_koalabear()) {
-            return Err(MachineVerificationError::InvalidVerificationKey);
-        }
-
-        if public_values.is_complete != KoalaBear::ONE {
-            return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
-        }
-
-        let vkey_hash = vk.hash_koalabear();
-        if public_values.zkm_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
-        }
-
-        Ok(())
-    }
-
     /// Verify a wrap bn254 proof.
     pub fn verify_wrap_bn254(
         &self,
@@ -335,7 +250,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         self.wrap_prover.machine().verify(wrap_vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
-        if !is_root_public_values_valid(self.shrink_prover.machine().config(), public_values) {
+        if !is_root_public_values_valid(&ShrinkSC::default(), public_values) {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "root public values are invalid",
             ));
@@ -344,11 +259,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        if *public_values.vk_root() != self.recursion_vk_root {
+        if *public_values.vk_root() != self.vk_root_felts() {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
-        let vkey_hash = vk.hash_koalabear();
+        let vkey_hash = <CoreSC as RingDigests>::vk_public_digest(&vk.vk);
         if *public_values.zkm_vk_digest() != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
@@ -370,7 +285,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.vk_root_felts()).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(PlonkVerificationError::InvalidVerificationKey.into());
         }
@@ -396,7 +311,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.vk_root_felts()).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(Groth16VerificationError::InvalidVerificationKey.into());
         }
@@ -473,32 +388,13 @@ pub fn groth16_vk_hash(vk: &ZKMVerifyingKey) -> Result<BigUint> {
 impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
-        proof: &zkm_core_machine::reduce::ZKMReduceProof<CompressedSC>,
-        vk: &zkm_pcs::StarkVerifyingKey<CoreSC>,
-        vk_hash: [u32; 8],
-        committed_value_digest: [u32; 8],
+        _proof: &zkm_core_machine::reduce::ZKMReduceProof<CompressedSC>,
+        _vk: &zkm_pcs::StarkVerifyingKey<CoreSC>,
+        _vk_hash: [u32; 8],
+        _committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<CompressedSC>> {
-        if vk.hash_u32() != vk_hash {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "vk hash from syscall does not match vkey from input",
-            ));
-        }
-        self.verify_compressed(
-            &ZKMReduceProof { vk: proof.vk.clone(), proof: proof.proof.clone() },
-            &ZKMVerifyingKey { vk: vk.clone() },
-        )?;
-        let public_values: &RecursionPublicValues<_> =
-            proof.proof.public_values.as_slice().borrow();
-        if public_values.vk_root != self.recursion_vk_root {
-            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
-        }
-        for (i, word) in public_values.committed_value_digest.iter().enumerate() {
-            if *word != committed_value_digest[i].into() {
-                return Err(MachineVerificationError::InvalidPublicValues(
-                    "committed_value_digest does not match",
-                ));
-            }
-        }
-        Ok(())
+        Err(MachineVerificationError::InvalidPublicValues(
+            "deferred proofs are not supported by the binary compress",
+        ))
     }
 }

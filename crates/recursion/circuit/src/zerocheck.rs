@@ -534,7 +534,7 @@ where
 
         verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
 
-        let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+        let len_felt: Felt<C::F> = builder.constant(C::F::from_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);
         for opening in opened_values.chips.iter() {
             crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(

@@ -448,7 +448,8 @@ where
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
+            build_jagged_verify_inputs, verify_jagged_inner_generic,
+            JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {

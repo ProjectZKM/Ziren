@@ -60,6 +60,8 @@ pub enum ZKMVerificationError {
     Plonk(anyhow::Error),
     #[error("Groth16 verification error: {0}")]
     Groth16(anyhow::Error),
+    #[error("Binary verification error: {0}")]
+    Binary(zkm_prover::ZKMRecursionProverError),
     /// `ZKMProof` is public and deserializable, so a structurally impossible
     /// value (an empty `Core` shard vector) is reachable input, not a bug.
     #[error("Malformed proof")]
@@ -68,6 +70,14 @@ pub enum ZKMVerificationError {
     /// `CompressToGroth16`. Previously `unreachable!()`.
     #[error("Unsupported proof kind")]
     UnsupportedProofKind,
+}
+
+/// The error of a proof mode that needs the BN254 wrap, which is not yet
+/// built over the binary compress root.
+pub(crate) fn wrap_unsupported(kind: ZKMProofKind) -> String {
+    format!(
+        "{kind:?} proofs need the BN254 wrap over the binary compress root, which is not built yet"
+    )
 }
 
 /// An implementation of [crate::ProverClient].
@@ -182,18 +192,17 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     .map_err(ZKMVerificationError::Core)
             }
             ZKMProof::Compressed(proof) => {
-                if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+                let values = &proof.root.public_values;
+                if values.len() < zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
                     return Err(ZKMVerificationError::MalformedProof);
                 }
-                let public_values: &PublicValues<Word<_>, _> =
-                    proof.proof.public_values.as_slice().borrow();
-
+                let public_values: &zkm_recursion_core::air::RecursionPublicValues<u32> =
+                    values.as_slice().borrow();
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
-                    .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
+                    .flat_map(|w| w.0.iter().map(|&x| x as u8))
                     .collect_vec();
-
                 for (a, b) in
                     committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
                 {
@@ -201,10 +210,9 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                         return Err(ZKMVerificationError::InvalidPublicValues);
                     }
                 }
-
                 self.zkm_prover()
-                    .verify_compressed(proof, vkey)
-                    .map_err(ZKMVerificationError::Recursion)
+                    .verify_binary_compressed(proof, vkey, None)
+                    .map_err(ZKMVerificationError::Binary)
             }
             ZKMProof::Plonk(proof) => self
                 .zkm_prover()

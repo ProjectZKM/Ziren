@@ -12,31 +12,29 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use p3_field::{PrimeCharacteristicRing, PrimeField};
+use p3_field::PrimeField;
 use p3_koala_bear::KoalaBear;
-use zkm_prover::{utils::koalabears_to_bn254, InnerSC};
+use zkm_prover::{types::RingDigests, utils::koalabears_to_bn254, InnerSC, VkDigest};
 use zkm_recursion_circuit::merkle_tree::MerkleTree;
-
-const DIGEST_SIZE: usize = 8;
 
 fn main() {
     let map_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vk_map.bin");
     let bytes = std::fs::read(&map_path).expect("read vk_map.bin");
-    let allowed: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+    let allowed: BTreeMap<VkDigest, usize> =
         bincode::deserialize(&bytes).expect("deserialize vk_map.bin");
     println!("vk_map.bin: {} keys", allowed.len());
 
-    let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed.keys().copied().collect();
+    let mut leaves: Vec<VkDigest> = allowed.keys().copied().collect();
     assert!(
         leaves.len() <= (1 << zkm_prover::VK_MERKLE_TREE_HEIGHT),
         "vk_map has {} keys, exceeding the fixed merkle capacity 2^{}",
         leaves.len(),
         zkm_prover::VK_MERKLE_TREE_HEIGHT
     );
-    leaves.resize(1 << zkm_prover::VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
+    leaves.resize(1 << zkm_prover::VK_MERKLE_TREE_HEIGHT, VkDigest::default());
     let (root, _tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
 
-    let bigint = koalabears_to_bn254(&root).as_canonical_biguint();
+    let bigint = koalabears_to_bn254(&InnerSC::public_felts(root)).as_canonical_biguint();
     let be = bigint.to_bytes_be();
     let mut out = [0u8; 32];
     out[32 - be.len()..].copy_from_slice(&be);

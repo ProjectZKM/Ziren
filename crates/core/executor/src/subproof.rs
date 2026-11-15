@@ -1,10 +1,13 @@
 //! Types and methods for subproof verification inside the [`crate::Executor`].
 
 use crate::ZKMReduceProof;
-use zkm_pcs::{
-    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
-    MachineVerificationError, StarkVerifyingKey,
-};
+use zkm_pcs::{KoalaBearBlake3, MachineVerificationError, StarkVerifyingKey};
+
+/// The ring of a core proof's verifying key.
+pub type SubproofCoreRing = KoalaBearBlake3;
+
+/// The ring of a compressed proof.
+pub type SubproofCompressedRing = KoalaBearBlake3;
 
 /// Verifier used in runtime when `zkm_zkvm::precompiles::verify::verify_zkm_proof` is called. This
 /// is then used to sanity check that the user passed in the correct proof; the actual constraints
@@ -16,11 +19,11 @@ pub trait SubproofVerifier: Sync + Send {
     /// Verify a deferred proof.
     fn verify_deferred_proof(
         &self,
-        proof: &ZKMReduceProof<KoalaBearPoseidon2Compress>,
-        vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
+        proof: &ZKMReduceProof<SubproofCompressedRing>,
+        vk: &StarkVerifyingKey<SubproofCoreRing>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2Compress>>;
+    ) -> Result<(), MachineVerificationError<SubproofCompressedRing>>;
 }
 
 /// A dummy verifier which does nothing.
@@ -29,11 +32,11 @@ pub struct NoOpSubproofVerifier;
 impl SubproofVerifier for NoOpSubproofVerifier {
     fn verify_deferred_proof(
         &self,
-        _proof: &ZKMReduceProof<KoalaBearPoseidon2Compress>,
-        _vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
+        _proof: &ZKMReduceProof<SubproofCompressedRing>,
+        _vk: &StarkVerifyingKey<SubproofCoreRing>,
         _vk_hash: [u32; 8],
         _committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2Compress>> {
+    ) -> Result<(), MachineVerificationError<SubproofCompressedRing>> {
         Ok(())
     }
 }

@@ -82,7 +82,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        p_witness.resize(P::Witness::USIZE, F::from_u32(P::WITNESS_OFFSET as u32));
         self.witness = Limbs(p_witness.try_into().unwrap());
 
         record.add_u8_range_checks_field(&self.result.0);
@@ -138,7 +138,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        p_witness.resize(P::Witness::USIZE, F::from_u32(P::WITNESS_OFFSET as u32));
         self.witness = Limbs(p_witness.try_into().unwrap());
 
         result

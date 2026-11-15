@@ -1,0 +1,51 @@
+\section{The core stage: \KB{} with \Blake{}}\label{sec:core}
+
+The core stage keeps \Ziren{}'s arithmetisation as it is: the per-opcode instruction-frame chips, the byte and range tables, the memory argument, the shard-level \LogUp{}~\citep{logup-gkr} and zerocheck, and the jagged commitment~\citep{jagged-pcs} opened through batched \WHIR{}. Its 56 instruction and precompile chips read only their own row; no constraint refers to the next row, and the maximum constraint degree is three. None of this changes. Only the commitment's hash and the transcript change.
+
+\subsection{The \Blake{} ring}
+
+\paragraph{Commitments.} Traces are committed with Merkle trees whose leaves hash the canonical little-endian encodings of \KB{} elements with \Blake{}, and whose internal nodes compress two 32-byte children with \Blake{}. The \WHIR{} round commitments use the same trees.
+
+\paragraph{Transcript.} The Fiat--Shamir transcript~\citep{fiat-shamir,bcs16} is a \Blake{} sponge-like construction that buffers observed bytes up to one block and folds them into a 32-byte state; challenges are squeezed as \KB{} elements from the state. A commitment root is observed as eight field elements, the low $30$ bits of each little-endian 32-bit word of the digest. Thirty bits lie below $p$, so the map is injective on what it keeps, and the transcript binds $240$ of the root's $256$ bits.
+
+\paragraph{What the compress stage inherits.} The leaf verifies exactly this ring. It recomputes every Merkle path with \Blake{}, replays the transcript with \Blake{}, and slices digests into 30-bit limbs. In the Boolean cost model these are cheap: slicing is wiring, and each compression costs about $10^4$ \AND{} constraints instead of the several hundred thousand a \Poseidon{} permutation would cost.
+
+\subsection{Measurements}\label{sec:core-measurements}
+
+We proved Ethereum mainnet block $26{,}206{,}588$ with the same guest program under both rings: $109{,}781{,}075$ MIPS cycles in $34$ shards. Both rings ran on two RTX~5090 GPUs of the same machine with the same prover settings, in back-to-back jobs. ``Cold'' is the first block after the prover starts; ``warm'' is a second proof of the same block in the same process. For the \Poseidon{} ring the time is to a compressed proof, with recursion overlapped on the same cards, and the core phase is reported separately; for the \Blake{} ring it is the core phase alone.
+
+\begin{table}[t]
+\centering\small
+\caption{Core stage, block $26{,}206{,}588$ ($1.10\times 10^8$ cycles, $34$ shards), two RTX~5090 GPUs.}
+\label{tab:core}
+\begin{tabular}{lrr}
+\toprule
+ & \Blake{} ring & \Poseidon{} ring \\
+\midrule
+core phase, cold & $16.7$--$17.3$\,s & $16.5$\,s \\
+core phase, warm & $15.0$\,s ($7.3$\,MHz) & $11.5$\,s ($9.5$\,MHz) \\
+compressed proof, warm & --- & $11.6$\,s \\
+shard proofs, total & $60.5$\,MB & $68.0$\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\caption{Warm core phase per card, in milliseconds (the two cards are listed separately). ``Opening commits'' are the \WHIR{} round commitments made while opening.}
+\label{tab:core-phases}
+\begin{tabular}{lrr}
+\toprule
+ & \Blake{} ring & \Poseidon{} ring \\
+\midrule
+trace commitment & $1{,}355$ / $1{,}692$ & $102$ / $135$ \\
+opening commits & $7{,}156$ / $6{,}377$ & $513$ / $436$ \\
+GKR, zerocheck and evaluation claims & $5{,}404$ / $5{,}378$ & $5{,}003$ / $6{,}200$ \\
+idle & $209$ / $552$ & $3{,}780$ / $3{,}503$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:core} gives the totals and Table~\ref{tab:core-phases} the warm phase breakdown. Cold, the two rings are level. Warm, the \Blake{} ring is $30\%$ slower, and Table~\ref{tab:core-phases} places the whole difference in the \WHIR{} commitments: about $8.5$\,s per card against $0.6$\,s. The constraint work (GKR, zerocheck, evaluation claims) costs the same in both rings. The \Poseidon{} cards are idle for about $3.5$\,s per block, so the \Blake{} ring's commitment cost is partly hidden in the totals.
+
+We have not yet split the \Blake{} ring's commitment time into encoding, hashing and data movement; the \Poseidon{} ring's kernels have been tuned over many releases and the \Blake{} ring's have not, which we expect to account for much of the gap. A 512\,MiB allocation in the \WHIR{} opening also fails on the last, largest precompile shards and is retried within the shard. Both effects are engineering rather than protocol: the two rings run the same protocol and differ only in the hash.
