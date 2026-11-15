@@ -678,7 +678,10 @@ pub fn record<R: Send>(f: impl FnOnce() -> R + Send) -> (R, Tape) {
         .num_threads(1)
         .build()
         .expect("a one-thread pool for the recording");
-    pool.install(|| {
+    // A profile taken on this thread follows the recording onto the pool's worker and back.
+    let profile = PROFILE.with(|profile| profile.borrow_mut().take());
+    let (result, tape, profile) = pool.install(|| {
+        PROFILE.with(|slot| *slot.borrow_mut() = profile);
         TAPE.with(|tape| {
             assert!(tape.borrow().is_none(), "a recording is already in progress");
             *tape.borrow_mut() = Some(Tape::default());
@@ -686,8 +689,10 @@ pub fn record<R: Send>(f: impl FnOnce() -> R + Send) -> (R, Tape) {
         let result = f();
         let tape =
             TAPE.with(|tape| tape.borrow_mut().take().expect("the recording is in progress"));
-        (result, tape)
-    })
+        (result, tape, PROFILE.with(|slot| slot.borrow_mut().take()))
+    });
+    PROFILE.with(|slot| *slot.borrow_mut() = profile);
+    (result, tape)
 }
 
 /// Whether a recording is in progress on this thread.

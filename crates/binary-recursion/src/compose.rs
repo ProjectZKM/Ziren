@@ -510,23 +510,41 @@ pub fn record_compose(node: &Compose<'_>) -> (Result<Composed, String>, Tape) {
         Err(error) => return (Err(error), Tape::default()),
     };
     let digest = composed.digest;
-    let profiling = std::env::var_os("ZIREN_TAPE_PROFILE").is_some();
+    // ZIREN_TAPE_PROFILE=<frames>: where the node's multiplications and hashing come from, by
+    // that many innermost frames (6 if it is not a number).
+    let profiling = std::env::var("ZIREN_TAPE_PROFILE").ok().map(|v| v.parse::<usize>().unwrap_or(6));
     let (composed, tape) = record(|| {
-        if profiling {
+        if profiling.is_some() {
             crate::tape::profile(97);
         }
         let composed = compose(node, Some(digest));
-        if let Some(profile) = crate::tape::take_profile() {
-            for (signature, muls, bytes) in profile.by_signature(6).into_iter().take(24) {
-                tracing::info!(
-                    "node profile: mul ~{muls:>9} hashed {bytes:>8} B  {}",
-                    &signature[..signature.len().min(260)]
-                );
+        if let Some(depth) = profiling {
+            if let Some(profile) = crate::tape::take_profile() {
+                // ZIREN_TAPE_PROFILE_DUMP=<file>: append every sample, one per line, after a
+                // `#` line for this node: weight, 1 for hashed bytes, frames innermost first.
+                if let Ok(path) = std::env::var("ZIREN_TAPE_PROFILE_DUMP") {
+                    use std::io::Write as _;
+                    let mut out = format!("# node every {}\n", profile.every);
+                    for (weight, is_hash, stack) in &profile.samples {
+                        out += &format!("{weight}\t{}\t{}\n", u8::from(*is_hash), stack.join(";"));
+                    }
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                        .and_then(|mut file| file.write_all(out.as_bytes()));
+                }
+                for (signature, muls, bytes) in profile.by_signature(depth).into_iter().take(40) {
+                    tracing::info!(
+                        "node profile: mul ~{muls:>9} hashed {bytes:>8} B  {}",
+                        &signature[..signature.len().min(400)]
+                    );
+                }
             }
         }
         composed
     });
-    if profiling {
+    if profiling.is_some() {
         let census: Vec<String> = Tape::KINDS
             .iter()
             .zip(tape.census())
