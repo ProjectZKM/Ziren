@@ -698,6 +698,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
+ "rayon-core",
 ]
 
 [[package]]
@@ -2467,15 +2468,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3038,7 +3030,6 @@ name = "p3-air"
 version = "0.8.0"
 source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
 dependencies = [
- "hashbrown 0.17.1",
  "p3-field",
  "p3-matrix",
  "serde",
@@ -3321,7 +3312,6 @@ name = "p3-keccak"
 version = "0.8.0"
 source = "git+https://github.com/ProjectZKM/Plonky3?rev=fb5d0d8976dcc6b94d11f08de98be0f285450020#fb5d0d8976dcc6b94d11f08de98be0f285450020"
 dependencies = [
- "cpufeatures 0.3.0",
  "p3-symmetric",
  "p3-util",
  "tiny-keccak",
@@ -6805,6 +6795,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-matrix",
+ "p3-multi-stark",
  "p3-symmetric",
  "p3-uni-stark",
  "p3-util",
@@ -6977,11 +6968,14 @@ dependencies = [
  "p3-binary-pcs",
  "p3-field",
  "p3-koala-bear",
+ "p3-maybe-rayon",
  "p3-word",
  "p3-word-backend",
  "postcard",
  "rand 0.8.6",
+ "serde",
  "thiserror 1.0.69",
+ "tracing",
  "zkm-binary-stark",
  "zkm-recursion-core",
 ]
