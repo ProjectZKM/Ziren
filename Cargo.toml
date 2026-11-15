@@ -55,7 +55,7 @@ rustc-hash = "2.1.0"
 # Pinned to a rev, not a branch. These crates supply the field, the challenger and
 # the Merkle tree -- the transcript -- so a branch pin lets `cargo update` change
 # every challenge, hence every vk, with no diff to review. This rev is fork branch
-# `zkm/binary-whir-main`: the fork's main (5ccd557f, the upstream-main port) plus
+# `zkm/binary-whir`: the fork's main (5ccd557f, the upstream-main port) plus
 # the binary-field prover changes this branch builds on.
 p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "56c2c7771dc19e6c0805a0fe38073da9fbfcebe4" }
 p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "56c2c7771dc19e6c0805a0fe38073da9fbfcebe4" }
