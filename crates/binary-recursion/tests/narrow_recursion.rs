@@ -32,10 +32,15 @@ fn census(label: &str, tape: &Tape) {
 /// rate and folding `ZIREN_B_SCHEDULE` names, as `johnson,8,4`.
 fn narrow_schedule() -> BinarySchedule {
     let mut schedule = narrow_schedule_base();
-    // whir-gc experiment: `ZIREN_B_NARROW=merge,forms` and `ZIREN_B_FOLDS=f0,f1,..;kept`.
+    // whir-gc experiment: `ZIREN_B_NARROW=merge,forms,short,joint,gruen` and `ZIREN_B_FOLDS=f0,f1,..;kept`.
     let levers = std::env::var("ZIREN_B_NARROW").unwrap_or_default();
     schedule.narrow.merge_claims = levers.split(',').any(|l| l == "merge");
     schedule.narrow.forms = levers.split(',').any(|l| l == "forms");
+    if levers.split(',').any(|l| l == "short") {
+        schedule.narrow.digest_bytes = 25;
+    }
+    schedule.narrow.joint_switch = levers.split(',').any(|l| l == "joint");
+    schedule.narrow.factored_bus = levers.split(',').any(|l| l == "gruen");
     if let Ok(spec) = std::env::var("ZIREN_B_FOLDS") {
         let (folds, kept) = spec.split_once(';').unwrap_or((&spec, "0"));
         for (slot, fold) in schedule.narrow.round_folds.iter_mut().zip(folds.split(',')) {
@@ -69,6 +74,7 @@ fn proves_a_recorded_verification_and_records_its_own() {
     let narrow_schedule = narrow_schedule();
     println!("narrow schedule: {narrow_schedule:?}");
     let probes = [Probe { groups: 16, log_height: 10 }];
+    zkm_binary_stark::use_protocol_of(&schedule);
     let (_, vk, proof) = prove_probes(&probes);
     let shapes: Vec<_> = probes.iter().map(Probe::shape).collect();
     let instances: Vec<Instance<'_, Probe>> = probes
@@ -86,6 +92,7 @@ fn proves_a_recorded_verification_and_records_its_own() {
     println!("  {}", program.census());
     // A table of fewer rows than an element absorbs would keep its claims from merging.
     let floor: &[(&str, usize)] = if narrow_schedule.narrow.merge_claims { &[("Public", 7)] } else { &[] };
+    zkm_binary_stark::use_protocol_of(&narrow_schedule);
     let machine =
         TapeMachine::new_with_floor(program, &narrow_schedule, floor).expect("the tape machine");
     for air in machine.airs() {
@@ -142,6 +149,13 @@ fn proves_a_recorded_verification_and_records_its_own() {
     );
     verdict.expect("the recorded verifier accepts the narrow proof");
     census("level 2 (the narrow proof's verifier)", &own);
+    let values = own.run(&own.inputs).expect("the narrow proof's verifier runs on its inputs");
+    assert_eq!(values, own.values, "a run of the recorded verifier reproduces every value");
+    // A digest byte of the proof past the low element: changing it breaks a hash check.
+    let mut tampered = own.inputs.clone();
+    let last = tampered.len() - 1;
+    tampered[last] += <zkm_binary_stark::F as p3_field::PrimeCharacteristicRing>::ONE;
+    assert!(own.run(&tampered).is_err(), "a changed proof input fails the recorded verifier");
 }
 
 /// The WHIR schedule of the narrow machine's two commitments under each

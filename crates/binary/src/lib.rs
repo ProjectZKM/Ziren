@@ -108,6 +108,20 @@ pub struct NarrowOptions {
     pub kept_domains: u32,
     /// Tables read through fewer linear forms than columns send their forms.
     pub forms: bool,
+    /// The recursion machine's Blake3 rounds take a row per half quarter-round, 416
+    /// columns, not a row per round, 4,096: a tenth of the opened values for one and a
+    /// half times the bits.
+    pub half_rounds: bool,
+    /// Bytes each Merkle digest keeps of its Blake3 output, the rest zero; zero keeps all
+    /// thirty-two.  Twenty-five bytes, 200 bits, hold collisions at `2^100` work, the
+    /// composed target, and cut 56 bits from every digest a verifier reads.
+    pub digest_bytes: u8,
+    /// A paired opening runs one ring switch for the main and preprocessed sides, over both
+    /// packings behind a selector variable: one claims tensor and one sumcheck fewer.
+    pub joint_switch: bool,
+    /// The bus's product reduction sends each sumcheck round with the bound coordinate's
+    /// equality factor divided out: four values a radix-four round where it sends five.
+    pub factored_bus: bool,
 }
 
 impl BinarySchedule {
@@ -194,6 +208,18 @@ impl BinarySchedule {
     ) -> Result<Config, BinaryProofError> {
         boolean_whir_config::<A, Blake3>(air, shape, self.options(), self.whir())
     }
+}
+
+/// whir-gc experiment: set the process-wide protocol choices of `schedule`.  A schedule that
+/// reads tables through linear forms starts each table at a multiple of its padded width, so
+/// every block of its columns is aligned in the table's own column index too; any other lays
+/// them back to back, as every proof before it was made.  A schedule with a factored bus
+/// builds its product reductions to send factored rounds.  Plonky3 sees only shapes and holds
+/// both process-wide, so a caller sets them before each setup, proof and verification under
+/// `schedule`.
+pub fn use_protocol_of(schedule: &BinarySchedule) {
+    p3_sumcheck::layout::set_aligned_layout(schedule.narrow.forms);
+    p3_bus::set_factored_rounds(schedule.narrow.factored_bus);
 }
 
 /// A fresh transcript of the stage.

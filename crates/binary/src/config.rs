@@ -21,15 +21,99 @@ use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 
 use crate::{BinarySchedule, Challenger, F};
 
-/// The Blake3 Merkle tree over bytes, arity 2.
+/// Blake3 with its digest cut to its first `bytes` bytes, the rest zero: the Merkle hash of
+/// a schedule with short digests.  A digest stays thirty-two bytes wide, so the trees and
+/// the proof format keep their shape; only the bytes past the cut are fixed at zero, and a
+/// verifier reads the bytes before it.  Whole, it is Blake3.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Blake3Cut {
+    bytes: usize,
+}
+
+impl Blake3Cut {
+    /// Blake3 itself: every byte kept.
+    pub const WHOLE: Self = Self { bytes: 32 };
+
+    /// Blake3 keeping its first `bytes` bytes.
+    ///
+    /// # Panics
+    /// Panics unless `bytes` is from 16 to 32: a digest's low element is always kept.
+    #[must_use]
+    pub fn new(bytes: usize) -> Self {
+        assert!((16..=32).contains(&bytes), "a cut digest keeps 16 to 32 bytes, not {bytes}");
+        Self { bytes }
+    }
+
+    /// The cut of `schedule`'s Merkle digests.
+    #[must_use]
+    pub fn of(schedule: &BinarySchedule) -> Self {
+        match schedule.narrow.digest_bytes {
+            0 => Self::WHOLE,
+            bytes => Self::new(usize::from(bytes)),
+        }
+    }
+
+    /// The bytes a digest keeps.
+    #[must_use]
+    pub const fn bytes(self) -> usize {
+        self.bytes
+    }
+
+    /// `digest` with its bytes past the cut zeroed.
+    #[must_use]
+    pub fn cut(self, mut digest: [u8; 32]) -> [u8; 32] {
+        digest[self.bytes..].fill(0);
+        digest
+    }
+}
+
+impl Default for Blake3Cut {
+    fn default() -> Self {
+        Self::WHOLE
+    }
+}
+
+impl p3_symmetric::CryptographicHasher<u8, [u8; 32]> for Blake3Cut {
+    const LANES: usize = <Blake3 as p3_symmetric::CryptographicHasher<u8, [u8; 32]>>::LANES;
+
+    fn hash_iter<I: IntoIterator<Item = u8>>(&self, input: I) -> [u8; 32] {
+        self.cut(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_iter(&Blake3, input))
+    }
+
+    fn hash_iter_slices<'a, I: IntoIterator<Item = &'a [u8]>>(&self, input: I) -> [u8; 32] {
+        self.cut(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_iter_slices(&Blake3, input))
+    }
+
+    fn hash_slice(&self, input: &[u8]) -> [u8; 32] {
+        self.cut(p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_slice(&Blake3, input))
+    }
+
+    fn hash_many(&self, input: &[u8], out: &mut [[u8; 32]]) {
+        p3_symmetric::CryptographicHasher::<u8, [u8; 32]>::hash_many(&Blake3, input, out);
+        if self.bytes < 32 {
+            for digest in out {
+                digest[self.bytes..].fill(0);
+            }
+        }
+    }
+}
+
+/// The Blake3 Merkle tree over bytes, arity 2, its digests cut as a schedule says.
 pub type MerkleMmcs = p3_merkle_tree::MerkleTreeMmcs<
     F,
     u8,
-    SerializingHasher<Blake3>,
-    CompressionFunctionFromHasher<Blake3, 2, 32>,
+    SerializingHasher<Blake3Cut>,
+    CompressionFunctionFromHasher<Blake3Cut, 2, 32>,
     2,
     32,
 >;
+
+/// The Merkle tree of `schedule`'s commitments, with `cap_height` layers of cap.
+#[must_use]
+pub fn merkle_mmcs(schedule: &BinarySchedule, cap_height: usize) -> MerkleMmcs {
+    let hash = Blake3Cut::of(schedule);
+    MerkleMmcs::new(SerializingHasher::new(hash), CompressionFunctionFromHasher::new(hash), cap_height)
+}
 
 /// The stacked Boolean WHIR commitment of every table of a machine.
 pub type MachinePcs = BooleanWhirTracePcs<F, F, BooleanWhirDomain, MerkleMmcs, Challenger>;
@@ -138,6 +222,8 @@ pub struct MachineConfig {
     pub arity: usize,
     /// Whether a preprocessed trace exists to pair with the main one.
     paired: bool,
+    /// The Merkle digests' cut, whose birthday bound caps the composed security.
+    digests: Blake3Cut,
 }
 
 impl MachineConfig {
@@ -154,6 +240,7 @@ impl MachineConfig {
             preprocessed_pcs: commitment(arity, schedule)?,
             arity,
             paired: !preprocessed.is_empty(),
+            digests: Blake3Cut::of(schedule),
         })
     }
 }
@@ -202,15 +289,13 @@ pub fn bit_commitment(
             budget: schedule.budget.max_grinding_bits,
         });
     }
-    let cap_height = recommended_cap_height(&whir_config);
-    let merkle = MerkleMmcs::new(
-        SerializingHasher::new(Blake3),
-        CompressionFunctionFromHasher::new(Blake3),
-        cap_height,
-    );
+    let merkle = merkle_mmcs(schedule, recommended_cap_height(&whir_config));
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);
     BooleanWhirPcs::new(prover, arity)
-        .map(|pcs| pcs.with_merged_claims(schedule.narrow.merge_claims))
+        .map(|pcs| {
+            pcs.with_merged_claims(schedule.narrow.merge_claims)
+                .with_joint_pair(schedule.narrow.joint_switch)
+        })
         .map_err(MachineConfigError::Commitment)
 }
 
@@ -238,8 +323,9 @@ impl MultiStarkConfig for MachineConfig {
         Table::from_boolean_rows(&trace).expect("every preprocessed cell of the machine is a bit")
     }
 
+    /// A collision of `8·b`-bit digests takes `2^(4·b)` hashes.
     fn collision_resistance_bits(&self) -> Option<usize> {
-        Some(128)
+        Some(4 * self.digests.bytes())
     }
 
     fn min_num_variables(&self) -> usize {
@@ -435,9 +521,8 @@ mod tests {
                     let profile = build(security, rate, fold);
                     match profile.config::<F, F, Challenger, _>(packed, &domain) {
                         Ok(config) => {
-                            let mmcs = super::MerkleMmcs::new(
-                                super::SerializingHasher::new(super::Blake3),
-                                super::CompressionFunctionFromHasher::new(super::Blake3),
+                            let mmcs = super::merkle_mmcs(
+                                &super::BinarySchedule::default(),
                                 super::recommended_cap_height(&config),
                             );
                             let shape = ProofShape::of(&config, &mmcs, 1)

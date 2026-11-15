@@ -24,6 +24,7 @@ pub mod kb;
 pub mod ledger;
 pub mod program;
 pub mod public;
+pub mod half_rounds;
 pub mod rewire;
 pub mod rounds;
 pub mod select;
@@ -61,6 +62,7 @@ use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
 use self::public::PublicAir;
 use self::rewire::{RewireAir, NARROW, WIDTH};
+use self::half_rounds::HalfRoundsAir;
 use self::rounds::RoundsAir;
 use self::select::SelectAir;
 use crate::tape::{RunError, Tape, F};
@@ -108,6 +110,8 @@ pub enum TapeAir {
     Gather(RewireAir<WIDTH>),
     Hash(HashAir),
     Rounds(RoundsAir),
+    /// The narrow layout of the round table, a row per half quarter-round.
+    HalfRounds(HalfRoundsAir),
     Kb(KbAir),
     Select(SelectAir),
     Public(PublicAir),
@@ -124,6 +128,7 @@ impl TapeAir {
             Self::Gather(air) => air.preprocessed_table(),
             Self::Hash(air) => air.preprocessed_table(),
             Self::Rounds(air) => air.preprocessed_table(),
+            Self::HalfRounds(air) => air.preprocessed_table(),
             Self::Kb(air) => air.preprocessed_table(),
             Self::Select(air) => air.preprocessed_table(),
             Self::Public(air) => air.preprocessed_table(),
@@ -139,6 +144,7 @@ impl TapeAir {
             Self::Gather(air) => air.log_height(),
             Self::Hash(air) => air.log_height(),
             Self::Rounds(air) => air.log_height(),
+            Self::HalfRounds(air) => air.log_height(),
             Self::Kb(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
             Self::Public(air) => air.log_height(),
@@ -156,6 +162,7 @@ impl TapeAir {
             "Gather" => Self::Gather(RewireAir { log_height, preprocessed }),
             "Hash" => Self::Hash(HashAir { log_height, preprocessed }),
             "Rounds" => Self::Rounds(RoundsAir { log_height, preprocessed }),
+            "HalfRounds" => Self::HalfRounds(HalfRoundsAir { log_height, preprocessed }),
             "Kb" => Self::Kb(KbAir { log_height, preprocessed }),
             "Select" => Self::Select(SelectAir { log_height, preprocessed }),
             "Public" => Self::Public(PublicAir { log_height, preprocessed }),
@@ -174,6 +181,7 @@ impl TapeAir {
             Self::Gather(air) => (&mut air.log_height, &mut air.preprocessed),
             Self::Hash(air) => (&mut air.log_height, &mut air.preprocessed),
             Self::Rounds(air) => (&mut air.log_height, &mut air.preprocessed),
+            Self::HalfRounds(air) => (&mut air.log_height, &mut air.preprocessed),
             Self::Kb(air) => (&mut air.log_height, &mut air.preprocessed),
             Self::Select(air) => (&mut air.log_height, &mut air.preprocessed),
             Self::Public(air) => (&mut air.log_height, &mut air.preprocessed),
@@ -195,6 +203,7 @@ impl TapeAir {
             Self::Gather(_) => "Gather",
             Self::Hash(_) => "Hash",
             Self::Rounds(_) => "Rounds",
+            Self::HalfRounds(_) => "HalfRounds",
             Self::Kb(_) => "Kb",
             Self::Select(_) => "Select",
             Self::Public(_) => "Public",
@@ -211,6 +220,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Gather(air) => BaseAir::<X>::width(air),
             Self::Hash(air) => BaseAir::<X>::width(air),
             Self::Rounds(air) => BaseAir::<X>::width(air),
+            Self::HalfRounds(air) => BaseAir::<X>::width(air),
             Self::Kb(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
             Self::Public(air) => BaseAir::<X>::width(air),
@@ -225,6 +235,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Gather(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Hash(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Rounds(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::HalfRounds(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Kb(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Public(air) => BaseAir::<X>::preprocessed_width(air),
@@ -267,6 +278,7 @@ impl<X: Field> BaseAir<X> for TapeAir {
             Self::Gather(air) => air.preprocessed_trace(),
             Self::Hash(air) => air.preprocessed_trace(),
             Self::Rounds(air) => air.preprocessed_trace(),
+            Self::HalfRounds(air) => air.preprocessed_trace(),
             Self::Kb(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
             Self::Public(air) => air.preprocessed_trace(),
@@ -283,6 +295,7 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for TapeAir {
             Self::Gather(air) => air.eval(builder),
             Self::Hash(air) => air.eval(builder),
             Self::Rounds(air) => air.eval(builder),
+            Self::HalfRounds(air) => air.eval(builder),
             Self::Kb(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
             Self::Public(air) => air.eval(builder),
@@ -445,7 +458,8 @@ impl TapeMachine {
         schedule: &BinarySchedule,
         floor: &[(&str, usize)],
     ) -> Result<Self, TapeMachineError> {
-        let mut airs = tracing::debug_span!("airs").in_scope(|| Self::airs_of(&program));
+        let mut airs = tracing::debug_span!("airs")
+            .in_scope(|| Self::airs_of(&program, schedule.narrow.half_rounds));
         for air in &mut airs {
             if let Some(&(_, log_height)) = floor.iter().find(|(name, _)| *name == air.name()) {
                 air.raise(log_height);
@@ -526,21 +540,27 @@ impl TapeMachine {
     /// name, with no key built.
     #[must_use]
     pub fn table_shapes(program: &Program) -> Vec<(&'static str, usize, usize)> {
-        Self::airs_of(program)
+        Self::airs_of(program, false)
             .iter()
             .map(|air| (air.name(), air.log_height(), BaseAir::<F>::width(air)))
             .collect()
     }
 
-    /// The tables of `program`'s machine.
-    fn airs_of(program: &Program) -> Vec<TapeAir> {
+    /// The tables of `program`'s machine, its rounds a row per half
+    /// quarter-round when `half_rounds`.
+    fn airs_of(program: &Program, half_rounds: bool) -> Vec<TapeAir> {
+        let compressions = program.compressions.len();
         let mut airs = vec![
             TapeAir::Ledger(LedgerAir::new(program)),
             TapeAir::Arith(ArithAir::new(program)),
             TapeAir::Rewire(RewireAir::new(program)),
             TapeAir::Gather(RewireAir::new(program)),
             TapeAir::Hash(HashAir::new(program)),
-            TapeAir::Rounds(RoundsAir::new(program.compressions.len())),
+            if half_rounds {
+                TapeAir::HalfRounds(HalfRoundsAir::new(compressions))
+            } else {
+                TapeAir::Rounds(RoundsAir::new(compressions))
+            },
         ];
         if !program.kb.is_empty() {
             airs.push(TapeAir::Kb(KbAir::new(program)));
@@ -773,6 +793,10 @@ impl TapeMachine {
                     tracing::info_span!("main table", air = "rounds")
                         .in_scope(|| backend.rounds_table(rounds, &round_inputs)),
                 ),
+                TapeAir::HalfRounds(rounds) => Some(
+                    tracing::info_span!("main table", air = "half rounds")
+                        .in_scope(|| rounds.table_of(&round_inputs)),
+                ),
                 _ => None,
             })
             .map(|(table, finals)| (Some(table), finals))
@@ -786,7 +810,7 @@ impl TapeMachine {
                     TapeAir::Rewire(_) => "rewire",
                     TapeAir::Gather(_) => "gather",
                     TapeAir::Hash(_) => "hash",
-                    TapeAir::Rounds(_) => "rounds taken",
+                    TapeAir::Rounds(_) | TapeAir::HalfRounds(_) => "rounds taken",
                     TapeAir::Kb(_) => "kb",
                     TapeAir::Select(_) => "select",
                     TapeAir::Public(_) => "public",
@@ -799,7 +823,9 @@ impl TapeMachine {
                     TapeAir::Hash(a) => {
                         backend.bit_table(a.main_rows(&self.program, values, &states, &finals))
                     }
-                    TapeAir::Rounds(_) => rounds_table.take().expect("one round table"),
+                    TapeAir::Rounds(_) | TapeAir::HalfRounds(_) => {
+                        rounds_table.take().expect("one round table")
+                    }
                     TapeAir::Kb(a) => backend.kb_table(a, &self.program, values),
                     TapeAir::Select(a) => a.main_table(&self.program, values),
                     TapeAir::Public(a) => a.main_table(public),

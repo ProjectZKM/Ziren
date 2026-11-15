@@ -44,7 +44,7 @@ use crate::bytes::{blake3, byte_bits, digest_bytes, merkle_node, to_bytes, Piece
 use crate::tape::digest_elements;
 use crate::word::{verify_word_routed, DeferredClaim};
 use crate::challenger::TracedChallenger;
-use crate::config::{reread, TracedConfig, TracedProof};
+use crate::config::{reread, TracedConfig};
 use crate::machine::{TapeAir, TapeMachine};
 use crate::mmcs::{TracedCap, TracedDigest};
 use crate::tape::{as_kb, kb_value, record, KbOp, Tape};
@@ -215,7 +215,7 @@ impl<'a> Child<'a> {
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
                 let (vk, roots) = lift_as_inputs(machine.verifying_key());
                 let digest = key_digest(KeyKind::Leaf, &main, &preprocessed, &roots);
-                let proof: TracedProof = reread(proof);
+                let proof = config.read_proof(proof);
                 let instances = machine.verifier_instances(&vk, public);
                 let mut challenger = TracedChallenger::new(TRANSCRIPT_DOMAIN);
                 let verdict = verify(&config, instances, &proof, 0, &mut challenger)
@@ -253,7 +253,7 @@ impl<'a> Child<'a> {
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
                 let (vk, roots) = lift_as_inputs(machine.verifying_key());
                 let digest = key_digest(KeyKind::Node, &main, &preprocessed, &roots);
-                let proof: TracedProof = reread(proof);
+                let proof = config.read_proof(proof);
                 let instances = VerifierInstances::new(
                     machine
                         .airs()
@@ -314,7 +314,7 @@ impl<'a> Child<'a> {
             })),
             verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
                 let digest = key_digest(KeyKind::Node, &main, &preprocessed, &roots);
-                let mut proof: TracedProof = reread(proof);
+                let mut proof = config.read_proof(proof);
                 if let Some(opening) = proof.preprocessed_opening.as_mut() {
                     for &(i, v) in &prep_known {
                         opening.values[i] = Traced::constant(v);

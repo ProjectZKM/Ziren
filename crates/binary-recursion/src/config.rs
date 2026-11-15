@@ -10,16 +10,16 @@
 use p3_binary_pcs::whir::{
     recommended_cap_height, BooleanWhirPcs, BooleanWhirProver, BooleanWhirTracePcs,
 };
-use p3_blake3::Blake3;
 use p3_multi_stark::config::{Commitment, MultiStarkConfig, ProverData};
 use p3_multi_stark::{MultiStarkProof, VerifyingKey};
 use p3_sumcheck::layout::Table;
 use p3_sumcheck::ring_switch::bits::BitRingSwitch;
 use p3_sumcheck::TableShape;
-use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use zkm_binary_stark::config::{paired_arity, MachineConfig, MachineConfigError, MerkleMmcs};
+use zkm_binary_stark::config::{
+    merkle_mmcs, paired_arity, Blake3Cut, MachineConfig, MachineConfigError,
+};
 use zkm_binary_stark::{BinarySchedule, F};
 
 use crate::challenger::TracedChallenger;
@@ -39,6 +39,7 @@ pub struct TracedConfig {
     pcs: TracedPcs,
     preprocessed_pcs: TracedPcs,
     paired: bool,
+    digests: Blake3Cut,
 }
 
 impl TracedConfig {
@@ -53,7 +54,15 @@ impl TracedConfig {
             pcs: commitment(arity, schedule)?,
             preprocessed_pcs: commitment(arity, schedule)?,
             paired: !preprocessed.is_empty(),
+            digests: Blake3Cut::of(schedule),
         })
+    }
+
+    /// `proof` read back over traced values, its digests at this configuration's cut:
+    /// under [`crate::record`] each digest becomes the inputs of the bytes it keeps.
+    #[must_use]
+    pub fn read_proof(&self, proof: &MultiStarkProof<MachineConfig>) -> TracedProof {
+        crate::mmcs::reading_cut(self.digests, || reread(proof))
     }
 }
 
@@ -79,15 +88,16 @@ pub fn bit_commitment(
     let whir_config = profile
         .config::<Traced, Traced, TracedChallenger, _>(packed, &domain)
         .map_err(MachineConfigError::Profile)?;
-    let cap_height = recommended_cap_height(&whir_config);
-    let merkle = TracedMmcs::new(MerkleMmcs::new(
-        SerializingHasher::new(Blake3),
-        CompressionFunctionFromHasher::new(Blake3),
-        cap_height,
-    ));
+    let merkle = TracedMmcs::new(
+        merkle_mmcs(schedule, recommended_cap_height(&whir_config)),
+        Blake3Cut::of(schedule),
+    );
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);
     BooleanWhirPcs::new(prover, arity)
-        .map(|pcs| pcs.with_merged_claims(schedule.narrow.merge_claims))
+        .map(|pcs| {
+            pcs.with_merged_claims(schedule.narrow.merge_claims)
+                .with_joint_pair(schedule.narrow.joint_switch)
+        })
         .map_err(MachineConfigError::Commitment)
 }
 
@@ -110,7 +120,7 @@ impl MultiStarkConfig for TracedConfig {
     }
 
     fn collision_resistance_bits(&self) -> Option<usize> {
-        Some(128)
+        Some(4 * self.digests.bytes())
     }
 
     fn min_num_variables(&self) -> usize {
@@ -196,7 +206,7 @@ where
             .iter()
             .map(|instance| instance.public_values.iter().map(|&x| Traced::input(x)).collect())
             .collect();
-        let proof: TracedProof = reread(proof);
+        let proof = config.read_proof(proof);
         let traced = p3_multi_stark::VerifierInstances::new(
             instances
                 .iter()

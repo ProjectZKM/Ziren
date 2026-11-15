@@ -25,30 +25,52 @@ use core::marker::PhantomData;
 use std::collections::BTreeMap;
 
 use p3_binary_field::{BinaryField128, TowerLevel};
-use p3_blake3::Blake3;
 use p3_challenger::CanObserve;
 use p3_field::PrimeCharacteristicRing;
 use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
 use p3_matrix::{Dimensions, Matrix};
-use p3_merkle_tree::{MerkleTreeMmcs, PrunedMerklePaths};
-use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
+use p3_merkle_tree::PrunedMerklePaths;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use zkm_binary_stark::config::Blake3Cut;
 
-use crate::bytes::{blake3, merkle_node, select, Piece};
+use crate::bytes::{blake3, byte_field, constant_byte, from_bytes, merkle_node, select, to_bytes, Piece};
 use crate::challenger::TracedChallenger;
 use crate::queries;
 use crate::tape::{digest_elements, F};
 use crate::traced::Traced;
 
 /// The binary stage's Merkle commitment scheme over native values.
-pub type NativeMmcs = MerkleTreeMmcs<
-    BinaryField128,
-    u8,
-    SerializingHasher<Blake3>,
-    CompressionFunctionFromHasher<Blake3, 2, 32>,
-    2,
-    32,
->;
+pub type NativeMmcs = zkm_binary_stark::config::MerkleMmcs;
+
+/// The bytes a digest read off a proof keeps: the cut of the commitment the proof being
+/// read was made under, while [`reading_cut`] reads it.
+static CUT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(32);
+
+/// Run `f`, which reads a proof whose digests are cut at `cut`, then restore the cut.
+pub fn reading_cut<R>(cut: Blake3Cut, f: impl FnOnce() -> R) -> R {
+    use std::sync::atomic::Ordering;
+    let before = CUT.swap(cut.bytes(), Ordering::SeqCst);
+    let result = f();
+    CUT.store(before, Ordering::SeqCst);
+    result
+}
+
+fn current_cut() -> Blake3Cut {
+    Blake3Cut::new(CUT.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// A Blake3 digest as a Merkle digest cut at `cut` keeps it: the low element whole, the
+/// high one with its bytes past the cut zero.  Wiring only: a split into bytes and back.
+#[must_use]
+pub fn shorten(cut: Blake3Cut, digest: [Traced; 2]) -> [Traced; 2] {
+    if cut == Blake3Cut::WHOLE {
+        return digest;
+    }
+    let high = to_bytes(digest[1]);
+    let kept = cut.bytes() - 16;
+    let tail: [Traced; 16] = core::array::from_fn(|i| if i < kept { high[i] } else { constant_byte(0) });
+    [digest[0], from_bytes(&tail)]
+}
 
 /// A digest of the proof as two elements, its low and high sixteen bytes:
 /// inputs of the program, or constants when read outside a recording, as a
@@ -61,19 +83,39 @@ impl TracedDigest {
     /// recording.
     #[must_use]
     pub fn read(digest: [u8; 32]) -> Self {
-        Self(digest_elements(digest).map(|half| {
+        Self::read_cut(digest, Blake3Cut::WHOLE)
+    }
+
+    /// `digest`, cut at `cut`, as inputs of the program, or constants outside a
+    /// recording: the low element whole, then each byte the cut keeps of the high one as
+    /// an input of its own, the bytes past the cut zero.
+    #[must_use]
+    pub fn read_cut(digest: [u8; 32], cut: Blake3Cut) -> Self {
+        let lift = |value| {
             if crate::tape::recording() {
-                Traced::input(half)
+                Traced::input(value)
             } else {
-                Traced::constant(half)
+                Traced::constant(value)
             }
-        }))
+        };
+        let [low, high] = digest_elements(digest);
+        if cut == Blake3Cut::WHOLE {
+            return Self([lift(low), lift(high)]);
+        }
+        let tail: [Traced; 16] = core::array::from_fn(|i| {
+            if 16 + i < cut.bytes() {
+                lift(byte_field(digest[16 + i]))
+            } else {
+                constant_byte(0)
+            }
+        });
+        Self([lift(low), from_bytes(&tail)])
     }
 }
 
 impl<'de> Deserialize<'de> for TracedDigest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self::read(<[u8; 32]>::deserialize(deserializer)?))
+        Ok(Self::read_cut(<[u8; 32]>::deserialize(deserializer)?, current_cut()))
     }
 }
 
@@ -128,25 +170,28 @@ pub enum TracedMmcsError {
 #[derive(Clone, Debug)]
 pub struct TracedMmcs {
     native: NativeMmcs,
+    /// The cut of `native`'s digests.
+    cut: Blake3Cut,
 }
 
 impl TracedMmcs {
-    /// The traced form of `native`.
+    /// The traced form of `native`, whose digests are cut at `cut`.
     #[must_use]
-    pub const fn new(native: NativeMmcs) -> Self {
-        Self { native }
+    pub const fn new(native: NativeMmcs, cut: Blake3Cut) -> Self {
+        Self { native, cut }
     }
 
     /// Check one query's path from its leaf to the root, recording it.
     fn check_path(
+        &self,
         leaf: &[Traced],
         siblings: &[[Traced; 2]],
         bits: &[Traced],
         roots: &[[Traced; 2]],
     ) {
-        let mut digest = hash_leaf(leaf);
+        let mut digest = hash_leaf(self.cut, leaf);
         for (&sibling, &bit) in siblings.iter().zip(bits) {
-            digest = merkle_node(bit, digest, sibling);
+            digest = shorten(self.cut, merkle_node(bit, digest, sibling));
         }
         let cap_bits = &bits[siblings.len()..];
         let root = select_root(roots, cap_bits);
@@ -169,22 +214,22 @@ pub fn set_deep_cap(cap: Option<(usize, Vec<[u8; 32]>)>) {
     *DEEP_CAP.lock().expect("the deep cap") = cap;
 }
 
-/// The native compression of two digests.
-fn compress(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+/// The native compression of two digests, cut at `cut`.
+fn compress(cut: Blake3Cut, left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut message = left.to_vec();
     message.extend_from_slice(right);
-    crate::tape::blake3_bytes(&message)
+    cut.cut(crate::tape::blake3_bytes(&message))
 }
 
 /// The registered deep nodes, if they hash up to these constant roots.
-fn deep_nodes(roots: &[[Traced; 2]], depth: usize) -> Option<(usize, Vec<[u8; 32]>)> {
+fn deep_nodes(cut: Blake3Cut, roots: &[[Traced; 2]], depth: usize) -> Option<(usize, Vec<[u8; 32]>)> {
     let (level, nodes) = DEEP_CAP.lock().expect("the deep cap").clone()?;
     if level > depth || !roots.iter().flatten().all(Traced::is_constant) {
         return None;
     }
     let mut layer = nodes.clone();
     while layer.len() > roots.len() {
-        layer = layer.chunks(2).map(|pair| compress(&pair[0], &pair[1])).collect();
+        layer = layer.chunks(2).map(|pair| compress(cut, &pair[0], &pair[1])).collect();
     }
     let cap: Vec<[F; 2]> = roots.iter().map(|root| root.map(|x| x.value())).collect();
     let derived: Vec<[F; 2]> = layer.into_iter().map(digest_elements).collect();
@@ -194,10 +239,16 @@ fn deep_nodes(roots: &[[Traced; 2]], depth: usize) -> Option<(usize, Vec<[u8; 32
 /// Check one query's path from its leaf up to a constant node: the lower siblings
 /// hashed in, the node chosen by a one-hot of the top bits (one AND per indicator), the
 /// selection itself XORs of constants.
-fn check_deep_path(leaf: &[Traced], siblings: &[[Traced; 2]], bits: &[Traced], nodes: &[[u8; 32]]) {
-    let mut digest = hash_leaf(leaf);
+fn check_deep_path(
+    cut: Blake3Cut,
+    leaf: &[Traced],
+    siblings: &[[Traced; 2]],
+    bits: &[Traced],
+    nodes: &[[u8; 32]],
+) {
+    let mut digest = hash_leaf(cut, leaf);
     for (&sibling, &bit) in siblings.iter().zip(bits) {
-        digest = merkle_node(bit, digest, sibling);
+        digest = shorten(cut, merkle_node(bit, digest, sibling));
     }
     let mut indicator = vec![Traced::ONE];
     for &bit in &bits[siblings.len()..] {
@@ -216,9 +267,9 @@ fn check_deep_path(leaf: &[Traced], siblings: &[[Traced; 2]], bits: &[Traced], n
     }
 }
 
-fn hash_leaf(leaf: &[Traced]) -> [Traced; 2] {
+fn hash_leaf(cut: Blake3Cut, leaf: &[Traced]) -> [Traced; 2] {
     let pieces: Vec<Piece> = leaf.iter().map(|&x| Piece::Element(x)).collect();
-    blake3(&pieces)
+    shorten(cut, blake3(&pieces))
 }
 
 fn assert_digest_eq(digest: &[Traced; 2], expected: &[Traced; 2]) {
@@ -236,6 +287,7 @@ fn fixed_level(bits: &[Traced]) -> usize {
 /// The nodes of one tree the queries' paths reached, by height and
 /// position, and the hashing of the fixed top of the tree above them.
 struct SharedTop<'a> {
+    cut: Blake3Cut,
     nodes: BTreeMap<(usize, usize), [Traced; 2]>,
     /// Each query's index and native siblings, leaf upward: the hint for a
     /// sibling at a fixed position no query reached.
@@ -267,7 +319,7 @@ impl SharedTop<'_> {
             .iter()
             .find(|(index, _)| index >> height == position)
             .expect("a placed node lies on a queried path");
-        TracedDigest::read(siblings[height]).0
+        TracedDigest::read_cut(siblings[height], self.cut).0
     }
 
     /// Hash every placed level up to `top`, the height of the cap roots.
@@ -288,7 +340,7 @@ impl SharedTop<'_> {
                     if position % 2 == 0 { (digest, sibling) } else { (sibling, digest) };
                 let pieces: Vec<Piece> =
                     left.iter().chain(&right).map(|&x| Piece::Element(x)).collect();
-                self.place(height + 1, position >> 1, blake3(&pieces));
+                self.place(height + 1, position >> 1, shorten(self.cut, blake3(&pieces)));
             }
         }
     }
@@ -385,17 +437,17 @@ impl Mmcs<Traced> for TracedMmcs {
                 (index, path.siblings.clone())
             })
             .collect();
-        if let Some((level, nodes)) = deep_nodes(&roots, depth) {
+        if let Some((level, nodes)) = deep_nodes(self.cut, &roots, depth) {
             for ((rows, bits), (_, siblings)) in opened_values.iter().zip(&bits).zip(&hints) {
                 let lower: Vec<[Traced; 2]> = siblings[..depth - level]
                     .iter()
-                    .map(|&digest| TracedDigest::read(digest).0)
+                    .map(|&digest| TracedDigest::read_cut(digest, self.cut).0)
                     .collect();
-                check_deep_path(rows[0].as_ref(), &lower, &bits[..depth], &nodes);
+                check_deep_path(self.cut, rows[0].as_ref(), &lower, &bits[..depth], &nodes);
             }
             return Ok(());
         }
-        let mut shared = SharedTop { nodes: BTreeMap::new(), hints: &hints };
+        let mut shared = SharedTop { cut: self.cut, nodes: BTreeMap::new(), hints: &hints };
         let mut top = None;
         for (((&index, rows), bits), (_, siblings)) in
             indices.iter().zip(opened_values).zip(&bits).zip(&hints)
@@ -403,14 +455,14 @@ impl Mmcs<Traced> for TracedMmcs {
             let fixed = fixed_level(bits);
             if fixed >= siblings.len() {
                 let siblings: Vec<[Traced; 2]> =
-                    siblings.iter().map(|&digest| TracedDigest::read(digest).0).collect();
-                Self::check_path(rows[0].as_ref(), &siblings, bits, &roots);
+                    siblings.iter().map(|&digest| TracedDigest::read_cut(digest, self.cut).0).collect();
+                self.check_path(rows[0].as_ref(), &siblings, bits, &roots);
                 continue;
             }
             top = Some(siblings.len());
-            let mut digest = hash_leaf(rows[0].as_ref());
+            let mut digest = hash_leaf(self.cut, rows[0].as_ref());
             for (&sibling, &bit) in siblings[..fixed].iter().zip(bits) {
-                digest = merkle_node(bit, digest, TracedDigest::read(sibling).0);
+                digest = shorten(self.cut, merkle_node(bit, digest, TracedDigest::read_cut(sibling, self.cut).0));
             }
             shared.place(fixed, index >> fixed, digest);
         }
