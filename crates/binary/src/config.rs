@@ -209,7 +209,9 @@ pub fn bit_commitment(
         cap_height,
     );
     let prover = BooleanWhirProver::new(whir_config, domain, merkle);
-    BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)
+    BooleanWhirPcs::new(prover, arity)
+        .map(|pcs| pcs.with_merged_claims(schedule.narrow.merge_claims))
+        .map_err(MachineConfigError::Commitment)
 }
 
 impl MultiStarkConfig for MachineConfig {

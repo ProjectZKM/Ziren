@@ -31,6 +31,22 @@ fn census(label: &str, tape: &Tape) {
 /// The schedule of the narrow proof: the stage's default, or the regime,
 /// rate and folding `ZIREN_B_SCHEDULE` names, as `johnson,8,4`.
 fn narrow_schedule() -> BinarySchedule {
+    let mut schedule = narrow_schedule_base();
+    // whir-gc experiment: `ZIREN_B_NARROW=merge,forms` and `ZIREN_B_FOLDS=f0,f1,..;kept`.
+    let levers = std::env::var("ZIREN_B_NARROW").unwrap_or_default();
+    schedule.narrow.merge_claims = levers.split(',').any(|l| l == "merge");
+    schedule.narrow.forms = levers.split(',').any(|l| l == "forms");
+    if let Ok(spec) = std::env::var("ZIREN_B_FOLDS") {
+        let (folds, kept) = spec.split_once(';').unwrap_or((&spec, "0"));
+        for (slot, fold) in schedule.narrow.round_folds.iter_mut().zip(folds.split(',')) {
+            *slot = fold.trim().parse().expect("ZIREN_B_FOLDS=f0,f1,..;kept");
+        }
+        schedule.narrow.kept_domains = kept.trim().parse().expect("a kept-domain mask");
+    }
+    schedule
+}
+
+fn narrow_schedule_base() -> BinarySchedule {
     let Ok(spec) = std::env::var("ZIREN_B_SCHEDULE") else { return BinarySchedule::default() };
     let parts: Vec<&str> = spec.split(',').collect();
     let regime = match parts[0] {
@@ -68,7 +84,10 @@ fn proves_a_recorded_verification_and_records_its_own() {
 
     let program = Program::new(&tape, 0);
     println!("  {}", program.census());
-    let machine = TapeMachine::new(program, &narrow_schedule).expect("the tape machine");
+    // A table of fewer rows than an element absorbs would keep its claims from merging.
+    let floor: &[(&str, usize)] = if narrow_schedule.narrow.merge_claims { &[("Public", 7)] } else { &[] };
+    let machine =
+        TapeMachine::new_with_floor(program, &narrow_schedule, floor).expect("the tape machine");
     for air in machine.airs() {
         println!(
             "  {:>7}: 2^{} rows x {} + {} prep",
@@ -76,6 +95,15 @@ fn proves_a_recorded_verification_and_records_its_own() {
             air.log_height(),
             p3_air::BaseAir::<zkm_binary_stark::F>::width(air),
             p3_air::BaseAir::<zkm_binary_stark::F>::preprocessed_width(air)
+        );
+    }
+    for air in machine.airs() {
+        let (main, prep) = zkm_binary_recursion::forms::table_forms(air);
+        println!(
+            "  {:>7} forms: main {:?}, prep {:?}",
+            air.name(),
+            main.map(|f| f.forms.len()),
+            prep.map(|f| f.forms.len())
         );
     }
     let public = machine.public_values(&tape.inputs);

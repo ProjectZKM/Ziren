@@ -278,6 +278,72 @@ impl<'a> Child<'a> {
 }
 
 impl<'a> Child<'a> {
+    /// whir-gc experiment: [`Self::node`] as the last level's verifier reads it.  The
+    /// machine's key is a constant of the program (the garbled circuit is built for one
+    /// key), and each preprocessed opened value in `prep_known` (index in the opening's
+    /// values, value) a constant: a form over constant preprocessed columns.  Each known
+    /// value is checked against the proof before the recording.
+    ///
+    /// # Panics
+    /// Panics if called during a recording, if a known value differs from the proof's,
+    /// or if the traced configuration cannot be built for the machine's shapes.
+    #[must_use]
+    pub fn node_final(
+        machine: &'a TapeMachine,
+        proof: &'a MachineProof,
+        public_values: Vec<u32>,
+        membership: VkMembership,
+        schedule: &BinarySchedule,
+        prep_known: Vec<(usize, crate::tape::F)>,
+    ) -> Self {
+        assert!(!crate::tape::recording(), "a child is made outside a recording");
+        let values = &proof.preprocessed_opening.as_ref().expect("a preprocessed opening").values;
+        for &(i, v) in &prep_known {
+            assert_eq!(values[i], v, "preprocessed value {i} is not its known constant");
+        }
+        let (main, preprocessed) = machine.shapes();
+        let config = TracedConfig::new(&main, &preprocessed, schedule).expect("traced config");
+        // Lifted outside the recording, the key's roots are constants.
+        let (vk, roots) = lift_as_inputs(machine.verifying_key());
+        let (key_main, key_preprocessed, key_roots) = (main.clone(), preprocessed.clone(), roots.clone());
+        Self {
+            public_values,
+            membership,
+            key: Some(Box::new(move || {
+                key_digest(KeyKind::Node, &key_main, &key_preprocessed, &key_roots)
+            })),
+            verify: Box::new(move |public: &[Traced; DIGEST_SIZE]| {
+                let digest = key_digest(KeyKind::Node, &main, &preprocessed, &roots);
+                let mut proof: TracedProof = reread(proof);
+                if let Some(opening) = proof.preprocessed_opening.as_mut() {
+                    for &(i, v) in &prep_known {
+                        opening.values[i] = Traced::constant(v);
+                    }
+                }
+                let instances = VerifierInstances::new(
+                    machine
+                        .airs()
+                        .iter()
+                        .map(|air| {
+                            let public_values: &[Traced] = match air {
+                                TapeAir::Public(_) => public,
+                                _ => &[],
+                            };
+                            VerifierInstance::new(air, &vk, air.log_height(), public_values)
+                        })
+                        .collect(),
+                );
+                let mut challenger = TracedChallenger::new(TRANSCRIPT_DOMAIN);
+                let verdict = verify(&config, instances, &proof, 0, &mut challenger)
+                    .map_err(|e| format!("{e:?}"));
+                crate::queries::take();
+                verdict.map(|()| Verified { key: digest, claims: None })
+            }),
+        }
+    }
+}
+
+impl<'a> Child<'a> {
     /// A leaf proved as a word proof of a normalize program's relations,
     /// whose public input words are its digest; `key_digest` names the key
     /// in the key tree.  The key is a constant of the program, and the

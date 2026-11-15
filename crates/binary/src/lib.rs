@@ -92,6 +92,22 @@ pub struct BinarySchedule {
     pub security_bits: usize,
     /// Ceilings on queries, proof bytes and grinding, per commitment.
     pub budget: BinaryWhirBudget,
+    /// whir-gc experiment: the narrow-recursion levers, all off by default.
+    pub narrow: NarrowOptions,
+}
+
+/// whir-gc experiment: levers that shrink a recursion level's verifier, each off by
+/// default so a schedule without them proves as before.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NarrowOptions {
+    /// Claims of a batch sharing their absorbed coordinates send one tensor.
+    pub merge_claims: bool,
+    /// Per-round WHIR folds, zero-terminated; all zero keeps the constant fold.
+    pub round_folds: [u8; 8],
+    /// Bit `i` keeps the folded domain in round `i` of the per-round folds.
+    pub kept_domains: u32,
+    /// Tables read through fewer linear forms than columns send their forms.
+    pub forms: bool,
 }
 
 impl BinarySchedule {
@@ -112,6 +128,7 @@ impl Default for BinarySchedule {
             term_security_bits: 108,
             security_bits: 100,
             budget: Self::BUDGET,
+            narrow: NarrowOptions::default(),
         }
     }
 }
@@ -147,6 +164,14 @@ impl BinarySchedule {
     /// The profile of the schedule's commitment at its regime.
     #[must_use]
     pub fn profile(&self) -> BinaryWhirProfile {
+        let profile = self.profile_constant();
+        if self.narrow.round_folds[0] == 0 {
+            return profile;
+        }
+        profile.with_round_folds(self.narrow.round_folds, self.narrow.kept_domains)
+    }
+
+    fn profile_constant(&self) -> BinaryWhirProfile {
         match self.regime {
             WhirRegime::UniqueDecoding => BinaryWhirProfile::unique_decoding(
                 self.term_security_bits,

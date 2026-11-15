@@ -16,6 +16,7 @@ pub mod compose;
 pub mod config;
 pub mod domain;
 pub mod fields;
+pub mod forms;
 pub mod machine;
 pub mod mmcs;
 pub mod node;

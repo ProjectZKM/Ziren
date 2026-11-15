@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use p3_binary_field::{BinaryField128, TowerLevel};
 use p3_blake3::Blake3;
 use p3_challenger::CanObserve;
+use p3_field::PrimeCharacteristicRing;
 use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
 use p3_matrix::{Dimensions, Matrix};
 use p3_merkle_tree::{MerkleTreeMmcs, PrunedMerklePaths};
@@ -150,6 +151,68 @@ impl TracedMmcs {
         let cap_bits = &bits[siblings.len()..];
         let root = select_root(roots, cap_bits);
         assert_digest_eq(&digest, &root);
+    }
+}
+
+/// whir-gc experiment: the nodes of a commitment whose cap is constant (the verifying
+/// key's), `level` layers below its root, as circuit constants.
+static DEEP_CAP: std::sync::Mutex<Option<(usize, Vec<[u8; 32]>)>> = std::sync::Mutex::new(None);
+
+/// Read a commitment whose cap is constant down to `level` from these nodes: a path
+/// stops at its level-`level` node, chosen among the constants by the index's top bits,
+/// and its siblings above are never read.  Only the commitment the nodes hash up to
+/// reads them; `None` clears them.
+pub fn set_deep_cap(cap: Option<(usize, Vec<[u8; 32]>)>) {
+    if let Some((level, nodes)) = &cap {
+        assert_eq!(nodes.len(), 1 << level, "one node per index at the level");
+    }
+    *DEEP_CAP.lock().expect("the deep cap") = cap;
+}
+
+/// The native compression of two digests.
+fn compress(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut message = left.to_vec();
+    message.extend_from_slice(right);
+    crate::tape::blake3_bytes(&message)
+}
+
+/// The registered deep nodes, if they hash up to these constant roots.
+fn deep_nodes(roots: &[[Traced; 2]], depth: usize) -> Option<(usize, Vec<[u8; 32]>)> {
+    let (level, nodes) = DEEP_CAP.lock().expect("the deep cap").clone()?;
+    if level > depth || !roots.iter().flatten().all(Traced::is_constant) {
+        return None;
+    }
+    let mut layer = nodes.clone();
+    while layer.len() > roots.len() {
+        layer = layer.chunks(2).map(|pair| compress(&pair[0], &pair[1])).collect();
+    }
+    let cap: Vec<[F; 2]> = roots.iter().map(|root| root.map(|x| x.value())).collect();
+    let derived: Vec<[F; 2]> = layer.into_iter().map(digest_elements).collect();
+    (derived == cap).then_some((level, nodes))
+}
+
+/// Check one query's path from its leaf up to a constant node: the lower siblings
+/// hashed in, the node chosen by a one-hot of the top bits (one AND per indicator), the
+/// selection itself XORs of constants.
+fn check_deep_path(leaf: &[Traced], siblings: &[[Traced; 2]], bits: &[Traced], nodes: &[[u8; 32]]) {
+    let mut digest = hash_leaf(leaf);
+    for (&sibling, &bit) in siblings.iter().zip(bits) {
+        digest = merkle_node(bit, digest, sibling);
+    }
+    let mut indicator = vec![Traced::ONE];
+    for &bit in &bits[siblings.len()..] {
+        let high: Vec<Traced> = indicator.iter().map(|&x| select(bit, Traced::ZERO, x)).collect();
+        let low: Vec<Traced> = indicator.iter().zip(&high).map(|(&x, &h)| x + h).collect();
+        indicator = low;
+        indicator.extend(high);
+    }
+    assert_eq!(indicator.len(), nodes.len(), "one indicator per node");
+    for half in 0..2 {
+        let mut node = Traced::ZERO;
+        for (&ind, constant) in indicator.iter().zip(nodes) {
+            node = node + select(ind, Traced::ZERO, Traced::constant(digest_elements(*constant)[half]));
+        }
+        digest[half].assert_eq(&node);
     }
 }
 
@@ -322,6 +385,16 @@ impl Mmcs<Traced> for TracedMmcs {
                 (index, path.siblings.clone())
             })
             .collect();
+        if let Some((level, nodes)) = deep_nodes(&roots, depth) {
+            for ((rows, bits), (_, siblings)) in opened_values.iter().zip(&bits).zip(&hints) {
+                let lower: Vec<[Traced; 2]> = siblings[..depth - level]
+                    .iter()
+                    .map(|&digest| TracedDigest::read(digest).0)
+                    .collect();
+                check_deep_path(rows[0].as_ref(), &lower, &bits[..depth], &nodes);
+            }
+            return Ok(());
+        }
         let mut shared = SharedTop { nodes: BTreeMap::new(), hints: &hints };
         let mut top = None;
         for (((&index, rows), bits), (_, siblings)) in
