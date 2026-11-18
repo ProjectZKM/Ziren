@@ -1,7 +1,17 @@
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 
-use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, MipsAirId, Opcode, NUM_REGISTERS};
+use crate::{
+    events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, executor::CORE_SHARD_CLK_LIMIT, MipsAirId,
+    Opcode, NUM_REGISTERS,
+};
+
+/// The `MemoryBump` rows a shard is charged up front: one first-touch shadow read per register,
+/// plus at most one gap shadow read per register per `2^16` clk ticks (a register access only
+/// range checks a 16-bit clk difference).  A fixed bound keeps the split identical in every
+/// executor mode, none of which has to track the gaps.
+pub const MEMORY_BUMP_ROWS_PER_SHARD: u64 =
+    NUM_REGISTERS as u64 * (1 + (CORE_SHARD_CLK_LIMIT as u64 >> 16));
 
 /// Maps the opcode counts to the number of events in each air.
 #[must_use]
@@ -36,7 +46,7 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::MemoryLocal] =
         touched_addresses.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64);
 
-    events_counts[MipsAirId::MemoryBump] = NUM_REGISTERS as u64;
+    events_counts[MipsAirId::MemoryBump] = MEMORY_BUMP_ROWS_PER_SHARD;
 
     events_counts[MipsAirId::Branch] = opcode_counts[Opcode::BEQ]
         + opcode_counts[Opcode::BNE]
@@ -217,7 +227,7 @@ impl ShardSplitAccumulator {
         self.trace_area = 0;
         self.max_height = 0;
         self.touched_addresses = 0;
-        self.bump(MipsAirId::MemoryBump, NUM_REGISTERS as u64);
+        self.bump(MipsAirId::MemoryBump, MEMORY_BUMP_ROWS_PER_SHARD);
     }
 
     /// Add `count` rows to `air`, keeping `trace_area` and `max_height` in step.
@@ -451,7 +461,7 @@ mod tests {
 
     /// A reset must restore exactly the state a fresh accumulator starts in, including the
     /// unconditional per-shard `MemoryBump` seed. A reset that dropped the seed would understate
-    /// every shard's area by `NUM_REGISTERS * width(MemoryBump)`.
+    /// every shard's area by `MEMORY_BUMP_ROWS_PER_SHARD * width(MemoryBump)`.
     #[test]
     fn reset_restores_a_fresh_shard() {
         let costs = costs();
@@ -484,9 +494,10 @@ mod tests {
         acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(2), (true, false));
 
-        let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, 100);
+        let cap = MEMORY_BUMP_ROWS_PER_SHARD + 100;
+        let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, cap);
         assert_eq!(acc.check_shard_limit(1_000_000), (false, false));
-        for _ in 0..100 {
+        for _ in 0..cap {
             acc.add_opcode(Opcode::ADD, 1);
         }
         assert_eq!(acc.check_shard_limit(1_000_000), (false, true));

@@ -36,11 +36,12 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_access(
 // ---------------------------------------------------------------------------
 // Register accesses.
 //
-// The `MemoryBump` chip guarantees `prev_shard == shard` for every register
-// access (it inserts a shadow read at `(shard, 0)` on the register's first
-// touch in the shard).  So a register access witnesses neither `prev_shard`
-// nor `compare_clk` nor the high limb of the timestamp difference -- the
-// high limb is a linear expression in the AIR.  9 columns -> 6.
+// The `MemoryBump` chip guarantees `prev_shard == shard` and a clk difference
+// below 2^16 for every register access (it inserts a shadow read one tick
+// before a first touch in the shard or an access 2^16 or more ticks after the
+// previous one).  So a register access witnesses neither `prev_shard` nor
+// `compare_clk` nor any difference limb -- the AIR range checks
+// `clk - prev_clk - 1` as an expression.  9 columns -> 5.
 // ---------------------------------------------------------------------------
 
 template<class F>
@@ -50,11 +51,9 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_access(
     const uint32_t prev_timestamp,
     const uint32_t value
 ) {
+    (void)timestamp;
     write_word_from_u32<F>(self.value, value);
     self.prev_clk = F::from_canonical_u32(prev_timestamp);
-
-    const uint32_t diff_minus_one = timestamp - prev_timestamp - 1;
-    self.diff_16bit_limb = F::from_canonical_u16((uint16_t)(diff_minus_one & 0xffff)).val;
 }
 
 // Takes the NARROW register record the instruction events carry: a register

@@ -116,16 +116,7 @@ impl<F: PrimeField32> RegisterAccessCols<F> {
     ) {
         self.value = value.into();
         self.prev_clk = F::from_u32(prev_timestamp);
-
-        let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
-        let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
-        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
-
-        output.add_u16_range_check(diff_16bit_limb);
-        output.add_bit_range_check(
-            ((diff_minus_one >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16,
-            TIMESTAMP_HIGH_LIMB_BITS,
-        );
+        output.add_u16_range_check(register_diff(timestamp, prev_timestamp));
     }
 
     /// Populate a register access.
@@ -148,18 +139,20 @@ impl<F: PrimeField32> RegisterAccessCols<F> {
         );
         self.value = value.into();
         self.prev_clk = F::from_u32(prev_timestamp);
-
-        let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
-        let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
-        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
-
-        output.add_u16_range_check(diff_16bit_limb);
-
-        output.add_bit_range_check(
-            ((diff_minus_one >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16,
-            TIMESTAMP_HIGH_LIMB_BITS,
-        );
+        output.add_u16_range_check(register_diff(timestamp, prev_timestamp));
     }
+}
+
+/// `timestamp - prev_timestamp - 1` of a register access, which the `MemoryBump` shadow reads
+/// keep below `2^16`.
+fn register_diff(timestamp: u32, prev_timestamp: u32) -> u16 {
+    let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
+    debug_assert!(
+        diff_minus_one < 1 << 16,
+        "register access at {timestamp} has prev {prev_timestamp}: the MemoryBump shadow read is \
+         missing"
+    );
+    diff_minus_one as u16
 }
 
 impl<F: PrimeField32> MemoryWriteCols<F> {

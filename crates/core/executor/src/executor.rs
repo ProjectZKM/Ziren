@@ -1079,7 +1079,7 @@ impl<'a> Executor<'a> {
         if !is_syscall_access && !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
             if let Some((prev, cur)) = self.touch_register(addr, None, shard, timestamp) {
                 let (prev_shard, prev_timestamp) =
-                    self.bump_register_timestamp(addr, shard, prev, false);
+                    self.bump_register_timestamp(addr, shard, timestamp, prev, false);
                 return MemoryReadRecord::new(
                     cur.value,
                     cur.shard,
@@ -1135,7 +1135,7 @@ impl<'a> Executor<'a> {
             );
         }
         let (prev_shard, prev_timestamp) =
-            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
+            self.bump_register_timestamp(addr, shard, timestamp, prev_record, is_syscall_access);
         MemoryReadRecord::new(
             cur_record.value,
             cur_record.shard,
@@ -1185,15 +1185,9 @@ impl<'a> Executor<'a> {
     ///
     /// Registers carry their `(shard, clk)` across shard boundaries, so the first touch of a
     /// register in a shard would otherwise witness `prev_shard < shard` and the access would have
-    /// to compare *shards* rather than clks.  The bump inserts a shadow read at `(shard, 0)`,
-    /// which is strictly below every real register access in the shard (those live at sub-cycle
-    /// positions `1..=4`, and `clk` restarts at 0 each shard), so it is always the first link of
-    /// the shard's access chain for that register.
-    ///
-    /// The resulting invariant — every register access has `prev_shard == shard` — is what lets
-    /// `RegisterAccessCols` drop `prev_shard`, `compare_clk` and `diff_8bit_limb` (9 columns to
-    /// 6).  The dropped shard comparison is paid for exactly once per (register, shard) by the
-    /// `MemoryBump` chip instead of once per first-touch.
+    /// to compare *shards* rather than clks.  The bump inserts a shadow read that does that
+    /// comparison once, so every register access has `prev_shard == shard`, which is what lets
+    /// `RegisterAccessCols` drop `prev_shard` and `compare_clk`.
     ///
     /// `is_syscall_access` says the access came through a [`crate::syscalls::SyscallContext`]
     /// (i.e. `local_memory_access` was `Some`), which means it will be proven by a *precompile*
@@ -1204,27 +1198,40 @@ impl<'a> Executor<'a> {
     /// need `prev_shard == shard`; every precompile chip witnesses the full `MemoryAccessCols`
     /// (`crate::air::MemoryAirBuilder::eval_memory_access`) and handles `prev_shard != shard`
     /// itself.
+    ///
+    /// The same shadow read also goes in when the register's previous access in this shard is
+    /// `2^16` or more clk ticks back, so a register access only range checks a 16-bit clk
+    /// difference.  The shadow read sits at `timestamp - 1`: above the previous access whenever a
+    /// bump is needed, and directly below the access itself.  The shard split prepays every bump
+    /// ([`crate::cost::MEMORY_BUMP_ROWS_PER_SHARD`]).
     #[inline]
     fn bump_register_timestamp(
         &mut self,
         addr: u32,
         shard: u32,
+        timestamp: u32,
         prev_record: MemoryRecord,
         is_syscall_access: bool,
     ) -> (u32, u32) {
-        if self.unconstrained || is_syscall_access || prev_record.shard == shard {
+        if self.unconstrained || is_syscall_access {
             return (prev_record.shard, prev_record.timestamp);
         }
+        let first_touch = prev_record.shard != shard;
+        if !first_touch && timestamp.wrapping_sub(prev_record.timestamp).wrapping_sub(1) < 1 << 16 {
+            return (prev_record.shard, prev_record.timestamp);
+        }
+        let bump_timestamp = timestamp - 1;
         if self.executor_mode == ExecutorMode::Trace {
             self.record.bump_memory_events.push(MemoryBumpEvent {
                 addr,
                 shard,
+                timestamp: bump_timestamp,
                 value: prev_record.value,
                 prev_shard: prev_record.shard,
                 prev_timestamp: prev_record.timestamp,
             });
         }
-        (shard, 0)
+        (shard, bump_timestamp)
     }
 
     /// Write a word to memory and create an access record.
@@ -1440,7 +1447,7 @@ impl<'a> Executor<'a> {
         }
 
         let (prev_shard, prev_timestamp) =
-            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
+            self.bump_register_timestamp(addr, shard, timestamp, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
             cur_record.value,
             cur_record.shard,
@@ -1467,7 +1474,7 @@ impl<'a> Executor<'a> {
         if !is_syscall_access && !self.unconstrained {
             if let Some((prev, cur)) = self.touch_register(addr, Some(value), shard, timestamp) {
                 let (prev_shard, prev_timestamp) =
-                    self.bump_register_timestamp(addr, shard, prev, false);
+                    self.bump_register_timestamp(addr, shard, timestamp, prev, false);
                 return MemoryWriteRecord::new(
                     cur.value,
                     cur.shard,
@@ -1532,7 +1539,7 @@ impl<'a> Executor<'a> {
         }
 
         let (prev_shard, prev_timestamp) =
-            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
+            self.bump_register_timestamp(addr, shard, timestamp, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
             cur_record.value,
             cur_record.shard,

@@ -1,7 +1,7 @@
 use std::iter::once;
 
 use p3_air::AirBuilder;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
 use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope},
@@ -113,14 +113,13 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
     ///
     /// Registers share the memory argument and the memory address space with real memory, but the
     /// `MemoryBump` chip guarantees that the previous access to a register is always in the
-    /// *current* shard: it inserts a shadow read at `(shard, 0)` on the register's first touch in
-    /// the shard, and `(shard, 0)` is strictly below every real register access (those sit at the
-    /// sub-cycle positions `1..=4` and `clk` restarts at 0 each shard).
+    /// *current* shard: it inserts a shadow read one clk tick before the register's first touch in
+    /// the shard.
     ///
-    /// So `prev_shard` is not witnessed — it *is* `shard` — the `compare_clk` branch collapses to
-    /// the clk comparison, and only the low limb and the top bit of the timestamp difference are
-    /// witnessed.  See
-    /// [`crate::memory::RegisterAccessCols`].
+    /// So `prev_shard` is not witnessed — it *is* `shard` — and the `compare_clk` branch collapses
+    /// to the clk comparison.  The bump also keeps `clk - prev_clk - 1` below `2^16`, so the
+    /// difference is checked as an expression with one `U16Range` lookup and nothing is
+    /// witnessed for it.  See [`crate::memory::RegisterAccessCols`].
     fn eval_register_access<E: Into<Self::Expr> + Clone>(
         &mut self,
         shard: impl Into<Self::Expr>,
@@ -139,22 +138,11 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         let prev_clk: Self::Expr = access.prev_clk.clone().into();
 
         let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
-        let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
-
-        let diff_high_limb =
-            (diff_minus_one - diff_16bit_limb.clone()) * Self::F::from_u32(1 << 16).inverse();
 
         self.send_byte(
             Self::Expr::from_u8(ByteOpcode::U16Range as u8),
-            diff_16bit_limb,
+            diff_minus_one,
             Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            do_check.clone(),
-        );
-        self.send_byte(
-            Self::Expr::from_u8(ByteOpcode::Range as u8),
-            diff_high_limb,
-            Self::Expr::from_u8(TIMESTAMP_HIGH_LIMB_BITS),
             Self::Expr::ZERO,
             do_check.clone(),
         );

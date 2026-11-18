@@ -93,7 +93,7 @@ where
                 is_real.clone(),
             );
 
-            AddOperation::<AB::F>::eval(
+            AddOperation::<AB::F>::eval_carries_only(
                 builder,
                 local.next_pc,
                 local.frame.op_c_val(),
@@ -106,9 +106,8 @@ where
                 local.next_next_pc.reduce::<AB>(),
             );
 
-            builder.slice_range_check_u8(&local.next_pc.0, is_real.clone() - local.is_branching);
-            builder
-                .slice_range_check_u8(&local.next_next_pc.0, is_real.clone() - local.is_branching);
+            builder.slice_range_check_u8(&local.next_pc.0, is_real.clone());
+            builder.slice_range_check_u8(&local.next_next_pc.0, is_real.clone());
 
             builder.when_not(is_real.clone()).assert_zero(local.is_branching);
 
