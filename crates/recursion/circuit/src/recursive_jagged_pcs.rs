@@ -155,7 +155,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             ..
         } = proof;
 
-        let num_cols = params.col_prefix_sums.len() - 1;
+        let num_cols = params.col_prefix_sums.len() - 2;
         let num_col_variables = num_cols.next_power_of_two().trailing_zeros() as usize;
         let z_col: Vec<Ext<C::F, C::EF>> =
             (0..num_col_variables).map(|_| challenger.sample_ext(builder)).collect();

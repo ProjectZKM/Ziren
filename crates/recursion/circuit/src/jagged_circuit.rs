@@ -55,9 +55,11 @@ pub struct RecursiveStackedPcsProof<Pcs, F, EF> {
 /// dimensions.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct JaggedDimensionMetadata<F> {
-    /// `col_prefix_sums[k]` is the bit-decomposition of the
-    /// cumulative column-row offset of column `k` in the dense
-    /// jagged layout.  Length = `num_columns + 1`.
+    /// Bit-decompositions of the dense jagged layout's column offsets:
+    /// entry 0 is zero, entry `k + 1` is the start of column `k`, and the
+    /// last entry is the total area.  Length = `next_power_of_two(columns) + 2`,
+    /// so the total keeps its own slot when the column count is a power of
+    /// two.
     pub col_prefix_sums: Vec<Vec<F>>,
 }
 

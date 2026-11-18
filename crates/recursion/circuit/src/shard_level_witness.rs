@@ -823,7 +823,7 @@ where
         column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum::<usize>()
             + bundle.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-    let col_prefix_sums_len = padded_cols + 1;
+    let col_prefix_sums_len = padded_cols + 2;
     let num_rounds = column_counts_by_round.len().max(1);
 
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
@@ -1070,7 +1070,7 @@ where
         column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum::<usize>()
             + padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-    let col_prefix_sums_len = padded_cols + 1;
+    let col_prefix_sums_len = padded_cols + 2;
     let _num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
