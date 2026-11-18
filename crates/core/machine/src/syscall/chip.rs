@@ -131,10 +131,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
-                .filter(|e| {
-                    (e.a_record.prev_value.to_le_bytes()[2] == 1)
-                        || (e.a_record.prev_value.to_le_bytes()[1] != 0)
-                })
+                .filter(|e| zkm_core_executor::syscall_is_sent(e.a_record.prev_value))
                 .map(|event| {
                     let is_linux = event.a_record.prev_value.to_le_bytes()[1] != 0;
                     let (rlo, rhi) = if is_linux {
@@ -241,10 +238,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => input
                 .syscall_events
                 .par_iter()
-                .filter(|event| {
-                    (event.a_record.prev_value.to_le_bytes()[2] == 1)
-                        || (event.a_record.prev_value.to_le_bytes()[1] != 0)
-                })
+                .filter(|event| zkm_core_executor::syscall_is_sent(event.a_record.prev_value))
                 .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => input
@@ -268,10 +262,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 shard
                     .syscall_events
                     .iter()
-                    .filter(|e| {
-                        (e.a_record.prev_value.to_le_bytes()[2] == 1)
-                            || (e.a_record.prev_value.to_le_bytes()[1] != 0)
-                    })
+                    .filter(|e| zkm_core_executor::syscall_is_sent(e.a_record.prev_value))
                     .take(1)
                     .count()
                     > 0
