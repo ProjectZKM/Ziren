@@ -2054,7 +2054,8 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
-        if !self.unconstrained && !self.skip_replay_bookkeeping {
+        let charged = !self.unconstrained && !self.skip_replay_bookkeeping;
+        if charged {
             self.report.opcode_counts[instruction.opcode] += 1;
             charge_instruction(&mut self.split_acct, instruction);
         }
@@ -2167,6 +2168,9 @@ impl<'a> Executor<'a> {
             clk = self.state.clk;
             pc = self.state.pc;
 
+            if charged && crate::syscall_is_sent(self.register(Register::V0)) {
+                self.split_acct.add_sent_syscall();
+            }
             self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
             next_pc = precompile_next_pc;
             next_next_pc = precompile_next_pc + 4;
@@ -3703,7 +3707,9 @@ pub(crate) fn charge_instruction(acct: &mut ShardSplitAccumulator, instruction: 
     } else {
         acct.add_opcode(instruction.opcode, 1);
     }
-    if instruction.is_branch_cmp_instruction() {
+    if instruction.opcode == Opcode::SYSCALL {
+        acct.add_air(MipsAirId::SyscallCore, 1);
+    } else if instruction.is_branch_cmp_instruction() {
         acct.add_opcode(Opcode::ADD, 1);
         acct.add_opcode(Opcode::SLT, 2);
     } else if instruction.is_mov_cond_instruction() {

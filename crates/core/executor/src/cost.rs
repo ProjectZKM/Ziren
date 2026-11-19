@@ -75,9 +75,11 @@ pub fn estimate_mips_event_counts(
 
     events_counts[MipsAirId::CloClz] = opcode_counts[Opcode::CLO] + opcode_counts[Opcode::CLZ];
 
-    events_counts[MipsAirId::SyscallCore] = syscalls_sent;
+    events_counts[MipsAirId::SyscallInstrs] = opcode_counts[Opcode::SYSCALL];
 
-    events_counts[MipsAirId::Global] = 2 * touched_addresses + syscalls_sent;
+    events_counts[MipsAirId::SyscallCore] = opcode_counts[Opcode::SYSCALL];
+
+    events_counts[MipsAirId::Global] = 2 * touched_addresses + 2 * syscalls_sent;
 
     events_counts
 }
@@ -89,8 +91,10 @@ pub fn estimate_mips_event_counts(
 /// per-instruction accumulate.
 ///
 /// Returns `None` for the opcodes that [`estimate_mips_event_counts`] does not attribute to
-/// any chip: `SYSCALL` (the `SyscallInstrs` chip is never populated by the estimator),
-/// `MOD` / `MODU` (the estimator's `DivRem` count is `DIV + DIVU` only) and `UNIMPL`.
+/// any chip: `MOD` / `MODU` (the estimator's `DivRem` count is `DIV + DIVU` only) and
+/// `UNIMPL`.  A `SYSCALL` also charges a `SyscallCore` row (see `charge_instruction` in the
+/// executor), and two `Global` rows when the core sends on it, which depends on the syscall
+/// code; see [`ShardSplitAccumulator::add_sent_syscall`].
 #[must_use]
 pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
     Some(match opcode {
@@ -120,8 +124,17 @@ pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
         | Opcode::TEQ => MipsAirId::MiscInstrs,
         Opcode::WSBH | Opcode::MNE | Opcode::MEQ => MipsAirId::MovCond,
         Opcode::CLO | Opcode::CLZ => MipsAirId::CloClz,
-        Opcode::SYSCALL | Opcode::MOD | Opcode::MODU | Opcode::UNIMPL => return None,
+        Opcode::SYSCALL => MipsAirId::SyscallInstrs,
+        Opcode::MOD | Opcode::MODU | Opcode::UNIMPL => return None,
     })
+}
+
+/// Whether the core `SyscallChip` emits rows for a syscall whose `V0` value before the call is
+/// `code`: one with its own table (byte 2 is 1) or a Linux syscall (byte 1 is nonzero).
+#[must_use]
+pub const fn syscall_is_sent(code: u32) -> bool {
+    let bytes = code.to_le_bytes();
+    bytes[2] == 1 || bytes[1] != 0
 }
 
 /// The immediate-form sibling of [`mips_air_id_from_opcode`]: the air an
@@ -261,6 +274,16 @@ impl ShardSplitAccumulator {
         self.bump(MipsAirId::Global, 2);
     }
 
+    /// Record one syscall the core shard sends on: the two `Global` rows (the call and its
+    /// result) the core `SyscallChip` emits for it.  Its `SyscallCore` row is charged with
+    /// every `SYSCALL`, sent or not, as the chip's height counts them all.
+    ///
+    /// Sent means [`syscall_is_sent`] holds for the syscall code.
+    #[inline]
+    pub fn add_sent_syscall(&mut self) {
+        self.bump(MipsAirId::Global, 2);
+    }
+
     /// Whether this shard has reached its trace-area budget / its per-chip height cap.
     ///
     /// `cpu_cycles` is the executed-cycle count (`clk / 5`); see the type-level note on why
@@ -386,6 +409,7 @@ mod tests {
         let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX);
         let mut reference: EnumMap<Opcode, u64> = EnumMap::default();
         let mut touched: u64 = 0;
+        let mut sent: u64 = 0;
 
         let mut rng: u64 = 0x243f_6a88_85a3_08d3;
         for step in 0..20_000u64 {
@@ -395,6 +419,13 @@ mod tests {
 
             acc.add_opcode(opcode, count);
             reference[opcode] += count;
+            if opcode == Opcode::SYSCALL {
+                acc.add_air(MipsAirId::SyscallCore, count);
+                for _ in 0..(rng >> 40) % (count + 1) {
+                    acc.add_sent_syscall();
+                    sent += 1;
+                }
+            }
 
             if rng.is_multiple_of(3) {
                 acc.add_touched_address();
@@ -402,7 +433,7 @@ mod tests {
             }
 
             let cpu_cycles = step * 5 / 5;
-            let expected = estimate_mips_event_counts(cpu_cycles, touched, 0, reference);
+            let expected = estimate_mips_event_counts(cpu_cycles, touched, sent, reference);
             assert_eq!(
                 acc.event_counts(cpu_cycles),
                 expected,
