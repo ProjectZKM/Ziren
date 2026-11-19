@@ -176,6 +176,13 @@ pub struct JitContext {
     /// The current shard, as a 32-bit operand for the memory hook's
     /// first-touch comparison.
     pub shard: u32,
+    /// Undo-log write cursor inside an unconstrained block: the producer
+    /// pushes `{entry address, entry}` (24 bytes) before each access. Null
+    /// outside one, where nothing is logged.
+    pub undo_tail: *mut u8,
+    /// One 24-byte undo entry before the end of the log's capacity; a push
+    /// with the tail above this exits with `JIT_EXIT_ORACLE_FULL` first.
+    pub undo_end: *mut u8,
 }
 
 impl Default for JitContext {
@@ -214,6 +221,8 @@ impl Default for JitContext {
             touched: 0,
             clk_limit: 0,
             shard: 0,
+            undo_tail: std::ptr::null_mut(),
+            undo_end: std::ptr::null_mut(),
         }
     }
 }

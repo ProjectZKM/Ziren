@@ -12,10 +12,10 @@
 //! One entry per guest WORD, indexed by `addr >> 2` -- the same aliasing of
 //! unaligned addresses the paged table has (`PagedMemory::compress_addr`).
 //! The array is a `MAP_SHARED | MAP_NORESERVE` view of a `memfd`, so it is
-//! sparse (only touched pages are ever committed) and an unconstrained block
-//! can be entered by mapping a `MAP_PRIVATE` copy-on-write view of the same
-//! fd and left by unmapping it -- the rollback the paged executor does with a
-//! per-address `memory_diff` becomes one `munmap`.
+//! sparse (only touched pages are ever committed). Inside an unconstrained
+//! block every access first pushes the entry to an undo log, and leaving the
+//! block writes the log back in reverse -- the rollback the paged executor
+//! does with a per-address `memory_diff`.
 //!
 //! An entry's first 12 bytes are exactly a [`crate::minimal_trace::MemValue`]
 //! image, so the producer's oracle push is one 12-byte copy of the entry as
@@ -77,19 +77,35 @@ const NUM_ENTRIES: usize = (MAX_MEMORY / 4 / PAGE_LEN + 1) * PAGE_LEN;
 #[cfg(target_os = "linux")]
 const BYTE_LEN: usize = NUM_ENTRIES * std::mem::size_of::<FlatEntry>();
 
+/// One undo-log entry: a touched entry's address and its state before the
+/// access. The JIT producer writes the same 24-byte layout.
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UndoEntry {
+    /// The touched `*mut FlatEntry`.
+    pub ptr: usize,
+    /// The entry before the access.
+    pub entry: FlatEntry,
+}
+
+#[cfg(target_os = "linux")]
+const _: () = assert!(std::mem::size_of::<UndoEntry>() == 24);
+#[cfg(target_os = "linux")]
+const _: () = assert!(std::mem::offset_of!(UndoEntry, entry) == 8);
+
 /// The flat memory. See the module docs.
 #[cfg(target_os = "linux")]
 pub struct FlatMem {
-    /// The live view: `primary` outside an unconstrained block, the COW
-    /// mapping inside one.
-    cur: *mut FlatEntry,
-    /// The `MAP_SHARED` view of the fd. Writes through it persist on the fd,
-    /// so a later `MAP_PRIVATE` view starts as a copy of the current state.
-    primary: *mut FlatEntry,
-    /// The `MAP_PRIVATE` view in effect inside an unconstrained block.
-    cow: *mut FlatEntry,
+    /// The `MAP_SHARED` view of the fd.
+    base: *mut FlatEntry,
     /// The backing `memfd`.
     fd: libc::c_int,
+    /// Whether an unconstrained block is open.
+    unconstrained: bool,
+    /// Inside an unconstrained block, every entry it touched as it stood
+    /// before the access, in access order.
+    undo: Vec<UndoEntry>,
 }
 
 // SAFETY: the mappings are process-wide and only ever touched through the
@@ -136,8 +152,7 @@ impl FlatMem {
             unsafe { libc::close(fd) };
             return Err(err);
         }
-        let primary = ptr.cast::<FlatEntry>();
-        Ok(Self { cur: primary, primary, cow: std::ptr::null_mut(), fd })
+        Ok(Self { base: ptr.cast(), fd, unconstrained: false, undo: Vec::new() })
     }
 
     #[inline]
@@ -153,21 +168,56 @@ impl FlatMem {
     #[inline]
     #[must_use]
     pub fn get(&self, addr: u32) -> &FlatEntry {
-        unsafe { &*self.cur.add(Self::index(addr)) }
+        unsafe { &*self.base.add(Self::index(addr)) }
     }
 
-    /// The entry of the word containing `addr`, mutably. Sound as in
-    /// [`Self::get`]; `&mut self` makes the reference unique.
+    /// The entry of the word containing `addr`, mutably, logged for rollback
+    /// inside an unconstrained block. Sound as in [`Self::get`]; `&mut self`
+    /// makes the reference unique.
     #[inline]
     pub fn get_mut(&mut self, addr: u32) -> &mut FlatEntry {
-        unsafe { &mut *self.cur.add(Self::index(addr)) }
+        let ptr = unsafe { self.base.add(Self::index(addr)) };
+        if self.unconstrained {
+            self.undo.push(UndoEntry { ptr: ptr as usize, entry: unsafe { *ptr } });
+        }
+        unsafe { &mut *ptr }
     }
 
-    /// The live view's base pointer (the JIT's memory register).
+    /// The base pointer (the JIT's memory register).
     #[inline]
     #[must_use]
     pub fn as_ptr(&self) -> *mut FlatEntry {
-        self.cur
+        self.base
+    }
+
+    /// The undo log's write cursor and last-entry bound for the JIT producer
+    /// (see `JitContext::undo_tail`), with room for at least one entry, or
+    /// `None` outside an unconstrained block.
+    pub fn undo_cursor(&mut self) -> Option<(*mut u8, *mut u8)> {
+        if !self.unconstrained {
+            return None;
+        }
+        if self.undo.capacity() == self.undo.len() {
+            self.undo.reserve(self.undo.len().max(1 << 12));
+        }
+        let size = std::mem::size_of::<UndoEntry>();
+        let base = self.undo.as_mut_ptr().cast::<u8>();
+        Some(unsafe {
+            (base.add(self.undo.len() * size), base.add((self.undo.capacity() - 1) * size))
+        })
+    }
+
+    /// Take back the cursor [`Self::undo_cursor`] handed out: the JIT has
+    /// written every entry below `tail`.
+    ///
+    /// # Safety
+    /// `tail` must be that cursor advanced by whole entries, at most to one
+    /// past its bound, with every entry below it written.
+    pub unsafe fn set_undo_tail(&mut self, tail: *mut u8) {
+        let base = self.undo.as_mut_ptr().cast::<u8>();
+        let len = (tail as usize - base as usize) / std::mem::size_of::<UndoEntry>();
+        debug_assert!(len <= self.undo.capacity());
+        unsafe { self.undo.set_len(len) };
     }
 
     /// Seed a never-accessed word with an initial value (a program-image word
@@ -186,49 +236,33 @@ impl FlatMem {
     #[inline]
     #[must_use]
     pub fn in_unconstrained(&self) -> bool {
-        !self.cow.is_null()
+        self.unconstrained
     }
 
-    /// Enter an unconstrained block: every access from here on goes to a
-    /// private copy-on-write view of the memory.
-    ///
-    /// # Errors
-    /// The `mmap` error.
-    pub fn enter_unconstrained(&mut self) -> std::io::Result<()> {
-        assert!(!self.in_unconstrained(), "nested unconstrained block");
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                BYTE_LEN,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_NORESERVE,
-                self.fd,
-                0,
-            )
-        };
-        if ptr == libc::MAP_FAILED {
-            return Err(std::io::Error::last_os_error());
-        }
-        self.cow = ptr.cast();
-        self.cur = self.cow;
-        Ok(())
+    /// Enter an unconstrained block: every access from here on is logged.
+    pub fn enter_unconstrained(&mut self) {
+        assert!(!self.unconstrained, "nested unconstrained block");
+        debug_assert!(self.undo.is_empty());
+        self.unconstrained = true;
     }
 
-    /// Leave an unconstrained block, discarding every access made inside it.
+    /// Leave an unconstrained block, discarding every access made inside it:
+    /// the log is written back newest first, so each entry ends at its state
+    /// before the block's first access to it.
     pub fn exit_unconstrained(&mut self) {
-        assert!(self.in_unconstrained(), "exit_unconstrained outside a block");
-        unsafe {
-            libc::munmap(self.cow.cast(), BYTE_LEN);
+        assert!(self.unconstrained, "exit_unconstrained outside a block");
+        for u in self.undo.drain(..).rev() {
+            unsafe { *(u.ptr as *mut FlatEntry) = u.entry };
         }
-        self.cow = std::ptr::null_mut();
-        self.cur = self.primary;
+        self.unconstrained = false;
     }
 
     /// Every entry that may have been written, in ascending address order:
     /// the data extents of the backing fd (`SEEK_DATA` / `SEEK_HOLE`), which
     /// hold exactly the pages some access has committed. Never-committed
-    /// pages are holes and hold nothing. Must not be called inside an
-    /// unconstrained block (its pages are private to the COW view).
+    /// pages are holes and hold nothing; a page an unconstrained block
+    /// committed holds entries restored to their never-accessed state. Must
+    /// not be called inside an unconstrained block.
     ///
     /// Yields `(addr, entry)` for entries with `f(entry)`. The raw reads are
     /// sound because `hole ≤ BYTE_LEN ⇒ idx < NUM_ENTRIES`.
@@ -247,7 +281,7 @@ impl FlatMem {
             let first = (data / entry_len) as usize;
             let last = (hole / entry_len) as usize;
             for idx in first..last {
-                let e = unsafe { &*self.primary.add(idx) };
+                let e = unsafe { &*self.base.add(idx) };
                 f((idx as u32) << 2, e);
             }
             off = hole;
@@ -259,10 +293,7 @@ impl FlatMem {
 impl Drop for FlatMem {
     fn drop(&mut self) {
         unsafe {
-            if !self.cow.is_null() {
-                libc::munmap(self.cow.cast(), BYTE_LEN);
-            }
-            libc::munmap(self.primary.cast(), BYTE_LEN);
+            libc::munmap(self.base.cast(), BYTE_LEN);
             libc::close(self.fd);
         }
     }
@@ -304,9 +335,7 @@ impl FlatMem {
     pub fn in_unconstrained(&self) -> bool {
         match self._never {}
     }
-    /// # Errors
-    /// Never returns.
-    pub fn enter_unconstrained(&mut self) -> std::io::Result<()> {
+    pub fn enter_unconstrained(&mut self) {
         match self._never {}
     }
     pub fn exit_unconstrained(&mut self) {
@@ -322,21 +351,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cow_rollback_and_extents() {
+    fn undo_rollback_and_extents() {
         let mut m = FlatMem::new().expect("flat mem");
         let a = 0x1000_0000u32;
         let b = 0x4000_0004u32;
         m.get_mut(a).value = 7;
         m.get_mut(a).shard = 1;
         m.seed_uninit(b, 9);
-        m.enter_unconstrained().expect("cow");
+        m.enter_unconstrained();
         m.get_mut(a).value = 8;
+        m.get_mut(a).timestamp = 3;
         m.get_mut(0x2000_0000).value = 5;
         m.get_mut(0x2000_0000).shard = 1;
         assert_eq!(m.get(a).value, 8);
         m.exit_unconstrained();
-        assert_eq!(m.get(a).value, 7);
-        assert_eq!(m.get(0x2000_0000).shard, 0);
+        assert_eq!(*m.get(a), FlatEntry { value: 7, timestamp: 0, shard: 1, flags: 0 });
+        assert_eq!(*m.get(0x2000_0000), FlatEntry::default());
         let mut seen = Vec::new();
         m.for_each_committed(|addr, e| {
             if e.shard != 0 || e.value != 0 {
