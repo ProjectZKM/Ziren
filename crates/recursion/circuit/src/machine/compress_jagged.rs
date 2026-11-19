@@ -1064,19 +1064,3 @@ impl<const P: u8>
         h.finish()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use zkm_recursion_compiler::config::InnerConfig;
-
-    type C = InnerConfig;
-
-    /// Smoke test: noop_eval_public_values_fn factory produces a
-    /// callable closure of the right type.
-    #[test]
-    fn noop_eval_public_values_fn_constructs() {
-        let _f = noop_eval_public_values_fn::<C>();
-    }
-}

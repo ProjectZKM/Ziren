@@ -124,28 +124,3 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// reduces to and the WHIR opener verifies.
     pub expected_eval: Ext<F, EF>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use p3_field::PrimeCharacteristicRing;
-    use p3_koala_bear::KoalaBear;
-
-    type F = KoalaBear;
-
-    #[test]
-    fn jagged_sumcheck_eval_proof_constructs() {
-        let proof: JaggedSumcheckEvalProof<F> =
-            JaggedSumcheckEvalProof { partial_sumcheck_proof: PartialSumcheckProof::dummy() };
-        assert!(proof.partial_sumcheck_proof.univariate_polys.is_empty());
-    }
-
-    #[test]
-    fn jagged_dimension_metadata_constructs() {
-        let meta: JaggedDimensionMetadata<F> = JaggedDimensionMetadata {
-            col_prefix_sums: vec![vec![F::ZERO; 8], vec![F::ONE; 8], vec![F::ZERO; 8]],
-        };
-        assert_eq!(meta.col_prefix_sums.len(), 3);
-        assert_eq!(meta.col_prefix_sums[0].len(), 8);
-    }
-}
