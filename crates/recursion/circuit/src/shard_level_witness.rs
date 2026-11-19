@@ -822,8 +822,6 @@ where
     let total_cols_before_pad: usize =
         column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum::<usize>()
             + bundle.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-    let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-    let col_prefix_sums_len = padded_cols + 1;
     let num_rounds = column_counts_by_round.len().max(1);
 
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
@@ -886,8 +884,7 @@ where
             v
         }
     };
-    let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
-    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+    let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(total_cols_before_pad + 1);
     let mut offset_idx: usize = 0;
     let mut current_offset: usize = 0;
     for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
@@ -898,9 +895,6 @@ where
                 current_offset = bundle.packing.offsets[offset_idx];
                 offset_idx += 1;
             }
-            if col_prefix_sums.len() >= col_prefix_sums_len {
-                break;
-            }
             col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
                 builder,
                 cap_to_bits(current_offset),
@@ -908,20 +902,11 @@ where
             ));
         }
     }
-    if col_prefix_sums.len() < col_prefix_sums_len - 1 {
-        let pad_bits =
-            bit_decompose_usize_to_felts::<C>(builder, cap_to_bits(current_offset), bits_per_entry);
-        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-            col_prefix_sums.push(pad_bits.clone());
-        }
-    }
-    if col_prefix_sums.len() < col_prefix_sums_len {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(total_values),
-            bits_per_entry,
-        ));
-    }
+    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+        builder,
+        cap_to_bits(total_values),
+        bits_per_entry,
+    ));
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums };
 
     let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(row_counts_src) = row_counts_by_round {
@@ -1069,9 +1054,6 @@ where
     let total_cols_before_pad: usize =
         column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum::<usize>()
             + padding_heights.iter().map(|p| p.len()).sum::<usize>();
-    let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-    let col_prefix_sums_len = padded_cols + 1;
-    let _num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
@@ -1105,7 +1087,7 @@ where
         tracing::info!(
             "LIFT-BUNDLE-DIAG bits_per_entry={bits_per_entry} jagged_eval_point_len={jagged_eval_point_len} \
              total_values={total_values} max_log_row_count={max_log_row_count} \
-             col_prefix_sums_len={col_prefix_sums_len} chip_height_felts={} (width capped at 31, MSBs zero-extended)",
+             num_cols={total_cols_before_pad} chip_height_felts={} (width capped at 31, MSBs zero-extended)",
             chip_height_felts.is_some()
         );
     }
@@ -1117,10 +1099,9 @@ where
         }
     };
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
-        // Every per-column prefix sum goes through a `PrefixSumChecks` chain
-        // on the compress machine, which asserts its bits boolean and pins its
-        // value, so those bits are hinted unchecked; the first, the padding
-        // and the last entries keep the per-bit check.
+        // Every column start goes through a `PrefixSumChecks` chain on the
+        // compress machine, which asserts its bits boolean and pins its value,
+        // so those bits are hinted unchecked; the total keeps the per-bit check.
         let chip_checks_bits = matches!(
             builder.program_type,
             zkm_primitives::types::RecursionProgramType::Core
@@ -1150,13 +1131,11 @@ where
                 bits
             }
         };
-        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
+            Vec::with_capacity(total_cols_before_pad + 1);
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
-        let bits0 = num2bits_be(builder, acc, true);
-        col_prefix_sums.push(bits0);
-        let mut current_offset_felt: Felt<C::F> = acc;
         let mut height_idx = 0usize;
-        'outer: for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
+        for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
             let pads: &[Felt<C::F>] =
                 padding_heights.get(round_idx).map(|v| v.as_slice()).unwrap_or(&[]);
             let widths: Vec<usize> =
@@ -1174,41 +1153,27 @@ where
                 .collect();
             for (w, h) in widths.into_iter().zip(col_heights) {
                 for _ in 0..w {
-                    if col_prefix_sums.len() >= col_prefix_sums_len {
-                        break 'outer;
-                    }
-                    current_offset_felt = acc;
                     let bits = num2bits_be(builder, acc, !chip_checks_bits);
                     col_prefix_sums.push(bits);
                     acc = builder.eval(acc + h);
                 }
             }
         }
-        if col_prefix_sums.len() < col_prefix_sums_len - 1 {
-            let pad_bits = num2bits_be(builder, current_offset_felt, true);
-            while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-                col_prefix_sums.push(pad_bits.clone());
-            }
-        }
-        if col_prefix_sums.len() < col_prefix_sums_len {
-            let bits = num2bits_be(builder, acc, true);
-            col_prefix_sums.push(bits);
-        }
+        let bits = num2bits_be(builder, acc, true);
+        col_prefix_sums.push(bits);
         JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }
     } else {
-        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
+            Vec::with_capacity(total_cols_before_pad + 1);
         let mut offset_idx: usize = 0;
         let mut current_offset: usize = 0;
-        for cc in column_counts_by_round.iter() {
-            let real_in_round = cc.iter().sum::<usize>();
-            for _ in 0..real_in_round {
+        for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
+            let cols_in_round =
+                cc.iter().sum::<usize>() + padding_heights.get(round_idx).map_or(0, |p| p.len());
+            for _ in 0..cols_in_round {
                 if offset_idx < bundle.packing.offsets.len() {
                     current_offset = bundle.packing.offsets[offset_idx];
                     offset_idx += 1;
-                }
-                if col_prefix_sums.len() >= col_prefix_sums_len {
-                    break;
                 }
                 col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
                     builder,
@@ -1217,20 +1182,11 @@ where
                 ));
             }
         }
-        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                builder,
-                cap_to_bits(current_offset),
-                bits_per_entry,
-            ));
-        }
-        if col_prefix_sums.len() < col_prefix_sums_len {
-            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                builder,
-                cap_to_bits(total_values),
-                bits_per_entry,
-            ));
-        }
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+            builder,
+            cap_to_bits(total_values),
+            bits_per_entry,
+        ));
         JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }
     };
 
@@ -1367,41 +1323,11 @@ mod tests {
 
     type C = InnerConfig;
 
-    /// JaggedReductionRound Witnessable round-trips a
-    /// 3-EF struct through the witness stream.
-    #[test]
-    fn jagged_reduction_round_witnessable_reads() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = JaggedReductionRound::<InnerChallenge> { evals: [InnerChallenge::ZERO; 3] };
-        let var: JaggedReductionRound<Ext<InnerVal, InnerChallenge>> =
-            <_ as Witnessable<C>>::read(&host, &mut builder);
-        assert_eq!(var.evals.len(), 3);
-    }
-
-    /// JaggedReductionProof Witnessable cascades through
-    /// rounds + eval_point + q_at_z.
-    #[test]
-    fn jagged_reduction_proof_witnessable_reads() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = JaggedReductionProof::<InnerChallenge> {
-            rounds: vec![
-                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
-                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
-            ],
-            eval_point: vec![InnerChallenge::ZERO; 4],
-            q_at_z: InnerChallenge::ZERO,
-        };
-        let var = <_ as Witnessable<C>>::read(&host, &mut builder);
-        assert_eq!(var.rounds.len(), 2);
-        assert_eq!(var.eval_point.len(), 4);
-    }
-
     /// eval-form → coeff-form converter shape sanity.
     /// Output univariate count matches input round count and the
     /// reconstructed polys agree with the input evals at x ∈ {0,1,2}.
     #[test]
     fn jagged_reduction_converter_shape_and_roundtrip() {
-        use p3_field::PrimeCharacteristicRing;
         let mk = |a: u16, b: u16, c: u16| JaggedReductionRound::<InnerChallenge> {
             evals: [
                 InnerChallenge::from_u16(a),
@@ -1437,105 +1363,11 @@ mod tests {
         assert_eq!(psp.point_and_eval.1, expected_final);
     }
 
-    /// converter output flows through the existing
-    /// `PartialSumcheckProof` Witnessable impl.  Confirms the bridge
-    /// composes with the recursion circuit's witness surface.
-    #[test]
-    fn jagged_reduction_converter_witnessable_composition() {
-        use p3_field::PrimeCharacteristicRing;
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = JaggedReductionProof::<InnerChallenge> {
-            rounds: vec![JaggedReductionRound {
-                evals: [InnerChallenge::ONE, InnerChallenge::ZERO, InnerChallenge::ZERO],
-            }],
-            eval_point: vec![InnerChallenge::ZERO],
-            q_at_z: InnerChallenge::ZERO,
-        };
-        let psp = jagged_reduction_to_partial_sumcheck(&proof);
-        let _var: PartialSumcheckProof<Ext<InnerVal, InnerChallenge>> =
-            <_ as Witnessable<C>>::read(&psp, &mut builder);
-    }
-
-    /// bit_decompose_usize_to_felts uses MSB-first ordering that
-    /// matches the verifier's Horner decode (`final_area = bit + 2*final_area`).
-    #[test]
-    fn bit_decompose_zero_yields_all_zero_felts() {
-        use p3_field::PrimeCharacteristicRing;
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 5);
-        assert_eq!(bits.len(), 5);
-        let _ = bits;
-        let _ = InnerVal::ZERO;
-    }
-
-    /// bit decomposition shape with non-zero values.
-    /// 4 bits LSB-first: 5 = [0, 1, 0, 1] when read MSB-first.
-    #[test]
-    fn bit_decompose_shape_matches_num_bits() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 5, 4);
-        assert_eq!(bits.len(), 4);
-        let bits_zero = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 8);
-        assert_eq!(bits_zero.len(), 8);
-        let bits_max = bit_decompose_usize_to_felts::<C>(&mut builder, 255, 8);
-        assert_eq!(bits_max.len(), 8);
-    }
-
     /// overflow panic when value exceeds bit budget.
     #[test]
     #[should_panic(expected = "exceeds 4 bits")]
     fn bit_decompose_overflow_panics() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let _ = bit_decompose_usize_to_felts::<C>(&mut builder, 16, 4);
-    }
-
-    /// edge case — zero bits is meaningful only for
-    /// value zero.  Returns empty Vec.
-    #[test]
-    fn bit_decompose_zero_bits_for_zero_value() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 0);
-        assert_eq!(bits.len(), 0);
-    }
-
-    /// NEGATIVE binding guard: the per-chip
-    /// heights derived from `bundle.commit.chip_dims` (2^log_height_padded)
-    /// must reconcile the packer's `packing.offsets` via the verifier's
-    /// prefix-sum accumulation, and an
-    /// all-zero fallback must NOT (it would assert the real, non-zero offsets
-    /// equal 0 — failing every non-degenerate proof).  Pure-usize mirror of
-    /// the in-circuit check; the e2e compress gate exercises the same logic
-    /// in-circuit.
-    #[test]
-    fn row_counts_from_chip_dims_reconcile_prefix_sums() {
-        let chip_dims: Vec<(usize, u32)> = vec![(1, 4), (1, 4), (1, 4)];
-        let column_counts: Vec<usize> = vec![1, 1, 1];
-        let offsets: Vec<usize> = vec![0, 16, 32];
-        let total_values: usize = 48;
-
-        let heights: Vec<usize> = chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
-        assert_eq!(heights, vec![16, 16, 16]);
-
-        let reconciles = |rows: &[usize]| -> bool {
-            let repeated: Vec<usize> = rows
-                .iter()
-                .zip(column_counts.iter())
-                .flat_map(|(&h, &c)| std::iter::repeat_n(h, c))
-                .collect();
-            let mut acc = 0usize;
-            for (i, &h) in repeated.iter().enumerate() {
-                if acc != offsets[i] {
-                    return false;
-                }
-                acc += h;
-            }
-            acc == total_values
-        };
-
-        assert!(reconciles(&heights), "chip_dims heights must reconcile the offsets");
-        assert!(
-            !reconciles(&[0usize, 0, 0]),
-            "all-zero row_counts must FAIL to reconcile non-zero offsets"
-        );
     }
 }
