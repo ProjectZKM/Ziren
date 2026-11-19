@@ -701,7 +701,9 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///   2. Run [`crate::sumcheck::verify_sumcheck`] on the embedded
 ///      `partial_sumcheck_proof` — this verifies the round polys
 ///      and samples challenges in-circuit.
-///   3. For each column pair `(col_prefix_sums[k], col_prefix_sums[k+1])`:
+///   3. For each real column `k`, the pair
+///      `(col_prefix_sums[k + 1], col_prefix_sums[k + 2])`, where the last real
+///      column ends at the final entry (the total):
 ///      merge bits, compute `(full_lagrange, prefix_sum_felt)` via
 ///      [`crate::jagged_eval_primitives::emit_prefix_sum_check`],
 ///      weight by `z_col_partial_lagrange[k]`, accumulate.
@@ -715,8 +717,9 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///
 /// # Arguments
 ///
-/// - `meta.col_prefix_sums[k]` — bit decomposition of column `k`'s
-///   cumulative row offset (Felt vec).
+/// - `meta.col_prefix_sums[k + 1]` — bit decomposition of column `k`'s
+///   cumulative row offset (Felt vec).  Entry 0 is zero and the last entry is
+///   the total area.
 /// - `z_row` — outer zerocheck row-direction eval point.
 /// - `z_col` — column-index challenges sampled just before this
 ///   closure in [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`].
