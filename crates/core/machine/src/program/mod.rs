@@ -2,11 +2,10 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use std::collections::HashMap;
 
 use crate::{
     air::ProgramAirBuilder,
-    utils::{next_power_of_two, pad_rows_fixed, zeroed_f_vec},
+    utils::{next_power_of_two, zeroed_f_vec},
     CoreChipError,
 };
 use p3_air::{Air, BaseAir, WindowAccess};
@@ -101,38 +100,30 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        let mut instruction_counts = HashMap::new();
-        input.cpu_events.iter().for_each(|event| {
-            let pc = event.pc;
-            instruction_counts.entry(pc).and_modify(|count| *count += 1).or_insert(1);
-        });
+        let program = &input.program;
+        let mut counts = vec![0u32; program.instructions.len()];
+        for event in &input.cpu_events {
+            let offset = event.pc.wrapping_sub(program.pc_base);
+            if offset.is_multiple_of(4) {
+                if let Some(count) = counts.get_mut((offset / 4) as usize) {
+                    *count += 1;
+                }
+            }
+        }
 
-        let mut rows = input
-            .program
-            .instructions
-            .clone()
-            .into_iter()
-            .enumerate()
-            .map(|(i, _)| {
-                let pc = input.program.pc_base + (i as u32 * 4);
-                let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
-                let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
-                cols.multiplicity = F::from_usize(*instruction_counts.get(&pc).unwrap_or(&0));
-                row
-            })
-            .collect::<Vec<_>>();
-
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_PROGRAM_MULT_COLS],
+        let height = next_power_of_two(
+            counts.len(),
             None,
             <ProgramChip as MachineAir<F>>::name(self).as_str(),
         );
+        let mut values = zeroed_f_vec(height * NUM_PROGRAM_MULT_COLS);
+        let (rows, _) = values.as_chunks_mut::<NUM_PROGRAM_MULT_COLS>();
+        for (row, count) in rows.iter_mut().zip(counts) {
+            let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
+            cols.multiplicity = F::from_usize(count as usize);
+        }
 
-        Ok(RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_PROGRAM_MULT_COLS,
-        ))
+        Ok(RowMajorMatrix::new(values, NUM_PROGRAM_MULT_COLS))
     }
 
     fn included(&self, _: &Self::Record) -> bool {
