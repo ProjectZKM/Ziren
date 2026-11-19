@@ -10,7 +10,7 @@
 //! * **A hidden output.**  The output `out(c, h)` over `I + 1` variables is
 //!   extended by a *virtual* slice `virt` of the same shape, four of whose
 //!   cells are random: `(p, 1)`, `(−p, 1)`, `(0, u_0)`, `(0, u_1)`, read off
-//!   the random stripe `R` ([`crate::zk_mask::VIRTUAL_LEAF_CELLS`]).  The
+//!   the mask region ([`crate::zk_mask::VIRTUAL_LEAF_CELLS`]).  The
 //!   slice's fractions sum to zero for every `p, u_0, u_1`, so the extended
 //!   output keeps the public-values balance.  The extended output is folded
 //!   by a GKR of its own, one variable per layer, down to one variable; the
@@ -430,7 +430,7 @@ fn next_point<EF: Field>(reduced_point: &[EF], line: EF, round: usize, i_vars: u
 
 /// The zk shard's LogUp-GKR prover: [`super::top_level::prove_shard_logup_gkr_rows_with_rows`]
 /// with random rows, a hidden output and masked rounds.  `region` is the
-/// mask region of the main round's random stripe, laid out by `layout`.
+/// mask region of the main round, laid out by `layout`.
 /// Returns the proof and the claims on the region's cells, in transcript
 /// order.
 #[allow(clippy::too_many_arguments)]

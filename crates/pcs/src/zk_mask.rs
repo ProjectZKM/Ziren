@@ -7,7 +7,7 @@
 //! jagged reduction's degree-2 messages are linear functionals of the
 //! committed cells, and every LogUp-GKR layer's degree-3 messages carry
 //! products of the layer's fractions.  The zk shard masks them all the way
-//! Libra does.  The prover commits, in the main round's random stripe
+//! Libra does.  The prover commits, in the main round's mask region
 //! ([`crate::whir::zk`]), the coefficients of
 //!
 //! ```text
@@ -35,7 +35,8 @@
 //! Every value the verifier must learn about the committed cells is a
 //! [`ZkCellClaim`]: a public sparse linear functional of the cells and the
 //! value it must take, which the zk WHIR opening binds.  The cells live in
-//! the top [`ZK_MASK_CELLS`] cells of the random stripe at the offsets a
+//! the [`ZK_MASK_CELLS`] uniform cells of the mask region, which the main
+//! round's last stripe carries in its auxiliary block, at the offsets a
 //! [`ZkCellLayout`] fixes from the shard's shape.
 
 use alloc::vec::Vec;
@@ -59,9 +60,9 @@ pub const GKR_MASK_DEGREE: usize = 5;
 /// first `m` of them.
 pub const ZK_MASK_MAX_VARS: usize = 32;
 
-/// Cells at the top of the random stripe that hold every mask and the
-/// virtual LogUp leaves.  Every other stripe of the main round is zero on
-/// these cells.
+/// Cells of the mask region that hold every mask and the virtual LogUp
+/// leaves: uniform cells in the auxiliary block of the main round's last
+/// stripe ([`crate::whir::zk::region_cells`]).
 pub const ZK_MASK_CELLS: usize = 1 << 14;
 
 /// Base cells a mask of `degree` over [`ZK_MASK_MAX_VARS`] variables commits

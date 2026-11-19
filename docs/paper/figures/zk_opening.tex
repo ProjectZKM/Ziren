@@ -1,5 +1,6 @@
-% The hiding opening of the zk shrink: padded stripes and the random stripe
-% R, the batched polynomial G, the funnelled claim, and salted leaves.
+% The hiding opening of the zk shrink: hiding rows (seeds, message, auxiliary
+% block), the first oracle G, a masked stage, and the code switch with the
+% masked base case.
 \begin{tikzpicture}[
   font=\scriptsize,
   data/.style={draw=zirenblue!90, fill=zirenblue!18, line width=0.5pt},
@@ -12,76 +13,78 @@
   a/.style={-{Latex[length=1.6mm]}, line width=0.5pt, zirenslate!85},
   side/.style={rectangle, rounded corners=2pt, draw=zirenslate!45, fill=zirenlight,
                align=left, font=\scriptsize, inner sep=4pt, line width=0.5pt},
-  val/.style={rectangle, rounded corners=1.5pt, draw=zirenblue!90, fill=zirenblue!10,
-              minimum width=0.5cm, minimum height=0.42cm, inner sep=2pt, line width=0.5pt},
-  valr/.style={val, draw=zirenslate!80, fill=white, pattern=north east lines,
-               pattern color=zirenslate!60},
 ]
 
-% ------------------------------------------------------------ (a) stripes
-\node[panel] at (0,3.35) {(a) Committed stripes, $n = \ell + 1$ variables};
+% ------------------------------------------------------------ (a) hiding rows
+\node[panel] at (0,3.35) {(a) Committed stripes, coefficients bottom to top};
 \def\W{0.62}
-\def\H{2.5}
-% preprocessed round: data below, zeros above
+\def\S{0.32}
+\def\D{1.7}
+% preprocessed round: zero seeds, then the data
 \foreach \i/\n in {0/P_0, 1/P_1} {
   \pgfmathsetmacro{\x}{0.3+0.8*\i}
-  \draw[zero] (\x,0) rectangle ++(\W,\H);
-  \draw[data] (\x,0) rectangle ++(\W,{0.5*\H});
+  \draw[zero] (\x,0) rectangle ++(\W,\S);
+  \node[lab] at (\x+0.5*\W,0.5*\S) {$0$};
+  \draw[data] (\x,\S) rectangle ++(\W,\D);
   \node at (\x+0.5*\W,-0.25) {$\n$};
-  \node[lab] at (\x+0.5*\W,{0.75*\H}) {$0$};
 }
-% main round: data below, uniform cells above
-\foreach \i/\n in {0/S_0, 1/S_1, 3/S_{k-1}} {
+% main round: uniform seeds, then the data
+\foreach \i/\n in {0/S_0, 1/S_1} {
   \pgfmathsetmacro{\x}{2.3+0.8*\i}
-  \draw[rnd] (\x,{0.5*\H}) rectangle ++(\W,{0.5*\H});
-  \draw[data] (\x,0) rectangle ++(\W,{0.5*\H});
+  \draw[rnd] (\x,0) rectangle ++(\W,\S);
+  \draw[data] (\x,\S) rectangle ++(\W,\D);
   \node at (\x+0.5*\W,-0.25) {$\n$};
 }
-\node at (2.3+0.8*2+0.5*\W,{0.5*\H}) {$\cdots$};
-% the random stripe with the mask region on top
-\pgfmathsetmacro{\xr}{2.3+0.8*4+0.15}
-\draw[rnd] (\xr,0) rectangle ++(\W,\H);
-\draw[mask] (\xr,{0.84*\H}) rectangle ++(\W,{0.16*\H});
-\node at (\xr+0.5*\W,-0.25) {$R$};
+\node at (2.3+0.8*2+0.5*\W,{0.5*\D}) {$\cdots$};
+% the last main stripe carries G's auxiliary block
+\pgfmathsetmacro{\xl}{2.3+0.8*3}
+\draw[rnd] (\xl,0) rectangle ++(\W,\S);
+\draw[data] (\xl,\S) rectangle ++(\W,\D);
+\draw[mask] (\xl,\S+\D) rectangle ++(\W,0.18);
+\draw[mask] (\xl,\S+\D+0.18) rectangle ++(\W,0.55);
+\node at (\xl+0.5*\W,-0.25) {$S_{L}$};
 % braces and labels
 \draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
-  (\xr+\W+0.08,{0.5*\H}) -- node[lab, right=4pt, align=left] {uniform $U_j$,\\$2^{\ell}$ cells}
-  (\xr+\W+0.08,0);
+  (\xl+\W+0.08,\S) -- node[lab, right=4pt, align=left] {$T$ seeds a row,\\$T = t_0 + 1$}
+  (\xl+\W+0.08,0);
 \draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
-  (\xr+\W+0.08,\H) -- node[lab, right=4pt, align=left] {mask region,\\$2^{14}$ cells of $R$}
-  (\xr+\W+0.08,{0.84*\H});
-\draw[zirenslate, |-|] (0.08,0) -- node[lab, left, font=\scriptsize] {$2^{\ell}$} (0.08,{0.5*\H});
-\draw[zirenslate, |-|] (0.08,{0.5*\H}) -- node[lab, left, font=\scriptsize] {$2^{\ell}$} (0.08,\H);
+  (\xl+\W+0.08,\S+\D) -- node[lab, right=4pt, align=left] {the stripe,\\$2^{\ell}$ cells}
+  (\xl+\W+0.08,\S);
+\draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
+  (\xl+\W+0.08,\S+\D+0.73) -- node[lab, right=4pt, align=left] {$G$'s mask coordinates\\and the mask region}
+  (\xl+\W+0.08,\S+\D);
 \node[lab, anchor=west, align=left] at (0.3,-0.75)
-  {$S'_j(\bm x, t) = (1-t)\,S_j(\bm x) + t\,U_j(\bm x)$, so $S'_j(\bm{sp}, 0) = S_j(\bm{sp})$;\\
-   the preprocessed round pads with zeros and stays deterministic.};
+  {row $b$ of a stripe: $\mathrm{ev}(\bm s_b, X) + X^{T} \mathrm{ev}(\bm m_b, X) + X^{T+\ell}\mathrm{ev}(\bm a_b, X)$;\\
+   no salts: an unopened leaf keeps one free coefficient per row.};
 
-% ------------------------------------------------------------ (b) the batch and the funnel
-\node[panel] at (8.6,3.35) {(b) One claim, one polynomial};
-\node[val] (e0) at (8.9,2.55) {$e_0$};
-\node[val] (e1) at (9.6,2.55) {$e_1$};
-\node[lab] at (10.2,2.55) {$\cdots$};
-\node[val] (ek) at (10.85,2.55) {$e_{k-1}$};
-\node[valr] (er) at (11.7,2.55) {$e_R$};
-\node[lab, anchor=west] at (12.1,2.55) {$e_j = S_j(\bm{sp})$};
-\node[side, anchor=north west] (c) at (8.75,2.05)
-  {$c = \sum_j \lambda^j e_j$ \quad (one value, uniform through $e_R$)};
-\foreach \v in {e0,e1,ek,er} { \draw[a] (\v.south) -- (c.north -| \v.south); }
-\node[side, anchor=north west] (g) at (8.75,1.15)
-  {$G = \sum_j \big(\eqf(\bm{bp}, j) + \mu\lambda^j\big)\, S'_j \;+\; \mu\lambda^{k} R$\\[1pt]
-   \WHIR{} opens $G(\bm{sp}, 0) = v + \mu c$; a wrong $v$ or $c$ survives with probability $1/|\EF|$};
-\draw[a] (c.south) -- (g.north -| c.south);
-\node[lab, anchor=west] at (8.75,0.05) {$R$ uniform $\Rightarrow$ $G$ uniform $\Rightarrow$ folds, OOD answers, final polynomial simulatable.};
+% ------------------------------------------------------------ (b) the first oracle and one stage
+\node[panel] at (8.6,3.35) {(b) The first oracle and a masked stage};
+\node[side, anchor=north west] (g) at (8.75,3.0)
+  {$G = \sum_j \eqf(\bm{bp}, j)\, S_j$, \quad $G(\bm{sp}) = v$ \quad (no per-stripe value is sent)};
+\node[side, anchor=north west] (st) at (8.75,2.2)
+  {mask $U = \hat s_0 + \hat s_1 (X_1 + \dots + X_k)$ in the rows' auxiliary blocks\\[1pt]
+   send $\tilde\mu = \sum_{\bm b} U(\bm b)$, \ draw $\varepsilon$, \ fold $U + \varepsilon\,\langle \bm w, \bm f\rangle$ over the $k$ row variables};
+\draw[a] (g.south) -- (st.north -| g.south);
+\node[lab, anchor=west] at (8.75,1.1) {cell claims: sparse functionals of $G$'s auxiliary block, batched into the first claim.};
 
-% ------------------------------------------------------------ (c) salted leaves
-\node[panel] at (8.6,-0.5) {(c) Salted leaves};
-\draw[data] (8.75,-1.3) rectangle ++(2.2,0.4);
-\node[lab] at (9.85,-1.1) {row$_i$};
-\draw[rnd] (10.95,-1.3) rectangle ++(0.9,0.4);
-\node[lab, fill=white, inner sep=1pt] at (11.4,-1.1) {salt$_i$};
-\node[lab, anchor=west] at (12.0,-1.1) {$\xrightarrow{\;\Hash\;}$ leaf$_i$};
-\node[lab, anchor=west, align=left] at (8.75,-1.8)
-  {row$_i$: the $2^{k_0}$ opened cells of every stripe; salt$_i$: 8 uniform cells, 247 bits,\\
-   on the main round and every folded oracle.  A sibling digest on an opened path\\
-   is $\Hash$ of a row that stays hidden under its own salt.};
+% ------------------------------------------------------------ (c) code switch and base case
+\node[panel] at (8.6,0.6) {(c) Code switch and base case};
+\def\cx{8.75}
+\def\cy{-0.25}
+\draw[rnd] (\cx,\cy) rectangle ++(0.7,0.4);
+\node[lab, fill=white, inner sep=1pt] at (\cx+0.35,\cy+0.2) {seeds};
+\draw[data] (\cx+0.7,\cy) rectangle ++(1.5,0.4);
+\node[lab] at (\cx+1.45,\cy+0.2) {$\bar{\bm f}$};
+\draw[mask] (\cx+2.2,\cy) rectangle ++(0.8,0.4);
+\node[lab] at (\cx+2.6,\cy+0.2) {$\hat s_0, \hat s_1$};
+\draw[data] (\cx+3.0,\cy) rectangle ++(0.9,0.4);
+\node[lab] at (\cx+3.45,\cy+0.2) {$\bar{\bm a}, \bar{\bm s}$};
+\draw[rnd] (\cx+3.9,\cy) rectangle ++(0.6,0.4);
+\node[lab, fill=white, inner sep=1pt] at (\cx+4.2,\cy+0.2) {pad};
+\node[lab, anchor=west] at (\cx+4.6,\cy+0.2) {next oracle's rows};
+\node[lab, anchor=west, align=left] at (\cx,\cy-0.75)
+  {the fold re-encoded under fresh seeds and masks; the out-of-domain answers weigh\\
+   the pad; a query value is a linear constraint on the next message.\\[2pt]
+   last oracle: commit a uniform row $g$, send $\mu_\star = \langle \bm w, g\rangle$, draw $\gamma_\star$,\\
+   disclose $D = g + \gamma_\star \bar{\bm f}$; each final query checks $D(x) = g(x) + \gamma_\star \bar f(x)$.};
 \end{tikzpicture}

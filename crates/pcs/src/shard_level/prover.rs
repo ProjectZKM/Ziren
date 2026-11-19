@@ -24,7 +24,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// proves against, and the open does not observe the commitment again.
 ///
 /// The traces are borrowed: each is relabelled in place, and no cell is copied.
-/// The mask region of a zk shard, read off the main round's random stripe
+/// The mask region of a zk shard, read off the main round's extra entry
 /// ([`crate::whir::zk::zk_region`]) as the ring's own field elements; `Val`
 /// is KoalaBear on every ring with a WHIR commitment.
 #[cfg(feature = "zk")]

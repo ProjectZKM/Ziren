@@ -9,8 +9,9 @@
 //! The ring opens its commitments under the zero-knowledge stacked WHIR
 //! (`zkm_pcs::whir::zk`): the opening reveals nothing of the committed
 //! traces, and two proofs of one root differ in every opened value.  The
-//! zerocheck and LogUp openings of the trace columns are not masked yet,
-//! which the later phases add on this same ring.
+//! shard's zerocheck, jagged reduction and LogUp-GKR sumchecks are masked
+//! and its trace columns carry random rows (`zkm_pcs::shard_level::zk`), so
+//! the whole shard proof hides the root proof it verifies.
 
 use std::borrow::Borrow;
 use std::sync::Arc;
@@ -46,7 +47,7 @@ pub struct ZkShrink;
 /// How many times the zk shrink proves a shard before giving up: each proof
 /// is verified, and one whose transcript drew a degenerate challenge
 /// ([`VerificationError::DegenerateChallenge`]) is proved again with fresh
-/// random rows, masks and salts.  An honest proof is rejected with
+/// random rows, seeds and masks.  An honest proof is rejected with
 /// probability below `2^-20`, so a second attempt is rare and a fourth
 /// failure is a bug.
 pub const ZK_SHRINK_ATTEMPTS: usize = 4;
@@ -264,6 +265,7 @@ mod tests {
             &zkm_pcs::whir::jagged::zk_shrink_whir_config(lsh),
             lsh,
             &layout,
+            2,
         );
         assert_eq!(budget.violations(), Vec::<String>::new(), "{budget}");
         let errors = ZkErrors::new(&budget, &layout, interaction_variables);

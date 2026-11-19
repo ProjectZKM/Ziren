@@ -1485,8 +1485,9 @@ pub mod jagged {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum JaggedRejection {
         /// A challenge of the zk ring under which a mask degenerates: the
-        /// jagged reduction's mask challenge or a WHIR batching challenge is
-        /// zero.  The bundle may be honest; the prover proves again.
+        /// jagged reduction's mask challenge is zero, or the jagged point
+        /// gives the opening's masked stripe a zero coefficient.  The bundle
+        /// may be honest; the prover proves again.
         DegenerateChallenge(alloc::string::String),
         /// The bundle does not verify, for the reason logged.
         Invalid,

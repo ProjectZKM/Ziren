@@ -144,26 +144,41 @@ pub fn shrink_whir_config(lsh: usize) -> WhirConfig {
 }
 
 /// The shrink schedule of the zk shrink ring at the jagged stacking height
-/// `lsh`: the folds, rates, queries and grinding of [`shrink_whir_config`]
-/// over stripes of `lsh + ZK_PAD_VARS` variables, the width the zk opening
-/// commits them at, so the padding variables land in the final polynomial
-/// rather than in an extra round.  At the production height the first
-/// oracle is `2^(22 + 2)` points, the whole two-adic subgroup of KoalaBear,
-/// and the final polynomial has `2^7` coefficients instead of the native
-/// shrink's `2^6`.
+/// `lsh`: [`shrink_whir_config`] without the stripe-batching grind, with
+/// each query count solved at the rate its oracle really has.  The zk
+/// opening batches the stripes with the jagged point's own `eq` weights
+/// rather than a sampled challenge, so there is nothing to grind; its hiding
+/// rows add seeds and an auxiliary block to every row, which raises each
+/// oracle's rate ([`crate::whir::zk::zk_query_phase_bits`]), most on the
+/// last and smallest one.  The counts are raised until every phase meets
+/// [`per_component_target_bits`] again; the seeds follow the counts, so the
+/// solve repeats until nothing moves.
 #[cfg(feature = "zk")]
 pub fn zk_shrink_whir_config(lsh: usize) -> WhirConfig {
-    let native = shrink_whir_config(lsh);
-    let folds: Vec<usize> = native.round_parameters.iter().map(|rp| rp.folding_factor).collect();
-    let final_log = native.final_poly_log_degree + crate::whir::zk::ZK_PAD_VARS;
-    let mut config = solve_rounds(
-        lsh + crate::whir::zk::ZK_PAD_VARS,
-        &folds,
-        final_log,
-        SHRINK_START_LOG_INV_RATE,
-    );
-    config.batch_pow_bits = native.batch_pow_bits;
-    config
+    let mut config = shrink_whir_config(lsh);
+    config.batch_pow_bits = 0;
+    let target = per_component_target_bits();
+    loop {
+        let n = config.round_parameters.len();
+        let mut changed = false;
+        for (s, stage) in crate::whir::zk::zk_stages(&config, lsh).iter().enumerate() {
+            let rate = stage.coefficients() as f64 / (1u64 << stage.domain_log) as f64;
+            let (queries, pow) = if s + 1 < n {
+                let rp = &mut config.round_parameters[s];
+                (&mut rp.num_queries, rp.queries_pow_bits)
+            } else {
+                (&mut config.final_queries, config.final_pow_bits)
+            };
+            let need = ((target - pow as f64) / bits_per_query_at_rate(rate)).ceil() as usize;
+            if need > *queries {
+                *queries = need;
+                changed = true;
+            }
+        }
+        if !changed {
+            return config;
+        }
+    }
 }
 
 fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
@@ -271,7 +286,13 @@ fn solve_rounds(lsh: usize, folds: &[usize], final_log: usize, start: usize) -> 
 /// `-log2((1 + rho)/2)`: what one shift query is worth at rate `2^-log_inv_rate`
 /// in the unique-decoding regime.
 pub fn bits_per_query(log_inv_rate: usize) -> f64 {
-    -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
+    bits_per_query_at_rate(2f64.powi(-(log_inv_rate as i32)))
+}
+
+/// `-log2((1 + rho)/2)` at any rate `rho`: what one shift query is worth in
+/// the unique-decoding regime.
+pub fn bits_per_query_at_rate(rate: f64) -> f64 {
+    -((1.0 + rate) / 2.0).log2()
 }
 
 /// The rate of the codeword round `r` queries under a schedule starting at

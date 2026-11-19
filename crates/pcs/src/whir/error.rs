@@ -17,8 +17,8 @@ pub enum WhirVerifierError {
     TerminalMismatch,
     /// The proof's shape (message counts, final-poly length) is wrong.
     IncorrectShape(String),
-    /// A batching challenge of the zk opening is zero, so the random stripe
-    /// drops out of the batched polynomial; the opening may be honest and
-    /// the prover opens again.
+    /// The jagged point gives the zk opening's masked stripe a zero batch
+    /// coefficient, so the first oracle carries no mask; the opening may be
+    /// honest and the prover opens again.
     DegenerateChallenge(String),
 }

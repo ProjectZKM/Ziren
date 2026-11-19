@@ -1,31 +1,35 @@
 //! The budgets and the error terms of the zero-knowledge shrink.
 //!
 //! The zk shard proof hides its witness with committed randomness, and each
-//! kind of randomness hides exactly as many values as it has cells.  A
-//! [`ZkBudget`] counts, for one WHIR schedule and one shard shape, what the
-//! verifier learns against what the prover committed:
+//! kind of randomness hides exactly as many values as it has degrees of
+//! freedom.  A [`ZkBudget`] counts, for one WHIR schedule and one shard
+//! shape, what the verifier learns against what the prover committed
+//! ([`crate::whir::zk`] has the opening):
 //!
-//! * **data stripes** — the round-0 queries open `q_0·2^{k_0}` entries of
-//!   every stripe's codeword.  The stripe's padding half holds `2^lsh`
-//!   uniform cells, and the evaluations of `x^{2^lsh}·r(x)` at distinct
-//!   domain points are independent while there are at most `2^lsh` of them
-//!   (a Vandermonde block), so the opened entries are uniform: the
-//!   interleaved-code argument of Ligero.
-//! * **the random stripe `R`** — everything else the verifier learns is a
-//!   linear functional of `G = Σ_j γ_j S_j + γ_R R`, which `R` makes
-//!   uniform: `R`'s own round-0 rows, its mask region, the folding
-//!   messages, the out-of-domain answers, the later-round and final queries
-//!   and the final polynomial.  Their count must stay below `R`'s
-//!   `2^{lsh+1}` cells.
+//! * **row seeds** — every row of every hiding oracle starts with `T` uniform
+//!   coefficients, and the `t` queries to the oracle open it at `t` distinct
+//!   points: the opened values are uniform while `t < T` (a Vandermonde
+//!   block), with one coefficient to spare for the unopened leaves.
+//! * **stage masks** — each stage's mask polynomial `U` has `2(k + 1)`
+//!   extension coefficients and its `k`-variable sumcheck reveals `1 + 2k`
+//!   values of it: `µ̃` and two free coefficients a round.
+//! * **out-of-domain pads** — the auxiliary block of every folded oracle ends
+//!   in uniform entries the out-of-domain answers weigh; one entry a sample
+//!   makes the answers uniform.
+//! * **the mask region** — the shard's masks fit the region the main round
+//!   commits.
 //! * **random rows** — each main column is opened at two points
 //!   ([`COLUMN_EVALUATIONS`]), eight base-field coordinates, and its
 //!   [`ZK_RANDOM_ROWS`] random rows give it as many uniform scalars when it
 //!   is free in both a pair's sum and difference
 //!   ([`crate::shard_level::zk`]).
-//! * **salts** — every leaf of the main round and of every folded oracle
-//!   hashes [`ZK_SALT_WIDTH`] uniform cells, so a sibling digest on an
-//!   authentication path is a random-oracle output on a preimage with
-//!   `salt_bits` bits of entropy.
+//! * **leaf entropy** — no leaf is salted (Appendix B of Chiesa–Fenzi–
+//!   Weissenberg, ePrint 2026/391): the spare seed coefficient leaves every
+//!   row's value at an unopened point uniform, so an unopened leaf of `K`
+//!   base rows keeps `(K − EF_DIM)·log2 p` bits once the folded seeds, an
+//!   extension combination of its rows, are known.  The input oracle's
+//!   leaves are the main round's stripes side by side, so their entropy
+//!   grows with the main stripe count.
 //!
 //! [`ZkErrors`] turns the counts into the two numbers the security
 //! statement carries: the soundness error the masks add, in units of
@@ -50,7 +54,7 @@ use core::fmt;
 
 use crate::shard_level::zk::ZK_RANDOM_ROWS;
 use crate::whir::config::WhirConfig;
-use crate::whir::zk::{region_cells, ZK_PAD_VARS, ZK_SALT_WIDTH};
+use crate::whir::zk::{region_cells, zk_stages, ZkStage, ZK_MASK_COORDS};
 use crate::zk_mask::{ZkCellLayout, GKR_MASK_DEGREE};
 
 /// `⌊100·log2 p⌋` for KoalaBear, `p = 2^31 − 2^24 + 1`.
@@ -64,8 +68,9 @@ pub const EF_BITS: usize = floor_bits(EF_DIM);
 pub const COLUMN_EVALUATIONS: usize = 2;
 /// Random-oracle queries the simulation error is quoted at.
 pub const LOG_RO_QUERIES: usize = 64;
-/// Coefficients each WHIR folding message reveals (degree at most two).
-const FOLD_MESSAGE_COEFFS: usize = 3;
+/// Free coefficients each WHIR folding message reveals: three, less the one
+/// the running claim fixes.
+const FOLD_MESSAGE_FREE: usize = 2;
 /// Degree of an unmasked LogUp-GKR layer sumcheck.
 const GKR_PLAIN_DEGREE: usize = 3;
 
@@ -78,22 +83,39 @@ const fn ceil_log2(n: usize) -> usize {
     n.next_power_of_two().trailing_zeros() as usize
 }
 
+/// One stage's counts: its rows' seeds against the queries that open
+/// them, its mask's coefficients against what its sumcheck reveals, the
+/// out-of-domain pad of its oracle against the samples, and the entropy of
+/// an unopened leaf.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StageBudget {
+    pub rows: usize,
+    pub seeds: usize,
+    pub queries: usize,
+    pub mask_coefficients: usize,
+    pub mask_revealed: usize,
+    /// Uniform pad entries of the auxiliary block and the out-of-domain
+    /// samples that weigh them; `None` on the input oracle, which has no
+    /// out-of-domain answer.
+    pub ood_pad: Option<(usize, usize)>,
+    /// Base cells of a leaf, and its entropy in bits once the folded seeds
+    /// are known.
+    pub leaf_cells: usize,
+    pub leaf_bits: usize,
+    /// Leaves of the oracle.
+    pub leaves: usize,
+}
+
 /// What the verifier of one zk shard learns against what the prover
 /// committed; see the module documentation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZkBudget {
-    /// The jagged layer's stacking height; stripes are padded one variable
-    /// wider.
+    /// The jagged layer's stacking height.
     pub log_stacking_height: usize,
-    /// Cells of a padded stripe, `2^{lsh + ZK_PAD_VARS}`; all of `R`'s are
-    /// uniform.
-    pub stripe_cells: usize,
-    /// Uniform cells of a data stripe: its padding.
-    pub stripe_random_cells: usize,
-    /// Entries of each data stripe the round-0 queries open.
-    pub stripe_revealed: usize,
-    /// Linear functionals of `R` the verifier learns.
-    pub random_stripe_learned: usize,
+    /// Stripes the main round covers: the input oracle's leaves hold one row
+    /// block of each.
+    pub main_stripes: usize,
+    pub stages: Vec<StageBudget>,
     /// Cells of the mask region and the cells the shard's layout uses.
     pub mask_cells: usize,
     pub mask_cells_used: usize,
@@ -101,88 +123,96 @@ pub struct ZkBudget {
     /// base-field scalars the random rows give each column.
     pub column_evaluations: usize,
     pub random_row_scalars: usize,
-    /// Entropy of a leaf's salt, in bits, and the salted leaves over all
-    /// oracles.
-    pub salt_bits: usize,
-    pub salted_leaves: usize,
 }
 
 impl ZkBudget {
-    /// The budget of `config` (the zk ring's schedule over `lsh + 1`
-    /// variables) for a shard whose masks follow `layout`.
-    pub fn for_schedule(config: &WhirConfig, lsh: usize, layout: &ZkCellLayout) -> Self {
-        let n = lsh + ZK_PAD_VARS;
-        let stripe_cells = 1usize << n;
+    /// The budget of `config` (the zk ring's schedule) for a shard whose
+    /// masks follow `layout` and whose main round covers `main_stripes`
+    /// stripes of height `2^lsh`.
+    pub fn for_schedule(
+        config: &WhirConfig,
+        lsh: usize,
+        layout: &ZkCellLayout,
+        main_stripes: usize,
+    ) -> Self {
+        let stages = zk_stages(config, lsh);
         let rounds = &config.round_parameters;
-        let committed = &rounds[..rounds.len() - 1];
-        let folds: Vec<usize> = rounds.iter().map(|r| r.folding_factor).collect();
-        let stripe_revealed = rounds[0].num_queries << folds[0];
-        let mask_cells = region_cells(stripe_cells);
-
-        let mut learned = stripe_revealed + mask_cells + config.starting_ood_samples;
-        learned += folds.iter().sum::<usize>() * FOLD_MESSAGE_COEFFS;
-        learned += committed.iter().map(|r| r.ood_samples).sum::<usize>();
-        learned +=
-            committed.iter().skip(1).map(|r| r.num_queries << r.folding_factor).sum::<usize>();
-        learned += config.final_queries << folds[folds.len() - 1];
-        learned += 1usize << config.final_poly_log_degree;
-
-        let mut salted_leaves = 1usize << (n - folds[0] + config.starting_log_inv_rate);
-        let mut remaining = n;
-        for (r, round) in committed.iter().enumerate() {
-            remaining -= round.folding_factor;
-            salted_leaves += 1usize << (remaining - folds[r + 1] + round.log_inv_rate);
-        }
-
+        let stage_budget = |s: usize, stage: &ZkStage| {
+            let k = stage.width.trailing_zeros() as usize;
+            let (ood_pad, leaf_cells) = if s == 0 {
+                (None, main_stripes * stage.width)
+            } else {
+                let pad = stage.aux * stage.width - ZK_MASK_COORDS * stage.width - stage.carried;
+                (Some((pad, rounds[s - 1].ood_samples)), stage.width * EF_DIM)
+            };
+            StageBudget {
+                rows: stage.width,
+                seeds: stage.seeds,
+                queries: stage.queries,
+                mask_coefficients: ZK_MASK_COORDS * (k + 1),
+                mask_revealed: 1 + FOLD_MESSAGE_FREE * k,
+                ood_pad,
+                leaf_cells,
+                leaf_bits: floor_bits(leaf_cells.saturating_sub(EF_DIM)),
+                leaves: 1usize << stage.domain_log,
+            }
+        };
         Self {
             log_stacking_height: lsh,
-            stripe_cells,
-            stripe_random_cells: stripe_cells - (1usize << lsh),
-            stripe_revealed,
-            random_stripe_learned: learned,
-            mask_cells,
+            main_stripes,
+            stages: stages.iter().enumerate().map(|(s, st)| stage_budget(s, st)).collect(),
+            mask_cells: region_cells(lsh),
             mask_cells_used: layout.end,
             column_evaluations: COLUMN_EVALUATIONS,
             random_row_scalars: ZK_RANDOM_ROWS,
-            salt_bits: floor_bits(ZK_SALT_WIDTH),
-            salted_leaves,
         }
+    }
+
+    /// The fewest bits an unopened leaf of any oracle keeps.
+    pub fn leaf_bits(&self) -> usize {
+        self.stages.iter().map(|s| s.leaf_bits).min().unwrap_or(0)
+    }
+
+    /// Leaves over every oracle.
+    pub fn leaves(&self) -> usize {
+        self.stages.iter().map(|s| s.leaves).sum()
     }
 
     /// The budgets that do not hold, one line each; empty when the shard
     /// proof is hiding.
     pub fn violations(&self) -> Vec<String> {
         let mut out = Vec::new();
-        let check = |out: &mut Vec<String>, ok: bool, what: &str, learned: usize, have: usize| {
+        let mut check = |ok: bool, what: String, learned: usize, have: usize| {
             if !ok {
                 out.push(alloc::format!("{what}: {learned} learned, {have} random"));
             }
         };
+        for (s, st) in self.stages.iter().enumerate() {
+            check(
+                st.queries < st.seeds,
+                alloc::format!("stage {s} row seeds"),
+                st.queries,
+                st.seeds,
+            );
+            check(
+                st.mask_revealed <= st.mask_coefficients,
+                alloc::format!("stage {s} mask coefficients"),
+                st.mask_revealed,
+                st.mask_coefficients,
+            );
+            if let Some((pad, samples)) = st.ood_pad {
+                check(samples <= pad, alloc::format!("stage {s} out-of-domain pad"), samples, pad);
+            }
+        }
         check(
-            &mut out,
-            self.stripe_revealed <= self.stripe_random_cells,
-            "data stripe entries",
-            self.stripe_revealed,
-            self.stripe_random_cells,
-        );
-        check(
-            &mut out,
-            self.random_stripe_learned <= self.stripe_cells,
-            "random stripe functionals",
-            self.random_stripe_learned,
-            self.stripe_cells,
-        );
-        check(
-            &mut out,
             self.mask_cells_used <= self.mask_cells,
-            "mask cells",
+            "mask cells".into(),
             self.mask_cells_used,
             self.mask_cells,
         );
         check(
-            &mut out,
             self.column_evaluations * EF_DIM <= self.random_row_scalars,
-            "column coordinates",
+            "column coordinates".into(),
             self.column_evaluations * EF_DIM,
             self.random_row_scalars,
         );
@@ -199,26 +229,22 @@ impl fmt::Display for ZkBudget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "[zk_shrink.budget]")?;
         writeln!(f, "log_stacking_height = {}", self.log_stacking_height)?;
-        writeln!(
-            f,
-            "stripe_cells = {}   # per padded stripe; all of R's are uniform",
-            self.stripe_cells
-        )?;
-        writeln!(
-            f,
-            "stripe_random_cells = {}   # a data stripe's padding",
-            self.stripe_random_cells
-        )?;
-        writeln!(
-            f,
-            "stripe_revealed = {}   # round-0 queries x 2^k0, must not exceed stripe_random_cells",
-            self.stripe_revealed
-        )?;
-        writeln!(
-            f,
-            "random_stripe_learned = {}   # functionals of R, must not exceed stripe_cells",
-            self.random_stripe_learned
-        )?;
+        writeln!(f, "main_stripes = {}", self.main_stripes)?;
+        for (s, st) in self.stages.iter().enumerate() {
+            write!(
+                f,
+                "stage_{s} = {{ rows = {}, seeds = {}, queries = {}, mask_coefficients = {}, mask_revealed = {}, ",
+                st.rows, st.seeds, st.queries, st.mask_coefficients, st.mask_revealed
+            )?;
+            if let Some((pad, samples)) = st.ood_pad {
+                write!(f, "ood_pad = {pad}, ood_samples = {samples}, ")?;
+            }
+            writeln!(
+                f,
+                "leaf_cells = {}, leaf_bits = {}, leaves = {} }}",
+                st.leaf_cells, st.leaf_bits, st.leaves
+            )?;
+        }
         writeln!(f, "mask_cells = {}", self.mask_cells)?;
         writeln!(f, "mask_cells_used = {}   # the shard's layout", self.mask_cells_used)?;
         writeln!(f, "column_evaluations = {}", self.column_evaluations)?;
@@ -226,12 +252,6 @@ impl fmt::Display for ZkBudget {
             f,
             "random_row_scalars = {}   # uniform base summands per column, must cover column_evaluations x 4",
             self.random_row_scalars
-        )?;
-        writeln!(f, "salt_bits = {}   # entropy of every salted leaf", self.salt_bits)?;
-        writeln!(
-            f,
-            "salted_leaves = {}   # main round and every folded oracle",
-            self.salted_leaves
         )?;
         writeln!(f, "holds = {}", self.holds())
     }
@@ -242,8 +262,9 @@ impl fmt::Display for ZkBudget {
 pub struct ZkErrors {
     /// Soundness error the masks add, in units of `1/|EF|`: the cube-sum
     /// check of every mask challenge, the two extra degrees of each masked
-    /// LogUp-GKR layer round, the whole degree of each merge round, and the
-    /// batching of the cell claims into the WHIR claim.
+    /// LogUp-GKR layer round, the whole degree of each merge round, the
+    /// batching of the cell claims into the input claim, each stage's mask
+    /// challenge `ε` and the base case's `γ⋆`.
     pub soundness_units: usize,
     /// `−log2` of that error, floored.
     pub soundness_bits: usize,
@@ -251,8 +272,8 @@ pub struct ZkErrors {
     pub cell_claims: usize,
     /// `−log2` of the simulation error of the compiled proof at
     /// `2^LOG_RO_QUERIES` random-oracle queries: a simulator that programs
-    /// the oracle fails only when a query hits a salted preimage,
-    /// `queries · salted_leaves / 2^salt_bits`.
+    /// the oracle fails only when a query hits an unopened leaf's preimage,
+    /// `queries · leaves / 2^leaf_bits`.
     pub simulation_bits: usize,
 }
 
@@ -271,14 +292,14 @@ impl ZkErrors {
             };
         }
         let cell_claims = layout.gkr.len() + 4;
-        units += cell_claims + 2;
+        units += cell_claims + budget.stages.len() + 1;
         Self {
             soundness_units: units,
             soundness_bits: EF_BITS - ceil_log2(units),
             cell_claims,
             simulation_bits: budget
-                .salt_bits
-                .saturating_sub(LOG_RO_QUERIES + ceil_log2(budget.salted_leaves)),
+                .leaf_bits()
+                .saturating_sub(LOG_RO_QUERIES + ceil_log2(budget.leaves())),
         }
     }
 }
@@ -305,42 +326,40 @@ mod tests {
     use crate::zk_mask::ZK_MASK_CELLS;
 
     /// The production schedule keeps every budget for every shard shape the
-    /// mask region admits, with orders of magnitude to spare.
+    /// mask region admits once the main round covers two stripes, with room
+    /// to spare.
     #[test]
     fn production_schedule_keeps_every_budget() {
         let lsh = DEFAULT_LOG_STACKING_HEIGHT as usize;
         let config = zk_shrink_whir_config(lsh);
         for i in 1..=14 {
             let layout = ZkCellLayout::for_shard(EF_DIM, 22, i);
-            let budget = ZkBudget::for_schedule(&config, lsh, &layout);
+            let budget = ZkBudget::for_schedule(&config, lsh, &layout, 2);
             assert_eq!(budget.violations(), Vec::<String>::new(), "{budget}");
             assert_eq!(budget.mask_cells, ZK_MASK_CELLS);
-            assert!(budget.stripe_revealed * 64 <= budget.stripe_random_cells, "{budget}");
-            assert!(budget.random_stripe_learned * 64 <= budget.stripe_cells, "{budget}");
+            assert_eq!(budget.stages.len(), config.round_parameters.len());
             let errors = ZkErrors::new(&budget, &layout, i);
             assert!(errors.soundness_bits >= 110, "{errors}");
             assert!(errors.simulation_bits >= 150, "{errors}");
         }
     }
 
-    /// A stripe too short for its queries fails the first budget, and the
-    /// failure names it.
+    /// One main stripe of eight rows leaves the input oracle's leaves four
+    /// base cells of entropy, too few to simulate against `2^64` queries.
     #[test]
-    fn a_short_stripe_breaks_the_budget() {
-        let lsh = 6;
-        let mut config =
-            crate::whir::jagged::whir_config_for_fold_schedule(lsh + ZK_PAD_VARS, &[3], 4);
-        config.round_parameters[0].num_queries = 16;
-        let layout = ZkCellLayout::new(EF_DIM, &[]);
-        let budget = ZkBudget::for_schedule(&config, lsh, &layout);
-        assert!(!budget.holds());
-        assert!(budget.violations()[0].starts_with("data stripe entries"), "{budget}");
+    fn a_single_main_stripe_leaves_thin_leaves() {
+        let lsh = DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let config = zk_shrink_whir_config(lsh);
+        let layout = ZkCellLayout::for_shard(EF_DIM, 22, 8);
+        let budget = ZkBudget::for_schedule(&config, lsh, &layout, 1);
+        assert_eq!(budget.stages[0].leaf_bits, floor_bits(budget.stages[0].rows - EF_DIM));
+        assert!(ZkErrors::new(&budget, &layout, 8).simulation_bits < 64, "{budget}");
     }
 
     #[test]
     fn field_bits_are_floored() {
         assert_eq!(EF_BITS, 123);
-        assert_eq!(floor_bits(ZK_SALT_WIDTH), 247);
+        assert_eq!(floor_bits(8), 247);
         assert_eq!(ceil_log2(1), 0);
         assert_eq!(ceil_log2(5), 3);
     }

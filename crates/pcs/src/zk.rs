@@ -10,12 +10,9 @@
 //! [`WHIR_PROFILE_ZK_SHRINK`], so that a zk-shrink proof and key are a
 //! distinct type from the native shrink's.  Its openings run the
 //! zero-knowledge stacked WHIR of [`crate::whir::zk`] under the shrink
-//! schedule with a final polynomial one variable larger
-//! ([`crate::whir::jagged::WhirProfile::ZkShrink`]):
-//! padded stripes, a random stripe, one funnelled claim and salted leaves, so
-//! the opening reveals nothing of the committed traces.  The masked
-//! sumchecks and the hiding of the trace columns themselves are the later
-//! phases' work.
+//! schedule ([`crate::whir::jagged::WhirProfile::ZkShrink`]): hiding rows,
+//! masked sumchecks and a masked base case, so the opening reveals nothing
+//! of the committed traces.
 
 use crate::koala_bear_poseidon2::{KoalaBearPoseidon2Ring, WHIR_PROFILE_ZK_SHRINK};
 
@@ -31,13 +28,16 @@ mod tests {
         whir::jagged::WhirProfile,
     };
 
-    /// The zk ring's schedule is the shrink schedule over stripes one
-    /// variable wider: the same rounds, queries and rates, one more variable
-    /// to fold.
+    /// The zk ring's schedule is the shrink schedule without the batching
+    /// grind and with its query counts raised to the rates the hiding rows
+    /// leave: every phase meets the target again, every row has a seed more
+    /// than its queries, and the rows fit their oracles.
     #[test]
-    fn zk_shrink_ring_proves_under_the_widened_shrink_schedule() {
-        use crate::whir::jagged::{shrink_whir_config, whir_config_for_profile};
-        use crate::whir::zk::ZK_PAD_VARS;
+    fn zk_shrink_ring_proves_under_the_shrink_schedule() {
+        use crate::whir::jagged::{
+            per_component_target_bits, shrink_whir_config, whir_config_for_profile,
+        };
+        use crate::whir::zk::{zk_query_phase_bits, zk_stages};
         assert_eq!(<KoalaBearPoseidon2ZkShrink as WhirRing>::WHIR_PROFILE, WhirProfile::ZkShrink);
         assert_eq!(<KoalaBearPoseidon2Shrink as WhirRing>::WHIR_PROFILE, WhirProfile::Shrink);
         assert_ne!(WHIR_PROFILE_ZK_SHRINK, WHIR_PROFILE_SHRINK);
@@ -45,25 +45,27 @@ mod tests {
         let zk = <KoalaBearPoseidon2ZkShrink as WhirRing>::whir_config(lsh);
         assert_eq!(zk, whir_config_for_profile(WhirProfile::ZkShrink, lsh));
         let native = shrink_whir_config(lsh);
-        let folds: Vec<usize> = zk.round_parameters.iter().map(|rp| rp.folding_factor).collect();
-        let native_folds: Vec<usize> =
-            native.round_parameters.iter().map(|rp| rp.folding_factor).collect();
-        assert_eq!(folds, native_folds);
-        assert_eq!(zk.final_poly_log_degree, native.final_poly_log_degree + ZK_PAD_VARS);
-        assert_eq!(folds.iter().sum::<usize>() + zk.final_poly_log_degree, lsh + ZK_PAD_VARS);
+        assert_eq!(zk.batch_pow_bits, 0);
+        assert_eq!(zk.final_poly_log_degree, native.final_poly_log_degree);
         for (z, n) in zk.round_parameters.iter().zip(&native.round_parameters) {
             assert_eq!(
-                (z.num_queries, z.log_inv_rate, z.ood_samples),
-                (n.num_queries, n.log_inv_rate, n.ood_samples)
+                (z.folding_factor, z.log_inv_rate, z.ood_samples, z.queries_pow_bits),
+                (n.folding_factor, n.log_inv_rate, n.ood_samples, n.queries_pow_bits)
             );
+            assert!(z.num_queries >= n.num_queries);
         }
-        assert_eq!(
-            (zk.final_queries, zk.final_pow_bits),
-            (native.final_queries, native.final_pow_bits)
-        );
+        assert!(zk.final_queries >= native.final_queries);
+        let target = per_component_target_bits();
+        for (s, (_, bits)) in zk_query_phase_bits(&zk, lsh).iter().enumerate() {
+            assert!(*bits >= target, "phase {s}: {bits} bits");
+        }
+        let stages = zk_stages(&zk, lsh);
+        for (s, stage) in stages.iter().enumerate() {
+            assert!(stage.seeds > stage.queries, "stage {s}");
+            assert!(stage.coefficients() <= 1usize << stage.domain_log, "stage {s}");
+        }
         assert!(
-            lsh + ZK_PAD_VARS + zk.starting_log_inv_rate
-                <= <crate::InnerVal as p3_field::TwoAdicField>::TWO_ADICITY,
+            stages[0].domain_log <= <crate::InnerVal as p3_field::TwoAdicField>::TWO_ADICITY,
             "the first oracle must fit the two-adic subgroup"
         );
     }
