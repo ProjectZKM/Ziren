@@ -1,0 +1,90 @@
+% The hiding opening of the zk shrink: hiding rows (seeds, message, auxiliary
+% block), the first oracle G, a masked stage, and the code switch with the
+% masked base case.
+\begin{tikzpicture}[
+  font=\scriptsize,
+  data/.style={draw=zirenblue!90, fill=zirenblue!18, line width=0.5pt},
+  rnd/.style={draw=zirenslate!80, fill=white, pattern=north east lines,
+              pattern color=zirenslate!60, line width=0.5pt},
+  mask/.style={draw=zirenorange!90, fill=zirenorange!30, line width=0.5pt},
+  zero/.style={draw=zirenteal!80, fill=zirenlight, line width=0.5pt},
+  lab/.style={text=black!90},
+  panel/.style={font=\footnotesize\bfseries, text=black!90, anchor=west, inner sep=0pt},
+  a/.style={-{Latex[length=1.6mm]}, line width=0.5pt, zirenslate!85},
+  side/.style={rectangle, rounded corners=2pt, draw=zirenslate!45, fill=zirenlight,
+               align=left, font=\scriptsize, inner sep=4pt, line width=0.5pt},
+]
+
+% ------------------------------------------------------------ (a) hiding rows
+\node[panel] at (0,3.35) {(a) Committed stripes, coefficients bottom to top};
+\def\W{0.62}
+\def\S{0.32}
+\def\D{1.7}
+% preprocessed round: zero seeds, then the data
+\foreach \i/\n in {0/P_0, 1/P_1} {
+  \pgfmathsetmacro{\x}{0.3+0.8*\i}
+  \draw[zero] (\x,0) rectangle ++(\W,\S);
+  \node[lab] at (\x+0.5*\W,0.5*\S) {$0$};
+  \draw[data] (\x,\S) rectangle ++(\W,\D);
+  \node at (\x+0.5*\W,-0.25) {$\n$};
+}
+% main round: uniform seeds, then the data
+\foreach \i/\n in {0/S_0, 1/S_1} {
+  \pgfmathsetmacro{\x}{2.3+0.8*\i}
+  \draw[rnd] (\x,0) rectangle ++(\W,\S);
+  \draw[data] (\x,\S) rectangle ++(\W,\D);
+  \node at (\x+0.5*\W,-0.25) {$\n$};
+}
+\node at (2.3+0.8*2+0.5*\W,{0.5*\D}) {$\cdots$};
+% the last main stripe carries G's auxiliary block
+\pgfmathsetmacro{\xl}{2.3+0.8*3}
+\draw[rnd] (\xl,0) rectangle ++(\W,\S);
+\draw[data] (\xl,\S) rectangle ++(\W,\D);
+\draw[mask] (\xl,\S+\D) rectangle ++(\W,0.18);
+\draw[mask] (\xl,\S+\D+0.18) rectangle ++(\W,0.55);
+\node at (\xl+0.5*\W,-0.25) {$S_{L}$};
+% braces and labels
+\draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
+  (\xl+\W+0.08,\S) -- node[lab, right=4pt, align=left] {$T$ seeds a row,\\$T = t_0 + 1$}
+  (\xl+\W+0.08,0);
+\draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
+  (\xl+\W+0.08,\S+\D) -- node[lab, right=4pt, align=left] {the stripe,\\$2^{\ell}$ cells}
+  (\xl+\W+0.08,\S);
+\draw[zirenslate, decorate, decoration={brace, amplitude=3pt}]
+  (\xl+\W+0.08,\S+\D+0.73) -- node[lab, right=4pt, align=left] {$G$'s mask coordinates\\and the mask region}
+  (\xl+\W+0.08,\S+\D);
+\node[lab, anchor=west, align=left] at (0.3,-0.75)
+  {row $b$ of a stripe: $\mathrm{ev}(\bm s_b, X) + X^{T} \mathrm{ev}(\bm m_b, X) + X^{T+\ell}\mathrm{ev}(\bm a_b, X)$;\\
+   no salts: an unopened leaf keeps one free coefficient per row.};
+
+% ------------------------------------------------------------ (b) the first oracle and one stage
+\node[panel] at (8.6,3.35) {(b) The first oracle and a masked stage};
+\node[side, anchor=north west] (g) at (8.75,3.0)
+  {$G = \sum_j \eqf(\bm{bp}, j)\, S_j$, \quad $G(\bm{sp}) = v$ \quad (no per-stripe value is sent)};
+\node[side, anchor=north west] (st) at (8.75,2.2)
+  {mask $U = \hat s_0 + \hat s_1 (X_1 + \dots + X_k)$ in the rows' auxiliary blocks\\[1pt]
+   send $\tilde\mu = \sum_{\bm b} U(\bm b)$, \ draw $\varepsilon$, \ fold $U + \varepsilon\,\langle \bm w, \bm f\rangle$ over the $k$ row variables};
+\draw[a] (g.south) -- (st.north -| g.south);
+\node[lab, anchor=west] at (8.75,1.1) {cell claims: sparse functionals of $G$'s auxiliary block, batched into the first claim.};
+
+% ------------------------------------------------------------ (c) code switch and base case
+\node[panel] at (8.6,0.6) {(c) Code switch and base case};
+\def\cx{8.75}
+\def\cy{-0.25}
+\draw[rnd] (\cx,\cy) rectangle ++(0.7,0.4);
+\node[lab, fill=white, inner sep=1pt] at (\cx+0.35,\cy+0.2) {seeds};
+\draw[data] (\cx+0.7,\cy) rectangle ++(1.5,0.4);
+\node[lab] at (\cx+1.45,\cy+0.2) {$\bar{\bm f}$};
+\draw[mask] (\cx+2.2,\cy) rectangle ++(0.8,0.4);
+\node[lab] at (\cx+2.6,\cy+0.2) {$\hat s_0, \hat s_1$};
+\draw[data] (\cx+3.0,\cy) rectangle ++(0.9,0.4);
+\node[lab] at (\cx+3.45,\cy+0.2) {$\bar{\bm a}, \bar{\bm s}$};
+\draw[rnd] (\cx+3.9,\cy) rectangle ++(0.6,0.4);
+\node[lab, fill=white, inner sep=1pt] at (\cx+4.2,\cy+0.2) {pad};
+\node[lab, anchor=west] at (\cx+4.6,\cy+0.2) {next oracle's rows};
+\node[lab, anchor=west, align=left] at (\cx,\cy-0.75)
+  {the fold re-encoded under fresh seeds and masks; the out-of-domain answers weigh\\
+   the pad; a query value is a linear constraint on the next message.\\[2pt]
+   last oracle: commit a uniform row $g$, send $\mu_\star = \langle \bm w, g\rangle$, draw $\gamma_\star$,\\
+   disclose $D = g + \gamma_\star \bar{\bm f}$; each final query checks $D(x) = g(x) + \gamma_\star \bar f(x)$.};
+\end{tikzpicture}

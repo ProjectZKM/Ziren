@@ -10,6 +10,7 @@ use super::{
     folder::VerifierConstraintFolder, types::ShardProof, OpeningError, StarkGenericConfig,
     StarkVerifyingKey, Val,
 };
+use crate::shard_level::verifier::JaggedShardVerifyError;
 use crate::{air::MachineAir, MachineChip};
 
 /// A verifier for a collection of air chips.
@@ -74,7 +75,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 pinned,
                 machine_has_pv_buses,
             )
-            .map_err(|e| VerificationError::JaggedShardVerifier(format!("{e}")))?;
+            .map_err(|e| match e {
+                JaggedShardVerifyError::DegenerateChallenge(why) => {
+                    VerificationError::DegenerateChallenge(why)
+                }
+                other => VerificationError::JaggedShardVerifier(format!("{other}")),
+            })?;
         Ok(())
     }
 }
@@ -120,6 +126,10 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     /// Shard-level WHIR verifier (the task path) rejected the proof.
     /// The message carries the inner JaggedShardVerifyError's display.
     JaggedShardVerifier(String),
+    /// A zk shard's transcript drew a challenge under which a mask
+    /// degenerates ([`JaggedShardVerifyError::DegenerateChallenge`]); the
+    /// proof is rejected and an honest prover proves again.
+    DegenerateChallenge(String),
 }
 
 impl Debug for OpeningShapeError {
@@ -181,6 +191,9 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
             VerificationError::JaggedShardVerifier(msg) => {
                 write!(f, "JaggedShardVerifier: {}", msg)
             }
+            VerificationError::DegenerateChallenge(msg) => {
+                write!(f, "degenerate challenge: {}", msg)
+            }
         }
     }
 }
@@ -214,6 +227,9 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
             }
             VerificationError::JaggedShardVerifier(msg) => {
                 write!(f, "JaggedShardVerifier: {}", msg)
+            }
+            VerificationError::DegenerateChallenge(msg) => {
+                write!(f, "degenerate challenge: {}", msg)
             }
         }
     }

@@ -260,11 +260,11 @@ pub trait WhirRing: StarkGenericConfig {
     /// BOTH rings (Val == KoalaBear everywhere).  No challenger observe
     /// (the caller surfaces the commitment).
     ///
-    /// DEFAULT body, and the ONLY body: no ring overrides this method (checked
-    /// across both repos), so the per-ring variation is entirely in the associated
-    /// `WhirMmcs` / `whir_mmcs()` / `WHIR_PROFILE`. In particular there is no
-    /// `StarkGpuProver` override of it -- the device path commits through its
-    /// own separate hook.
+    /// The DEFAULT body is [`commit_multilinears_default`], and no ring but
+    /// the zk shrink ring (feature `zk`) overrides it, so the per-ring
+    /// variation is otherwise entirely in the associated `WhirMmcs` /
+    /// `whir_mmcs()` / `WHIR_PROFILE`. There is no `StarkGpuProver` override
+    /// of it -- the device path commits through its own separate hook.
     ///
     /// The returned `commit` is the WHIR root, `whir_data` the WHIR tree, and
     /// `prover_data` keeps the interleaved MLEs the step-4 reduction reads.  The
@@ -275,65 +275,20 @@ pub trait WhirRing: StarkGenericConfig {
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
-        use p3_matrix::dense::RowMajorMatrix;
+        commit_multilinears_default::<Self>(chip_traces, pin)
+    }
 
-        let mut packing =
-            crate::jagged::compute_jagged_metadata_pinned::<crate::InnerVal>(chip_traces, pin);
-        if packing.dense_len == 0 {
-            packing.dense_len = 1;
-        }
-        let dense_q = crate::jagged::materialize_dense_jagged::<crate::InnerVal>(
-            chip_traces,
-            packing.dense_len,
-        );
-        assert_eq!(
-            dense_q.len(),
-            packing.dense_len,
-            "materialize_dense_jagged produced {} cells for a dense_len of {}",
-            dense_q.len(),
-            packing.dense_len,
-        );
-        let dense_traces = alloc::vec![(
-            alloc::string::String::from("<jagged-dense>"),
-            RowMajorMatrix::new(dense_q, 1),
-        )];
-        let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-
-        let (mles, chip_dims) = crate::jagged_pcs::chips_to_mles_owned(dense_traces);
-        let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
-        let log_stacking_height = crate::jagged_pcs::pick_log_stacking_height(total_entries);
-        let area = total_entries.next_multiple_of(1usize << log_stacking_height);
-        let interleaved_mles = crate::whir::stripes::interleave_multilinears_with_fixed_rate(
-            crate::jagged_pcs::DEFAULT_BATCH_SIZE,
-            mles,
-            log_stacking_height,
-        );
-        let cfg = Self::whir_config(log_stacking_height as usize);
-        let (commit, whir_data) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
-            Self::WhirMmcs,
-            crate::jagged_pcs::JaggedDft,
-        >(
-            &interleaved_mles,
-            chip_dims.clone(),
-            area,
-            log_stacking_height,
-            Self::whir_mmcs(),
-            dft,
-            cfg,
-        );
-        let prover_data = crate::jagged_pcs::JaggedProverData::new(
-            interleaved_mles,
-            chip_dims,
-            area,
-            log_stacking_height,
-        );
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
-            packing,
-            commit,
-            prover_data,
-            whir_data,
-            fixed_pad_columns: pin.map(|p| p.pad_columns),
-        }
+    /// [`Self::commit_multilinears`] for the MAIN round of a shard, which the
+    /// shard prover ([`crate::shard_level::prover::commit_traces`]) calls; the
+    /// preprocessed round goes through `prep_precompute`.  The two coincide
+    /// on every ring but the zk shrink ring, whose main round alone carries
+    /// the randomness that hides the opening (feature `zk`,
+    /// [`crate::whir::zk`]).
+    fn commit_main_multilinears(
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
+        pin: Option<crate::jagged::AreaPin>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::WhirMmcs> {
+        Self::commit_multilinears(chip_traces, pin)
     }
 
     /// Ring-native jagged WHIR OPEN — the prove-side counterpart of
@@ -369,6 +324,19 @@ pub trait WhirRing: StarkGenericConfig {
         rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
+
+    /// [`Self::prove_jagged_open`] with the shard's claims on the zk mask
+    /// region ([`crate::zk_mask`]), which only the zk shrink ring's opening
+    /// binds; every other ring ignores them.
+    fn prove_jagged_open_zk(
+        z_row: &[crate::InnerChallenge],
+        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::WhirMmcs>>,
+        zk_claims: &[crate::zk_mask::ZkCellClaim<crate::InnerChallenge>],
+        challenger: &mut Self::Challenger,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        let _ = zk_claims;
+        Self::prove_jagged_open(z_row, rounds, challenger)
+    }
 }
 
 /// The WHIR jagged-PCS commitment type for a `WhirRing`
@@ -399,5 +367,92 @@ where
 
     fn initialise_challenger(&self) -> Self::Challenger {
         self.0.challenger()
+    }
+}
+
+/// The stacked input of a jagged commit, the part of
+/// [`WhirRing::commit_multilinears`] before anything is committed: the
+/// packing, the dense polynomial's `DEFAULT_BATCH_SIZE`-wide interleaves and
+/// the round's geometry.
+pub struct JaggedCommitInput {
+    pub packing: crate::jagged::JaggedPacking<crate::InnerVal>,
+    pub interleaved_mles: Vec<std::sync::Arc<crate::whir::mle::Mle<crate::jagged_pcs::JaggedVal>>>,
+    pub chip_dims: Vec<(usize, u32)>,
+    pub area: usize,
+    pub log_stacking_height: u32,
+}
+
+/// Pack `chip_traces` as one dense jagged polynomial under `pin` and stack it
+/// into stripes of `2^DEFAULT_LOG_STACKING_HEIGHT`.
+pub fn jagged_commit_input(
+    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
+    pin: Option<crate::jagged::AreaPin>,
+) -> JaggedCommitInput {
+    use p3_matrix::dense::RowMajorMatrix;
+
+    let mut packing =
+        crate::jagged::compute_jagged_metadata_pinned::<crate::InnerVal>(chip_traces, pin);
+    if packing.dense_len == 0 {
+        packing.dense_len = 1;
+    }
+    let dense_q =
+        crate::jagged::materialize_dense_jagged::<crate::InnerVal>(chip_traces, packing.dense_len);
+    assert_eq!(
+        dense_q.len(),
+        packing.dense_len,
+        "materialize_dense_jagged produced {} cells for a dense_len of {}",
+        dense_q.len(),
+        packing.dense_len,
+    );
+    let dense_traces = alloc::vec![(
+        alloc::string::String::from("<jagged-dense>"),
+        RowMajorMatrix::new(dense_q, 1)
+    )];
+
+    let (mles, chip_dims) = crate::jagged_pcs::chips_to_mles_owned(dense_traces);
+    let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
+    let log_stacking_height = crate::jagged_pcs::pick_log_stacking_height(total_entries);
+    let area = total_entries.next_multiple_of(1usize << log_stacking_height);
+    let interleaved_mles = crate::whir::stripes::interleave_multilinears_with_fixed_rate(
+        crate::jagged_pcs::DEFAULT_BATCH_SIZE,
+        mles,
+        log_stacking_height,
+    );
+    JaggedCommitInput { packing, interleaved_mles, chip_dims, area, log_stacking_height }
+}
+
+/// The default body of [`WhirRing::commit_multilinears`]: the jagged commit
+/// of [`jagged_commit_input`] under `R`'s MMCS and schedule.
+pub fn commit_multilinears_default<R: WhirRing>(
+    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
+    pin: Option<crate::jagged::AreaPin>,
+) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<R::WhirMmcs> {
+    let input = jagged_commit_input(chip_traces, pin);
+    let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+    let cfg = R::whir_config(input.log_stacking_height as usize);
+    let (commit, whir_data) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
+        R::WhirMmcs,
+        crate::jagged_pcs::JaggedDft,
+    >(
+        &input.interleaved_mles,
+        input.chip_dims.clone(),
+        input.area,
+        input.log_stacking_height,
+        R::whir_mmcs(),
+        dft,
+        cfg,
+    );
+    let prover_data = crate::jagged_pcs::JaggedProverData::new(
+        input.interleaved_mles,
+        input.chip_dims,
+        input.area,
+        input.log_stacking_height,
+    );
+    crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
+        packing: input.packing,
+        commit,
+        prover_data,
+        whir_data,
+        fixed_pad_columns: pin.map(|p| p.pad_columns),
     }
 }

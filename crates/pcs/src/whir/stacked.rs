@@ -329,7 +329,7 @@ where
     }
 
     /// Interleaved-encode one stripe (base field) to its codeword matrix.
-    fn encode_stripe(&self, stripe: &Mle<F>) -> RowMajorMatrix<F> {
+    pub(crate) fn encode_stripe(&self, stripe: &Mle<F>) -> RowMajorMatrix<F> {
         let ff = self.ff();
         let width = 1usize << ff;
         let vals = stripe.guts().as_slice();

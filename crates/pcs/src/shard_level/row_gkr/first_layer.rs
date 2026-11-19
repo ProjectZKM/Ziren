@@ -69,6 +69,36 @@ pub fn build_chip_interaction_tables<
     alpha: EF,
     betas: &[EF],
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
+    build_chip_interaction_tables_masked(
+        interactions,
+        main_values,
+        main_width,
+        preprocessed_trace,
+        alpha,
+        betas,
+        (0, &[]),
+    )
+}
+
+/// [`build_chip_interaction_tables`] with the zk shard's numerator mask:
+/// `mask = (constrained, masked)` zeroes, on every row at or past
+/// `constrained`, the numerator of each interaction whose `masked` flag is
+/// set (the lookups whose multiplicity ignores the main columns, see
+/// [`crate::shard_level::zk`]).  An empty `masked` is the plain table.
+#[allow(clippy::too_many_arguments)]
+pub fn build_chip_interaction_tables_masked<
+    F: PrimeField + Send + Sync,
+    EF: ExtensionField<F> + Send + Sync,
+>(
+    interactions: &[(&Lookup<F>, bool)],
+    main_values: &[F],
+    main_width: usize,
+    preprocessed_trace: Option<crate::whir::mle::TraceRef<'_, F>>,
+    alpha: EF,
+    betas: &[EF],
+    mask: (usize, &[bool]),
+) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
+    let (constrained, masked_interactions) = mask;
     let height = main_values.len().checked_div(main_width).unwrap_or(0);
     let num_interactions = interactions.len();
 
@@ -81,6 +111,7 @@ pub fn build_chip_interaction_tables<
         let main_w = main_width;
         let prep_w = preprocessed_trace.map(|pt| pt.width).unwrap_or(0);
         let prep_values: Option<&[F]> = preprocessed_trace.map(|pt| pt.values);
+        let zero_prep_row: Vec<F> = vec![F::ZERO; prep_w];
         numer_evals
             .par_chunks_exact_mut(num_interactions)
             .zip(denom_evals.par_chunks_exact_mut(num_interactions))
@@ -88,7 +119,10 @@ pub fn build_chip_interaction_tables<
             .for_each(|(row_idx, (numer_row, denom_row))| {
                 let main_row = &main_values[row_idx * main_w..(row_idx + 1) * main_w];
                 let prep_row: &[F] = match prep_values {
-                    Some(pv) if prep_w > 0 => &pv[row_idx * prep_w..(row_idx + 1) * prep_w],
+                    Some(pv) if prep_w > 0 && (row_idx + 1) * prep_w <= pv.len() => {
+                        &pv[row_idx * prep_w..(row_idx + 1) * prep_w]
+                    }
+                    Some(_) if prep_w > 0 => zero_prep_row.as_slice(),
                     _ => &[],
                 };
                 for (col_idx, (interaction, is_send)) in interactions.iter().enumerate() {
@@ -100,7 +134,10 @@ pub fn build_chip_interaction_tables<
                         alpha,
                         betas,
                     );
-                    numer_row[col_idx] = numer;
+                    let masked = !masked_interactions.is_empty()
+                        && row_idx >= constrained
+                        && masked_interactions[col_idx];
+                    numer_row[col_idx] = if masked { F::ZERO } else { numer };
                     denom_row[col_idx] = denom;
                 }
             });
@@ -191,6 +228,36 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F>,
 {
+    generate_first_layer_with_rows::<F, EF, A>(
+        chips,
+        preprocessed_traces,
+        shared_trace_mles,
+        alpha,
+        betas,
+        num_row_variables,
+        false,
+    )
+}
+
+/// [`generate_first_layer`] over a shard that carries the zk random rows
+/// when `zk_rows` is set: every chip's constant-multiplicity lookups have
+/// their numerators zeroed past the chip's constrained height
+/// ([`crate::shard_level::zk::constrained_height`]).
+#[allow(clippy::too_many_arguments)]
+pub fn generate_first_layer_with_rows<F, EF, A>(
+    chips: &[&Chip<F, A>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
+    shared_trace_mles: &[PaddedMle<F>],
+    alpha: EF,
+    betas: &[EF],
+    num_row_variables: usize,
+    zk_rows: bool,
+) -> LogUpGkrCpuLayer<F, EF>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+    A: MachineAir<F>,
+{
     assert!(num_row_variables >= 1, "num_row_variables must be >= 1");
     assert_eq!(chips.len(), shared_trace_mles.len(), "chip count vs main trace count");
     assert_eq!(chips.len(), preprocessed_traces.len(), "chip count vs preprocessed trace count");
@@ -216,13 +283,28 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        let (numer_mat, denom_mat) = build_chip_interaction_tables::<F, EF>(
+        let masked: Vec<bool> =
+            if zk_rows { crate::shard_level::zk::numerator_masks(chip) } else { Vec::new() };
+        let constrained = if zk_rows {
+            let committed = mt_values.len().checked_div(mt_width).unwrap_or(0);
+            crate::shard_level::zk::constrained_height(committed, mt_width).unwrap_or_else(|| {
+                panic!(
+                    "zk random rows: chip {} committed {committed} rows, fewer than the random \
+                     rows",
+                    chip.name()
+                )
+            })
+        } else {
+            0
+        };
+        let (numer_mat, denom_mat) = build_chip_interaction_tables_masked::<F, EF>(
             &interactions,
             mt_values,
             mt_width,
             prep_trace.real_trace_ref(),
             alpha,
             betas,
+            (constrained, masked.as_slice()),
         );
 
         let chip_height: usize = numer_mat.values.len().checked_div(num_interactions).unwrap_or(0);

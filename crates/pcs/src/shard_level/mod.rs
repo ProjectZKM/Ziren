@@ -16,6 +16,7 @@ pub mod types;
 pub mod verifier;
 pub mod zerocheck_poly;
 pub mod zerocheck_prover;
+pub mod zk;
 
 pub use logup_gkr_prover::*;
 pub use prover::*;

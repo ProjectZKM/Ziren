@@ -13,6 +13,7 @@ pub mod layer;
 pub mod round;
 pub mod top_level;
 pub mod transition;
+pub mod zk;
 
 pub use build::*;
 pub use extract::*;

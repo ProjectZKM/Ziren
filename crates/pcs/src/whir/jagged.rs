@@ -143,6 +143,44 @@ pub fn shrink_whir_config(lsh: usize) -> WhirConfig {
     core_schedule(lsh, SHRINK_START_LOG_INV_RATE)
 }
 
+/// The shrink schedule of the zk shrink ring at the jagged stacking height
+/// `lsh`: [`shrink_whir_config`] without the stripe-batching grind, with
+/// each query count solved at the rate its oracle really has.  The zk
+/// opening batches the stripes with the jagged point's own `eq` weights
+/// rather than a sampled challenge, so there is nothing to grind; its hiding
+/// rows add seeds and an auxiliary block to every row, which raises each
+/// oracle's rate ([`crate::whir::zk::zk_query_phase_bits`]), most on the
+/// last and smallest one.  The counts are raised until every phase meets
+/// [`per_component_target_bits`] again; the seeds follow the counts, so the
+/// solve repeats until nothing moves.
+#[cfg(feature = "zk")]
+pub fn zk_shrink_whir_config(lsh: usize) -> WhirConfig {
+    let mut config = shrink_whir_config(lsh);
+    config.batch_pow_bits = 0;
+    let target = per_component_target_bits();
+    loop {
+        let n = config.round_parameters.len();
+        let mut changed = false;
+        for (s, stage) in crate::whir::zk::zk_stages(&config, lsh).iter().enumerate() {
+            let rate = stage.coefficients() as f64 / (1u64 << stage.domain_log) as f64;
+            let (queries, pow) = if s + 1 < n {
+                let rp = &mut config.round_parameters[s];
+                (&mut rp.num_queries, rp.queries_pow_bits)
+            } else {
+                (&mut config.final_queries, config.final_pow_bits)
+            };
+            let need = ((target - pow as f64) / bits_per_query_at_rate(rate)).ceil() as usize;
+            if need > *queries {
+                *queries = need;
+                changed = true;
+            }
+        }
+        if !changed {
+            return config;
+        }
+    }
+}
+
 fn core_schedule(lsh: usize, start: usize) -> WhirConfig {
     let mut config = core_whir_config_without_batch_grind(lsh, start);
     config.batch_pow_bits = whir_batch_grinding_bits();
@@ -224,7 +262,11 @@ fn core_whir_config_without_batch_grind(lsh: usize, start: usize) -> WhirConfig 
         folds.push(6);
         rem -= 6;
     }
-    let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
+    solve_rounds(lsh, &folds, rem, start)
+}
+
+fn solve_rounds(lsh: usize, folds: &[usize], final_log: usize, start: usize) -> WhirConfig {
+    let mut config = whir_config_for_fold_schedule(lsh, folds, final_log);
     config.starting_log_inv_rate = start;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = start + 3 * (r + 1);
@@ -244,7 +286,13 @@ fn core_whir_config_without_batch_grind(lsh: usize, start: usize) -> WhirConfig 
 /// `-log2((1 + rho)/2)`: what one shift query is worth at rate `2^-log_inv_rate`
 /// in the unique-decoding regime.
 pub fn bits_per_query(log_inv_rate: usize) -> f64 {
-    -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
+    bits_per_query_at_rate(2f64.powi(-(log_inv_rate as i32)))
+}
+
+/// `-log2((1 + rho)/2)` at any rate `rho`: what one shift query is worth in
+/// the unique-decoding regime.
+pub fn bits_per_query_at_rate(rate: f64) -> f64 {
+    -((1.0 + rate) / 2.0).log2()
 }
 
 /// The rate of the codeword round `r` queries under a schedule starting at
@@ -288,6 +336,26 @@ pub enum WhirProfile {
     /// Size-oriented shrink schedule; hash selection belongs to the suite.
     #[cfg(feature = "compact-shrink")]
     CompactShrink,
+    /// The zk shrink ring's schedule: the shrink schedule over stripes one
+    /// variable wider, which is where the zk opening keeps its random
+    /// padding ([`zk_shrink_whir_config`], [`crate::whir::zk`]).
+    #[cfg(feature = "zk")]
+    ZkShrink,
+}
+
+impl WhirProfile {
+    /// Is this the zk shrink ring's profile, whose opening hides the cells
+    /// and masks the sumchecks ([`crate::whir::zk`])?
+    pub fn is_zk(self) -> bool {
+        #[cfg(feature = "zk")]
+        {
+            matches!(self, WhirProfile::ZkShrink)
+        }
+        #[cfg(not(feature = "zk"))]
+        {
+            false
+        }
+    }
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -299,6 +367,8 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
         WhirProfile::Wrap => wrap_whir_config(lsh),
         #[cfg(feature = "compact-shrink")]
         WhirProfile::CompactShrink => super::compact_params::compact_whir_config(lsh),
+        #[cfg(feature = "zk")]
+        WhirProfile::ZkShrink => zk_shrink_whir_config(lsh),
     }
 }
 
@@ -598,7 +668,7 @@ fn size_tuned_whir_config_for_target(
 /// width-1 form is the one the round-0 engine and the device upload read
 /// (one stripe per `Arc<Mle>`, each `2^log_stacking_height` values), so it
 /// is kept as the committed representation.
-fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<JaggedVal>>> {
+pub(crate) fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<JaggedVal>>> {
     use p3_maybe_rayon::prelude::*;
     let mut polys = Vec::new();
     for stripe in stripes {
@@ -759,6 +829,68 @@ where
     let stack_point: Vec<JaggedChallenge> = eval_point[..log_stacking_height as usize].to_vec();
     let stacked: Vec<&_> = rounds.iter().map(|r| &r.stacked_data).collect();
     prover.prove_trusted_evaluation_with_engine(ef_dft, stack_point, &stacked, challenger, engine)
+}
+
+/// [`verify_jagged_whir_rounds`] under the opening protocol of `profile`:
+/// the zk shrink profile verifies the zk opening ([`crate::whir::zk`]),
+/// every other profile the plain stacked one.
+#[allow(clippy::too_many_arguments)]
+/// `masks`: the zk ring's sumcheck-mask claims, ignored by every other
+/// profile.
+pub fn verify_whir_rounds_for_profile<Challenger, MT>(
+    profile: WhirProfile,
+    mmcs: MT,
+    config: WhirConfig,
+    log_stacking_height: u32,
+    commitments: &[<MT as Mmcs<JaggedVal>>::Commitment],
+    round_areas: &[usize],
+    point: &[JaggedChallenge],
+    proof: &StackedWhirProof<JaggedVal, JaggedChallenge, MT>,
+    evaluation_claim: JaggedChallenge,
+    masks: Option<(
+        &[crate::zk_mask::ZkCellClaim<JaggedChallenge>],
+        (JaggedChallenge, JaggedChallenge),
+    )>,
+    challenger: &mut Challenger,
+) -> Result<(), WhirVerifierError>
+where
+    MT: Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    Challenger: FieldChallenger<JaggedVal>
+        + GrindingChallenger<Witness = JaggedVal>
+        + Clone
+        + Sync
+        + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
+        + 'static,
+{
+    match profile {
+        #[cfg(feature = "zk")]
+        WhirProfile::ZkShrink => crate::whir::zk::verify_zk_whir_rounds::<Challenger, MT>(
+            mmcs,
+            config,
+            log_stacking_height,
+            commitments,
+            round_areas,
+            point,
+            proof,
+            evaluation_claim,
+            masks,
+            challenger,
+        ),
+        _ => {
+            let _ = masks;
+            verify_jagged_whir_rounds::<Challenger, MT>(
+                mmcs,
+                config,
+                log_stacking_height,
+                commitments,
+                round_areas,
+                point,
+                proof,
+                evaluation_claim,
+                challenger,
+            )
+        }
+    }
 }
 
 /// Verify a jagged-WHIR batched open: bind the claim by interpolating the

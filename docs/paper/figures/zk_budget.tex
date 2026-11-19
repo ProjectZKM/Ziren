@@ -1,0 +1,39 @@
+% The zero-knowledge budgets: what the verifier learns against what the
+% prover committed, per source of randomness and oracle, on a log scale.
+\begin{tikzpicture}
+\begin{axis}[
+  xbar,
+  width=11.5cm, height=7.2cm,
+  xmode=log, log basis x=2,
+  xmin=1, xmax=2^16, clip=false,
+  xtick={1,2^2,2^4,2^6,2^8,2^10,2^12,2^14,2^16},
+  xticklabels={$2^{0}$,$2^{2}$,$2^{4}$,$2^{6}$,$2^{8}$,$2^{10}$,$2^{12}$,$2^{14}$,$2^{16}$},
+  xlabel={values (log scale)},
+  symbolic y coords={ood2,ood1,mask2,mask1,mask0,seeds2,seeds1,seeds0,region,rows},
+  ytick={ood2,ood1,mask2,mask1,mask0,seeds2,seeds1,seeds0,region,rows},
+  yticklabels={out-of-domain pad of oracle 2, out-of-domain pad of oracle 1,
+               stage mask of oracle 2, stage mask of oracle 1, stage mask of oracle 0,
+               row seeds of oracle 2, row seeds of oracle 1, row seeds of oracle 0,
+               mask region, random rows of a column},
+  y tick label style={font=\scriptsize, align=right},
+  x tick label style={font=\scriptsize},
+  xlabel style={font=\scriptsize},
+  bar width=4pt,
+  enlarge y limits=0.07,
+  legend style={font=\scriptsize, at={(0.5,-0.2)}, anchor=north, legend columns=2, draw=zirenslate!45, fill=zirenlight},
+  legend cell align=left,
+  axis line style={zirenslate!70},
+  xmajorgrids, grid style={zirenslate!25},
+  point meta=rawx,
+  nodes near coords, nodes near coords style={font=\tiny, /pgf/number format/fixed, /pgf/number format/precision=0, /pgf/number format/set thousands separator={\,}},
+  nodes near coords align={horizontal},
+]
+\addplot[fill=zirenblue!25, draw=zirenblue!90] coordinates
+  {(8,rows) (9524,region) (125,seeds0) (89,seeds1) (86,seeds2)
+   (7,mask0) (13,mask1) (13,mask2) (2,ood1) (2,ood2)};
+\addplot[fill=white, draw=zirenslate!80, pattern=north east lines, pattern color=zirenslate!55] coordinates
+  {(8,rows) (16384,region) (126,seeds0) (90,seeds1) (87,seeds2)
+   (8,mask0) (14,mask1) (14,mask2) (58,ood1) (65,ood2)};
+\legend{learned by the verifier, committed by the prover}
+\end{axis}
+\end{tikzpicture}

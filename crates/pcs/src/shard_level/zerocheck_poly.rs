@@ -339,6 +339,14 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     padded_row_adjustment: EF,
     /// Virtual padded-row indicator.
     virtual_geq: VirtualGeq<EF>,
+    /// The zk shard's constraint weight: the equality table of the anchor
+    /// cut at the chip's constrained height, one value per held row, folded
+    /// with the cells.  Empty except on the zk shrink ring, where the
+    /// constraint part of the round polynomial is `Σ_rows W(row) · C(row)`
+    /// in place of `Σ_rows eq(ζ, row) · C(row)` and no padded-row
+    /// correction applies (`W` is zero past the constrained height).  See
+    /// [`crate::shard_level::zk`].
+    constraint_weight: Vec<EF>,
     _marker: PhantomData<A>,
 }
 
@@ -388,8 +396,21 @@ where
             geq_value,
             padded_row_adjustment,
             virtual_geq,
+            constraint_weight: Vec::new(),
             _marker: PhantomData,
         }
+    }
+
+    /// Weigh the constraint part by `weight` (one value per real row, the
+    /// zk shard's cut equality table) instead of the anchor's equality
+    /// polynomial; an empty `weight` keeps the equality polynomial.
+    pub(crate) fn with_constraint_weight(mut self, weight: Vec<EF>) -> Self {
+        debug_assert!(
+            weight.is_empty() || weight.len() == self.num_real_entries,
+            "one weight per held row"
+        );
+        self.constraint_weight = weight;
+        self
     }
 
     /// Evaluate the chip's α-RLC'd constraints at a single `K` row,
@@ -429,6 +450,15 @@ where
         let last = self.zeta[dim - 1];
         let rest_point = &self.zeta[..dim - 1];
         let partial = partial_lagrange_prefix(rest_point, num_real.div_ceil(2));
+
+        if !self.constraint_weight.is_empty() {
+            let (g, c) = self.accumulate_weighted_y_tuples(
+                &partial,
+                &self.constraint_weight,
+                is_first_round,
+            );
+            return self.finalize_weighted_round_poly(claim, last, g, c);
+        }
 
         let compute_y3 = zerocheck_eq_root(last).is_none();
         let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round, compute_y3);
@@ -545,6 +575,112 @@ where
             )
     }
 
+    /// The zk shard's per-pair accumulators at `X ∈ {0, 2, 3, 4}`: the
+    /// openings part `Σ_pairs eq_rest(pair) · G(row_X)` (as
+    /// [`Self::accumulate_y_tuple_host`]) and the constraint part
+    /// `Σ_pairs W_pair(X) · C(row_X)` with `W_pair(X)` the pair's two
+    /// weights interpolated linearly, zero past the held rows.  The weight
+    /// is a generic multilinear, so the eq-root reconstruction does not
+    /// apply and `X = 3` is always computed.
+    fn accumulate_weighted_y_tuples(
+        &self,
+        partial: &[EF],
+        weight: &[EF],
+        is_first_round: bool,
+    ) -> ([EF; 4], [EF; 4]) {
+        let num_real = self.num_real_entries;
+        let nm = self.num_main_cols;
+        let np = self.num_prep_cols;
+        let num_pairs = num_real.div_ceil(2);
+        let half = EF::from_u64(2).inverse();
+        let half_cell = K::from_u64(2).inverse();
+        let prep_cells = self.prep_cells.as_ref();
+
+        (0..num_pairs)
+            .into_par_iter()
+            .map_init(
+                || {
+                    (
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; np],
+                        vec![K::ZERO; np],
+                        vec![K::ZERO; np],
+                        vec![K::ZERO; np],
+                    )
+                },
+                |(m0, m2, m3, m4, p0, p2, p3, p4), pair| {
+                    let eq = partial[pair];
+                    let row0 = 2 * pair;
+                    let row1 = 2 * pair + 1;
+                    let w0 = weight[row0];
+                    let w1 = if row1 < num_real { weight[row1] } else { EF::ZERO };
+                    let dw = w1 - w0;
+                    let w2 = w0 + dw.double();
+                    let w3 = w2 + dw;
+                    let w4 = w3 + dw;
+
+                    interp_pair(&self.main_cells, nm, num_real, row0, row1, m0, m2, m4);
+                    if np > 0 {
+                        let prep = prep_cells.expect("prep_cells present when np > 0");
+                        interp_pair(prep, np, num_real, row0, row1, p0, p2, p4);
+                    }
+                    for c in 0..nm {
+                        m3[c] = (m2[c] + m4[c]) * half_cell;
+                    }
+                    for c in 0..np {
+                        p3[c] = (p2[c] + p4[c]) * half_cell;
+                    }
+
+                    let g0 = self.gkr_batch(m0, p0);
+                    let g2 = self.gkr_batch(m2, p2);
+                    let g4 = g2 + g2 - g0;
+                    let g3 = (g2 + g4) * half;
+
+                    let c0 = if is_first_round { EF::ZERO } else { self.eval_air_at_row(p0, m0) };
+                    let c2 = self.eval_air_at_row(p2, m2);
+                    let c3 = self.eval_air_at_row(p3, m3);
+                    let c4 = self.eval_air_at_row(p4, m4);
+
+                    ([g0 * eq, g2 * eq, g3 * eq, g4 * eq], [c0 * w0, c2 * w2, c3 * w3, c4 * w4])
+                },
+            )
+            .reduce(
+                || ([EF::ZERO; 4], [EF::ZERO; 4]),
+                |(ga, ca), (gb, cb)| {
+                    (
+                        [ga[0] + gb[0], ga[1] + gb[1], ga[2] + gb[2], ga[3] + gb[3]],
+                        [ca[0] + cb[0], ca[1] + cb[1], ca[2] + cb[2], ca[3] + cb[3]],
+                    )
+                },
+            )
+    }
+
+    /// The zk shard's round polynomial from its accumulators: the openings
+    /// part scaled by `elf_X · eq_adjustment` plus the constraint part as
+    /// accumulated, `p(1) = claim − p(0)`, interpolated over `{0,1,2,3,4}`.
+    fn finalize_weighted_round_poly(
+        &self,
+        claim: EF,
+        last: EF,
+        g: [EF; 4],
+        c: [EF; 4],
+    ) -> UnivariatePolynomial<EF> {
+        let elf = [
+            EF::ONE - last,
+            last * EF::from_u64(3) - EF::ONE,
+            last * EF::from_u64(5) - EF::from_u64(2),
+            last * EF::from_u64(7) - EF::from_u64(3),
+        ];
+        let p = |i: usize| g[i] * (elf[i] * self.eq_adjustment) + c[i];
+        let p0 = p(0);
+        let ys = [p0, claim - p0, p(1), p(2), p(3)];
+        let xs = [EF::ZERO, EF::ONE, EF::from_u64(2), EF::from_u64(3), EF::from_u64(4)];
+        interpolate_univariate_polynomial(&xs, &ys)
+    }
+
     /// Analytic finalize (host-only, transcript-critical): scale the per-pair
     /// accumulators by `elf_X · eq_adjustment`, subtract the VirtualGeq
     /// padded-row correction, fix `y_1 = claim − y_0`, and Lagrange-interpolate
@@ -631,6 +767,11 @@ where
         let new_num_real = self.num_real_entries.div_ceil(2);
         let new_num_vars = self.num_variables - 1;
         let new_virtual_geq = self.virtual_geq.fix_last_variable(alpha);
+        let new_weight = if self.constraint_weight.is_empty() {
+            Vec::new()
+        } else {
+            fold_cells::<EF, EF>(&self.constraint_weight, 1, self.num_real_entries, alpha)
+        };
 
         let dim = self.zeta.len();
         let last = self.zeta[dim - 1];
@@ -653,6 +794,7 @@ where
                 geq_value: self.geq_value,
                 padded_row_adjustment: self.padded_row_adjustment,
                 virtual_geq: new_virtual_geq,
+                constraint_weight: new_weight,
                 _marker: PhantomData,
             };
         }
@@ -683,6 +825,7 @@ where
             geq_value,
             padded_row_adjustment: self.padded_row_adjustment,
             virtual_geq: new_virtual_geq,
+            constraint_weight: new_weight,
             _marker: PhantomData,
         }
     }
@@ -1349,6 +1492,136 @@ mod tests {
         assert_eq!(
             proof.point_and_eval.1, expected,
             "sum_as_poly reduction != eq*(C(trace@z)+batch) — host zerocheck bug reproduced"
+        );
+    }
+
+    /// The zk shard's zerocheck: `h` satisfying rows followed by random rows
+    /// that satisfy nothing, weighed by the equality table cut at `h`.  The
+    /// sumcheck must reduce to `W̃(z) · C(trace@z) + eq(ζ, z) · batch(trace@z)`
+    /// with `W̃` the cut table's extension ([`masked_eq_eval`]), the identity
+    /// the zk verifier asserts, and its claim must stay the batch of the
+    /// committed trace's openings (the random rows satisfy no constraint, so
+    /// the constraint part of the cube sum is zero only because of the cut).
+    #[test]
+    fn weighted_reduce_sumcheck_reduces_to_cut_eq_times_constraint_plus_batch() {
+        use crate::shard_level::zk::{constraint_weight_table, masked_eq_eval};
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        let num_vars = 5u32;
+        let ncols = 1usize;
+        let constrained = 5usize;
+        let committed = constrained + 4;
+
+        let main_cells: Vec<EF> = (0..committed * ncols)
+            .map(|i| {
+                if i < constrained * ncols {
+                    EF::from_u64((i % 3) as u64)
+                } else {
+                    EF::from_u64(1000 + 37 * i as u64)
+                }
+            })
+            .collect();
+        let zeta: Vec<EF> =
+            (0..num_vars as usize).map(|k| EF::from_u64((k * 5 + 2) as u64 + 100)).collect();
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let lambda = EF::from_u64(31);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..ncols {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let batch =
+            |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(
+                &chip,
+                alpha,
+                &pv,
+                &[],
+                main_row,
+            )
+        };
+        let zero_row = vec![EF::ZERO; ncols];
+        let row = |x: usize| -> &[EF] {
+            if x < committed {
+                &main_cells[x * ncols..x * ncols + ncols]
+            } else {
+                &zero_row
+            }
+        };
+
+        let n = num_vars as usize;
+        let weight = constraint_weight_table(&zeta, constrained, committed);
+        let mut claim = EF::ZERO;
+        let mut constraint_part = EF::ZERO;
+        for x in 0..(1usize << n) {
+            let pt: Vec<EF> = (0..n)
+                .map(|k| if (x >> (n - 1 - k)) & 1 == 1 { EF::ONE } else { EF::ZERO })
+                .collect();
+            claim += eq_pt(&zeta, &pt) * batch(row(x));
+            constraint_part += weight.get(x).copied().unwrap_or(EF::ZERO) * cval(row(x));
+        }
+        assert_eq!(constraint_part, EF::ZERO, "the cut kills the random rows' constraints");
+        assert_ne!(
+            (constrained..committed).map(|x| cval(row(x))).sum::<EF>(),
+            EF::ZERO,
+            "the random rows satisfy no constraint"
+        );
+
+        let pra =
+            compute_padded_row_adjustment::<InnerVal, EF, MockAir>(&chip, alpha, &pv, ncols, 0);
+        let vg = VirtualGeq::new(committed as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
+            &chip,
+            &pv,
+            alpha,
+            gkr_powers.clone(),
+            zeta.clone(),
+            main_cells.clone(),
+            ncols,
+            None,
+            0,
+            committed,
+            num_vars,
+            EF::ONE,
+            EF::ZERO,
+            pra,
+            vg,
+        )
+        .with_constraint_weight(weight);
+
+        let (proof, cpe) = reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(
+            vec![poly],
+            &mut challenger,
+            vec![claim],
+            1,
+            lambda,
+        );
+
+        let p0 = &proof.univariate_polys[0].coefficients;
+        assert_eq!(claim, poly_horner(p0, EF::ZERO) + poly_horner(p0, EF::ONE));
+        assert!(proof.univariate_polys.iter().all(|p| p.coefficients.len() == 5));
+
+        let z = &proof.point_and_eval.0;
+        let main_at_z = &cpe[0][..];
+        let expected = masked_eq_eval(&zeta, z, constrained) * cval(main_at_z)
+            + eq_pt(&zeta, z) * batch(main_at_z);
+        assert_eq!(proof.point_and_eval.1, expected);
+        assert_ne!(
+            proof.point_and_eval.1,
+            eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z)),
+            "the plain identity no longer holds once the random rows are in"
         );
     }
 

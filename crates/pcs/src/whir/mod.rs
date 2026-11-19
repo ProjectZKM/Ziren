@@ -55,6 +55,8 @@ pub mod stripes;
 pub mod sumcheck;
 #[cfg(test)]
 pub mod verifier;
+#[cfg(feature = "zk")]
+pub mod zk;
 
 #[cfg(test)]
 mod test;

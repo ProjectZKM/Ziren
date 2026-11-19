@@ -764,32 +764,74 @@ pub fn prove_jagged_reduction_hadamard_poly<C>(
 where
     C: p3_challenger::FieldChallenger<crate::InnerVal>,
 {
+    prove_jagged_reduction_hadamard_poly_masked(hp, challenger, None)
+}
+
+/// [`prove_jagged_reduction_hadamard_poly`] with an optional sumcheck mask
+/// `(h, ρ)` ([`crate::zk_mask`]): round `k`'s wire evaluations are those of
+/// the product plus `ρ` times the mask's message for its `k`-th univariate,
+/// so the transcript proves `Σ q·w + ρ·h` and closes on `q(z*)·w(z*) +
+/// ρ·h(z*)` with `h` read at the point in sample order.  The product's own
+/// claim chain stays unmasked, the three-evaluation trick needs it so.
+pub fn prove_jagged_reduction_hadamard_poly_masked<C>(
+    hp: HadamardProduct<crate::InnerVal, crate::InnerChallenge>,
+    challenger: &mut C,
+    mask: Option<(&crate::zk_mask::LibraMask<crate::InnerChallenge>, crate::InnerChallenge)>,
+) -> crate::jagged_sumcheck::JaggedReductionProof<crate::InnerChallenge>
+where
+    C: p3_challenger::FieldChallenger<crate::InnerVal>,
+{
     use crate::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
+    use p3_field::PrimeCharacteristicRing;
     let n = <HadamardProduct<crate::InnerVal, crate::InnerChallenge> as
         crate::shard_level::sumcheck_poly::SumcheckPolyBase>::num_variables(&hp);
+    if let Some((h, _)) = mask {
+        assert!(
+            h.num_variables() >= n as usize,
+            "jagged mask over {} variables for a {n}-variable reduction",
+            h.num_variables()
+        );
+    }
 
     let mut rounds: alloc::vec::Vec<JaggedReductionRound<crate::InnerChallenge>> =
         alloc::vec::Vec::with_capacity(n as usize);
     let mut eval_point: alloc::vec::Vec<crate::InnerChallenge> =
         alloc::vec::Vec::with_capacity(n as usize);
+    let mut bound_sum = crate::InnerChallenge::ZERO;
+    let masked_evals = |evals: [crate::InnerChallenge; 3], k: usize, bound_sum| {
+        let mut evals = evals;
+        if let Some((h, rho)) = mask {
+            let message = h.round_message(k, n as usize - 1 - k, bound_sum);
+            for (t, e) in evals.iter_mut().enumerate() {
+                *e += rho * message.eval_at_point(crate::InnerChallenge::from_u8(t as u8));
+            }
+        }
+        evals
+    };
 
     let poly = hp.sum_as_poly_in_last_t_variables(None, 1);
-    let evals = round_evals_at_012(&poly);
+    let evals = masked_evals(round_evals_at_012(&poly), 0, bound_sum);
     crate::jagged_sumcheck::observe_round_poly_evals(challenger, evals);
     let r0: crate::InnerChallenge = challenger.sample_algebra_element();
     eval_point.push(r0);
     rounds.push(JaggedReductionRound { evals });
+    if let Some((h, _)) = mask {
+        bound_sum += h.univariate_at(0, r0);
+    }
     let mut claim = poly.eval_at_point(r0);
     let mut cur = hp.fix_t_variables(r0, 1);
 
-    for _ in 1..n {
+    for k in 1..n as usize {
         let poly = cur.sum_as_poly_in_last_variable(Some(claim));
-        let evals = round_evals_at_012(&poly);
+        let evals = masked_evals(round_evals_at_012(&poly), k, bound_sum);
         crate::jagged_sumcheck::observe_round_poly_evals(challenger, evals);
         let r: crate::InnerChallenge = challenger.sample_algebra_element();
         eval_point.push(r);
         rounds.push(JaggedReductionRound { evals });
+        if let Some((h, _)) = mask {
+            bound_sum += h.univariate_at(k, r);
+        }
         claim = poly.eval_at_point(r);
         cur = SumcheckPoly::fix_last_variable(cur, r);
     }

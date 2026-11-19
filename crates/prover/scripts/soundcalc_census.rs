@@ -226,6 +226,54 @@ fn main() {
         zkm_pcs::whir::jagged::SizeTunedParams::wrap().johnson_m,
     );
 
+    // The zk shrink opens under the shrink schedule; its zero-knowledge budgets
+    // (at the two main stripes the budget asks of a shard) and the error terms
+    // its masks add follow.
+    #[cfg(feature = "zk")]
+    {
+        use zkm_pcs::shard_level::zk::num_interaction_variables;
+        use zkm_pcs::zk_budget::{ZkBudget, ZkErrors, EF_DIM};
+        use zkm_pcs::zk_mask::ZkCellLayout;
+        type ZkShrinkSC = zkm_pcs::zk::KoalaBearPoseidon2ZkShrink;
+        let config = zkm_pcs::whir::jagged::zk_shrink_whir_config(lsh);
+        whir_schedule(
+            "zk_shrink",
+            &config,
+            lsh,
+            "unique_decoding",
+            zkm_pcs::whir::jagged::bits_per_query,
+        );
+        let phases = zkm_pcs::whir::zk::zk_query_phase_bits(&config, lsh);
+        let round2 = |x: f64| (x * 100.0).round() / 100.0;
+        println!("[zk_shrink.hiding_rows]");
+        println!(
+            "effective_log_inv_rates = {:?}   # each oracle's coefficients over its points",
+            phases.iter().map(|p| round2(p.0)).collect::<Vec<_>>()
+        );
+        println!(
+            "query_phase_bits = {:?}   # at the effective rates, grinding included",
+            phases.iter().map(|p| round2(p.1)).collect::<Vec<_>>()
+        );
+        println!();
+        let shrink =
+            zkm_prover::ShrinkAir::<Val<ZkShrinkSC>>::shrink_machine(ZkShrinkSC::compressed());
+        let chips: Vec<_> = shrink.chips().iter().collect();
+        let interaction_variables = num_interaction_variables(&chips);
+        let log_rows = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
+            .max_log_row_count;
+        let layout = ZkCellLayout::for_shard(EF_DIM, log_rows, interaction_variables);
+        let budget = ZkBudget::for_schedule(&config, lsh, &layout, 2);
+        println!("[zk_shrink.shard]");
+        println!("num_interaction_variables = {interaction_variables}");
+        println!("max_log_row_count = {log_rows}");
+        println!("masked_gkr_rounds = {}", layout.gkr.len());
+        println!();
+        print!("{budget}");
+        println!();
+        print!("{}", ZkErrors::new(&budget, &layout, interaction_variables));
+        println!();
+    }
+
     println!("[all_rings]");
     println!("grinding_bits_lookup = {}", zkm_pcs::logup_gkr::gkr_grinding_bits());
     println!(
