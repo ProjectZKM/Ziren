@@ -701,9 +701,8 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///   2. Run [`crate::sumcheck::verify_sumcheck`] on the embedded
 ///      `partial_sumcheck_proof` — this verifies the round polys
 ///      and samples challenges in-circuit.
-///   3. For each real column `k`, the pair
-///      `(col_prefix_sums[k + 1], col_prefix_sums[k + 2])`, where the last real
-///      column ends at the final entry (the total):
+///   3. For each column `k`, the pair
+///      `(col_prefix_sums[k], col_prefix_sums[k + 1])`:
 ///      merge bits, compute `(full_lagrange, prefix_sum_felt)` via
 ///      [`crate::jagged_eval_primitives::emit_prefix_sum_check`],
 ///      weight by `z_col_partial_lagrange[k]`, accumulate.
@@ -717,9 +716,9 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///
 /// # Arguments
 ///
-/// - `meta.col_prefix_sums[k + 1]` — bit decomposition of column `k`'s
-///   cumulative row offset (Felt vec).  Entry 0 is zero and the last entry is
-///   the total area.
+/// - `meta.col_prefix_sums[k]` — bit decomposition of column `k`'s
+///   cumulative row offset (Felt vec), `real_num_cols + 1` entries, the last
+///   one the total area.
 /// - `z_row` — outer zerocheck row-direction eval point.
 /// - `z_col` — column-index challenges sampled just before this
 ///   closure in [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`].
@@ -774,6 +773,13 @@ where
         let z_col_lagrange: Vec<SymbolicExt<C::F, C::EF>> =
             crate::logup_gkr::partial_lagrange_symbolic::<C>(&z_col_symbolic);
 
+        let cps = &meta.col_prefix_sums;
+        assert_eq!(
+            cps.len(),
+            real_num_cols + 1,
+            "jagged eval: {} prefix sums for {real_num_cols} columns",
+            cps.len()
+        );
         let mut prefix_sum_felts: Vec<Felt<C::F>> = Vec::new();
         let mut expected_eval: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
 
@@ -789,8 +795,6 @@ where
                 | RecursionProgramType::Compress
         );
         if chip_path {
-            let cps = &meta.col_prefix_sums;
-            let last_cps = cps.last().expect("col_prefix_sums non-empty");
             let point: Vec<Ext<C::F, C::EF>> = proof_point.to_vec();
             const PAR_BLOCKS_CHIP: usize = 64;
             let group_len = real_num_cols.div_ceil(PAR_BLOCKS_CHIP).max(1);
@@ -801,10 +805,8 @@ where
                     let mut acc: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
                     let mut felts: Vec<Felt<C::F>> = Vec::with_capacity(group.len());
                     for &k in group {
-                        let curr = &cps[k + 1];
-                        let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
-                        let mut merged: Vec<Felt<C::F>> = curr.clone();
-                        merged.extend_from_slice(next);
+                        let mut merged: Vec<Felt<C::F>> = cps[k].clone();
+                        merged.extend_from_slice(&cps[k + 1]);
                         assert_eq!(
                             merged.len(),
                             point.len(),
@@ -823,36 +825,16 @@ where
                 expected_eval += partial;
                 prefix_sum_felts.extend(felts);
             }
-            // The padding columns past the real ones repeat one prefix sum,
-            // whose bits are checked at the hint; a Horner gives their felts.
-            let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
-            let mut last: Option<(&Vec<Felt<C::F>>, Felt<C::F>)> = None;
-            for k in real_num_cols..cps.len() - 1 {
-                let bits = &cps[k + 1];
-                let felt = match last {
-                    Some((prev, f)) if prev == bits => f,
-                    _ => {
-                        let mut ps_acc: Felt<C::F> = builder.constant(C::F::ZERO);
-                        for bit in bits.iter() {
-                            ps_acc = builder.eval(*bit + two_felt * ps_acc);
-                        }
-                        ps_acc
-                    }
-                };
-                last = Some((bits, felt));
-                prefix_sum_felts.push(felt);
-            }
         } else {
-            let pairs = meta.col_prefix_sums.iter().zip(meta.col_prefix_sums.iter().skip(1));
             let proof_point_vec: Vec<Ext<C::F, C::EF>> = proof_point.to_vec();
 
             let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
-            let mut slot_of: Vec<usize> = Vec::with_capacity(meta.col_prefix_sums.len());
+            let mut slot_of: Vec<usize> = Vec::with_capacity(real_num_cols);
             let mut distinct: Vec<&Vec<Felt<C::F>>> = Vec::new();
-            for (_curr_ps, next_ps) in pairs {
+            for ps in &cps[..real_num_cols] {
                 match distinct.last() {
-                    Some(prev_bits) if *prev_bits == next_ps => {}
-                    _ => distinct.push(next_ps),
+                    Some(prev_bits) if *prev_bits == ps => {}
+                    _ => distinct.push(ps),
                 }
                 slot_of.push(distinct.len() - 1);
             }
@@ -877,16 +859,13 @@ where
                 .collect();
             prefix_sum_felts.extend(slot_of.iter().map(|&s| accs[s]));
 
-            let cps = &meta.col_prefix_sums;
-            let last_cps = cps.last().expect("col_prefix_sums non-empty");
             let eq_factors = crate::jagged_eval_primitives::precompute_eq_factors::<C>(
                 builder,
                 &proof_point_vec,
             );
             let mut eq_consumed: Option<usize> = None;
             for k in 0..real_num_cols {
-                let merged_len = cps[k + 1].len()
-                    + if k + 1 < real_num_cols { cps[k + 2].len() } else { last_cps.len() };
+                let merged_len = cps[k].len() + cps[k + 1].len();
                 let consumed = merged_len.min(eq_factors.len());
                 match eq_consumed {
                     None => eq_consumed = Some(consumed),
@@ -905,10 +884,8 @@ where
                 .ir_par_map_collect::<Vec<_>, _, _>(builder, |b, group| {
                     let mut acc: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
                     for &k in group {
-                        let curr = &cps[k + 1];
-                        let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
-                        let mut merged: Vec<Felt<C::F>> = curr.clone();
-                        merged.extend_from_slice(next);
+                        let mut merged: Vec<Felt<C::F>> = cps[k].clone();
+                        merged.extend_from_slice(&cps[k + 1]);
                         let full_lagrange =
                             crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
                                 &merged,
