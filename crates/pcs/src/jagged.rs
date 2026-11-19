@@ -79,11 +79,8 @@ pub struct JaggedPacking<F> {
     /// entries with the final sentinel `offsets[total_cols] = total_values`.
     /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`.
     /// The recursion lift (`lift_jagged_bundle_outer` / `_generic` in
-    /// `shard_level_witness.rs`) turns these into `col_prefix_sums`: a leading
-    /// zero, the column starts, padding entries up to
-    /// `next_power_of_two(total_cols)` columns, then `total_values`, so
-    /// `next_power_of_two(total_cols) + 2` entries.  The recursive verifier
-    /// reads `len - 2` columns.
+    /// `shard_level_witness.rs`) bit-decomposes the same `total_cols + 1`
+    /// entries into `col_prefix_sums`.
     pub offsets: Vec<usize>,
     /// Total number of values in the dense vector.
     pub total_values: usize,
