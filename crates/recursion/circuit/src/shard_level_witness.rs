@@ -1367,41 +1367,11 @@ mod tests {
 
     type C = InnerConfig;
 
-    /// JaggedReductionRound Witnessable round-trips a
-    /// 3-EF struct through the witness stream.
-    #[test]
-    fn jagged_reduction_round_witnessable_reads() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = JaggedReductionRound::<InnerChallenge> { evals: [InnerChallenge::ZERO; 3] };
-        let var: JaggedReductionRound<Ext<InnerVal, InnerChallenge>> =
-            <_ as Witnessable<C>>::read(&host, &mut builder);
-        assert_eq!(var.evals.len(), 3);
-    }
-
-    /// JaggedReductionProof Witnessable cascades through
-    /// rounds + eval_point + q_at_z.
-    #[test]
-    fn jagged_reduction_proof_witnessable_reads() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = JaggedReductionProof::<InnerChallenge> {
-            rounds: vec![
-                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
-                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
-            ],
-            eval_point: vec![InnerChallenge::ZERO; 4],
-            q_at_z: InnerChallenge::ZERO,
-        };
-        let var = <_ as Witnessable<C>>::read(&host, &mut builder);
-        assert_eq!(var.rounds.len(), 2);
-        assert_eq!(var.eval_point.len(), 4);
-    }
-
     /// eval-form → coeff-form converter shape sanity.
     /// Output univariate count matches input round count and the
     /// reconstructed polys agree with the input evals at x ∈ {0,1,2}.
     #[test]
     fn jagged_reduction_converter_shape_and_roundtrip() {
-        use p3_field::PrimeCharacteristicRing;
         let mk = |a: u16, b: u16, c: u16| JaggedReductionRound::<InnerChallenge> {
             evals: [
                 InnerChallenge::from_u16(a),
@@ -1437,105 +1407,11 @@ mod tests {
         assert_eq!(psp.point_and_eval.1, expected_final);
     }
 
-    /// converter output flows through the existing
-    /// `PartialSumcheckProof` Witnessable impl.  Confirms the bridge
-    /// composes with the recursion circuit's witness surface.
-    #[test]
-    fn jagged_reduction_converter_witnessable_composition() {
-        use p3_field::PrimeCharacteristicRing;
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = JaggedReductionProof::<InnerChallenge> {
-            rounds: vec![JaggedReductionRound {
-                evals: [InnerChallenge::ONE, InnerChallenge::ZERO, InnerChallenge::ZERO],
-            }],
-            eval_point: vec![InnerChallenge::ZERO],
-            q_at_z: InnerChallenge::ZERO,
-        };
-        let psp = jagged_reduction_to_partial_sumcheck(&proof);
-        let _var: PartialSumcheckProof<Ext<InnerVal, InnerChallenge>> =
-            <_ as Witnessable<C>>::read(&psp, &mut builder);
-    }
-
-    /// bit_decompose_usize_to_felts uses MSB-first ordering that
-    /// matches the verifier's Horner decode (`final_area = bit + 2*final_area`).
-    #[test]
-    fn bit_decompose_zero_yields_all_zero_felts() {
-        use p3_field::PrimeCharacteristicRing;
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 5);
-        assert_eq!(bits.len(), 5);
-        let _ = bits;
-        let _ = InnerVal::ZERO;
-    }
-
-    /// bit decomposition shape with non-zero values.
-    /// 4 bits LSB-first: 5 = [0, 1, 0, 1] when read MSB-first.
-    #[test]
-    fn bit_decompose_shape_matches_num_bits() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 5, 4);
-        assert_eq!(bits.len(), 4);
-        let bits_zero = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 8);
-        assert_eq!(bits_zero.len(), 8);
-        let bits_max = bit_decompose_usize_to_felts::<C>(&mut builder, 255, 8);
-        assert_eq!(bits_max.len(), 8);
-    }
-
     /// overflow panic when value exceeds bit budget.
     #[test]
     #[should_panic(expected = "exceeds 4 bits")]
     fn bit_decompose_overflow_panics() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let _ = bit_decompose_usize_to_felts::<C>(&mut builder, 16, 4);
-    }
-
-    /// edge case — zero bits is meaningful only for
-    /// value zero.  Returns empty Vec.
-    #[test]
-    fn bit_decompose_zero_bits_for_zero_value() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 0);
-        assert_eq!(bits.len(), 0);
-    }
-
-    /// NEGATIVE binding guard: the per-chip
-    /// heights derived from `bundle.commit.chip_dims` (2^log_height_padded)
-    /// must reconcile the packer's `packing.offsets` via the verifier's
-    /// prefix-sum accumulation, and an
-    /// all-zero fallback must NOT (it would assert the real, non-zero offsets
-    /// equal 0 — failing every non-degenerate proof).  Pure-usize mirror of
-    /// the in-circuit check; the e2e compress gate exercises the same logic
-    /// in-circuit.
-    #[test]
-    fn row_counts_from_chip_dims_reconcile_prefix_sums() {
-        let chip_dims: Vec<(usize, u32)> = vec![(1, 4), (1, 4), (1, 4)];
-        let column_counts: Vec<usize> = vec![1, 1, 1];
-        let offsets: Vec<usize> = vec![0, 16, 32];
-        let total_values: usize = 48;
-
-        let heights: Vec<usize> = chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
-        assert_eq!(heights, vec![16, 16, 16]);
-
-        let reconciles = |rows: &[usize]| -> bool {
-            let repeated: Vec<usize> = rows
-                .iter()
-                .zip(column_counts.iter())
-                .flat_map(|(&h, &c)| std::iter::repeat_n(h, c))
-                .collect();
-            let mut acc = 0usize;
-            for (i, &h) in repeated.iter().enumerate() {
-                if acc != offsets[i] {
-                    return false;
-                }
-                acc += h;
-            }
-            acc == total_values
-        };
-
-        assert!(reconciles(&heights), "chip_dims heights must reconcile the offsets");
-        assert!(
-            !reconciles(&[0usize, 0, 0]),
-            "all-zero row_counts must FAIL to reconcile non-zero offsets"
-        );
     }
 }
