@@ -123,6 +123,58 @@ pub fn verify_sumcheck_with_order<C, FC>(
     builder.assert_ext_eq(previous_poly.eval_at_point(alpha.into()), proof.point_and_eval.1);
 }
 
+/// Zerocheck sumcheck with the univariate-skip first message; host twin
+/// `verify_zerocheck_skip_sumcheck_host`.
+///
+/// Message 0 has [`SKIP_POLY_LEN`] coefficients and must sum to
+/// `claimed_sum` over `D` (`16 · Σ_j c_{16j}`); then `r0` is sampled and the
+/// remaining `N − 4` messages are degree-4 multilinear rounds.  The reduced
+/// point must be `(challenges of rounds N−1 … 4, r0, r0, r0, r0)`.
+///
+/// [`SKIP_POLY_LEN`]: zkm_pcs::shard_level::univariate_skip::SKIP_POLY_LEN
+pub fn verify_zerocheck_skip_sumcheck<C, FC>(
+    builder: &mut Builder<C>,
+    challenger: &mut FC,
+    proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
+) where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+{
+    use zkm_pcs::shard_level::univariate_skip::{SKIP_BITS, SKIP_POLY_LEN, SKIP_SIZE};
+    let n = proof.point_and_eval.0.len();
+    assert!(n > SKIP_BITS, "zerocheck point too short for the skip");
+    assert_eq!(proof.univariate_polys.len(), n - SKIP_BITS + 1, "zerocheck message count");
+    let skip = &proof.univariate_polys[0];
+    assert_eq!(skip.coefficients.len(), SKIP_POLY_LEN, "skip message length");
+
+    let mut domain_sum: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+    for c in skip.coefficients.iter().step_by(SKIP_SIZE) {
+        domain_sum += SymbolicExt::from(*c);
+    }
+    let sixteen = SymbolicExt::<C::F, C::EF>::from(C::F::from_usize(SKIP_SIZE));
+    builder.assert_ext_eq(domain_sum * sixteen, proof.claimed_sum);
+
+    observe_poly_coeffs::<C, FC>(builder, challenger, skip);
+    let r0 = challenger.sample_ext(builder);
+    let mut claim: SymbolicExt<C::F, C::EF> = lift_to_symbolic::<C>(skip).eval_at_point(r0.into());
+
+    let mut point: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(n);
+    for round_poly in proof.univariate_polys.iter().skip(1) {
+        assert_eq!(round_poly.coefficients.len(), 5, "zerocheck round degree");
+        let sym = lift_to_symbolic::<C>(round_poly);
+        builder.assert_ext_eq(claim, sym.eval_one_plus_eval_zero());
+        observe_poly_coeffs::<C, FC>(builder, challenger, round_poly);
+        let alpha = challenger.sample_ext(builder);
+        point.insert(0, alpha);
+        claim = sym.eval_at_point(alpha.into());
+    }
+    point.extend(std::iter::repeat_n(r0, SKIP_BITS));
+    for (v, p) in point.iter().zip(proof.point_and_eval.0.iter()) {
+        builder.assert_ext_eq(*v, *p);
+    }
+    builder.assert_ext_eq(claim, proof.point_and_eval.1);
+}
+
 /// Lift a concrete-coefficient `UnivariatePolynomial<Ext>` into the
 /// symbolic algebra so we can build expression trees over its
 /// evaluations inside the builder.

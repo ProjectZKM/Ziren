@@ -1170,11 +1170,10 @@ where
         }
     }
 
-    verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
+    verify_zerocheck_skip_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
         zerocheck_proof,
         challenger,
         max_log_row_count,
-        4,
     )
     .map_err(|e| match e {
         JaggedShardVerifyError::LogupGkr(msg) => JaggedShardVerifyError::Zerocheck(msg),
@@ -1236,12 +1235,19 @@ where
 {
     use p3_air::BaseAir;
 
+    use crate::shard_level::univariate_skip::{eq_sharp, lagrange_weights, SKIP_BITS};
+
     let z_star = &zerocheck_proof.point_and_eval.0;
     let z_gkr = &gkr_evaluations.point;
+    let n = z_star.len();
+    let r0 = z_star[n - 1];
+    let z_hi = &z_star[..n - SKIP_BITS];
 
-    let z_gkr_anchor: Vec<Challenge<SC>> = z_gkr.iter().rev().copied().collect();
+    let z_gkr_hi_anchor: Vec<Challenge<SC>> = z_gkr[SKIP_BITS..].iter().rev().copied().collect();
 
-    let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(&z_gkr_anchor, z_star);
+    let zerocheck_eq_val = eq_sharp::<Val<SC>, Challenge<SC>>(&z_gkr[..SKIP_BITS], r0)
+        * eq_eval_host::<Challenge<SC>>(&z_gkr_hi_anchor, z_hi);
+    let skip_weights = lagrange_weights::<Val<SC>, Challenge<SC>>(r0);
 
     let max_elements = chips
         .iter()
@@ -1260,9 +1266,9 @@ where
         }
     }
 
-    let mut z_extended: Vec<Challenge<SC>> = Vec::with_capacity(z_star.len() + 1);
+    let mut z_extended: Vec<Challenge<SC>> = Vec::with_capacity(z_hi.len() + 1);
     z_extended.push(Challenge::<SC>::ZERO);
-    z_extended.extend_from_slice(z_star);
+    z_extended.extend_from_slice(z_hi);
 
     let mut rlc_eval = Challenge::<SC>::ZERO;
 
@@ -1270,8 +1276,8 @@ where
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
 
-        let geq_val = if degree.len() == z_extended.len() {
-            full_geq_host::<Challenge<SC>>(degree, &z_extended)
+        let geq_val = if degree.len() == n + 1 {
+            skip_geq_host::<Challenge<SC>>(degree, &z_extended, &skip_weights)
         } else {
             Challenge::<SC>::ONE
         };
@@ -1303,6 +1309,119 @@ where
     }
 
     rlc_eval
+}
+
+/// The padded-row indicator `[row ≥ h]` at the skip point `(r0, z_hi)`.
+///
+/// `degree` holds the big-endian bits of `h` (`N + 1` of them); its top
+/// `N − 3` bits are the boundary block `x_b = h >> 4` and the low four the
+/// real rows `h_lo` of that block.  With `ρ = Σ_{b ≥ h_lo} L_b(r0)` the
+/// indicator is `geq_{x_b}(z_hi) − (1 − ρ)·eq(z_hi, x_b)`: zero below the
+/// boundary block, `ρ` on it, one above.  `z_extended = (0, z_hi)`.
+fn skip_geq_host<EF: Field + Copy>(
+    degree: &[EF],
+    z_extended: &[EF],
+    skip_weights: &[EF; crate::shard_level::univariate_skip::SKIP_SIZE],
+) -> EF {
+    use crate::shard_level::univariate_skip::{SKIP_BITS, SKIP_SIZE};
+    let split = degree.len() - SKIP_BITS;
+    let (hi_bits, lo_bits) = degree.split_at(split);
+    let mut lo_ext = Vec::with_capacity(SKIP_BITS + 1);
+    lo_ext.push(EF::ZERO);
+    lo_ext.extend_from_slice(lo_bits);
+    let mut rho = EF::ZERO;
+    for (b, &w) in skip_weights.iter().enumerate().take(SKIP_SIZE) {
+        let b_bits: Vec<EF> = (0..=SKIP_BITS)
+            .rev()
+            .map(|i| if (b >> i) & 1 == 1 { EF::ONE } else { EF::ZERO })
+            .collect();
+        rho += w * full_geq_host::<EF>(&lo_ext, &b_bits);
+    }
+    full_geq_host::<EF>(hi_bits, z_extended)
+        - (EF::ONE - rho) * eq_eval_host::<EF>(hi_bits, z_extended)
+}
+
+/// Zerocheck sumcheck with the univariate skip first round.
+///
+/// Round 0 is the skip message ([`SKIP_POLY_LEN`] coefficients): its sum
+/// over the subgroup `D` must equal `claimed_sum`, then `r0` is sampled.
+/// The remaining `N − 4` rounds are degree-4 multilinear rounds.  The
+/// reduced point must be `(challenges of rounds N−1 … 4, r0, r0, r0, r0)`.
+///
+/// [`SKIP_POLY_LEN`]: crate::shard_level::univariate_skip::SKIP_POLY_LEN
+fn verify_zerocheck_skip_sumcheck_host<F, EF, Challenger>(
+    proof: &PartialSumcheckProof<EF>,
+    challenger: &mut Challenger,
+    num_variables: usize,
+) -> Result<(), JaggedShardVerifyError>
+where
+    F: Field,
+    EF: ExtensionField<F> + BasedVectorSpace<F> + Copy,
+    Challenger: FieldChallenger<F>,
+{
+    use crate::shard_level::univariate_skip::{sum_over_domain, SKIP_BITS, SKIP_POLY_LEN};
+    let err = |m: String| Err(JaggedShardVerifyError::LogupGkr(m));
+    let rounds = num_variables - SKIP_BITS;
+    if proof.univariate_polys.len() != rounds + 1 {
+        return err(format!(
+            "zerocheck has {} messages, expected {}",
+            proof.univariate_polys.len(),
+            rounds + 1
+        ));
+    }
+    if proof.point_and_eval.0.len() != num_variables {
+        return err(format!(
+            "zerocheck point has dim {}, expected {num_variables}",
+            proof.point_and_eval.0.len()
+        ));
+    }
+    let skip = &proof.univariate_polys[0];
+    if skip.coefficients.len() != SKIP_POLY_LEN {
+        return err(format!(
+            "skip message has {} coefficients, expected {SKIP_POLY_LEN}",
+            skip.coefficients.len()
+        ));
+    }
+    if sum_over_domain(&skip.coefficients) != proof.claimed_sum {
+        return err("skip message does not sum to the claim over the subgroup".into());
+    }
+    for c in &skip.coefficients {
+        for basis in c.as_basis_coefficients_slice() {
+            challenger.observe(*basis);
+        }
+    }
+    let r0: EF = challenger.sample_algebra_element::<EF>();
+    let mut claim = eval_coeffs_host(&skip.coefficients, r0);
+    let mut alphas: Vec<EF> = Vec::with_capacity(num_variables);
+    for (i, poly) in proof.univariate_polys.iter().enumerate().skip(1) {
+        if poly.coefficients.len() != 5 {
+            return err(format!(
+                "zerocheck round {i} has {} coefficients, expected 5",
+                poly.coefficients.len()
+            ));
+        }
+        let at0 = eval_coeffs_host(&poly.coefficients, EF::ZERO);
+        let at1 = eval_coeffs_host(&poly.coefficients, EF::ONE);
+        if at0 + at1 != claim {
+            return err(format!("zerocheck round-{i} consistency failed"));
+        }
+        for c in &poly.coefficients {
+            for basis in c.as_basis_coefficients_slice() {
+                challenger.observe(*basis);
+            }
+        }
+        let alpha: EF = challenger.sample_algebra_element::<EF>();
+        alphas.insert(0, alpha);
+        claim = eval_coeffs_host(&poly.coefficients, alpha);
+    }
+    alphas.extend(core::iter::repeat_n(r0, SKIP_BITS));
+    if alphas != proof.point_and_eval.0 {
+        return err("zerocheck reduced point doesn't match sampled challenges".into());
+    }
+    if claim != proof.point_and_eval.1 {
+        return err("zerocheck final eval doesn't match recomputed value".into());
+    }
+    Ok(())
 }
 
 /// Host-side `eq_eval`: the multilinear equality indicator

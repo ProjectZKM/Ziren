@@ -29,7 +29,6 @@ use crate::chip_opened_values::JaggedShardOpenedValuesVariable;
 use crate::constraint_folder::ShardConstraintFolder;
 use crate::logup_proof::LogUpEvaluations;
 use crate::partial_sumcheck::PartialSumcheckProof;
-use crate::sumcheck::verify_sumcheck;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
 /// In-circuit "≥" indicator for `eval_point` ≥ `threshold` in
@@ -329,7 +328,7 @@ where
     /// padded-row mask and the chip's main+preprocessed openings;
     /// asserts the cross-chip RLC matches the prover's claimed
     /// evaluation; reduces the GKR-side modifier into the zerocheck
-    /// `claimed_sum`; runs [`verify_sumcheck`]; and observes the
+    /// `claimed_sum`; runs [`crate::sumcheck::verify_zerocheck_skip_sumcheck`]; and observes the
     /// per-chip openings into the transcript so the next phase
     /// (jagged PCS opening) sees a consistent challenger state.
     ///
@@ -383,26 +382,33 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        let verifier_use_rev = !gkr_evaluations.chip_openings.is_empty()
-            && gkr_evaluations
-                .chip_openings
-                .values()
-                .all(|ce| ce.main_trace_evaluations_full.is_some());
-
         let alpha = challenger.sample_ext(builder);
         let gkr_batch_open_ext = challenger.sample_ext(builder);
         let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> = gkr_batch_open_ext.into();
         let lambda = challenger.sample_ext(builder);
 
+        use zkm_pcs::shard_level::univariate_skip::SKIP_BITS;
         let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             zerocheck_proof.point_and_eval.0.iter().map(|x| (*x).into()).collect();
-        let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = if verifier_use_rev {
-            gkr_evaluations.point.iter().rev().map(|x| (*x).into()).collect()
-        } else {
-            gkr_evaluations.point.iter().map(|x| (*x).into()).collect()
-        };
-        let zerocheck_eq_val: Ext<C::F, C::EF> =
-            builder.eval(eq_eval::<C>(&gkr_point_symbolic, &point_symbolic));
+        let n_point = point_symbolic.len();
+        assert!(n_point > SKIP_BITS, "verify_zerocheck: point too short for the skip");
+        let z_hi = &point_symbolic[..n_point - SKIP_BITS];
+        let skip_weights: Vec<SymbolicExt<C::F, C::EF>> =
+            crate::univariate_skip::lagrange_weights::<C>(point_symbolic[n_point - 1])
+                .into_iter()
+                .map(|w| {
+                    let e: Ext<C::F, C::EF> = builder.eval(w);
+                    e.into()
+                })
+                .collect();
+        let gkr_point: Vec<SymbolicExt<C::F, C::EF>> =
+            gkr_evaluations.point.iter().map(|x| (*x).into()).collect();
+        let gkr_hi_anchor: Vec<SymbolicExt<C::F, C::EF>> =
+            gkr_point[SKIP_BITS..].iter().rev().copied().collect();
+        let zerocheck_eq_val: Ext<C::F, C::EF> = builder.eval(
+            crate::univariate_skip::eq_sharp::<C>(&gkr_point[..SKIP_BITS], &skip_weights)
+                * eq_eval::<C>(&gkr_hi_anchor, z_hi),
+        );
 
         let max_elements = shard_chips
             .iter()
@@ -435,8 +441,10 @@ where
                     dimension, pcs_max_log_row_count,
                 );
 
-                let mut proof_point_extended = point_symbolic.clone();
-                proof_point_extended.insert(0, SymbolicExt::ZERO);
+                let mut z_extended: Vec<SymbolicExt<C::F, C::EF>> =
+                    Vec::with_capacity(z_hi.len() + 1);
+                z_extended.push(SymbolicExt::ZERO);
+                z_extended.extend_from_slice(z_hi);
 
                 let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
                     degree.iter().map(|x| (*x).into()).collect();
@@ -450,7 +458,16 @@ where
                     }
                 }
 
-                let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
+                assert_eq!(
+                    degree_symbolic.len(),
+                    dimension + 1,
+                    "verify_zerocheck: chip degree must have N + 1 bits",
+                );
+                let geq_val = crate::univariate_skip::skip_geq::<C>(
+                    &degree_symbolic,
+                    &z_extended,
+                    &skip_weights,
+                );
                 let padded_row_adjustment = Self::compute_padded_row_adjustment_jagged(
                     builder,
                     chip,
@@ -532,7 +549,11 @@ where
 
         let _ = one_ext;
 
-        verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
+        crate::sumcheck::verify_zerocheck_skip_sumcheck::<C, FC>(
+            builder,
+            challenger,
+            zerocheck_proof,
+        );
 
         let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);

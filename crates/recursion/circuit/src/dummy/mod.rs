@@ -21,8 +21,8 @@
 //!   * `chip_cumulative_sums` — one entry per chip in the input shape
 //!   * `logup_gkr_proof.logup_evaluations.chip_openings` — one entry
 //!     per chip, sized to chip widths
-//!   * `zerocheck_proof.univariate_polys.len()` matches
-//!     `max_log_row_count`
+//!   * `zerocheck_proof` has the univariate-skip shape: one skip message,
+//!     then `max_log_row_count − 4` rounds
 //!
 //! # Reference
 //!
@@ -33,4 +33,5 @@ pub mod jagged_shard_proof;
 
 pub use jagged_shard_proof::{
     dummy_jagged_shard_proof, dummy_logup_gkr_proof, dummy_partial_sumcheck_proof,
+    dummy_zerocheck_skip_proof,
 };
