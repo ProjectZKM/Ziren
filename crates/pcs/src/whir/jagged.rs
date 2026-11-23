@@ -330,15 +330,24 @@ pub fn compress_query_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_COMPRESS_QUERY_GRINDING_BITS", 26)
 }
 
-/// Grinding on every folding challenge of the compress schedule, in bits.
+/// The grinding of the compress schedule's folding challenges.
 ///
 /// Under the Johnson bound the proximity-gap error of a fold carries the list
-/// size, `(m + 1/2) / sqrt(rho)`, and the degree of the folded polynomial; at
-/// `m = 6` and stacking height 21 the term sits near 79 bits without grinding
-/// and clears the per-component target with 27.
-pub fn compress_fold_grinding_bits() -> usize {
-    crate::params::env_usize("ZIREN_COMPRESS_FOLD_GRINDING_BITS", 27)
+/// size, `(m + 1/2) / sqrt(rho)`, and the degree of the folded polynomial, so
+/// a step's error halves with each variable already folded.  A flat 27 bits on
+/// every step left the weakest step at 103 bits at stacking height 21 and the
+/// rest up to 7 bits above it.  By default each step is ground to the weakest
+/// step's level under that flat grind ([`FoldGrinding::MatchWeakest`]), which
+/// keeps the schedule's weakest fold term and cuts the folding search about
+/// six-fold.  `ZIREN_COMPRESS_FOLD_GRINDING_BITS` grinds every step a fixed
+/// count instead.
+pub fn compress_fold_grinding() -> FoldGrinding {
+    crate::params::env_opt_usize("ZIREN_COMPRESS_FOLD_GRINDING_BITS", None)
+        .map_or(FoldGrinding::MatchWeakest(COMPRESS_FOLD_FLAT_BITS), FoldGrinding::Fixed)
 }
+
+/// The flat fold grinding whose weakest step [`compress_fold_grinding`] keeps.
+pub const COMPRESS_FOLD_FLAT_BITS: usize = 27;
 
 /// Grinding on the stripe batching of the compress schedule, in bits; the
 /// batching term carries the same list size as the folds.
@@ -423,6 +432,38 @@ fn fold_grinding_bits_for_target(
     (target - bits).ceil().max(0.0) as usize
 }
 
+/// The soundness of every folding step of `config` without grinding, in whole
+/// bits as [`fold_grinding_bits`] counts it: round `r` folds a codeword of rate
+/// `2^-(rate + 3r)`, and its step `s` leaves `s` fewer variables.
+fn fold_step_soundness(lsh: usize, rate: usize, m: usize, config: &WhirConfig) -> Vec<Vec<f64>> {
+    let mut log_dim = lsh;
+    config
+        .round_parameters
+        .iter()
+        .enumerate()
+        .map(|(r, rp)| {
+            let steps = (1..=rp.folding_factor)
+                .map(|s| fold_soundness_bits(rate + 3 * r, log_dim - s, m).floor())
+                .collect();
+            log_dim -= rp.folding_factor;
+            steps
+        })
+        .collect()
+}
+
+/// How a size-tuned schedule grinds its folding challenges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FoldGrinding {
+    /// Every step ground this many bits.
+    Fixed(usize),
+    /// Each step ground what its own error needs to reach the target
+    /// ([`fold_grinding_bits`]).
+    ToTarget,
+    /// Each step ground up to the soundness the schedule's weakest step has
+    /// under a flat grind of this many bits.
+    MatchWeakest(usize),
+}
+
 /// The knobs of a size-tuned schedule: [`compress_whir_config`] and
 /// [`wrap_whir_config`] differ only in where these come from.
 #[derive(Clone, Copy, Debug)]
@@ -436,9 +477,8 @@ pub struct SizeTunedParams {
     pub johnson_m: usize,
     /// Grinding on every query phase, in bits.
     pub query_pow: usize,
-    /// Grinding on every folding challenge, in bits; `None` grinds each step
-    /// what its own folding error needs ([`fold_grinding_bits`]).
-    pub fold_pow: Option<usize>,
+    /// Grinding on the folding challenges.
+    pub fold_pow: FoldGrinding,
     /// Grinding on the stripe batching, in bits.
     pub batch_pow: usize,
 }
@@ -451,7 +491,7 @@ impl SizeTunedParams {
             round0_folding: compress_round0_folding(),
             johnson_m: compress_johnson_m(),
             query_pow: compress_query_grinding_bits(),
-            fold_pow: Some(compress_fold_grinding_bits()),
+            fold_pow: compress_fold_grinding(),
             batch_pow: compress_batch_grinding_bits(),
         }
     }
@@ -477,7 +517,7 @@ impl SizeTunedParams {
             round0_folding: 2,
             johnson_m: 3,
             query_pow: 24,
-            fold_pow: None,
+            fold_pow: FoldGrinding::ToTarget,
             batch_pow: 24,
         }
     }
@@ -491,10 +531,8 @@ impl SizeTunedParams {
             round0_folding: env("ZIREN_WRAP_ROUND0_FOLDING", defaults.round0_folding),
             johnson_m: env("ZIREN_WRAP_JOHNSON_M", defaults.johnson_m),
             query_pow: env("ZIREN_WRAP_WHIR_QUERY_GRINDING_BITS", defaults.query_pow),
-            fold_pow: crate::params::env_opt_usize(
-                "ZIREN_WRAP_FOLD_GRINDING_BITS",
-                defaults.fold_pow,
-            ),
+            fold_pow: crate::params::env_opt_usize("ZIREN_WRAP_FOLD_GRINDING_BITS", None)
+                .map_or(defaults.fold_pow, FoldGrinding::Fixed),
             batch_pow: env("ZIREN_WRAP_BATCH_GRINDING_BITS", defaults.batch_pow),
         }
     }
@@ -506,9 +544,8 @@ impl SizeTunedParams {
 /// Round `r` queries the codeword committed at `2^-(rate + 3r)`; the queries
 /// of each round are the least count reaching the target under the Johnson
 /// bound at [`compress_johnson_m`] with [`compress_query_grinding_bits`] of
-/// grinding, every folding challenge is ground
-/// [`compress_fold_grinding_bits`] and the batching challenge
-/// [`compress_batch_grinding_bits`].  At the defaults and `lsh = 21`:
+/// grinding, the folding challenges are ground by [`compress_fold_grinding`]
+/// and the batching challenge [`compress_batch_grinding_bits`].  At the defaults and `lsh = 21`:
 ///
 /// ```text
 ///   rho = 2^-3  : 58 · 1.3846 + 26 = 106.3
@@ -531,9 +568,8 @@ pub fn wrap_whir_config(lsh: usize) -> WhirConfig {
 /// The size-tuned schedule at stacking height `lsh` under `params`: folds
 /// `[k0, 6, 6, …]` with at most seven final variables, round `r` committing
 /// at `2^-(rate + 3(r + 1))`, every query phase the least count reaching
-/// [`per_component_target_bits`] under the Johnson bound at `m`, and every
-/// folding step ground the fixed `fold_pow` or, without one, what that step
-/// needs ([`fold_grinding_bits`]).
+/// [`per_component_target_bits`] under the Johnson bound at `m`, and the
+/// folding steps ground as `fold_pow` says.
 pub fn size_tuned_whir_config(lsh: usize, params: SizeTunedParams) -> WhirConfig {
     size_tuned_whir_config_for_target(lsh, params, per_component_target_bits())
 }
@@ -563,20 +599,27 @@ fn size_tuned_whir_config_for_target(
     let num_rounds = config.round_parameters.len();
     let pow = params.query_pow;
     let m = params.johnson_m;
-    let mut log_dim = lsh;
+    let steps = fold_step_soundness(lsh, rate, m, &config);
+    let fold_target = match params.fold_pow {
+        FoldGrinding::Fixed(_) | FoldGrinding::ToTarget => target,
+        FoldGrinding::MatchWeakest(flat) => {
+            steps.iter().flatten().copied().fold(f64::INFINITY, f64::min) + flat as f64
+        }
+    };
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = rate + 3 * (r + 1);
         rp.num_queries = min_queries_johnson_for_target(rate + 3 * r, pow, m, target);
         rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
-        rp.pow_bits = (1..=rp.folding_factor)
-            .map(|s| {
-                params.fold_pow.unwrap_or_else(|| {
-                    fold_grinding_bits_for_target(rate + 3 * r, log_dim - s, m, target)
-                })
+        rp.pow_bits = steps[r]
+            .iter()
+            .map(|&bits| match params.fold_pow {
+                FoldGrinding::Fixed(n) => n,
+                FoldGrinding::ToTarget | FoldGrinding::MatchWeakest(_) => {
+                    (fold_target - bits).ceil().max(0.0) as usize
+                }
             })
             .collect();
-        log_dim -= rp.folding_factor;
     }
     config.final_queries =
         min_queries_johnson_for_target(rate + 3 * (num_rounds - 1), pow, m, target);
@@ -824,9 +867,10 @@ where
 mod tests {
     use super::{
         bits_per_query, bits_per_query_johnson, compress_johnson_m, compress_whir_config,
-        core_whir_config, min_queries, min_queries_compress, min_queries_johnson,
-        per_component_target_bits, size_tuned_whir_config_for_target, wrap_whir_config,
-        SizeTunedParams, DEFAULT_PER_COMPONENT_TARGET_BITS,
+        core_whir_config, fold_step_soundness, min_queries, min_queries_compress,
+        min_queries_johnson, per_component_target_bits, size_tuned_whir_config_for_target,
+        wrap_whir_config, FoldGrinding, SizeTunedParams, COMPRESS_FOLD_FLAT_BITS,
+        DEFAULT_PER_COMPONENT_TARGET_BITS,
     };
     use crate::whir::config::WhirConfig;
 
@@ -919,6 +963,50 @@ mod tests {
                 |rate, pow| min_queries_johnson(rate, pow, m),
             );
         }
+    }
+
+    /// Each folding step's term, its soundness without grinding plus its
+    /// grinding, and the total folding search, `sum 2^bits`.
+    fn fold_terms(lsh: usize, fold_pow: FoldGrinding) -> (Vec<f64>, f64) {
+        let params = SizeTunedParams { fold_pow, ..SizeTunedParams::compress() };
+        let cfg = size_tuned_whir_config_for_target(lsh, params, DEFAULT_PER_COMPONENT_TARGET_BITS);
+        let steps = fold_step_soundness(lsh, params.log_inv_rate, params.johnson_m, &cfg);
+        let pows: Vec<usize> =
+            cfg.round_parameters.iter().flat_map(|rp| rp.pow_bits.clone()).collect();
+        let terms = steps.iter().flatten().zip(&pows).map(|(b, &p)| b + p as f64).collect();
+        (terms, pows.iter().map(|&p| 2f64.powi(p as i32)).sum())
+    }
+
+    /// Every folding step of the compress schedule lands on the weakest term
+    /// the flat grind gave, at each stacking height the recursion stages use,
+    /// for a smaller folding search.
+    #[test]
+    fn compress_fold_steps_keep_the_flat_grind_floor() {
+        for lsh in [16usize, 19, 20, 21] {
+            let flat = FoldGrinding::Fixed(COMPRESS_FOLD_FLAT_BITS);
+            let (flat_terms, flat_search) = fold_terms(lsh, flat);
+            let floor = flat_terms.iter().copied().fold(f64::INFINITY, f64::min);
+            let matched = FoldGrinding::MatchWeakest(COMPRESS_FOLD_FLAT_BITS);
+            let (terms, search) = fold_terms(lsh, matched);
+            assert!(terms.iter().all(|&t| t == floor), "lsh {lsh}: {terms:?} vs floor {floor}");
+            assert!(search < flat_search / 4.0, "lsh {lsh}: {search} vs {flat_search}");
+        }
+    }
+
+    /// The compress schedule's folding grinds at stacking height 21.
+    #[test]
+    fn compress_fold_grinding_at_lsh_21_is_pinned() {
+        let params = SizeTunedParams {
+            fold_pow: FoldGrinding::MatchWeakest(COMPRESS_FOLD_FLAT_BITS),
+            ..SizeTunedParams::compress()
+        };
+        let cfg = size_tuned_whir_config_for_target(21, params, DEFAULT_PER_COMPONENT_TARGET_BITS);
+        let folds: Vec<Vec<usize>> =
+            cfg.round_parameters.iter().map(|rp| rp.pow_bits.clone()).collect();
+        assert_eq!(
+            folds,
+            vec![vec![20, 19], vec![25, 24, 23, 22, 21, 20], vec![27, 26, 25, 24, 23, 22]]
+        );
     }
 
     /// The wrap schedule at the wrap's stacking height, as soundcalc's WHIR
