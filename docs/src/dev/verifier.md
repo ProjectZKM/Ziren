@@ -149,7 +149,7 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
 }
 ```
 
-The release build fills in `{ZKM_CIRCUIT_VERSION}` (for example `v2.0.0`), `{VERIFIER_HASH}` and `{VK_ROOT}`. The contract:
+The release build fills in `{ZKM_CIRCUIT_VERSION}` (for example `v2.1.0`), `{VERIFIER_HASH}` and `{VK_ROOT}`. The contract:
 
 - checks that the first 4 bytes of `proofBytes` match `VERIFIER_HASH`;
 - binds the proof to the program through `programVKey`;
@@ -216,7 +216,7 @@ The contracts are plain Solidity and can be deployed with any tool. With Foundry
 pragma solidity ^0.8.20;
 
 import {Script} from "forge-std/Script.sol";
-import {ZKMVerifier} from "../src/v2.0.0/ZKMVerifierGroth16.sol";
+import {ZKMVerifier} from "../src/v2.1.0/ZKMVerifierGroth16.sol";
 
 contract ZKMVerifierGroth16Script is Script {
     function run() public {
