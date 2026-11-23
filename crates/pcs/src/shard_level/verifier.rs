@@ -1896,6 +1896,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shard_level::types::UnivariatePolynomial;
+    use crate::shard_level::univariate_skip::{
+        lagrange_weights, sum_over_domain, SKIP_BITS, SKIP_POLY_LEN, SKIP_SIZE,
+    };
+    use crate::{InnerChallenge, InnerChallenger, InnerVal};
+    use p3_field::TwoAdicField;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn verifier_constructs_with_defaults() {
@@ -2059,5 +2066,150 @@ mod tests {
         assert_eq!(eval_coeffs_host(&coeffs, EF::ZERO), EF::from_u32(3));
         assert_eq!(eval_coeffs_host(&coeffs, EF::ONE), EF::from_u32(15));
         assert_eq!(eval_coeffs_host(&coeffs, EF::from_u32(2)), EF::from_u32(41));
+    }
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    const NUM_VARS: usize = 6;
+
+    fn rand_ef(rng: &mut impl Rng) -> EF {
+        EF::from_basis_coefficients_iter(
+            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+        )
+        .unwrap()
+    }
+
+    fn challenger() -> InnerChallenger {
+        InnerChallenger::new(zkm_primitives::poseidon2_init())
+    }
+
+    fn observe_coeffs(ch: &mut InnerChallenger, coeffs: &[EF]) {
+        for c in coeffs {
+            for &b in <EF as BasedVectorSpace<F>>::as_basis_coefficients_slice(c) {
+                ch.observe(b);
+            }
+        }
+    }
+
+    /// A proof the skip verifier must accept: a random 61-coefficient skip
+    /// message with `claimed_sum` set to its sum over the subgroup, then
+    /// random degree-4 rounds with `p(0) + p(1)` equal to the running
+    /// claim, driven by a challenger exactly as the verifier drives it.
+    fn honest_skip_proof(num_vars: usize, seed: u64) -> PartialSumcheckProof<EF> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ch = challenger();
+        let skip: Vec<EF> = (0..SKIP_POLY_LEN).map(|_| rand_ef(&mut rng)).collect();
+        let claimed_sum = sum_over_domain(&skip);
+        observe_coeffs(&mut ch, &skip);
+        let r0: EF = ch.sample_algebra_element();
+        let mut claim = eval_coeffs_host(&skip, r0);
+        let mut polys = vec![UnivariatePolynomial { coefficients: skip }];
+        let mut point: Vec<EF> = Vec::new();
+        let inv2 = F::TWO.inverse();
+        for _ in SKIP_BITS..num_vars {
+            let tail: Vec<EF> = (0..4).map(|_| rand_ef(&mut rng)).collect();
+            let c0 = (claim - tail.iter().copied().sum::<EF>()) * inv2;
+            let mut coeffs = vec![c0];
+            coeffs.extend(tail);
+            observe_coeffs(&mut ch, &coeffs);
+            let alpha: EF = ch.sample_algebra_element();
+            claim = eval_coeffs_host(&coeffs, alpha);
+            point.insert(0, alpha);
+            polys.push(UnivariatePolynomial { coefficients: coeffs });
+        }
+        point.extend(core::iter::repeat_n(r0, SKIP_BITS));
+        PartialSumcheckProof {
+            univariate_polys: polys,
+            claimed_sum,
+            point_and_eval: (point, claim),
+        }
+    }
+
+    fn verify(proof: &PartialSumcheckProof<EF>) -> Result<(), JaggedShardVerifyError> {
+        verify_zerocheck_skip_sumcheck_host::<F, EF, InnerChallenger>(
+            proof,
+            &mut challenger(),
+            NUM_VARS,
+        )
+    }
+
+    /// The honest proof is accepted, and each tampering is rejected by the
+    /// check it targets (the error text names that check).
+    #[test]
+    fn skip_sumcheck_rejects_tampering() {
+        let honest = honest_skip_proof(NUM_VARS, 7);
+        verify(&honest).expect("the honest skip proof must verify");
+
+        let n = NUM_VARS;
+        type Tamper = fn(&mut PartialSumcheckProof<EF>);
+        let cases: [(&str, Tamper, &str); 6] = [
+            (
+                "c_1 changed: the domain sum still holds, so only the transcript catches it",
+                |p| p.univariate_polys[0].coefficients[1] += EF::ONE,
+                "round-1 consistency",
+            ),
+            (
+                "c_16 changed",
+                |p| p.univariate_polys[0].coefficients[SKIP_SIZE] += EF::ONE,
+                "does not sum to the claim",
+            ),
+            (
+                "62 skip coefficients",
+                |p| p.univariate_polys[0].coefficients.push(EF::ZERO),
+                "skip message has 62 coefficients",
+            ),
+            (
+                "one round too many",
+                |p| {
+                    let extra = p.univariate_polys[1].clone();
+                    p.univariate_polys.push(extra);
+                },
+                "messages, expected",
+            ),
+            (
+                "a low point slot differs from r0",
+                |p| {
+                    let last = p.point_and_eval.0.len() - 2;
+                    p.point_and_eval.0[last] += EF::ONE;
+                },
+                "reduced point",
+            ),
+            ("final eval + 1", |p| p.point_and_eval.1 += EF::ONE, "final eval"),
+        ];
+        assert_eq!(honest.point_and_eval.0.len(), n);
+        for (name, tamper, expected) in cases {
+            let mut proof = honest.clone();
+            tamper(&mut proof);
+            let err = verify(&proof).expect_err(name);
+            let msg = format!("{err}");
+            assert!(msg.contains(expected), "{name}: rejected for the wrong reason: {msg}");
+        }
+    }
+
+    fn bits_be(v: usize, n: usize) -> Vec<EF> {
+        (0..n).rev().map(|i| EF::from_bool((v >> i) & 1 == 1)).collect()
+    }
+
+    /// At an integer row (`z_hi` boolean, `r0 = ω^{row mod 16}`) the skip
+    /// padded-row indicator is exactly `[row ≥ h]`, including heights that
+    /// are not a multiple of 16 and `h = 2^N`.
+    #[test]
+    fn skip_geq_host_is_row_indicator() {
+        let n = NUM_VARS;
+        let w = EF::two_adic_generator(SKIP_BITS);
+        for h in [0usize, 1, 15, 16, 17, 31, 40, 63, 64] {
+            let degree = bits_be(h, n + 1);
+            for row in 0..(1usize << n) {
+                let weights = lagrange_weights::<F, EF>(w.exp_u64((row % SKIP_SIZE) as u64));
+                let mut z_ext = vec![EF::ZERO];
+                z_ext.extend(bits_be(row >> SKIP_BITS, n - SKIP_BITS));
+                assert_eq!(
+                    skip_geq_host(&degree, &z_ext, &weights),
+                    EF::from_bool(row >= h),
+                    "h={h} row={row}"
+                );
+            }
+        }
     }
 }

@@ -420,4 +420,205 @@ mod tests {
             skip_domain::<F>().iter().map(|&w| p.eval_at_point(EF::from(w))).sum::<EF>();
         assert_eq!(sum_over_domain(&coeffs), direct);
     }
+
+    mod brute_force {
+        use super::*;
+        use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir, MachineProgram};
+        use crate::lookup::LookupKind;
+        use crate::record::MachineRecord;
+        use crate::septic_digest::SepticDigest;
+        use crate::shard_level::zerocheck_poly::compute_padded_row_adjustment;
+        use p3_air::{BaseAir, WindowAccess};
+        use p3_matrix::dense::RowMajorMatrix;
+
+        #[derive(Clone, Default)]
+        struct MockRecord;
+        impl MachineRecord for MockRecord {
+            type Config = ();
+            fn stats(&self) -> hashbrown::HashMap<String, usize> {
+                hashbrown::HashMap::new()
+            }
+            fn append(&mut self, _other: &mut Self) {}
+            fn public_values<FF: PrimeCharacteristicRing>(&self) -> Vec<FF> {
+                Vec::new()
+            }
+        }
+
+        #[derive(Clone, Default)]
+        struct MockProgram;
+        impl MachineProgram<F> for MockProgram {
+            fn pc_start(&self) -> F {
+                F::ZERO
+            }
+            fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
+                SepticDigest::<F>::zero()
+            }
+        }
+
+        /// Two columns `(x, y)` with `(x − 1)(x − 2)(x − 3) = 0` (degree 3)
+        /// and `y = x²`.  The zero row violates the first constraint, so the
+        /// padded-row adjustment is non-zero and the padding term is live.
+        #[derive(Clone)]
+        struct CubicAir;
+        impl<T> BaseAir<T> for CubicAir {
+            fn width(&self) -> usize {
+                2
+            }
+        }
+        impl<AB: BaseAirBuilder> Air<AB> for CubicAir {
+            fn eval(&self, builder: &mut AB) {
+                let main = builder.main();
+                let row = main.current_slice();
+                let x: AB::Expr = row[0].into();
+                let y: AB::Expr = row[1].into();
+                let one = AB::Expr::ONE;
+                let two = one.clone() + one.clone();
+                let three = two.clone() + one.clone();
+                builder.assert_zero((x.clone() - one) * (x.clone() - two) * (x.clone() - three));
+                builder.assert_zero(y - x.clone() * x.clone());
+                // One lookup, like every real chip: with none, the
+                // permutation constraints expect challenges this folder
+                // doesn't carry.
+                builder.send(
+                    AirLookup::new(vec![x], AB::Expr::ONE, LookupKind::Byte),
+                    LookupScope::Local,
+                );
+            }
+        }
+        impl MachineAir<F> for CubicAir {
+            type Record = MockRecord;
+            type Program = MockProgram;
+            type Error = std::convert::Infallible;
+            fn name(&self) -> String {
+                "Cubic".to_string()
+            }
+            fn generate_trace(
+                &self,
+                _input: &MockRecord,
+                _output: &mut MockRecord,
+            ) -> Result<RowMajorMatrix<F>, Self::Error> {
+                unreachable!("not used by this test")
+            }
+            fn included(&self, _shard: &MockRecord) -> bool {
+                true
+            }
+        }
+
+        /// `eq(ζ_hi, x)` for block `x`; `zeta` is LSB-first, so bit `j` of `x`
+        /// pairs with `zeta[4 + j]`.
+        fn eq_hi(zeta: &[EF], x: usize) -> EF {
+            zeta[SKIP_BITS..]
+                .iter()
+                .enumerate()
+                .map(|(j, &z)| if (x >> j) & 1 == 1 { z } else { EF::ONE - z })
+                .product()
+        }
+
+        /// `eq(ζ, r)` for row `r`, `zeta` LSB-first.
+        fn eq_row(zeta: &[EF], r: usize) -> EF {
+            zeta.iter()
+                .enumerate()
+                .map(|(i, &z)| if (r >> i) & 1 == 1 { z } else { EF::ONE - z })
+                .product()
+        }
+
+        /// `skip_round_poly` against the definition, on a chip whose height (37)
+        /// is not a multiple of 16:
+        ///  (a) `s(z) = eq#(ζ_lo, z) · Σ_x eq(ζ_hi, x) · F(z, x)` at a random `z`,
+        ///      where `F` applies the constraints to the columns interpolated
+        ///      over each 16-row block, minus `pra` times the padded-row weight,
+        ///      plus the β-batched columns;
+        ///  (b) `Σ_{z ∈ D} s(z)` is the multilinear claim
+        ///      `Σ_r eq(ζ, r) · (C_r − pra·[r ≥ h] + T_r)` over all `2^N` rows.
+        #[test]
+        fn skip_round_poly_matches_brute_force() {
+            const N: usize = 6;
+            const H: usize = 37;
+            const W: usize = 2;
+            let mut rng = rand::rngs::StdRng::seed_from_u64(4);
+
+            let mut cells = Vec::with_capacity(H * W);
+            for _ in 0..H {
+                let x = F::from_u32(1 + rng.gen::<u32>() % 3);
+                cells.extend([x, x * x]);
+            }
+            let chip = Chip::new(CubicAir);
+            let pv: Vec<F> = Vec::new();
+            let alpha = rand_ef(&mut rng);
+            let beta = rand_ef(&mut rng);
+            let gkr_powers = [beta, beta * beta];
+            let zeta: Vec<EF> = (0..N).map(|_| rand_ef(&mut rng)).collect();
+            let pra = compute_padded_row_adjustment::<F, EF, CubicAir>(&chip, alpha, &pv, W, 0);
+            assert!(!pra.is_zero(), "the zero row must violate the AIR for this test to bite");
+
+            let s = skip_round_poly::<F, EF, CubicAir>(
+                &SkipChipInput {
+                    chip: &chip,
+                    main_cells: &cells,
+                    num_main_cols: W,
+                    prep_cells: None,
+                    num_prep_cols: 0,
+                    height: H,
+                    gkr_powers: &gkr_powers,
+                    padded_row_adjustment: pra,
+                },
+                alpha,
+                &pv,
+                &zeta,
+            );
+            assert_eq!(s.coefficients.len(), SKIP_POLY_LEN);
+
+            let cell = |r: usize, c: usize| -> EF {
+                if r < H {
+                    EF::from(cells[r * W + c])
+                } else {
+                    EF::ZERO
+                }
+            };
+            let constraints = |row: &[EF]| -> EF {
+                crate::shard_level::zerocheck_poly::eval_air_constraints_at_row::<F, EF, EF, CubicAir>(
+                    &chip,
+                    alpha,
+                    &pv,
+                    &[],
+                    row,
+                )
+            };
+            let batch = |row: &[EF]| -> EF { row[0] * gkr_powers[0] + row[1] * gkr_powers[1] };
+
+            // (a) s at a random point against the definition.
+            let z = rand_ef(&mut rng);
+            let l = lagrange_weights::<F, EF>(z);
+            let mut inner = EF::ZERO;
+            for x in 0..(1usize << (N - SKIP_BITS)) {
+                let row: Vec<EF> = (0..W)
+                    .map(|c| (0..SKIP_SIZE).map(|b| l[b] * cell(SKIP_SIZE * x + b, c)).sum())
+                    .collect();
+                let pad: EF =
+                    (0..SKIP_SIZE).filter(|&b| SKIP_SIZE * x + b >= H).map(|b| l[b]).sum();
+                let t: EF = (0..SKIP_SIZE)
+                    .map(|b| {
+                        let r = SKIP_SIZE * x + b;
+                        l[b] * batch(&[cell(r, 0), cell(r, 1)])
+                    })
+                    .sum();
+                inner += eq_hi(&zeta, x) * (constraints(&row) - pra * pad + t);
+            }
+            let expected = eq_sharp::<F, EF>(&zeta[..SKIP_BITS], z) * inner;
+            assert_eq!(s.eval_at_point(z), expected, "s(z) differs from its definition");
+
+            // (b) the subgroup sum is the multilinear zerocheck claim.
+            let mut claim = EF::ZERO;
+            for r in 0..(1usize << N) {
+                let row = [cell(r, 0), cell(r, 1)];
+                let pad = if r >= H { EF::ONE } else { EF::ZERO };
+                claim += eq_row(&zeta, r) * (constraints(&row) - pra * pad + batch(&row));
+            }
+            assert_eq!(
+                sum_over_domain(&s.coefficients),
+                claim,
+                "domain sum differs from the claim"
+            );
+        }
+    }
 }

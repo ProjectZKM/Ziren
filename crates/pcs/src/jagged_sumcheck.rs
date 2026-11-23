@@ -112,7 +112,7 @@ fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerCha
 /// Build the jagged-reduction weight table for an EXTERNAL
 /// (GPU-hook) prover.  Exactly the table `prove_jagged_reduction_owned`
 /// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
-/// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
+/// with `row_eq_full = skip_row_eq_table(z_row)`.  Exposed `pub` so the
 /// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
 /// of re-deriving the gamma-mixing weights.  Keep in lockstep with the
 /// host body; any weight-table change MUST update both.
@@ -134,7 +134,7 @@ pub fn build_weight_table_from_z_col(
 ///
 /// Returns `(z_col_lagrange, row_eq)` where:
 ///   * `z_col_lagrange = partial_lagrange(z_col)`  (per packed column k)
-///   * `row_eq = eq_mle_table(rev(z_row))`         (full max-log-row eq table,
+///   * `row_eq = skip_row_eq_table(z_row)`         (full max-log-row row weights,
 ///     indexed by the LITERAL row index 0..h_c)
 ///
 /// BYTE-IDENTICAL to `build_weight_table` by construction: that fn computes
@@ -487,7 +487,7 @@ mod closing_identity {
     // claims so the assert holds.
 
     // y for a chip stored at `log_h_store` rows (raw zero-padded), production formula:
-    //   eq_c = eq_mle_table(rev(z_row)); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
+    //   eq_c = skip_row_eq_table(z_row); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
     fn y_for_height(
         trace_cols: &[Vec<InnerVal>],
         log_h_store: usize,
