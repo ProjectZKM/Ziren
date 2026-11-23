@@ -207,3 +207,120 @@ fn observe_poly_coeffs<C, FC>(
 const _: fn() = || {
     fn _assert_ring<T: PrimeCharacteristicRing>() {}
 };
+
+#[cfg(test)]
+mod tests {
+    use p3_challenger::{CanObserve, FieldChallenger};
+    use p3_field::{BasedVectorSpace, Field};
+    use rand::{Rng, SeedableRng};
+    use zkm_pcs::shard_level::univariate_skip::{sum_over_domain, SKIP_BITS, SKIP_POLY_LEN};
+    use zkm_pcs::{InnerChallenge, InnerChallenger, InnerVal};
+    use zkm_primitives::poseidon2_init;
+    use zkm_recursion_compiler::config::InnerConfig;
+    use zkm_recursion_compiler::ir::Builder;
+
+    use super::*;
+    use crate::challenger::DuplexChallengerVariable;
+    use crate::utils::tests::run_test_recursion;
+    use crate::witness::{WitnessBlock, Witnessable};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    const NUM_VARS: usize = 6;
+
+    fn rand_ef(rng: &mut impl Rng) -> EF {
+        EF::from_basis_coefficients_iter(
+            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+        )
+        .unwrap()
+    }
+
+    fn horner(coeffs: &[EF], x: EF) -> EF {
+        coeffs.iter().rev().fold(EF::ZERO, |acc, &c| acc * x + c)
+    }
+
+    fn observe_coeffs(ch: &mut InnerChallenger, coeffs: &[EF]) {
+        for c in coeffs {
+            for &b in <EF as BasedVectorSpace<F>>::as_basis_coefficients_slice(c) {
+                ch.observe(b);
+            }
+        }
+    }
+
+    /// The same honest proof as the host test in
+    /// `zkm_pcs::shard_level::verifier`: a random 61-coefficient skip message
+    /// with `claimed_sum` set to its sum over the subgroup, then random
+    /// degree-4 rounds consistent with the running claim, driven by the host
+    /// challenger the way the verifier drives it.
+    fn honest_skip_proof(num_vars: usize, seed: u64) -> PartialSumcheckProof<EF> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ch = InnerChallenger::new(poseidon2_init());
+        let skip: Vec<EF> = (0..SKIP_POLY_LEN).map(|_| rand_ef(&mut rng)).collect();
+        let claimed_sum = sum_over_domain(&skip);
+        observe_coeffs(&mut ch, &skip);
+        let r0: EF = ch.sample_algebra_element();
+        let mut claim = horner(&skip, r0);
+        let mut polys = vec![UnivariatePolynomial { coefficients: skip }];
+        let mut point: Vec<EF> = Vec::new();
+        let inv2 = F::TWO.inverse();
+        for _ in SKIP_BITS..num_vars {
+            let tail: Vec<EF> = (0..4).map(|_| rand_ef(&mut rng)).collect();
+            let c0 = (claim - tail.iter().copied().sum::<EF>()) * inv2;
+            let mut coeffs = vec![c0];
+            coeffs.extend(tail);
+            observe_coeffs(&mut ch, &coeffs);
+            let alpha: EF = ch.sample_algebra_element();
+            claim = horner(&coeffs, alpha);
+            point.insert(0, alpha);
+            polys.push(UnivariatePolynomial { coefficients: coeffs });
+        }
+        point.extend(core::iter::repeat_n(r0, SKIP_BITS));
+        PartialSumcheckProof {
+            univariate_polys: polys,
+            claimed_sum,
+            point_and_eval: (point, claim),
+        }
+    }
+
+    /// Witness the (possibly tampered) honest proof and run it through
+    /// [`verify_zerocheck_skip_sumcheck`] in the recursion runtime.
+    fn run_skip_sumcheck_circuit(tamper: impl FnOnce(&mut PartialSumcheckProof<EF>)) {
+        let mut proof = honest_skip_proof(NUM_VARS, 7);
+        tamper(&mut proof);
+
+        let mut builder = Builder::<InnerConfig>::default();
+        let proof_var = Witnessable::<InnerConfig>::read(&proof, &mut builder);
+        let mut challenger = DuplexChallengerVariable::new(&mut builder);
+        verify_zerocheck_skip_sumcheck::<InnerConfig, _>(&mut builder, &mut challenger, &proof_var);
+
+        let mut witness_stream: Vec<WitnessBlock<InnerConfig>> = Vec::new();
+        Witnessable::<InnerConfig>::write(&proof, &mut witness_stream);
+        run_test_recursion(builder.into_operations(), witness_stream);
+    }
+
+    /// POSITIVE: the honest proof verifies in-circuit, so the circuit and the
+    /// host challenger agree on the skip transcript.
+    #[test]
+    fn skip_sumcheck_circuit_accepts_honest() {
+        run_skip_sumcheck_circuit(|_| {});
+    }
+
+    /// NEGATIVE: changing `c_1` keeps the domain sum, so only the transcript
+    /// can catch it (`r0` moves and round 1 no longer matches the claim).
+    #[test]
+    #[should_panic]
+    fn skip_sumcheck_circuit_rejects_tampered_c1() {
+        run_skip_sumcheck_circuit(|p| p.univariate_polys[0].coefficients[1] += EF::ONE);
+    }
+
+    /// NEGATIVE: one of the four low point slots differs from `r0`.
+    #[test]
+    #[should_panic]
+    fn skip_sumcheck_circuit_rejects_wrong_r0_slot() {
+        run_skip_sumcheck_circuit(|p| {
+            let slot = p.point_and_eval.0.len() - 2;
+            p.point_and_eval.0[slot] += EF::ONE;
+        });
+    }
+}
