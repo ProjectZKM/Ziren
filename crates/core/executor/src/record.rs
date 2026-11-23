@@ -246,7 +246,7 @@ pub struct ExecutionRecord {
     /// A trace of the register timestamp bumps (shadow reads) for this shard.
     ///
     /// One entry per register on its first touch in the shard, plus one before any access
-    /// `2^16` or more clk ticks after the register's previous one.  See [`MemoryBumpEvent`].
+    /// more than `2^16` clk ticks after the register's previous one.  See [`MemoryBumpEvent`].
     pub bump_memory_events: Vec<MemoryBumpEvent>,
     /// A trace of all the syscall events.
     pub syscall_events: EventVec<SyscallEvent>,

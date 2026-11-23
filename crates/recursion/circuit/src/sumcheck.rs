@@ -309,14 +309,30 @@ mod tests {
     /// NEGATIVE: changing `c_1` keeps the domain sum, so only the transcript
     /// can catch it (`r0` moves and round 1 no longer matches the claim).
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "DivEOutOfDomain")]
     fn skip_sumcheck_circuit_rejects_tampered_c1() {
         run_skip_sumcheck_circuit(|p| p.univariate_polys[0].coefficients[1] += EF::ONE);
     }
 
+    /// NEGATIVE: a claimed sum the skip message does not sum to over the
+    /// subgroup.  The claim is not in the transcript, so only the circuit's
+    /// own subgroup-sum check (`16 · Σ_j c_{16j}`) can catch it.
+    #[test]
+    #[should_panic(expected = "DivEOutOfDomain")]
+    fn skip_sumcheck_circuit_rejects_wrong_claimed_sum() {
+        run_skip_sumcheck_circuit(|p| p.claimed_sum += EF::ONE);
+    }
+
+    /// NEGATIVE: the final evaluation differs from the last round's value.
+    #[test]
+    #[should_panic(expected = "DivEOutOfDomain")]
+    fn skip_sumcheck_circuit_rejects_wrong_final_eval() {
+        run_skip_sumcheck_circuit(|p| p.point_and_eval.1 += EF::ONE);
+    }
+
     /// NEGATIVE: one of the four low point slots differs from `r0`.
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "DivEOutOfDomain")]
     fn skip_sumcheck_circuit_rejects_wrong_r0_slot() {
         run_skip_sumcheck_circuit(|p| {
             let slot = p.point_and_eval.0.len() - 2;

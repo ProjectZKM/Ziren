@@ -12,6 +12,8 @@ pub mod prover;
 pub mod row_gkr;
 pub mod shard_proof;
 pub mod sumcheck_poly;
+#[cfg(test)]
+pub(crate) mod test_machine;
 pub mod types;
 pub mod univariate_skip;
 pub mod verifier;

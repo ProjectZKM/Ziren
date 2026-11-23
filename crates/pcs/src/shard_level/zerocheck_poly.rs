@@ -1160,37 +1160,12 @@ mod tests {
     }
 
     // sumcheck-reduction end-to-end identity (host sum_as_poly)
-    use crate::air::{AirLookup, BaseAirBuilder, LookupScope};
-    use crate::air::{MachineAir, MachineProgram};
+    use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir};
     use crate::chip::Chip;
     use crate::lookup::LookupKind;
-    use crate::record::MachineRecord;
-    use crate::septic_digest::SepticDigest;
+    use crate::shard_level::test_machine::{MockProgram, MockRecord};
     use p3_air::{Air, BaseAir, WindowAccess};
     use p3_matrix::dense::RowMajorMatrix;
-
-    #[derive(Clone, Default)]
-    struct MockRecord;
-    impl MachineRecord for MockRecord {
-        type Config = ();
-        fn stats(&self) -> hashbrown::HashMap<String, usize> {
-            hashbrown::HashMap::new()
-        }
-        fn append(&mut self, _other: &mut Self) {}
-        fn public_values<FF: p3_field::PrimeCharacteristicRing>(&self) -> Vec<FF> {
-            Vec::new()
-        }
-    }
-    #[derive(Clone, Default)]
-    struct MockProgram;
-    impl MachineProgram<InnerVal> for MockProgram {
-        fn pc_start(&self) -> InnerVal {
-            InnerVal::ZERO
-        }
-        fn initial_global_cumulative_sum(&self) -> SepticDigest<InnerVal> {
-            SepticDigest::<InnerVal>::zero()
-        }
-    }
     #[derive(Clone)]
     struct MockAir {
         ncols: usize,
