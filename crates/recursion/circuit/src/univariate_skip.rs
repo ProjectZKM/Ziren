@@ -67,28 +67,38 @@ pub fn eq_sharp<C: CircuitConfig>(
     acc
 }
 
+/// `[Σ_{b ≥ k} L_b(z)]` for `k = 0, …, 15`, from the weights of
+/// [`lagrange_weights`].  One table serves every chip of a shard.
+pub fn weight_suffix_sums<C: CircuitConfig>(
+    weights: &[SymbolicExt<C::F, C::EF>],
+) -> Vec<SymbolicExt<C::F, C::EF>> {
+    assert_eq!(weights.len(), SKIP_SIZE);
+    let mut sums = weights.to_vec();
+    for k in (0..SKIP_SIZE - 1).rev() {
+        sums[k] = sums[k] + sums[k + 1];
+    }
+    sums
+}
+
 /// The padded-row indicator `[row ≥ h]` at the skip point; host twin
-/// `skip_geq_host`.  `degree` is the `N + 1` big-endian bits of `h`,
-/// `z_extended = (0, z_hi)`.  With `ρ = Σ_{b ≥ h mod 16} L_b(r0)` it is
+/// `skip_geq_host`.  `degree` is the `N + 1` big-endian bits of `h`, which
+/// the caller constrains to be bits, `z_extended = (0, z_hi)`, and
+/// `suffix_sums` is [`weight_suffix_sums`].  With `ρ = Σ_{b ≥ h mod 16}
+/// L_b(r0)`, read from the table by the four low bits of `h`, it is
 /// `geq_{h >> 4}(z_hi) − (1 − ρ)·eq(z_hi, h >> 4)`.
 pub fn skip_geq<C: CircuitConfig>(
     degree: &[SymbolicExt<C::F, C::EF>],
     z_extended: &[SymbolicExt<C::F, C::EF>],
-    weights: &[SymbolicExt<C::F, C::EF>],
+    suffix_sums: &[SymbolicExt<C::F, C::EF>],
 ) -> SymbolicExt<C::F, C::EF> {
+    assert_eq!(suffix_sums.len(), SKIP_SIZE);
     let split = degree.len() - SKIP_BITS;
     let (hi_bits, lo_bits) = degree.split_at(split);
-    let mut lo_ext = Vec::with_capacity(SKIP_BITS + 1);
-    lo_ext.push(SymbolicExt::ZERO);
-    lo_ext.extend_from_slice(lo_bits);
-    let mut rho = SymbolicExt::<C::F, C::EF>::ZERO;
-    for (b, &w) in weights.iter().enumerate() {
-        let b_bits: Vec<SymbolicExt<C::F, C::EF>> = (0..=SKIP_BITS)
-            .rev()
-            .map(|i| if (b >> i) & 1 == 1 { SymbolicExt::ONE } else { SymbolicExt::ZERO })
-            .collect();
-        rho += w * full_geq::<C>(&lo_ext, &b_bits);
+    let mut table = suffix_sums.to_vec();
+    for &bit in lo_bits.iter().rev() {
+        table = table.chunks(2).map(|pair| pair[0] + bit * (pair[1] - pair[0])).collect();
     }
+    let rho = table[0];
     full_geq::<C>(hi_bits, z_extended)
         - (SymbolicExt::<C::F, C::EF>::ONE - rho) * eq_eval::<C>(hi_bits, z_extended)
 }
@@ -131,8 +141,38 @@ mod tests {
                         .collect();
                 let mut z_ext = vec![SymbolicExt::ZERO];
                 z_ext.extend(bits(row >> 4, n - SKIP_BITS));
-                let got = value(skip_geq::<C>(&degree, &z_ext, &weights));
+                let got = value(skip_geq::<C>(&degree, &z_ext, &weight_suffix_sums::<C>(&weights)));
                 assert_eq!(got, EF::from_bool(row >= h), "h={h} row={row}");
+            }
+        }
+    }
+
+    /// Off the domain the indicator on the boundary block is the weight
+    /// suffix the height's low digit selects, for every low digit.
+    #[test]
+    fn skip_geq_reads_the_suffix_of_the_low_digit() {
+        let n = 6;
+        let host = zkm_pcs::shard_level::univariate_skip::lagrange_weights::<InnerVal, EF>(
+            EF::from_u32(987_654_321),
+        );
+        let weights: Vec<SymbolicExt<InnerVal, EF>> =
+            host.iter().map(|&l| SymbolicExt::from(l)).collect();
+        let suffix_sums = weight_suffix_sums::<C>(&weights);
+        for h in 0..(1usize << n) {
+            let degree = bits(h, n + 1);
+            for block in 0..(1usize << (n - SKIP_BITS)) {
+                let mut z_ext = vec![SymbolicExt::ZERO];
+                z_ext.extend(bits(block, n - SKIP_BITS));
+                let expected = match block.cmp(&(h >> SKIP_BITS)) {
+                    core::cmp::Ordering::Less => EF::ZERO,
+                    core::cmp::Ordering::Equal => host[h & (SKIP_SIZE - 1)..].iter().copied().sum(),
+                    core::cmp::Ordering::Greater => EF::ONE,
+                };
+                assert_eq!(
+                    value(skip_geq::<C>(&degree, &z_ext, &suffix_sums)),
+                    expected,
+                    "h={h} block={block}"
+                );
             }
         }
     }
