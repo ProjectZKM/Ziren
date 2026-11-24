@@ -33,7 +33,9 @@
 use alloc::vec::Vec;
 use core::array;
 
-use p3_field::Field;
+use p3_field::{Field, TwoAdicField};
+
+use crate::shard_level::univariate_skip::{lagrange_weights, SKIP_BITS, SKIP_SIZE};
 
 /// Memory state of the branching program: 2 booleans = 4 states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -165,20 +167,24 @@ pub struct BranchingProgram<EF: Field> {
     /// Number of layers: `max(z_row.len(), z_index.len())`.  The DP
     /// runs `num_vars + 1` iterations.
     num_vars: usize,
+    /// `L_a(r0)` for the sixteen low row digits `a`, `r0 = z_row[last]`.
+    skip_weights: [EF; SKIP_SIZE],
 }
 
-impl<EF: Field> BranchingProgram<EF> {
+impl<EF: TwoAdicField> BranchingProgram<EF> {
     /// Construct from outer-protocol challenge points.
     ///
-    /// `z_row`: row-direction challenges (typically from outer
-    /// LogUp-GKR sumcheck).
+    /// `z_row`: row-direction challenges, a univariate-skip row point
+    /// (more than four entries, the last four holding `r0`).
     ///
     /// `z_index`: trace-direction challenges (typically from the outer
     /// jagged reduction's eval_point).
     #[must_use]
     pub fn new(z_row: Vec<EF>, z_index: Vec<EF>) -> Self {
+        assert!(z_row.len() > SKIP_BITS, "branching program: skip row point too short");
         let num_vars = z_row.len().max(z_index.len());
-        Self { z_row, z_index, num_vars }
+        let skip_weights = lagrange_weights::<EF, EF>(z_row[z_row.len() - 1]);
+        Self { z_row, z_index, num_vars, skip_weights }
     }
 
     fn get_ith_lsb_ef(point: &[EF], i: usize) -> EF {
@@ -190,52 +196,144 @@ impl<EF: Field> BranchingProgram<EF> {
         }
     }
 
-    /// Evaluate the branching program at `(prefix_sum, next_prefix_sum)`.
-    ///
-    /// Returns 1 iff the indicator function holds at this point's
-    /// hypercube interpretation; returns the multilinear extension's
-    /// value otherwise.
-    pub fn eval(&self, prefix_sum: &[EF], next_prefix_sum: &[EF]) -> EF {
-        let mut state_by_state_results: [EF; 4] = [EF::ZERO; 4];
-        state_by_state_results[MemoryState::success().get_index()] = EF::ONE;
-
+    /// One DP layer: `results[s]` is the value of finishing from state `s`
+    /// above this layer; returns the same for this layer and above.
+    fn layer_step(results: &[EF; 4], point: [EF; 4]) -> [EF; 4] {
         let memory_states = all_memory_states();
         let bit_states = all_bit_states();
+        let four_var_eq = partial_lagrange_4(point);
+        let mut new_results: [EF; 4] = [EF::ZERO; 4];
+        for &memory_state in &memory_states {
+            let mut accum_elems: [EF; 4] = [EF::ZERO; 4];
+            for (i, &elem) in four_var_eq.iter().enumerate() {
+                if let StateOrFail::State(out_state) =
+                    transition_function(bit_states[i], memory_state)
+                {
+                    accum_elems[out_state.get_index()] += elem;
+                }
+            }
+            new_results[memory_state.get_index()] = accum_elems
+                .iter()
+                .zip(results.iter())
+                .fold(EF::ZERO, |a, (&accum_elem, &sbs)| a + accum_elem * sbs);
+        }
+        new_results
+    }
 
-        for layer in (0..=self.num_vars).rev() {
-            let mut new_results: [EF; 4] = [EF::ZERO; 4];
+    /// Evaluate the branching program at `(prefix_sum, next_prefix_sum)`.
+    ///
+    /// `z_row` is a univariate-skip row point: its low four row bits are
+    /// replaced by the Lagrange weights `L_a(r0)` on the order-16 subgroup,
+    /// `r0 = z_row[last]`, so the row factor is `L_{r mod 16}(r0) ·
+    /// eq(z_row_hi, r >> 4)`.  Layers 4 and up read `z_row` bit by bit; the
+    /// four low layers are evaluated once per low digit `a` with the row
+    /// bit pinned to `a`'s bit (a binary trie, 30 layer steps), then summed
+    /// with weights `L_a(r0)`.
+    pub fn eval(&self, prefix_sum: &[EF], next_prefix_sum: &[EF]) -> EF {
+        let mut results: [EF; 4] = [EF::ZERO; 4];
+        results[MemoryState::success().get_index()] = EF::ONE;
 
-            let point: [EF; 4] = [
-                Self::get_ith_lsb_ef(&self.z_row, layer),
+        let bits = |layer: usize, row: EF| -> [EF; 4] {
+            [
+                row,
                 Self::get_ith_lsb_ef(&self.z_index, layer),
                 Self::get_ith_lsb_ef(prefix_sum, layer),
                 Self::get_ith_lsb_ef(next_prefix_sum, layer),
-            ];
-            let four_var_eq = partial_lagrange_4(point);
-
-            for &memory_state in &memory_states {
-                let mut accum_elems: [EF; 4] = [EF::ZERO; 4];
-
-                for (i, &elem) in four_var_eq.iter().enumerate() {
-                    let bit_state = bit_states[i];
-                    if let StateOrFail::State(out_state) =
-                        transition_function(bit_state, memory_state)
-                    {
-                        accum_elems[out_state.get_index()] += elem;
-                    }
-                }
-
-                let acc = accum_elems
-                    .iter()
-                    .zip(state_by_state_results.iter())
-                    .fold(EF::ZERO, |a, (&accum_elem, &sbs)| a + accum_elem * sbs);
-
-                new_results[memory_state.get_index()] = acc;
-            }
-            state_by_state_results = new_results;
+            ]
+        };
+        for layer in (SKIP_BITS..=self.num_vars).rev() {
+            results =
+                Self::layer_step(&results, bits(layer, Self::get_ith_lsb_ef(&self.z_row, layer)));
         }
+        let mut branches: Vec<[EF; 4]> = alloc::vec![results];
+        for layer in (0..SKIP_BITS).rev() {
+            let mut next = Vec::with_capacity(branches.len() * 2);
+            for r in &branches {
+                next.push(Self::layer_step(r, bits(layer, EF::ZERO)));
+                next.push(Self::layer_step(r, bits(layer, EF::ONE)));
+            }
+            branches = next;
+        }
+        self.weigh_low_digits(&branches)
+    }
 
-        state_by_state_results[MemoryState::initial().get_index()]
+    /// `Σ_a L_a(r0) · branches[a][initial]`, `branches[a]` being the DP
+    /// result with the four low row bits pinned to the digit `a`.
+    fn weigh_low_digits(&self, branches: &[[EF; 4]]) -> EF {
+        let init = MemoryState::initial().get_index();
+        branches
+            .iter()
+            .zip(self.skip_weights.iter())
+            .fold(EF::ZERO, |acc, (r, &w)| acc + w * r[init])
+    }
+
+    /// One DP layer with the row bit and both prefix-sum bits known.  For
+    /// each memory state the addition check admits one index bit, so the
+    /// layer costs four multiplications by `index_weights[index_bit]`,
+    /// where `index_weights = [1 - z, z]` for the layer's index
+    /// coordinate `z`.
+    fn layer_step_at_bits(
+        results: &[EF; 4],
+        index_weights: [EF; 2],
+        row_bit: bool,
+        curr_bit: bool,
+        next_bit: bool,
+    ) -> [EF; 4] {
+        let mut new_results: [EF; 4] = [EF::ZERO; 4];
+        for memory_state in all_memory_states() {
+            for (index_bit, weight) in [false, true].into_iter().zip(index_weights) {
+                let bit_state = BitState {
+                    row_bit,
+                    index_bit,
+                    curr_col_prefix_sum_bit: curr_bit,
+                    next_col_prefix_sum_bit: next_bit,
+                };
+                if let StateOrFail::State(out_state) = transition_function(bit_state, memory_state)
+                {
+                    new_results[memory_state.get_index()] +=
+                        weight * results[out_state.get_index()];
+                }
+            }
+        }
+        new_results
+    }
+
+    /// [`Self::eval`] at the bit patterns of two integers, which is what
+    /// the verifier needs for a column's offsets.  With the prefix-sum
+    /// bits known, a layer is linear in the row coordinate between its
+    /// two [`Self::layer_step_at_bits`] values: twelve multiplications
+    /// for a layer above the skip, four for each step of the low trie.
+    #[must_use]
+    pub fn eval_at_offsets(&self, prefix_sum: usize, next_prefix_sum: usize) -> EF {
+        let bit =
+            |value: usize, layer: usize| layer < usize::BITS as usize && (value >> layer) & 1 == 1;
+        let index_weights = |layer: usize| {
+            let z = Self::get_ith_lsb_ef(&self.z_index, layer);
+            [EF::ONE - z, z]
+        };
+        let mut results: [EF; 4] = [EF::ZERO; 4];
+        results[MemoryState::success().get_index()] = EF::ONE;
+
+        for layer in (SKIP_BITS..=self.num_vars).rev() {
+            let (curr, next) = (bit(prefix_sum, layer), bit(next_prefix_sum, layer));
+            let weights = index_weights(layer);
+            let lo = Self::layer_step_at_bits(&results, weights, false, curr, next);
+            let hi = Self::layer_step_at_bits(&results, weights, true, curr, next);
+            let row = Self::get_ith_lsb_ef(&self.z_row, layer);
+            results = array::from_fn(|s| lo[s] + row * (hi[s] - lo[s]));
+        }
+        let mut branches: Vec<[EF; 4]> = alloc::vec![results];
+        for layer in (0..SKIP_BITS).rev() {
+            let (curr, next) = (bit(prefix_sum, layer), bit(next_prefix_sum, layer));
+            let weights = index_weights(layer);
+            let mut grown = Vec::with_capacity(branches.len() * 2);
+            for r in &branches {
+                grown.push(Self::layer_step_at_bits(r, weights, false, curr, next));
+                grown.push(Self::layer_step_at_bits(r, weights, true, curr, next));
+            }
+            branches = grown;
+        }
+        self.weigh_low_digits(&branches)
     }
 }
 
@@ -271,24 +369,19 @@ pub fn bits_big_endian<EF: Field>(value: usize, num_bits: usize) -> Vec<EF> {
 /// Closed-form evaluation of the jagged polynomial.
 ///
 /// `prefix_sums.len()` = num_chips + 1.  Each entry is a usize cumulative
-/// row count; `log_m` is `log2_ceil(prefix_sums.last())`.
+/// row count.
 ///
 /// Returns the value the jagged-eval sumcheck must reduce to:
 ///
 ///   J(z_row, z_col, z_index) = Σ_k z_col_lagrange[k] × BP.eval(t_k, t_{k+1})
 ///
-/// where `t_k = bits_be(prefix_sums[k], log_m+1)`.
-pub fn full_jagged_evaluation<EF: Field>(
+/// where `t_k` is the bit pattern of `prefix_sums[k]`.
+pub fn full_jagged_evaluation<EF: TwoAdicField>(
     prefix_sums: &[usize],
     z_row: &[EF],
     z_col: &[EF],
     z_index: &[EF],
 ) -> EF {
-    let last = prefix_sums.last().copied().unwrap_or(0);
-    let log_m =
-        if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    let num_bits = log_m + 1;
-
     let z_col_lagrange = partial_lagrange(z_col);
 
     let bp = BranchingProgram::new(z_row.to_vec(), z_index.to_vec());
@@ -296,9 +389,7 @@ pub fn full_jagged_evaluation<EF: Field>(
 
     let mut acc = EF::ZERO;
     for col in 0..num_cols {
-        let curr = bits_big_endian::<EF>(prefix_sums[col], num_bits);
-        let next = bits_big_endian::<EF>(prefix_sums[col + 1], num_bits);
-        let bp_eval = bp.eval(&curr, &next);
+        let bp_eval = bp.eval_at_offsets(prefix_sums[col], prefix_sums[col + 1]);
         let weight = z_col_lagrange.get(col).copied().unwrap_or(EF::ZERO);
         acc += weight * bp_eval;
     }
@@ -422,30 +513,64 @@ mod tests {
     /// This is the defining property of the indicator polynomial.
     #[test]
     fn branching_program_eval_indicator_at_integer_points() {
-        let log_m = 3;
-        let num_bits = log_m + 1;
-
-        let row_count = 3usize;
+        let num_bits = 6;
+        let row_count = 21usize;
         let prefix_sum_curr = bits_be::<InnerChallenge>(0, num_bits);
         let prefix_sum_next = bits_be::<InnerChallenge>(row_count, num_bits);
 
-        for row in 0..(1 << num_bits) {
+        for row in 0..(1 << (num_bits - 1)) {
             for index in 0..(1 << num_bits) {
-                let z_row = bits_be::<InnerChallenge>(row, num_bits);
+                let z_row = skip_point_of_row(row, num_bits);
                 let z_index = bits_be::<InnerChallenge>(index, num_bits);
                 let bp = BranchingProgram::new(z_row, z_index);
                 let result = bp.eval(&prefix_sum_curr, &prefix_sum_next);
+                let expected = (index == row) && (index < row_count);
+                assert_eq!(
+                    result,
+                    if expected { InnerChallenge::ONE } else { InnerChallenge::ZERO },
+                    "row={row} index={index}",
+                );
+            }
+        }
+    }
 
-                let expected_one = (index == row) && (index < row_count);
-                if expected_one {
-                    assert_eq!(result, InnerChallenge::ONE, "row={row} index={index} expected ONE",);
-                } else {
-                    assert_eq!(
-                        result,
-                        InnerChallenge::ZERO,
-                        "row={row} index={index} expected ZERO",
-                    );
-                }
+    /// The skip row point of integer row `row`: high bits big-endian, then
+    /// `ω^{row mod 16}` in the four low slots, so `L_b(r0) = [b == row mod 16]`.
+    fn skip_point_of_row(row: usize, num_bits: usize) -> Vec<InnerChallenge> {
+        use p3_field::TwoAdicField;
+        let w = InnerChallenge::two_adic_generator(4).exp_u64((row & 15) as u64);
+        let mut p = bits_be::<InnerChallenge>(row >> 4, num_bits - 4);
+        p.extend([w; 4]);
+        p
+    }
+
+    /// The integer-offset evaluation agrees with the general one at random
+    /// row and index points, including offsets with bits above the row
+    /// point's length.
+    #[test]
+    fn eval_at_offsets_matches_eval() {
+        use p3_field::BasedVectorSpace;
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let rand_ef = |rng: &mut rand::rngs::StdRng| {
+            InnerChallenge::from_basis_coefficients_iter(
+                (0..4).map(|_| InnerVal::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            )
+            .unwrap()
+        };
+        for (row_len, index_len) in [(9, 12), (12, 12), (14, 11)] {
+            let z_row: Vec<InnerChallenge> = (0..row_len).map(|_| rand_ef(&mut rng)).collect();
+            let z_index: Vec<InnerChallenge> = (0..index_len).map(|_| rand_ef(&mut rng)).collect();
+            let bp = BranchingProgram::new(z_row, z_index);
+            let num_bits = 14;
+            for _ in 0..64 {
+                let curr = rng.gen_range(0..1usize << num_bits);
+                let next = rng.gen_range(0..1usize << num_bits);
+                assert_eq!(
+                    bp.eval_at_offsets(curr, next),
+                    bp.eval(&bits_be(curr, num_bits), &bits_be(next, num_bits)),
+                    "row_len={row_len} index_len={index_len} curr={curr} next={next}",
+                );
             }
         }
     }
@@ -485,9 +610,8 @@ mod tests {
     /// triple is consistent with the prefix-sum schedule.
     #[test]
     fn full_jagged_evaluation_indicator_at_integer_points() {
-        let prefix_sums = vec![0usize, 3, 5];
-        let log_m = 3;
-        let num_bits = log_m + 1;
+        let prefix_sums = vec![0usize, 19, 27];
+        let num_bits = 5;
 
         for col in 0..2 {
             for row in 0..(1 << num_bits) {
@@ -495,7 +619,7 @@ mod tests {
                 if index >= (1 << num_bits) {
                     continue;
                 }
-                let z_row: Vec<InnerChallenge> = bits_big_endian(row, num_bits);
+                let z_row: Vec<InnerChallenge> = skip_point_of_row(row, num_bits);
                 let z_col: Vec<InnerChallenge> = bits_big_endian(col, 1);
                 let z_index: Vec<InnerChallenge> = bits_big_endian(index, num_bits);
 

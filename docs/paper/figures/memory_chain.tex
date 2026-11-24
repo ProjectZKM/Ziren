@@ -31,10 +31,10 @@
 \draw[shardbox] (-1.35,-1.8) rectangle (13.35,1.75);
 \node[hdr, anchor=north west] at (-1.2,1.66) {shard $s$};
 
-\node[loc] (li) at (0,0)    {\texttt{MemoryLocal}\\initial};
+\node[loc] (li) at (0,0)    {shard boundary\\initial};
 \node[acc] (r1) at (4.4,0)  {\texttt{lw}\\read at $c_1$};
 \node[acc] (w1) at (8.8,0)  {\texttt{sw}\\write at $c_2$};
-\node[loc] (lf) at (13.2,0) {\texttt{MemoryLocal}\\final};
+\node[loc] (lf) at (13.2,0) {shard boundary\\final};
 
 \draw[bus] (li) -- (r1);
 \draw[bus] (r1) -- (w1);
@@ -49,9 +49,9 @@
 \draw[shardbox] (-1.35,-6.0) rectangle (9.05,-2.45);
 \node[hdr, anchor=north east] at (8.9,-2.54) {shard $s{+}1$};
 
-\node[loc] (li2) at (0,-4.2)   {\texttt{MemoryLocal}\\initial};
+\node[loc] (li2) at (0,-4.2)   {shard boundary\\initial};
 \node[acc] (r2)  at (4.4,-4.2) {\texttt{lw}\\read at $c_1'$};
-\node[loc] (lf2) at (8.8,-4.2) {\texttt{MemoryLocal}\\final};
+\node[loc] (lf2) at (8.8,-4.2) {shard boundary\\final};
 
 \draw[bus] (li2) -- (r2);
 \draw[bus] (r2) -- (lf2);
@@ -64,8 +64,8 @@
   {one tuple: sent in shard $s$, received in shard $s{+}1$, cancels in $D$};
 
 % ================= the whole-execution tables at the two ends of the chain
-\node[glob] (gi) at (-4.6,0)    {\texttt{MemoryGlobalInit}};
-\node[glob] (gf) at (12.7,-4.2) {\texttt{MemoryGlobalFinalize}};
+\node[glob] (gi) at (-4.6,0)    {memory initialisation};
+\node[glob] (gf) at (12.7,-4.2) {memory finalisation};
 \draw[gl] (gi) -- (li);
 \draw[gl] (lf2) -- (gf);
 \node[note, text width=4.0cm] at (-4.6,-1.35)

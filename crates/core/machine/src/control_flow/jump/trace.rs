@@ -110,7 +110,10 @@ impl JumpChip {
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
         if matches!(event.opcode, Opcode::JumpDirect) {
-            crate::operations::AddOperation::<F>::default().populate(blu, event.next_pc, event.b);
+            crate::operations::AddOperation::<F>::default()
+                .populate_carries_only(event.next_pc, event.b);
+            blu.add_u8_range_checks(&event.next_pc.to_le_bytes());
+            blu.add_u8_range_checks(&event.next_next_pc.to_le_bytes());
         }
     }
 }

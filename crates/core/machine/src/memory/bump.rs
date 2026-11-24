@@ -17,7 +17,7 @@ use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
-    air::MemoryAirBuilder,
+    air::{MemoryAirBuilder, TIMESTAMP_HIGH_LIMB_BITS, TIMESTAMP_HIGH_LIMB_MASK},
     memory::MemoryReadCols,
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -27,8 +27,9 @@ pub(crate) const NUM_MEMORY_BUMP_COLS: usize = size_of::<MemoryBumpCols<u8>>();
 
 /// The columns of the `MemoryBump` chip.
 ///
-/// One row per (register, shard): a *shadow read* of the register at `(shard, 0)` that advances
-/// the register's memory-argument timestamp out of whatever earlier shard it was left in.
+/// One row per shadow read of a register at `(shard, clk)`: on the register's first touch in the
+/// shard, advancing its memory-argument timestamp out of whatever earlier shard it was left in,
+/// and before an access `2^16` or more clk ticks after the register's previous one.
 #[derive(PicusAnnotations, AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryBumpCols<T> {
@@ -39,6 +40,10 @@ pub struct MemoryBumpCols<T> {
 
     /// The shard the register is bumped into.
     pub shard: T,
+    /// The clk of the shadow read, `clk_16bit_limb + clk_high_limb * 2^16`, range checked below
+    /// `2^26` like an instruction's clk.
+    pub clk_16bit_limb: T,
+    pub clk_high_limb: T,
 
     /// The register address.  Constrained to be `< NUM_REGISTERS`.
     pub addr: T,
@@ -47,20 +52,21 @@ pub struct MemoryBumpCols<T> {
     pub is_real: T,
 }
 
-/// A chip that bumps the memory-argument timestamp of every register touched in a shard.
+/// A chip that bumps the memory-argument timestamp of a register with a shadow read.
 ///
 /// Registers carry their `(shard, clk)` across shard boundaries, so the first access to a register
-/// in a shard would have to compare *shards* rather than clks.  Rather than pay three columns for
-/// that on every register access of every cycle, this chip performs one shadow read per (register,
-/// shard) at `(shard, 0)`.  Because `clk` restarts at 0 each shard and register accesses live at
-/// the sub-cycle positions `1..=4`, `(shard, 0)` is strictly below every real register access, so
-/// the shadow read is forced to be the first link of the shard's access chain for that register.
+/// in a shard would have to compare *shards* rather than clks, and a register left untouched for a
+/// long stretch would need a 26-bit clk difference.  Rather than pay for either on every register
+/// access of every cycle, this chip re-reads the register one clk tick before such an access, with
+/// the full shard-or-clk comparison of [`crate::memory::MemoryAccessCols`].  Its clk is range
+/// checked below `2^26`, so the shadow read is an ordinary link of the register's access chain.
 ///
-/// Consequently every register access proven anywhere in the machine has `prev_shard == shard`,
-/// which is what lets [`crate::memory::RegisterAccessCols`] be 6 columns instead of 9.
+/// Consequently every register access proven anywhere in the machine has `prev_shard == shard`
+/// and `clk - prev_clk - 1 < 2^16`, which is what lets [`crate::memory::RegisterAccessCols`] be
+/// 5 columns with one byte lookup instead of 9 columns with two.
 ///
-/// Ziren's "high limb" of the timestamp is the shard number, which changes once per shard, so the
-/// chip is bounded by `NUM_REGISTERS` rows per shard instead of being driven by a 24-bit epoch.
+/// A shard has at most `NUM_REGISTERS` first-touch rows plus one gap row per register per `2^16`
+/// clk ticks.
 #[derive(Default)]
 pub struct MemoryBumpChip {}
 
@@ -80,6 +86,11 @@ impl<F> BaseAir<F> for MemoryBumpChip {
 /// `generate_trace` so the two can never drift.
 fn bump_row_blu_events(event: &MemoryBumpEvent, blu: &mut impl ByteRecord) {
     blu.add_u16_range_check(event.shard as u16);
+    blu.add_u16_range_check((event.timestamp & 0xffff) as u16);
+    blu.add_bit_range_check(
+        ((event.timestamp >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16,
+        TIMESTAMP_HIGH_LIMB_BITS,
+    );
 
     blu.add_byte_lookup_event(ByteLookupEvent {
         opcode: ByteOpcode::LTU,
@@ -158,6 +169,8 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
                     let mut blu = Vec::new();
                     cols.access.populate(read_record(event), &mut blu);
                     cols.shard = F::from_u32(event.shard);
+                    cols.clk_16bit_limb = F::from_u32(event.timestamp & 0xffff);
+                    cols.clk_high_limb = F::from_u32(event.timestamp >> 16);
                     cols.addr = F::from_u32(event.addr);
                     cols.is_real = F::ONE;
                 });
@@ -175,13 +188,13 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
     }
 }
 
-/// The shadow read a bump event stands for: the register's value, re-read at `(shard, 0)`.
+/// The shadow read a bump event stands for: the register's value, re-read at `(shard, clk)`.
 #[inline]
 fn read_record(event: &MemoryBumpEvent) -> MemoryReadRecord {
     MemoryReadRecord {
         value: event.value,
         shard: event.shard,
-        timestamp: 0,
+        timestamp: event.timestamp,
         prev_shard: event.prev_shard,
         prev_timestamp: event.prev_timestamp,
     }
@@ -214,9 +227,14 @@ where
             local.is_real,
         );
 
+        builder.send_timestamp_range_checks(
+            local.clk_16bit_limb,
+            local.clk_high_limb,
+            local.is_real,
+        );
         builder.eval_memory_access(
             local.shard,
-            AB::Expr::ZERO,
+            local.clk_16bit_limb + local.clk_high_limb * AB::Expr::from_u32(1 << 16),
             local.addr,
             &local.access,
             local.is_real,

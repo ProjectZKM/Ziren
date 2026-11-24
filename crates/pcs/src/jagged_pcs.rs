@@ -1794,7 +1794,7 @@ mod test {
         views: &[ChipTraceView],
         z_row: &[JaggedChallenge],
     ) -> Vec<Vec<JaggedChallenge>> {
-        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<JaggedChallenge>(z_row);
+        let eq_c = crate::shard_level::univariate_skip::skip_row_eq_table::<JaggedChallenge>(z_row);
         views
             .iter()
             .map(|(_, pm)| {

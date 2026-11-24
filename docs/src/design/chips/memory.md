@@ -35,7 +35,12 @@ The memory-instruction chips do not range-check the bytes of the loaded or store
 
 ## MemoryBump
 
-A register access compares only clocks, not shards. To make that sound, `MemoryBump` has one row per (register, shard) for every register the shard touches: a *shadow read* of the register at timestamp `(shard, 0)`. Its previous access may be in any earlier shard, so this row uses the full access columns with a shard comparison. Because `clk` restarts at 0 in every shard and real register accesses sit at \\( clk + 1 \\) to \\( clk + 4 \\), the shadow read is always the first access of the shard to that register. Every other register access then has `prev_shard = shard`. This reduces each register access to six columns (value, previous clock and one 16-bit limb of the clock difference) instead of nine.
+A register access compares only clocks, not shards, and checks the clock difference with a single 16-bit lookup. To make that sound, `MemoryBump` inserts *shadow reads* of a register in two cases:
+
+- one row per (register, shard) for every register the shard touches, at timestamp `(shard, 0)`. Its previous access may be in any earlier shard, so this row uses the full access columns with a shard comparison. Because `clk` restarts at 0 in every shard and real register accesses sit at \\( clk + 1 \\) to \\( clk + 4 \\), the shadow read is always the first access of the shard to that register;
+- one row just before an access whose previous access to the register is \\( 2^{16} \\) or more clock ticks back, so the difference seen by the access itself is small again.
+
+Every other register access then has `prev_shard = shard` and \\( clk - prev\\_clk - 1 < 2^{16} \\). This reduces each register access to five columns (value and previous clock) and one range lookup, instead of nine columns and two lookups. A shard has at most 36 first-touch rows plus one gap row per register per \\( 2^{16} \\) ticks.
 
 ## MemoryLocal
 

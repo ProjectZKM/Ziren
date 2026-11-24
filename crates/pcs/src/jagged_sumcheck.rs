@@ -31,8 +31,9 @@ pub struct JaggedReductionProof<EF> {
 /// `z_col`); padding columns beyond the real count are never indexed.
 ///
 /// * `z_row`: the full zerocheck-reduced point (`max_log_row_count` dims).
-///   Row `r < h_c` of chip `c` gets weight `eq(z_row, r)`; bits of `r` at or
-///   above `log h_c` are 0, so no separate height factor is needed.
+///   Its last four slots hold the skip challenge `r0`.  Row `r < h_c` of
+///   chip `c` gets weight `L_{r mod 16}(r0) · eq(z_hi, r >> 4)`; bits of `r`
+///   at or above `log h_c` are 0, so no separate height factor is needed.
 fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
@@ -44,7 +45,7 @@ fn build_weight_table(
 
     let _ = r_row_per_chip;
     let row_eq_full: Vec<InnerChallenge> =
-        crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
+        crate::shard_level::univariate_skip::skip_row_eq_table::<InnerChallenge>(z_row);
     let eq_c: &[InnerChallenge] = &row_eq_full;
 
     let mut k: usize = 0;
@@ -112,7 +113,7 @@ fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerCha
 /// Build the jagged-reduction weight table for an EXTERNAL
 /// (GPU-hook) prover.  Exactly the table `prove_jagged_reduction_owned`
 /// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
-/// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
+/// with `row_eq_full = skip_row_eq_table(z_row)`.  Exposed `pub` so the
 /// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
 /// of re-deriving the gamma-mixing weights.  Keep in lockstep with the
 /// host body; any weight-table change MUST update both.
@@ -134,7 +135,7 @@ pub fn build_weight_table_from_z_col(
 ///
 /// Returns `(z_col_lagrange, row_eq)` where:
 ///   * `z_col_lagrange = partial_lagrange(z_col)`  (per packed column k)
-///   * `row_eq = eq_mle_table(rev(z_row))`         (full max-log-row eq table,
+///   * `row_eq = skip_row_eq_table(z_row)`         (full max-log-row row weights,
 ///     indexed by the LITERAL row index 0..h_c)
 ///
 /// BYTE-IDENTICAL to `build_weight_table` by construction: that fn computes
@@ -147,7 +148,7 @@ pub fn build_fused_weight_inputs(
     z_row: &[InnerChallenge],
 ) -> (Vec<InnerChallenge>, Vec<InnerChallenge>) {
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
-    let row_eq = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
+    let row_eq = crate::shard_level::univariate_skip::skip_row_eq_table::<InnerChallenge>(z_row);
     (z_col_lagrange, row_eq)
 }
 
@@ -371,7 +372,7 @@ mod closing_identity {
             d
         };
 
-        let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
+        let max_log_row = chips.iter().map(|c| c.0).max().unwrap().max(5);
         let z_row: Vec<InnerChallenge> = {
             let mut c = challenger();
             (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
@@ -392,7 +393,9 @@ mod closing_identity {
             .map(|((_n, trace), _r_row_c)| {
                 let w = trace.width;
                 let h = trace.values.len() / w.max(1);
-                let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(&z_row);
+                let eq_c = crate::shard_level::univariate_skip::skip_row_eq_table::<InnerChallenge>(
+                    &z_row,
+                );
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
@@ -485,7 +488,7 @@ mod closing_identity {
     // claims so the assert holds.
 
     // y for a chip stored at `log_h_store` rows (raw zero-padded), production formula:
-    //   eq_c = eq_mle_table(rev(z_row)); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
+    //   eq_c = skip_row_eq_table(z_row); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
     fn y_for_height(
         trace_cols: &[Vec<InnerVal>],
         log_h_store: usize,
@@ -495,7 +498,7 @@ mod closing_identity {
         let w = trace_cols.len();
         let raw_h = trace_cols[0].len();
         let h_store = 1usize << log_h_store;
-        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
+        let eq_c = crate::shard_level::univariate_skip::skip_row_eq_table::<InnerChallenge>(z_row);
         let log_h2 = log_h_store as u32;
         (0..w)
             .map(|col| {
@@ -663,7 +666,7 @@ mod closing_identity {
         let w = trace_cols.len();
         let h_raw = 1usize << lr;
         let h_band = 1usize << lb;
-        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
+        let eq_c = crate::shard_level::univariate_skip::skip_row_eq_table::<InnerChallenge>(z_row);
         (0..w)
             .map(|col| {
                 let mut dense = vec![InnerVal::ZERO; h_band];
@@ -846,6 +849,7 @@ mod closed_form_weight_equivalence {
         for (i, chips) in cases.iter().enumerate() {
             let max_h = chips.iter().map(|(h, _)| *h).max().unwrap_or(1).max(1);
             let min_dim = max_h.next_power_of_two().trailing_zeros() as usize;
+            let min_dim = min_dim.max(5);
             for z_row_dim in [min_dim, min_dim + 1, min_dim + 4, 22] {
                 assert_agrees(chips, 4242 + i as u64, z_row_dim);
             }

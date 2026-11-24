@@ -29,9 +29,9 @@
 \node[chip] (u1) at (0,0)    {};
 \node[chip] (u2) at (5,0)    {};
 \node[chip] (u3) at (10,0)   {};
-\node[hdr] at ($(u1.north)+(0,-0.42)$) {\texttt{AddSubImm}};
-\node[hdr] at ($(u2.north)+(0,-0.42)$) {\texttt{Branch}};
-\node[hdr] at ($(u3.north)+(0,-0.42)$) {\texttt{LoadWord}};
+\node[hdr] at ($(u1.north)+(0,-0.42)$) {add immediate};
+\node[hdr] at ($(u2.north)+(0,-0.42)$) {branch};
+\node[hdr] at ($(u3.north)+(0,-0.42)$) {load word};
 \node[lbl] at ($(u1.south)+(0,0.40)$) {\texttt{addiu}};
 \node[lbl] at ($(u2.south)+(0,0.40)$) {\texttt{bne}};
 \node[lbl] at ($(u3.south)+(0,0.40)$) {\texttt{lw} (delay slot)};

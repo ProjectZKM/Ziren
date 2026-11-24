@@ -556,7 +556,10 @@ mod tests {
     ///         emit_branching_program_eval,
     ///         emit_prefix_sum_check,
     ///      )`.
-    fn _machine_wiring_reference_pattern<C: CircuitConfig>() {
+    fn _machine_wiring_reference_pattern<C: CircuitConfig>()
+    where
+        C::F: p3_field::TwoAdicField,
+    {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
         use crate::jagged_eval_primitives::{emit_branching_program_eval, emit_prefix_sum_check};
         let _evaluator: RecursiveJaggedEvalSumcheckConfig<

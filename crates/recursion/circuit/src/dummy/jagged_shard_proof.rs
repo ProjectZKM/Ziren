@@ -49,6 +49,25 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
     }
 }
 
+/// Zero-filled zerocheck proof in the univariate-skip shape: one
+/// [`SKIP_POLY_LEN`]-coefficient skip message, then `num_variables − 4`
+/// degree-4 rounds; the point keeps all `num_variables` coordinates.
+///
+/// [`SKIP_POLY_LEN`]: zkm_pcs::shard_level::univariate_skip::SKIP_POLY_LEN
+pub fn dummy_zerocheck_skip_proof<EF: Field + Copy + PrimeCharacteristicRing>(
+    num_variables: usize,
+) -> PartialSumcheckProof<EF> {
+    use zkm_pcs::shard_level::univariate_skip::{SKIP_BITS, SKIP_POLY_LEN};
+    let mut univariate_polys = vec![UnivariatePolynomial::new(vec![EF::ZERO; SKIP_POLY_LEN])];
+    univariate_polys
+        .extend((SKIP_BITS..num_variables).map(|_| UnivariatePolynomial::new(vec![EF::ZERO; 5])));
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum: EF::ZERO,
+        point_and_eval: (vec![EF::ZERO; num_variables], EF::ZERO),
+    }
+}
+
 /// Allocator for [`LogupGkrProof`] — zero-filled, structurally
 /// identical to the real prover's output.
 ///
@@ -144,7 +163,7 @@ where
 /// | `public_values`        | `vec![ZERO; PROOF_MAX_NUM_PVS]`        |
 /// | `main_commitment`      | `[ZERO; 8]`                            |
 /// | `logup_gkr_proof`      | [`dummy_logup_gkr_proof`]              |
-/// | `zerocheck_proof`      | `dummy_partial_sumcheck_proof(max_log_row_count, 4)` |
+/// | `zerocheck_proof`      | `dummy_zerocheck_skip_proof(max_log_row_count)` |
 /// | `opened_values`        | one zero entry per chip, shaped as the prover's |
 /// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
@@ -166,7 +185,7 @@ where
 
     let logup_gkr_proof = dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
 
-    let zerocheck_proof = dummy_partial_sumcheck_proof::<EF>(max_log_row_count, 4);
+    let zerocheck_proof = dummy_zerocheck_skip_proof::<EF>(max_log_row_count);
 
     let opened_values = {
         let bit_len = max_log_row_count + 1;
