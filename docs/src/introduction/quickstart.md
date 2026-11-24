@@ -42,7 +42,7 @@ You can also create a new project by cloning the [Ziren Project Template](https:
 - Solidity contracts for on-chain verification
 - Sample inputs/outputs and test data
 
-The template's `host/Cargo.toml` and `guest/Cargo.toml` take `zkm-sdk`, `zkm-build` and `zkm-zkvm` as git dependencies. To build against Ziren 2.0, point them at `https://github.com/ProjectZKM/Ziren` (the repository's former name, zkMIPS, still appears in older copies of the template).
+The template's `host/Cargo.toml` and `guest/Cargo.toml` take `zkm-sdk`, `zkm-build` and `zkm-zkvm` as git dependencies. To build against Ziren 2.1, point them at `https://github.com/ProjectZKM/Ziren` (the repository's former name, zkMIPS, still appears in older copies of the template).
 
 The project directory has the following structure: 
 
@@ -104,7 +104,7 @@ contracts: contains the Solidity verifier smart contracts and test scripts for o
 - `contracts/src/Fibonacci.sol`: a sample Solidity contract demonstrating input/output structure for the Fibonacci program.
 - `IZKMVerifier.sol`: implemented Ziren interface for verifiers.
 - `fixtures/`: contains the public outputs, proof and verification keys in JSON format.
-- `v1.0.0/`: contains the Groth16 and PLONK verifier implementations and wrapper contracts for circuit version v1.0.0. The verifier contracts must match the circuit version of the SDK that produced the proof. For Ziren 2.0 (circuit version `v2.0.0`), the SDK downloads them with the circuit artifacts into `~/.zkm/circuits/groth16/v2.0.0/` (`Groth16Verifier.sol`, `ZKMVerifierGroth16.sol`) and `~/.zkm/circuits/plonk/v2.0.0/` (`PlonkVerifier.sol`, `ZKMVerifierPlonk.sol`); copy them into `contracts/src/v2.0.0/`.
+- `v1.0.0/`: contains the Groth16 and PLONK verifier implementations and wrapper contracts for circuit version v1.0.0. The verifier contracts must match the circuit version of the SDK that produced the proof. For Ziren 2.1 (circuit version `v2.1.0`), the SDK downloads them with the circuit artifacts into `~/.zkm/circuits/groth16/v2.1.0/` (`Groth16Verifier.sol`, `ZKMVerifierGroth16.sol`) and `~/.zkm/circuits/plonk/v2.1.0/` (`PlonkVerifier.sol`, `ZKMVerifierPlonk.sol`); copy them into `contracts/src/v2.1.0/`.
 - `contracts/script/`: contains forge scripts to deploy the verifier contracts.
 - `contracts/test/`: contains Foundry tests to validate verifier functionality.
 
@@ -167,7 +167,7 @@ cd host
 cargo run --release --bin evm -- --system groth16
 ```
 
-The output includes public values, the verifying key hash, and proof bytes. An example output, abbreviated (the Groth16 constraint count, timings, key hash and proof depend on the circuit version and the program; the Ziren 2.0 Groth16 circuit has about 31.9 million constraints):
+The output includes public values, the verifying key hash, and proof bytes. An example output, abbreviated (the Groth16 constraint count, timings, key hash and proof depend on the circuit version and the program; the Ziren 2.1 Groth16 circuit has about 30.6 million constraints):
 
 ```
 n: 20

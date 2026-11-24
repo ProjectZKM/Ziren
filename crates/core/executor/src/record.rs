@@ -245,8 +245,8 @@ pub struct ExecutionRecord {
     pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
     /// A trace of the register timestamp bumps (shadow reads) for this shard.
     ///
-    /// One entry per register touched in the shard, emitted on its first touch.  See
-    /// [`MemoryBumpEvent`].
+    /// One entry per register on its first touch in the shard, plus one before any access
+    /// more than `2^16` clk ticks after the register's previous one.  See [`MemoryBumpEvent`].
     pub bump_memory_events: Vec<MemoryBumpEvent>,
     /// A trace of all the syscall events.
     pub syscall_events: EventVec<SyscallEvent>,

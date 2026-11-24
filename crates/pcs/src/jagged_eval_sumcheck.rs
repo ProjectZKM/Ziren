@@ -880,6 +880,8 @@ mod tests {
             InnerChallenge::from_u8(7),
             InnerChallenge::from_u8(11),
             InnerChallenge::from_u8(13),
+            InnerChallenge::from_u8(31),
+            InnerChallenge::from_u8(37),
         ];
         let z_col = vec![InnerChallenge::from_u8(17)];
         let z_trace = vec![
@@ -933,6 +935,8 @@ mod tests {
             InnerChallenge::from_u8(7),
             InnerChallenge::from_u8(11),
             InnerChallenge::from_u8(13),
+            InnerChallenge::from_u8(31),
+            InnerChallenge::from_u8(37),
         ];
         let z_col = vec![InnerChallenge::from_u8(17)];
         let z_trace = vec![
@@ -983,6 +987,8 @@ mod tests {
             InnerChallenge::from_u8(7),
             InnerChallenge::from_u8(11),
             InnerChallenge::from_u8(13),
+            InnerChallenge::from_u8(31),
+            InnerChallenge::from_u8(37),
         ];
         let z_col = vec![InnerChallenge::from_u8(17)];
         let z_trace = vec![
@@ -1068,7 +1074,7 @@ mod tests {
         let mut challenger = InnerChallenger::new(perm);
         let prefix_sums = vec![0usize, 3];
         let log_m = 2;
-        let z_row = vec![InnerChallenge::ZERO; log_m + 1];
+        let z_row = vec![InnerChallenge::from_u8(3); log_m + 3];
         let z_col: Vec<InnerChallenge> = vec![];
         let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
 

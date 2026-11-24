@@ -141,27 +141,29 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
     z_trace: &[SymbolicExt<C::F, C::EF>],
     prefix_sum: &[SymbolicExt<C::F, C::EF>],
     next_prefix_sum: &[SymbolicExt<C::F, C::EF>],
-) -> SymbolicExt<C::F, C::EF> {
+) -> SymbolicExt<C::F, C::EF>
+where
+    C::F: p3_field::TwoAdicField,
+{
+    use zkm_pcs::shard_level::univariate_skip::SKIP_BITS;
+    assert!(z_row.len() > SKIP_BITS, "branching program: skip row point too short");
     let num_vars = z_row.len().max(z_trace.len());
-
-    let mut state_weights: [SymbolicExt<C::F, C::EF>; 4] =
-        [SymbolicExt::ZERO, SymbolicExt::ZERO, SymbolicExt::ONE, SymbolicExt::ZERO];
 
     let lsb = |v: &[SymbolicExt<C::F, C::EF>], i: usize| -> SymbolicExt<C::F, C::EF> {
         v.get(i).copied().unwrap_or(SymbolicExt::ZERO)
     };
-
-    for layer in (0..=num_vars).rev() {
-        let layer_point = [
-            lsb(z_row, layer),
+    let step = |state: &[SymbolicExt<C::F, C::EF>; 4],
+                layer: usize,
+                row: SymbolicExt<C::F, C::EF>|
+     -> [SymbolicExt<C::F, C::EF>; 4] {
+        let eq_weights = partial_lagrange_four::<C>([
+            row,
             lsb(z_trace, layer),
             lsb(prefix_sum, layer),
             lsb(next_prefix_sum, layer),
-        ];
-        let eq_weights = partial_lagrange_four::<C>(layer_point);
-
-        let mut new_state_weights: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
-        for ms_in in 0..4usize {
+        ]);
+        let mut out: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
+        for (ms_in, slot) in out.iter_mut().enumerate() {
             let mut accum: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
             for (bs, w) in eq_weights.iter().enumerate() {
                 if let Some(ms_out) = TRANSITIONS[ms_in][bs] {
@@ -169,15 +171,30 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
                 }
             }
             let mut sum = SymbolicExt::ZERO;
-            for (a, r) in accum.iter().zip(state_weights.iter()) {
+            for (a, r) in accum.iter().zip(state.iter()) {
                 sum += *a * *r;
             }
-            new_state_weights[ms_in] = sum;
+            *slot = sum;
         }
-        state_weights = new_state_weights;
-    }
+        out
+    };
 
-    state_weights[0]
+    let mut state: [SymbolicExt<C::F, C::EF>; 4] =
+        [SymbolicExt::ZERO, SymbolicExt::ZERO, SymbolicExt::ONE, SymbolicExt::ZERO];
+    for layer in (SKIP_BITS..=num_vars).rev() {
+        state = step(&state, layer, lsb(z_row, layer));
+    }
+    let mut branches = vec![state];
+    for layer in (0..SKIP_BITS).rev() {
+        let mut next = Vec::with_capacity(branches.len() * 2);
+        for s in &branches {
+            next.push(step(s, layer, SymbolicExt::ZERO));
+            next.push(step(s, layer, SymbolicExt::ONE));
+        }
+        branches = next;
+    }
+    let weights = crate::univariate_skip::lagrange_weights::<C>(z_row[0]);
+    branches.iter().zip(weights.iter()).fold(SymbolicExt::ZERO, |acc, (s, &w)| acc + w * s[0])
 }
 
 /// In-circuit emitter for the `prefix_sum_check` op.
@@ -325,23 +342,43 @@ mod tests {
     type F = InnerVal;
     type EF = InnerChallenge;
 
-    /// Construction smoke test: the branching-program emitter
-    /// builds a symbolic expression from empty inputs without
-    /// panicking (the trivial case — zero iterations of the DP).
+    /// The circuit branching program (LSB-first inputs) equals the host one
+    /// (big-endian inputs) on a skip row point.
     #[test]
-    fn branching_program_eval_trivial() {
+    fn branching_program_eval_matches_host() {
         let mut builder = AsmBuilder::<F, EF>::default();
-        let z_row: Vec<SymbolicExt<F, EF>> = vec![];
-        let z_trace: Vec<SymbolicExt<F, EF>> = vec![];
-        let prefix_sum: Vec<SymbolicExt<F, EF>> = vec![];
-        let next_prefix_sum: Vec<SymbolicExt<F, EF>> = vec![];
-        let _result = emit_branching_program_eval::<C>(
+        let mk = |seed: u32, n: usize| -> Vec<EF> {
+            (0..n)
+                .map(|i| {
+                    EF::from_u32(
+                        seed.wrapping_mul(2_654_435_761).wrapping_add(97 * i as u32) % 0x7f00_0000,
+                    )
+                })
+                .collect()
+        };
+        let z_row_be = mk(11, 7);
+        let z_trace_be = mk(23, 9);
+        let ps_be = mk(37, 9);
+        let nps_be = mk(41, 9);
+        let host = zkm_pcs::jagged_branching_program::BranchingProgram::new(
+            z_row_be.clone(),
+            z_trace_be.clone(),
+        )
+        .eval(&ps_be, &nps_be);
+        let le = |v: &[EF]| -> Vec<SymbolicExt<F, EF>> {
+            v.iter().rev().map(|&x| SymbolicExt::from(x)).collect()
+        };
+        let got = emit_branching_program_eval::<C>(
             &mut builder,
-            &z_row,
-            &z_trace,
-            &prefix_sum,
-            &next_prefix_sum,
+            &le(&z_row_be),
+            &le(&z_trace_be),
+            &le(&ps_be),
+            &le(&nps_be),
         );
+        match got {
+            SymbolicExt::Const(v) => assert_eq!(v, host),
+            _ => panic!("constant inputs must fold to a constant"),
+        }
     }
 
     /// The factored `eq` the emitter uses must equal the textbook form for

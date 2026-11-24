@@ -25,7 +25,7 @@ A shard's accesses are tuples `(shard, clk, addr, value)` on the `Memory` bus. T
 
 - An access sends its previous tuple `(prev_shard, prev_clk, addr, prev_value)` (the read) and receives its new tuple (the write). It asserts that `(shard, clk)` is strictly larger than `(prev_shard, prev_clk)`. When the shards are equal, the difference `clk - prev_clk - 1` is split into a 16-bit and a 10-bit limb and both are range-checked, which proves `clk > prev_clk` because both clocks are below \\( 2^{26} \\). Otherwise the same check is applied to the shards.
 - `MemoryLocal` has one row per address the shard touches. The row supplies the address's first tuple in the shard and consumes its last one.
-- Registers are addresses 0 to 35. `MemoryBump` inserts a read of every touched register at `(shard, 0)`, so the check for every other register access compares clocks only (see [Memory](./chips/memory.md)).
+- Registers are addresses 0 to 35. `MemoryBump` inserts a read of every touched register at `(shard, 0)`, and another before any access that comes \\( 2^{16} \\) or more clock ticks after the previous one. Every other register access therefore compares clocks only, and its difference fits one 16-bit range check (see [Memory](./chips/memory.md)).
 
 The `Memory` bus balances when the sends equal the receives, which is condition 4 for the shard. The LogUp-GKR argument proves it together with all other buses (see [Lookup Arguments](./lookup-arguments.md)).
 
