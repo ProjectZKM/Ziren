@@ -439,56 +439,6 @@ pub fn materialize_dense_jagged<F: Field>(
     dense_values
 }
 
-/// Pack multiple chip traces into a single dense vector for Jagged PCS.
-///
-/// Each chip's trace is a `RowMajorMatrix<F>` with `row_count` rows and
-/// `column_count` columns. The traces may have different heights.
-///
-/// The packing concatenates all columns from all chips sequentially:
-/// ```text
-///   chip_0 col_0 (l_0 values) | chip_0 col_1 (l_0 values) | ... |
-///   chip_1 col_0 (l_1 values) | chip_1 col_1 (l_1 values) | ... |
-///   ...
-/// ```
-///
-/// The result is zero-padded out to the committed dense length (whole
-/// stacking blocks — see [`committed_dense_len`]).
-///
-/// Prefer [`compute_jagged_metadata`] + [`materialize_dense_jagged`] for new
-/// code — that pair lets the dense vector exist only for the brief window
-/// when the WHIR commit needs it.
-pub fn pack_traces_jagged<F: Field>(traces: &[(String, RowMajorMatrix<F>)]) -> JaggedPacking<F> {
-    let mut chip_infos = Vec::with_capacity(traces.len());
-    let mut offsets = Vec::new();
-    let mut dense_values = Vec::new();
-
-    for (name, trace) in traces {
-        let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
-        let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
-
-        chip_infos.push(JaggedChipInfo {
-            name: name.clone(),
-            row_count: height,
-            column_count: width,
-        });
-
-        for col in 0..width {
-            offsets.push(dense_values.len());
-            for row in 0..height {
-                dense_values.push(trace.values[row * width + col]);
-            }
-        }
-    }
-
-    let total_values = dense_values.len();
-    offsets.push(total_values);
-
-    let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
-    dense_values.resize(dense_len, F::ZERO);
-
-    JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
-}
-
 /// Compute the cumulative column offsets `t_k = Σ_{j<k} row_count_j · column_count_j`
 /// for Jagged verification, `k = 0..=n`; the verifier uses them to locate
 /// chip data in the dense vector.
@@ -605,7 +555,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
 
 //  Hierarchical PCS: Table-Local Column Folding + Global WHIR
 //
-// The naive approach (pack_traces_jagged above) treats all columns from
+// The flat packing treats all columns from
 // all tables as a single flat vector. This has O(total_columns) fan-in
 // for the PCS projection, causing register pressure and compute-bound
 // bottlenecks on GPU.
@@ -748,37 +698,6 @@ mod tests {
     type F = KoalaBear;
 
     #[test]
-    fn test_pack_traces_jagged() {
-        let cpu_trace = RowMajorMatrix::new(vec![F::ONE; 1024 * 70], 70);
-        let addsub_trace = RowMajorMatrix::new(vec![F::TWO; 256 * 31], 31);
-        let divrem_trace = RowMajorMatrix::new(vec![F::ONE; 16 * 170], 170);
-
-        let traces = vec![
-            ("Cpu".to_string(), cpu_trace),
-            ("AddSub".to_string(), addsub_trace),
-            ("DivRem".to_string(), divrem_trace),
-        ];
-
-        let packing = pack_traces_jagged(&traces);
-        let stats = jagged_stats(&packing);
-
-        println!("Jagged packing stats:");
-        println!("  chips: {}", stats.num_chips);
-        println!("  total columns: {}", stats.total_columns);
-        println!("  real values: {}", stats.total_real_values);
-        println!("  padded size: {}", stats.padded_size);
-        println!("  padding ratio: {:.2}x", stats.padding_ratio);
-        println!("  per-chip padded total: {}", stats.per_chip_padded_total);
-        println!("  savings vs per-chip: {:.1}%", stats.savings_vs_per_chip * 100.0);
-
-        assert_eq!(stats.num_chips, 3);
-        assert_eq!(stats.total_columns, 70 + 31 + 170);
-        assert_eq!(stats.total_real_values, 1024 * 70 + 256 * 31 + 16 * 170);
-        assert!(stats.padded_size >= stats.total_real_values);
-        assert!(stats.padded_size.is_power_of_two());
-    }
-
-    #[test]
     fn test_hierarchical_jagged_pack() {
         let cpu_trace = RowMajorMatrix::new(vec![F::ONE; 1024 * 70], 70);
         let addsub_trace = RowMajorMatrix::new(vec![F::TWO; 256 * 31], 31);
@@ -809,16 +728,6 @@ mod tests {
 
         assert_eq!(stats.total_columns, 3);
         assert_eq!(stats.total_real_values, 1024 + 256 + 16);
-
-        let flat_packing = pack_traces_jagged(&traces);
-        let flat_stats = jagged_stats(&flat_packing);
-        println!("\nFlat vs Hierarchical:");
-        println!("  Flat real values: {}", flat_stats.total_real_values);
-        println!("  Hierarchical real values: {}", stats.total_real_values);
-        println!(
-            "  Data reduction: {:.1}x",
-            flat_stats.total_real_values as f64 / stats.total_real_values as f64
-        );
     }
 
     #[test]

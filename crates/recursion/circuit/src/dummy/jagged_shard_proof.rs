@@ -700,10 +700,9 @@ mod tests {
     /// Height-agnostic groundwork (Stages 1-3) ROUND-TRIP: the dummy's
     /// witnessed `row_counts` / `padding_column_counts` must EQUAL the
     /// real prover's for the same chip-set shape.  Both derive from the
-    /// SAME `pack_traces_jagged` packing via
-    /// `derive_row_and_padding_counts`, so dummy == real by construction.
-    /// The dummy packs ZERO matrices at the given dims; the "real"
-    /// reference packs full-VALUE matrices at the SAME dims — the
+    /// SAME jagged layout via `derive_row_and_padding_counts`.  The dummy
+    /// lays out the given dims alone; the "real" reference lays out
+    /// full-VALUE traces at the SAME dims the way the prover does — the
     /// derivation is value-independent (offsets/column_counts only), so
     /// the numeric counts must match exactly.
     #[test]
@@ -715,7 +714,7 @@ mod tests {
     fn check_row_padding_counts(chip_dims: &[(usize, usize)]) {
         use p3_field::PrimeCharacteristicRing;
         use p3_matrix::dense::RowMajorMatrix;
-        use zkm_pcs::jagged::{derive_row_and_padding_counts, pack_traces_jagged};
+        use zkm_pcs::jagged::{compute_jagged_metadata, derive_row_and_padding_counts};
         use zkm_pcs::InnerVal;
 
         let max_log_row_count = 8usize;
@@ -743,7 +742,9 @@ mod tests {
                 (format!("chip{i}"), RowMajorMatrix::new(vals, *w))
             })
             .collect();
-        let real_packing = pack_traces_jagged::<InnerVal>(&real_traces);
+        let real_packing = compute_jagged_metadata::<InnerVal>(
+            &zkm_pcs::jagged_pcs::jagged::views_over_traces(real_traces),
+        );
         let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
         let area = zkm_pcs::jagged::committed_dense_len(real_packing.total_values, log_stack);
         let cube = 1usize << max_log_row_count;
