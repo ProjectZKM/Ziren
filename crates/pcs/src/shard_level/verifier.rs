@@ -1067,8 +1067,9 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 ///      — transcript kept in sync with the prover.
 ///   2. Point dimension == `max_log_row_count`.
 ///   3. Point dimension == `gkr_evaluations.point` dimension.
-///   4. Inner sumcheck proof via [`verify_sumcheck_host`] (degree 4,
-///      `max_log_row_count` rounds).
+///   4. Inner sumcheck proof via [`verify_zerocheck_skip_sumcheck_host`]:
+///      the 61-coefficient skip message, then `max_log_row_count - 4`
+///      rounds of degree 4.
 ///   5. Per-chip opening transcript observations matching the prover's
 ///      ordering.
 ///

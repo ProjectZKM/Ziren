@@ -31,8 +31,9 @@ pub struct JaggedReductionProof<EF> {
 /// `z_col`); padding columns beyond the real count are never indexed.
 ///
 /// * `z_row`: the full zerocheck-reduced point (`max_log_row_count` dims).
-///   Row `r < h_c` of chip `c` gets weight `eq(z_row, r)`; bits of `r` at or
-///   above `log h_c` are 0, so no separate height factor is needed.
+///   Its last four slots hold the skip challenge `r0`.  Row `r < h_c` of
+///   chip `c` gets weight `L_{r mod 16}(r0) · eq(z_hi, r >> 4)`; bits of `r`
+///   at or above `log h_c` are 0, so no separate height factor is needed.
 fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],

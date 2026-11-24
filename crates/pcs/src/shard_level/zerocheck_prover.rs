@@ -12,10 +12,13 @@
 //!      analytically by `VirtualGeq`.
 //!   3. Seed each chip's claim from its GKR openings
 //!      (`Σ openings · β^(1..)`).
-//!   4. Reduce via
-//!      [`super::sumcheck_poly::reduce_sumcheck_to_evaluation`]
-//!      (λ-RLC across chips, name order) into `univariate_polys` /
-//!      `claimed_sum` / `point_and_eval`.
+//!   4. Send the univariate skip message for the four lowest row
+//!      variables ([`super::univariate_skip`], λ-RLC across chips, name
+//!      order), sample `r0` and fold every 16-row block with `L_b(r0)`.
+//!   5. Reduce the remaining variables via
+//!      [`super::sumcheck_poly::reduce_sumcheck_to_evaluation`] into
+//!      `univariate_polys` / `claimed_sum` / `point_and_eval`; the point
+//!      carries `r0` in its last four slots.
 
 use std::collections::BTreeMap;
 
@@ -55,7 +58,9 @@ where
 ///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
 ///      padded tail is handled analytically by `VirtualGeq`).
 ///   3. Seed per-chip claims from the GKR openings.
-///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
+///   4. Send the univariate skip message, sample `r0`, fold each 16-row block.
+///   5. Reduce the remaining variables via `reduce_sumcheck_to_evaluation`
+///      (λ-RLC across chips).
 ///
 /// * `alpha`, `gkr_batch_open`: squeezed by the caller in that order right
 ///   before this call; `lambda` is squeezed here, so the transcript order is
