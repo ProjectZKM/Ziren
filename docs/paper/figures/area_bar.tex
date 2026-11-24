@@ -1,10 +1,11 @@
-% Trace area by chip (executor census of block 25955640 at the current revision, 29.2 G cells).
+% Trace area by chip (census of block 25955640, analysed configuration, 29.2 G cells).
 \begin{tikzpicture}
 \begin{axis}[
   xbar, xmin=0, xmax=20, scale only axis, width=0.5\linewidth, height=6.2cm,
   bar width=7pt, xlabel={share of trace area (\%)},
   symbolic y coords={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,Global,LoadWord},
   ytick={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,Global,LoadWord},
+  yticklabels={Other,Narrow load,Bitwise,Addition,{Shift left, imm.},{Addition, imm.},Branch,Unaligned access,Store word,Cross-shard digest,Load word},
   y dir=normal, nodes near coords, nodes near coords align={horizontal},
   every node near coord/.append style={font=\scriptsize},
   tick label style={font=\scriptsize}, label style={font=\small},

@@ -118,7 +118,7 @@
 \newcommand{\Lean}{Lean~4}
 \newcommand{\ndettotal}{104}
 
-\title{\Zirenver{}: Succinct Arguments for MIPS32 Execution\thanks{Source code: \url{https://github.com/ProjectZKM/Ziren}. Measurements name the configuration they were taken on (\S\ref{sec:perf-revision}).}}
+\title{\Zirenver{}: Succinct Arguments for MIPS32 Execution\thanks{Measurements name the configuration they were taken on (\S\ref{sec:perf-revision}).}}
 
 \author[1, 2]{Stephen Duan\thanks{Corresponding author: \texttt{stephen.d@zkm.io}}}
 \author[1]{Jingping Yin}
@@ -129,18 +129,18 @@
 \affil[1]{ZKM Team}
 \affil[2]{GOAT Network}
 
-\date{October 2026}
+\date{November 2026}
 
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-Proving MIPS32 execution requires preserving branch-delay semantics while controlling the cost of heterogeneous instruction constraints. We present \Ziren{}, a production \zkVM{} for MIPS32r2 that supports 77 user-mode integer instructions and has proved Ethereum mainnet blocks end to end. Its arithmetisation embeds the program-counter pair in per-opcode instruction frames, eliminating the central CPU table. Each shard is proved with a single lookup argument, a zerocheck and a jagged commitment opened through batched \WHIR{}; recursive aggregation uses an enumerated verifying-key allowlist.
+Proving MIPS32 execution requires preserving branch-delay semantics while controlling the cost of heterogeneous instruction constraints. We present \Ziren{}, a \zkVM{} for MIPS32r2 that supports 77 user-mode integer instructions and has proved Ethereum mainnet blocks end to end. Its arithmetisation embeds the program-counter pair in per-opcode instruction frames, eliminating the central CPU table. Each shard is proved with a single lookup argument, a zerocheck whose first four rounds are folded into one univariate round, and a jagged commitment opened through batched \WHIR{}. Recursive aggregation uses an enumerated verifying-key allowlist, and an optional terminal proof is zero knowledge.
 
-We mechanically extract \ndettotal{} determinism theorems from the prover's constraint description and discharge them in \Lean{}. The kernel-checked proofs cover 57 of the core machine's 62 chips, including precompiles, and establish unique outputs for fixed inputs under the declared lookup-table assumptions. The exclusions are three preprocessed tables and two SHA-256 control chips. We also formulate a cost model that separates trace cells and bus interactions per guest instruction from hardware-dependent proving throughput, accounting for instruction frames, shard-boundary memory rows and precompile expansion.
+We mechanically extract \ndettotal{} determinism theorems from the constraint system and discharge them in \Lean{}. The kernel-checked proofs cover 57 of the core machine's 62 chips, including precompiles, and establish unique outputs for fixed inputs under the declared lookup-table assumptions. We also formulate a cost model that separates trace cells and bus interactions per guest instruction from hardware-dependent proving throughput.
 
-On the evaluated Ethereum blocks, warm proving throughput reaches $12.0$\,MHz on one NVIDIA RTX~5090 GPU and $75.8$\,MHz on eight. Each proof stage has more than 100 bits of interactive soundness; a union bound for a tree with 149 core-schedule proofs and one root gives $93.5$ bits of interactive composite security. End-to-end knowledge soundness remains conditional on five stated hypotheses, including enforcement of the recursion relation and computational binding of the cross-shard digest. No numerical security bound is established for that digest; the interactive estimates therefore do not quantify the full security of the deployed non-interactive proof.
+On the evaluated Ethereum blocks, one NVIDIA RTX~5090 GPU proves the execution of the Reth client at $14.0$\,MHz and two at $21.2$\,MHz; with the Geth client an earlier configuration reaches $75.8$\,MHz on eight. Each proof stage has more than 100 bits of interactive soundness; a union bound for a tree with 149 core-schedule proofs and one root gives $93.5$ bits of interactive composite security. End-to-end knowledge soundness remains conditional on five stated hypotheses, including enforcement of the recursion relation and computational binding of the cross-shard digest, for which no numerical bound is established.
 \end{abstract}
 
 \noindent\textbf{Index terms:} arithmetic circuits, formal verification, GPU acceleration, MIPS32, polynomial commitment schemes, round-by-round soundness, verifiable computation, zero-knowledge virtual machines.

@@ -1,12 +1,10 @@
-\section{The frame and the chips in detail}
+\section{The instruction frame and the chips}
 \label{sec:app-chips}
 \label{sec:app-frame}
 
-This appendix itemises the columns and interactions of the instruction frame (Table~\ref{tab:frame}) and the width of every chip (Table~\ref{tab:chips}).
+Table~\ref{tab:frame} itemises the columns of the instruction frame. The R-type frame raises 20 interactions per row: one program fetch; a receive of $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ and a send of $(\mathsf{shard}, \mathsf{clk} + 5 + \delta, \mathsf{next\_pc}, \mathsf{next\_next\_pc})$ on the state bus, where $\delta$ is zero except for a system call; a send of the previous and a receive of the new tuple on the memory bus for each of its three accesses; and eleven table lookups, one 16-bit check of the shard, two for the clock limbs, two per access for the timestamp difference, and two for the four bytes of the written word, which the byte table checks in pairs. The I-type and shift-amount frames have one access fewer, and raise 16. Tables~\ref{tab:chips} and~\ref{tab:chips-other} list the chips.
 
-\subsection{The instruction frame}
-
-\begin{table}[t]
+\begin{table}[!htb]
 \centering
 \small
 \caption{Columns of the R-type instruction frame. The I-type frame replaces the $\mathsf{op\_c}$ index and access (7 columns) by a word immediate (4), 27 columns in all; the shift-amount frame replaces them by a scalar immediate (1) and drops the access, 24 columns. The program-counter pair is owned by the chip and passed to the frame.}
@@ -15,10 +13,10 @@ This appendix itemises the columns and interactions of the instruction frame (Ta
 \toprule
 Element & Purpose & Columns \\
 \midrule
-$\mathsf{shard}$ & shard index, the high part of every timestamp; 16-bit range check & 1 \\
-$\mathsf{clk}$ limbs & the instruction's clock as a 16-bit and a 10-bit limb, both range-checked & 2 \\
+$\mathsf{shard}$ & shard index, the high part of every timestamp; range-checked to 16 bits & 1 \\
+$\mathsf{clk}$ limbs & the clock as a 16-bit and a 10-bit limb, both range-checked & 2 \\
 $\mathsf{opcode}$, $\mathsf{op\_a}$, $\mathsf{op\_b}$, $\mathsf{op\_c}$ & the decoded instruction, sent on the program bus with $\mathsf{pc}$ & 4 \\
-$\mathsf{op\_a\_0}$ & set when the destination is register 0, which pins the written word to zero & 1 \\
+zero-destination flag & set when the destination is register 0, which pins the written word to zero & 1 \\
 $\mathsf{op\_a}$ access & previous word, written word, previous timestamp and one limb of the timestamp difference & 10 \\
 $\mathsf{op\_b}$ access & word read, previous timestamp, one difference limb & 6 \\
 $\mathsf{op\_c}$ access & word read, previous timestamp, one difference limb & 6 \\
@@ -29,31 +27,57 @@ $\mathsf{pc}$, $\mathsf{next\_pc}$ & the counter pair received on the state bus;
 \end{tabular}
 \end{table}
 
-The R-type frame raises 20 interactions per row: one program fetch; a receive of $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ and a send of $(\mathsf{shard}, \mathsf{clk} + 5 + \delta, \mathsf{next\_pc}, \mathsf{next\_next\_pc})$ on the state bus, where $\delta$ is zero except for a system call; a send of the previous and a receive of the new tuple on the memory bus for each of its three accesses; and eleven table lookups, one 16-bit check of the shard, two for the clock limbs, two per access for the timestamp difference, and two for the four bytes of the written word, which the byte table checks in pairs. The I-type and shift-amount frames have one access fewer, and raise 16.
-
-\subsection{The chips}
-
-Table~\ref{tab:chips} lists all 62 chips with their widths in the analysed configuration. \texttt{Global} differs most from the measured configuration: it has 65 columns here, against 100 in the measured baseline and 58 after the change of \S\ref{sec:perf-changes}, because the analysed configuration keeps seven chord-witness columns that change removed.
-
-\begin{table}[t]
+\begin{table}[!htbp]
 \centering
 \small
-\caption{The 62 chips of the core machine with their main-trace widths (columns over $\F$), in the analysed configuration; a second figure is a preprocessed width. The immediate (\texttt{Imm}) variants take the second operand from the instruction word. Appendix~\ref{sec:app-isa} gives the instruction-to-chip map.}
+\caption{The 23 instruction chips among the 62 chips of the core machine, in the analysed configuration (\S\ref{sec:perf-revision}): the instructions each proves, its frame (R-type, I-type, shift-amount S or universal U), its main-trace width in columns over $\F$, and the interactions it adds to its frame's, the eight of a \texttt{HI} access included.}
 \label{tab:chips}
-\begin{tabular}{p{0.2\textwidth} p{0.74\textwidth}}
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{0.42\textwidth}crr@{}}
+\toprule
+Chip & Instructions & Frame & Width & Added \\
+\midrule
+Addition & \texttt{add}, \texttt{addu}, \texttt{sub}, \texttt{subu} & R & 36 & 0 \\
+Addition, immediate & \texttt{addi}, \texttt{addiu}, \texttt{lui}, \texttt{mfhi}, \texttt{mflo}, \texttt{mthi}, \texttt{mtlo}, \texttt{sync}, \texttt{synci}, \texttt{pref} & I & 33 & 0 \\
+Bitwise & \texttt{and}, \texttt{or}, \texttt{xor}, \texttt{nor} & R & 37 & 4 \\
+Bitwise, immediate & \texttt{andi}, \texttt{ori}, \texttt{xori} & I & 33 & 4 \\
+Comparison & \texttt{slt}, \texttt{sltu} & R & 50 & 3 \\
+Comparison, immediate & \texttt{slti}, \texttt{sltiu} & I & 47 & 3 \\
+Shift left & \texttt{sllv} & R & 62 & 4 \\
+Shift left, immediate & \texttt{sll} & S & 45 & 4 \\
+Shift right & \texttt{srlv}, \texttt{srav}, \texttt{rotrv} & R & 89 & 25 \\
+Shift right, immediate & \texttt{srl}, \texttt{sra}, \texttt{rotr} & S & 83 & 25 \\
+Branch & \texttt{beq}, \texttt{bne}, \texttt{bgez}, \texttt{bgtz}, \texttt{blez}, \texttt{bltz} & I & 56 & $\le 9$ \\
+Jump & \texttt{j}, \texttt{jal}, \texttt{jr}, \texttt{jalr}, \texttt{bal} & U & 57 & 3; \texttt{bal} 9 \\
+Load word & \texttt{lw}, \texttt{ll} & I & 48 & 9 \\
+Store word & \texttt{sw}, \texttt{sc} & I & 52 & 9 \\
+Narrow load & \texttt{lb}, \texttt{lbu}, \texttt{lh}, \texttt{lhu} & I & 59 & 10 \\
+Narrow store & \texttt{sb}, \texttt{sh} & I & 55 & 9 \\
+Unaligned access & \texttt{lwl}, \texttt{lwr}, \texttt{swl}, \texttt{swr} & I & 59 & 9 \\
+Multiplication & \texttt{mul}, \texttt{mult}, \texttt{multu} & R & 74 & 22 \\
+Division & \texttt{div}, \texttt{divu} & R & 163 & 44 \\
+Leading-bit count & \texttt{clz}, \texttt{clo} & I & 93 & 28 \\
+Conditional move & \texttt{movz}, \texttt{movn}, \texttt{wsbh} & U & 49 & 0 \\
+Rare instructions & \texttt{madd}, \texttt{maddu}, \texttt{msub}, \texttt{msubu}, \texttt{seb}, \texttt{seh}, \texttt{ext}, \texttt{ins}, \texttt{teq} & U & 432 & $\le 113$ \\
+System call & \texttt{syscall} & R & 79 & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htbp]
+\centering
+\small
+\caption{The other 39 chips of the core machine with their main-trace widths. A second figure is a preprocessed width, and precompile widths are given as a range.}
+\label{tab:chips-other}
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{0.74\textwidth}@{}}
 \toprule
 Family & Chips (width) \\
 \midrule
-Integer ALU & \texttt{AddSub} (36), \texttt{AddSubImm} (33), \texttt{Bitwise} (37), \texttt{BitwiseImm} (33), \texttt{Mul} (74), \texttt{DivRem} (163), \texttt{Lt} (50), \texttt{LtImm} (47), \texttt{CloClz} (93) \\
-Shifts & \texttt{ShiftLeft} (62), \texttt{ShiftLeftImm} (45), \texttt{ShiftRight} (89), \texttt{ShiftRightImm} (83) \\
-Control flow & \texttt{Branch} (56), \texttt{Jump} (57) \\
-Memory instructions & \texttt{LoadWord} (48), \texttt{LoadNarrow} (59), \texttt{StoreWord} (52), \texttt{StoreNarrow} (55), \texttt{MemoryUnaligned} (59) \\
-Misc.\ / syscall & \texttt{MiscInstrs} (432), \texttt{MovCond} (49), \texttt{SyscallInstrs} (79), \texttt{SyscallCore} (11), \texttt{SyscallPrecompile} (11), \texttt{SysLinux} (135) \\
-Memory argument & \texttt{MemoryLocal} (80), \texttt{MemoryBump} (12), \texttt{MemoryGlobalInit} (152), \texttt{MemoryGlobalFinalize} (152), \texttt{Global} (65) \\
-Tables & \texttt{Program} (1, +14), \texttt{Byte} (10, +12), \texttt{Range} (1, +2) \\
-Hash precompiles & \texttt{ShaExtend} (166) and control (4), \texttt{ShaCompress} (249) and control (69), \texttt{KeccakSponge} (2637) and control (1095), \texttt{Poseidon2Permute} (571) \\
-Curve precompiles & add (1685) and double (1666) for \texttt{Secp256k1}, \texttt{Secp256r1} and \texttt{Bn254}, decompress (1040) for the first two; \texttt{Bls12381} add (2533), double (2506), decompress (1613); \texttt{Ed25519} add (1433), decompress (1166) \\
-Field precompiles & \texttt{Bls12381Fp} (512), \texttt{Bls12381Fp2AddSub} (1014), \texttt{Bls12381Fp2Mul} (1773), \texttt{Bn254Fp} (344), \texttt{Bn254Fp2AddSub} (678), \texttt{Bn254Fp2Mul} (1181), \texttt{Uint256MulMod} (417), \texttt{U256XU2048Mul} (2627) \\
+System-call tables & core and precompile call tables (11 each), Linux-call chip (135) \\
+Memory argument & shard-boundary chip (80), register shadow-read chip (12), memory initialisation and finalisation chips (152 each), cross-shard digest chip (65) \\
+Preprocessed tables & program (1, +14), byte (10, +12), range (1, +2) \\
+Hash precompiles & SHA-256 message extension and compression and the Keccak sponge, each with a control chip, and the \Poseidon{} permutation: 7 chips (4 to 2637) \\
+Curve precompiles & addition and doubling on secp256k1, secp256r1, BN254 and BLS12-381, addition on Ed25519, and decompression on secp256k1, secp256r1, BLS12-381 and Ed25519: 13 chips (1040 to 2533) \\
+Field precompiles & base-field arithmetic, quadratic-extension addition and subtraction, and quadratic-extension multiplication for BLS12-381 and BN254, 256-bit modular multiplication and 256-by-2048-bit multiplication: 8 chips (344 to 2627) \\
 \bottomrule
 \end{tabular}
 \end{table}

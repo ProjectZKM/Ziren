@@ -1,7 +1,7 @@
 \section{The arithmetisation: frame, buses and chips}
 \label{sec:air}
 
-Figure~\ref{fig:processor} shows instruction chips connected by buses to a program ROM, a memory subsystem and lookup tables. Every relation between chips (Definition~\ref{def:chip}), or between rows of one chip, is an interaction on a named bus, and the lookup argument of Section~\ref{sec:air-logup} proves that every bus balances (Definition~\ref{def:bus}). No constraint reads the next row: the state bus carries everything one row passes to the next. The guest-accelerator set is a configuration choice: it fixes which precompile chips a shard may contain, and adding one changes the chip set and the verifying keys. This section builds the parts every chip shares and what one row costs (\S\S\ref{sec:air-chips}--\ref{sec:air-cost}), then gives the chips instruction by instruction, for the base instruction set (\S\ref{sec:base}) and for the extended instruction set and system calls (\S\ref{sec:ext}).
+Figure~\ref{fig:processor} shows instruction chips connected by buses to a program table, a memory subsystem and lookup tables. Every relation between chips (Definition~\ref{def:chip}), or between rows of one chip, is an interaction on a named bus, and one lookup argument proves that every bus balances (Definition~\ref{def:bus}, \S\ref{sec:air-logup}). No constraint reads the next row: the state bus carries everything one row passes to the next. This section builds the parts every chip shares; \S\S\ref{sec:base} and~\ref{sec:ext} give the chips by instruction family.
 
 \begin{figure}[t]
 \centering
@@ -10,10 +10,8 @@ Figure~\ref{fig:processor} shows instruction chips connected by buses to a progr
 \label{fig:processor}
 \end{figure}
 
-\subsection{Chips, words and padding}
+\subsection{Words and padding}
 \label{sec:air-chips}
-
-Appendix~\ref{sec:app-chips} catalogues the chips with their widths. Three families dominate the trace area of an Ethereum block: the memory-instruction chips, the ALU chips, and the \texttt{Global} chip that carries the cross-shard memory argument. Immediate forms of the ALU instructions have chips of their own, whose rows have one register read fewer and are about a tenth narrower.
 
 \paragraph{Notation for words.} A 32-bit word $x$ is carried as four byte columns $(x_0, x_1, x_2, x_3)$, least significant first, and denotes the integer $\mathrm{int}(x) = \sum_{i<4} 2^{8i} x_i$; since $2^{32} > p$ that integer is never formed as a single field element. Its sign bit $x_s$ is the top bit of $x_3$, and $x_{<s}$ is the word with that bit cleared. A \emph{byte-checked} word is one whose four columns are each proved to lie in $[0, 256)$ by the byte table. Signed instructions read a word in two's complement, $\mathrm{int}(x) - 2^{32} x_s$.
 
@@ -25,25 +23,25 @@ Let $x_0, \ldots, x_{\ell-1}$ be field elements proved to lie in $[0, 2^{b_i})$ 
 Both sides are integers in $[0, p)$ that agree modulo $p$, so they are equal; uniqueness is that of positional notation.
 \end{proof}
 
-This is Cairo's instruction-decoding theorem~\citep[Thm.~1]{cairo} in general form, and every word-level constraint of the machine must meet its hypothesis. A word held as one element cannot, and neither can two 16-bit half-words checked only against their sum in $\F$, which is why the syscall bus carries the half-words themselves (\S\ref{sec:ext}).
+This is Cairo's instruction-decoding theorem~\citep[Thm.~1]{cairo} in general form, and every word-level constraint of the machine must meet its hypothesis. Two 16-bit half-words checked only against their sum in $\F$ do not, which is why the syscall bus carries the half-words themselves (\S\ref{sec:ext}).
 
-\paragraph{Padding.} Row counts are rounded up to a multiple of 32, not to a power of two; the jagged commitment of Section~\ref{sec:pcs} commits the added rows without rounding every chip to a power-of-two height. Padding rows have $\mathsf{is\_real} = 0$, and every constraint and interaction multiplicity is gated so that they are vacuous.
+\paragraph{Padding.} Row counts are rounded up to a multiple of 32, not to a power of two, and the jagged commitment of Section~\ref{sec:pcs} commits each chip at that height. Padding rows clear the gating column of Definition~\ref{def:chip}, so every constraint and interaction multiplicity is vacuous on them.
 
 \subsection{Preprocessed tables}
 \label{sec:air-tables}
 
-The byte table has $2^{16}$ rows indexed by a byte pair and one multiplicity column per operation (bitwise operations, shifts, comparisons and 8/16-bit range checks); every carry, borrow, comparison and range check in the machine is an interaction with it. A range table serves the clock limbs, and the program table holds the decoded program image. Preprocessed tables are part of the verifying key (\S\ref{sec:statement}), which therefore binds the image; OpenVM instead commits the program as a cached trace bound at the root of its recursion, so its verifying key is program-independent~\citep[\S4.4]{openvm}.
+The byte table has $2^{16}$ rows indexed by a byte pair and one multiplicity column per operation (bitwise operations, shifts, comparisons and 8- and 16-bit range checks); every carry, borrow, comparison and range check in the machine is an interaction with it. A range table serves the clock limbs, and the program table holds the decoded program image. Preprocessed tables are part of the verifying key (\S\ref{sec:statement}), which therefore binds the image.
 
-\paragraph{The byte table as a decomposed instruction table.}\label{sec:air-bytes} One lookup into the $2^{64}$-entry table of a 32-bit bitwise operation becomes four lookups into the $2^{16}$-entry byte table, indexed by a byte pair: the decomposition the original Jolt design applies to instruction tables through Lasso~\citep{jolt,lasso}, taken at $W = 32$ with four 8-bit chunks. Two things separate the settings. Lasso never commits its subtables, because the verifier evaluates their multilinear extensions itself~\citep{lasso}; a $2^{16}$-row table is small enough to commit once in the verifying key, and \LogUp{} then charges the table side one multiplicity column per operation over $2^{16}$ rows per shard, about $6.6\cdot10^{5}$ cells, under $0.2\%$ of a shard's $4.6\cdot10^{8}$-cell area budget (\S\ref{sec:isa-record}). And Jolt routes every instruction through such tables, addition and multiplication included; this arithmetisation evaluates those by constraints with byte-checked carries and uses the table only for byte-granular facts (\S\S\ref{sec:base} and~\ref{sec:ext}).
+\paragraph{The byte table as a decomposed instruction table.}\label{sec:air-bytes} One lookup into the $2^{64}$-entry table of a 32-bit bitwise operation becomes four lookups into the byte table: the decomposition the original Jolt design applies to instruction tables through Lasso~\citep{jolt,lasso}, taken with four 8-bit chunks. The table is committed once in the verifying key, and its multiplicity columns cost about $6.6\cdot10^{5}$ cells per shard, under $0.2\%$ of a shard's $4.6\cdot10^{8}$-cell area budget (\S\ref{sec:isa-record}). The table serves only byte-granular facts; addition and multiplication are evaluated by constraints with byte-checked carries (\S\S\ref{sec:base} and~\ref{sec:ext}).
 
 \subsection{The instruction frame}
 \label{sec:air-frame}
 
-A conventional zkVM arithmetisation has a central \emph{CPU chip}: one row per cycle fetches the instruction, performs the register accesses, chains the program counter and forwards a decoded instruction to an opcode chip, which spends a second row on it. Like SP1 and OpenVM for RISC-V~\citep{sp1,openvm}, \Ziren{} has no such table. Each instruction chip embeds an \emph{instruction frame} and performs those duties itself, so one executed instruction is one row of one chip. The instruction frame comprises shared columns and bus interactions that constrain instruction identity, execution time, register accesses and machine-state transitions. Opcode-specific columns constrain the relation between the operand values and the result. The frame consists of:
+No central CPU table fetches instructions, accesses registers and chains the program counter. Each instruction chip embeds an \emph{instruction frame} that performs those duties, so one executed instruction is one row of one chip, and the chip's own columns constrain only the relation between the operand values and the result. The frame consists of:
 
 \begin{itemize}
-  \item \textbf{Program fetch.} The row sends $(\mathsf{pc}, \mathsf{opcode}, \mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c}, \mathsf{imm\_b}, \mathsf{imm\_c})$ on the \emph{program} bus, and the preprocessed program table receives it with the multiplicity recorded at trace generation, so the instruction comes from the image committed in the verifying key.
-  \item \textbf{Register accesses.} Reads of $\mathsf{op\_c}$ and $\mathsf{op\_b}$ (unless immediate) and the read--write of $\mathsf{op\_a}$ at sub-cycle positions $1$, $2$ and $3$; position $0$ is the memory access and $4$ a write of \texttt{HI}. They use the register variant of the memory argument (\S\ref{sec:air-memory}). An $\mathsf{op\_a\_0}$ flag pins a write to register 0 to zero, so chips bind their result through a $(1-\mathsf{op\_a\_0})$ factor.
+  \item \textbf{Program fetch.} The row sends $(\mathsf{pc}, \mathsf{opcode}, \mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c}, \mathsf{imm\_b}, \mathsf{imm\_c})$ on the \emph{program} bus, and the preprocessed program table receives it with its use count, so the instruction comes from the image committed in the verifying key.
+  \item \textbf{Register accesses.} Reads of $\mathsf{op\_c}$ and $\mathsf{op\_b}$ (unless immediate) and the read--write of $\mathsf{op\_a}$ at sub-cycle positions $1$, $2$ and $3$; position $0$ is the memory access and $4$ a write of \texttt{HI}. They use the register variant of the memory argument (\S\ref{sec:air-memory}). The frame byte-checks the word written to $\mathsf{op\_a}$, the single place where a register value is range-checked, and a flag set when the destination is register 0 pins that word to zero and switches off the chip's result constraint.
   \item \textbf{State bus.} The row receives $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ and sends $(\mathsf{shard}, \mathsf{clk}+\Delta, \mathsf{next\_pc}, \mathsf{next\_next\_pc})$, where $\Delta$ is five, one per sub-cycle position, or a larger bounded value for a syscall (\S\ref{sec:ext-syscall}). The public-values table sends the shard's entry state and receives its exit state.
   \item \textbf{Clock.} $\mathsf{clk}$ is witnessed as a 16-bit and a 10-bit limb, both range-checked, so that timestamp differences can use the same limb widths in the memory argument.
 \end{itemize}
@@ -53,47 +51,24 @@ A conventional zkVM arithmetisation has a central \emph{CPU chip}: one row per c
 In a valid shard (Definition~\ref{def:shard}) with entry state $s_0$ and exit state $s_N$, the real instruction rows can be ordered $r_1, \dots, r_N$ so that $r_i$ receives $s_{i-1}$ and sends $s_i$, with $\mathsf{clk}(s_i) > \mathsf{clk}(s_{i-1})$; every real instruction row is in the chain, and $N$ is the number of real instruction rows.
 \end{lemma}
 \begin{proof}
-Each real instruction row receives exactly one state tuple and sends exactly one, with a strictly larger clock, and the public-values table sends $s_0$ and receives $s_N$. Balance of the state bus means the multiset of sent tuples equals the multiset of received tuples. Consider the directed graph whose vertices are the distinct state tuples and whose edges are the rows (from received tuple to sent tuple). Every vertex other than $s_0$ and $s_N$ has in-degree equal to out-degree, $s_0$ has out-degree one more than in-degree and $s_N$ the reverse, so the edge multiset decomposes into one $s_0 \to s_N$ path and cycles. A cycle is impossible because the clock strictly increases along every edge. Hence the rows form a single path from $s_0$ to $s_N$.
+Each real instruction row receives exactly one state tuple and sends exactly one, with a strictly larger clock, and the public-values table sends $s_0$ and receives $s_N$. Take the distinct state tuples as vertices and the rows as directed edges, from received to sent tuple. Balance of the state bus gives every vertex other than $s_0$ and $s_N$ equal in- and out-degree, $s_0$ one more edge out and $s_N$ one more in, so the edges decompose into one $s_0 \to s_N$ path and cycles, and a cycle is impossible because the clock strictly increases along every edge.
 \end{proof}
 
-Figure~\ref{fig:frame} shows three consecutive rows and the buses that bind them. The frame comes in R-type (two register reads), I-type (a word immediate, used by the immediate ALU, memory and branch chips) and shift-amount (a 5-bit immediate) variants, and a universal variant for chips whose opcodes mix operand shapes. It byte-checks the word written to $\mathsf{op\_a}$, the single place where a register value is range-checked (\S\ref{sec:air-memory}).
+The frame comes in R-type (two register reads), I-type (a word immediate, used by the immediate ALU, memory and branch chips) and shift-amount (a 5-bit immediate) variants, and a universal variant for chips whose opcodes mix operand shapes. Figure~\ref{fig:frame} shows three consecutive rows and the buses that bind them.
 
 \begin{example}[A delay slot on the state bus]
 \label{ex:delay}
-Take a taken \texttt{beq} at address $\mathtt{0x100}$ whose target is $\mathtt{0x200}$, the \texttt{addiu} in its delay slot at $\mathtt{0x104}$, and the instruction at the target. With the shard $s$ and the branch's clock $\mathsf{clk}$, the three rows exchange these tuples on the state bus:
-\begin{center}
-\small
-\begin{tabular}{@{}llll@{}}
-\toprule
-Row & Chip & receives $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ & sends \\
-\midrule
-\texttt{beq} & \texttt{Branch} & $(s, \mathsf{clk}, \mathtt{0x100}, \mathtt{0x104})$ & $(s, \mathsf{clk}+5, \mathtt{0x104}, \mathtt{0x200})$ \\
-\texttt{addiu} & \texttt{AddSubImm} & $(s, \mathsf{clk}+5, \mathtt{0x104}, \mathtt{0x200})$ & $(s, \mathsf{clk}+10, \mathtt{0x200}, \mathtt{0x204})$ \\
-target & any & $(s, \mathsf{clk}+10, \mathtt{0x200}, \mathtt{0x204})$ & $(s, \mathsf{clk}+15, \mathtt{0x204}, \ldots)$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-The branch does not change its own successor, $\mathtt{0x104}$; it sets the one after it. The \texttt{addiu} row is an ordinary row that happens to receive $\mathsf{next\_pc} = \mathtt{0x200}$ and sends $(\mathtt{0x200}, \mathtt{0x204})$ by the constraint every sequential row obeys. Not taken, the branch would have sent $(\mathtt{0x104}, \mathtt{0x108})$ and nothing else would change.
+Take a taken \texttt{beq} at address $\mathtt{0x100}$ whose target is $\mathtt{0x200}$, with an \texttt{addiu} in its delay slot at $\mathtt{0x104}$, in shard $s$ at clock $\mathsf{clk}$. The \texttt{beq} row receives $(s, \mathsf{clk}, \mathtt{0x100}, \mathtt{0x104})$ and sends $(s, \mathsf{clk}+5, \mathtt{0x104}, \mathtt{0x200})$: it does not change its own successor but sets the one after it. The \texttt{addiu} row receives that tuple and sends $(s, \mathsf{clk}+10, \mathtt{0x200}, \mathtt{0x204})$ by the constraint every sequential row obeys, and the row at the target receives it. Not taken, the branch would have sent $(\mathtt{0x104}, \mathtt{0x108})$ and nothing else would change.
 \end{example}
 
-\paragraph{The frame beside other instruction interfaces.} SP1 gives each instruction chip a column group that chains $(\mathsf{clk}, \mathsf{pc})$ and an R-, I- or J-type register reader that fetches the instruction and reads its operands~\citep{sp1}; the frame's R-type, I-type and shift-amount variants correspond to those readers. OpenVM factors an instruction executor into an \emph{adapter}, which owns every program, execution and memory interaction, and a \emph{core}, which computes~\citep{openvm}. The frame fills the same role for MIPS32. It differs from both in carrying the delay slot, and from OpenVM in four respects. The state is $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ rather than $(\mathsf{pc}, t)$. Time advances by a fixed five per instruction with a fixed position per access, where OpenVM advances one tick per access; in both, the accesses of step $i$ sit strictly between the states received and sent,
-\[
-  \mathsf{clk}_i < \mathsf{clk}_i + 1 < \mathsf{clk}_i + 2 < \mathsf{clk}_i + 3 < \mathsf{clk}_i + 4 < \mathsf{clk}_{i+1} = \mathsf{clk}_i + 5,
-\]
-Registers are shadow-read into the shard and use a six-column access (\S\ref{sec:air-memory}), where OpenVM's are ordinary memory in a separate address space. And OpenVM's connector chip is here the public-values table.
-
-Both designs state their buses by the same kind of invariant: $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ is sent on the state bus exactly when it is the machine state at that clock, and $(\mathsf{shard}, \mathsf{clk}, a, v)$ is on the memory bus exactly when address $a$ held $v$ after its access at that time.
-
-\paragraph{The frame as a reordering of the trace.} A per-step circuit that can execute any instruction must either contain every instruction's logic at every step or be told which one runs. vRAM~\citep{vram} took the second route: the prover announces how often each instruction executed, commits the trace regrouped by instruction, and proves by a permutation check that it is a reordering of a time-ordered trace; Jolt names the same device as one way to route its lookups by opcode~\citep{jolt}, and Ceno's per-opcode design gives it in multiset form, as a set equality over (program counter, clock) state records~\citep[\S6.2]{ceno}. The frame realises this regrouping with a program-counter pair and a shard field in the state. The chips are the groups, their heights are the instruction counts and enter the transcript before any challenge, and the state bus is the permutation check: Lemma~\ref{lem:chain} says the grouped rows re-assemble into one time-ordered chain. The regrouping is of instructions only; the memory argument does not reorder the trace (\S\ref{sec:prelim-lookups}).
-
-Regrouping by opcode makes the trace shape depend on the instruction mix. A circuit that carries every instruction at every step has a trace shape that depends only on its length, as RISC Zero's does~\citep{risc0}, or on its length and configured builtins, as Cairo's does~\citep[\S2.8]{cairo}, which makes Cairo's verifier program-independent and its recursion simple~\citep[\S2.2.4]{cairo}. Here the shape depends on which counts are non-zero, so the key of the program that verifies a shard is a function of its chip set, and Section~\ref{sec:argument-block} enumerates those sets.
+\paragraph{Relation to other designs.} The frame fills for MIPS32 the role of SP1's state columns and register readers~\citep{sp1} and of OpenVM's adapters~\citep{openvm}. It differs from both in carrying the delay slot in the state. It also realises vRAM's regrouping of a trace by instruction~\citep{vram}, which Ceno gives in multiset form~\citep[\S6.2]{ceno}: the chips are the groups, their heights are the instruction counts and enter the transcript before any challenge, and the state bus is the permutation check, by Lemma~\ref{lem:chain}. The trace shape therefore depends on which counts are non-zero, so the key of the program that verifies a shard is a function of its chip set, and Section~\ref{sec:argument-block} enumerates those sets.
 
 \begin{figure}[!tbp]
 \centering
 \begin{subfigure}{\textwidth}
 \centering
 \resizebox{\textwidth}{!}{\input{figures/frame_flow}}
-\caption{The state chain across three consecutive cycles: each row receives its state, sends the next, fetches its instruction from the program ROM and places its accesses on the memory bus.}
+\caption{The state chain across three consecutive cycles.}
 \label{fig:frame-flow}
 \end{subfigure}
 
@@ -101,17 +76,17 @@ Regrouping by opcode makes the trace shape depend on the instruction mix. A circ
 \begin{subfigure}{0.76\textwidth}
 \centering
 \resizebox{\textwidth}{!}{\input{figures/frame_unit}}
-\caption{One row enlarged: the five sub-cycle positions, memory at $\mathsf{clk}$, then $\mathsf{op\_c}$, $\mathsf{op\_b}$, $\mathsf{op\_a}$ and \texttt{HI}. Filled pins are accesses the opcode uses; a load has no $\mathsf{op\_c}$ read, its offset being an immediate, and no \texttt{HI} write.}
+\caption{One row enlarged: the five sub-cycle positions. Filled pins are accesses the opcode uses.}
 \label{fig:frame-chip}
 \end{subfigure}
-\caption{The instruction frame binds consecutive opcode rows into one state chain (panel~\subref{fig:frame-flow}) while assigning register and memory accesses to fixed sub-cycle positions (panel~\subref{fig:frame-chip}). Each memory access sends the previous tuple $(\mathsf{shard},\, \mathsf{clk}{+}\mathsf{pos},\, \mathsf{addr},\, \mathsf{value})$ and receives the new one. In panel~\subref{fig:frame-flow} the \texttt{LoadWord} row sits in the branch's delay slot, so its successor arrives as the branch target rather than $\mathsf{pc}{+}4$; the rows are an \texttt{AddSubImm}, a \texttt{Branch} computing $\mathsf{taken} \leftarrow [a \neq b]$ on registers $\mathsf{rs}$ and $\mathsf{rt}$, and the aligned four-lane load of panel~\subref{fig:frame-chip}.}
+\caption{The instruction frame binds consecutive opcode rows into one state chain (panel~\subref{fig:frame-flow}) and assigns register and memory accesses to fixed sub-cycle positions (panel~\subref{fig:frame-chip}). In panel~\subref{fig:frame-flow} the word load sits in the branch's delay slot, so its successor arrives as the branch target rather than $\mathsf{pc}{+}4$.}
 \label{fig:frame}
 \end{figure}
 
 \subsection{Registers and memory}
 \label{sec:air-memory}
 
-Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}. The state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. Every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ (a one-bit \texttt{compare\_clk} selector chooses), as a range-checked 16-bit limb and 10-bit high limb, which covers a $\mathsf{clk} + \mathsf{pos}$ timestamp under the 25-bit clock fence. Figure~\ref{fig:memchain} follows one address through two shards.
+Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}. The state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. Every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ (a one-bit selector chooses), as a range-checked 16-bit limb and 10-bit high limb, which covers a $\mathsf{clk} + \mathsf{pos}$ timestamp under the 25-bit clock fence. Figure~\ref{fig:memchain} follows one address through two shards.
 
 \begin{lemma}[Memory argument]
 \label{lem:memory}
@@ -121,32 +96,36 @@ The memory bus with the timestamp constraints is a memory-checking argument in t
 Each access sends its previous tuple and receives its new tuple on the memory bus, and its constraints enforce that the new timestamp strictly exceeds the previous one. Balance of the memory bus, restricted to the tuples with address $a$, gives a graph as in Lemma~\ref{lem:chain} with the initial-state row as source and the final-state row as sink; strictly increasing timestamps exclude cycles, so the accesses form one path, and along the path a read carries its previous value forward unchanged.
 \end{proof}
 
-\paragraph{Registers.} A dedicated chip, \texttt{MemoryBump}, inserts, for every register at its first touch in a shard, a shadow read at $(\mathsf{shard}, 0)$, a device SP1 introduced~\citep{sp1}. Since $\mathsf{clk}$ restarts at zero in every shard and real register accesses sit at positions $1..4$, the previous access of a register is always in the current shard. The register variant of the access columns therefore drops $\mathsf{prev\_shard}$, the compare selector and one limb, re-derived linearly from the others: 9 columns become 6 on every register access.
+\paragraph{Registers.} A dedicated chip, the \emph{register shadow-read chip}, inserts, for every register at its first touch in a shard, a shadow read at $(\mathsf{shard}, 0)$, a device SP1 introduced~\citep{sp1}. Since $\mathsf{clk}$ restarts at zero in every shard and real register accesses sit at positions $1$ to $4$, the previous access of a register is always in the current shard. The register variant of the access columns therefore drops the previous shard index, the comparison selector and one limb, re-derived linearly from the others: 9 columns become 6 on every register access.
 
-\paragraph{Shard-local memory.} Within a shard, the first access to a word consumes a tuple no access in the shard produced, and the last produces one nothing in the shard consumes. A shard-boundary chip, \texttt{MemoryLocal}, records, for every word the shard touches, its initial and final $(\mathsf{shard}, \mathsf{clk}, \mathsf{value})$; it receives the initial tuple on the memory bus, sends the final one, and forwards both as \emph{global} interactions (\S\ref{sec:air-global}) to be matched across shards. A shard of an Ethereum block executed by the Reth client touches a few hundred thousand words, mostly a hot working set touched again in the next shard, and these two global rows per touched word are a large share of trace area (\S\ref{sec:perf-profile}), which is why shard size matters.
+\paragraph{Shard-local memory.} Within a shard, the first access to a word consumes a tuple no access in the shard produced, and the last produces one nothing in the shard consumes. The \emph{shard-boundary chip} records, for every word the shard touches, its initial and final $(\mathsf{shard}, \mathsf{clk}, \mathsf{value})$; it receives the initial tuple on the memory bus, sends the final one, and forwards both as \emph{global} interactions (\S\ref{sec:air-global}) to be matched across shards. These two global rows per touched word are a large share of trace area (\S\ref{sec:perf-profile}), which is why shard size matters.
 
-\paragraph{Memory initialisation and finalisation.} The \texttt{MemoryGlobalInit} and \texttt{MemoryGlobalFinalize} chips carry the initial contents of the words outside the program image (hint data and zero-initialised words) and the final contents of every word; an initial tuple carries timestamp $(0, 0)$, below every access. Both witness the word as 32 boolean columns, so every value that enters memory is byte-shaped by construction. Outside the image, only words the execution touches appear, as in Ceno~\citep[\S5.1]{ceno}. Addresses are 32-bit decomposed and proved strictly increasing along the table, and the address cursors are public values, so the recursion checks that consecutive tables tile the address space. The program image is bound by the verifying key: its digest (\S\ref{sec:air-global}), the sum of the image's initial tuples, is a value of the key that the first shard's leaf adds to the cross-shard digest, so every image word is finalised.
+\paragraph{Memory initialisation and finalisation.} The \emph{memory-initialisation} and \emph{memory-finalisation chips} carry the initial contents of the words outside the program image (hint data and zero-initialised words) and the final contents of every word; an initial tuple carries timestamp $(0, 0)$, below every access. Both witness the word as 32 boolean columns, so every value that enters memory is byte-shaped by construction. Outside the image, only words the execution touches appear, as in Ceno~\citep[\S5.1]{ceno}. Addresses are 32-bit decomposed and proved strictly increasing along the table, and the address cursors are public values, so the recursion checks that consecutive tables tile the address space. The program image is bound by the verifying key: its digest (\S\ref{sec:air-global}), the sum of the image's initial tuples, is a value of the key that the first shard's leaf adds to the cross-shard digest, so every image word is finalised.
 
 \paragraph{Byte checks.} Every value that enters a register is byte-checked by the frame at the write, and every value a precompile writes to memory is byte-checked or bit-decomposed by the precompile chip; memory-instruction rows therefore omit the two byte lookups per word that accesses otherwise carry.
 
-\paragraph{Comparison with Twist and Shout.} Twist and Shout~\citep{twist-shout} checks memory with one-hot addresses and increments far more cheaply than timestamped checking, but its costs assume commitments in which zeros are free or bits pack, and it notes that committing to zeros is not free under a hash-based commitment~\citep[\S2.9]{twist-shout}: a one-hot register address alone would be 32 cells against the six of a register access here. Across shards, Twist must commit the memory's state at each boundary, which it leaves open~\citep[\S2.9]{twist-shout}; the digest below pays only for the words a shard touches.
+A one-hot memory check~\citep{twist-shout} is cheaper where committed zeros are free, which a hash-based commitment does not provide~\citep[\S2.9]{twist-shout}: a one-hot register address alone would be 32 cells against the six of a register access here.
 
 \begin{figure}[!tbp]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/memory_chain}}
-\caption{The chain of one address $a$ across a shard boundary. A shard proof balances only tuples whose two sides it contains, so the shard-boundary rows stand in for the accesses it cannot see: the initial row supplies the tuple the shard's first access consumes, and the final row consumes the tuple its last access produces. These are the same tuple on either side of the boundary, carried with opposite signs into the digest $D$ of \S\ref{sec:air-global}, so the chain closes over the execution without any shard proof depending on another.}
+\caption{The chain of one address $a$ across a shard boundary. The shard-boundary rows stand in for the accesses a shard proof cannot see: the same tuple appears as a final row on one side of the boundary and as an initial row on the other, and enters the digest $D$ of \S\ref{sec:air-global} with opposite signs.}
 \label{fig:memchain}
 \end{figure}
 
 \subsection{Cross-shard interactions}
 \label{sec:air-global}
 
-Interactions whose two sides live in different shards (the initial and final tuples of every shard-touched word, memory initialisation and finalisation, and syscall pairings) cannot be balanced by a per-shard fraction sum. Each shard proof therefore publishes a commitment to its cross-shard state, and the recursion checks that the commitments of the shards compose; the per-shard argument is the same whatever that commitment is. There are four options: two multiset hashes, over an elliptic curve and over a lattice, a global challenge, and Merkle roots over touched memory. They differ in what a shard publishes, what composition checks and what soundness rests on, and they trade committed area against the order in which shards can be proved (Table~\ref{tab:pq}); three are implemented and measured, and the lattice hash is costed. The configuration selects one option according to its security assumptions, trace area and scheduling costs. The measurements of Section~\ref{sec:performance} and the soundness accounting of Section~\ref{sec:security} are stated for the elliptic-curve multiset hash.
+Interactions whose two sides live in different shards (the initial and final tuples of every shard-touched word, memory initialisation and finalisation, and syscall pairings) cannot be balanced by a per-shard fraction sum. Each shard proof therefore publishes a commitment to its cross-shard state, and the recursion checks that the commitments of the shards compose; the per-shard argument is the same whatever that commitment is. The construction analysed in Section~\ref{sec:security} and measured in Section~\ref{sec:performance} is an elliptic-curve multiset hash.
+
+\paragraph{Elliptic-curve multiset hash.} Each interaction tuple is mapped into a commutative group, sends add its image and receives subtract it, each shard publishes its running sum, its \emph{cross-shard digest} $D$, and the root compose node checks that the sums over the execution add to the identity: the multiset hash of Clarke et al.~\citep{multiset-hash} on the incremental hashing of Bellare and Micciancio~\citep{bellare-micciancio}. On an elliptic curve~\citep{ec-multiset-hash}, which SP1 introduced to zkVM memory checking~\citep{sp1-turbo-memo}, a tuple $\bm m \in \F^7$ is lifted to a point of $E: y^2 = x^3 + 3\zeta x - 3$ over $\F_{p^7} = \F[\zeta]/(\zeta^7 + 2\zeta - 8)$. One row of the \emph{cross-shard digest chip} per interaction witnesses the point, checks the curve equation and a sign band for $y$ that separates sends from receives, and adds the point to a running sum on an accumulation bus; the sum starts at a public offset point $D_{\mathrm{off}}$, so two digests combine as $D + D' - D_{\mathrm{off}}$ and the empty digest is $D_{\mathrm{off}}$. The \emph{lift} applies no hash: the message is the $x$-coordinate, up to a prover-chosen byte $\mathsf{offset}$ that makes the curve's right-hand side a square, which keeps the chip at a few dozen columns; \S\ref{sec:air-digest-security} gives what soundness then rests on.
+
+\paragraph{Alternatives.} Table~\ref{tab:pq} compares three other commitments to the cross-shard state. A \emph{lattice multiset hash}, as in LtHash~\citep{lthash}, which ZisK uses for its challenge derivation~\citep{zisk-lthash}, replaces curve points by vectors $h(\bm m) \in \F^n$; $h$ must be constrained for every interaction and behave as a random function, and a map strong enough for the lattice assumption needs $n = 800$ or more and at least $19.6\times$ the committed area by our count, so this option is costed, not built. A \emph{global challenge} draws one \LogUp{} challenge from a hash chain over the trace commitments of all shards, under which each shard proves its cross-shard interactions; it adds no hashing to the machine, but every shard must be committed before any can be proved. \emph{Merkle roots over touched memory} make memory a Merkle tree under $\Hash$, of which each shard recomputes the paths of the leaves it touches; precompile and syscall pairings then balance in the shard that issues them, and the committed area falls, at a higher memory cost per worker. In the measurements of Table~\ref{tab:pq} the global challenge is slower on one GPU and on four, and Merkle roots are faster on one GPU and slower on four.
 
 \begin{table}[t]
 \centering
 \footnotesize
-\caption{The four options for cross-shard interactions. Times are relative to the elliptic-curve multiset hash on the same GPUs (warm, compressed proofs, $\Hash = \Poseidon{}$); the global challenge was measured on one block, Merkle roots over six and twelve blocks with the two builds alternated (ABBA), the block count in parentheses.}
+\caption{The four options for cross-shard interactions. Times are relative to the elliptic-curve multiset hash on the same GPUs (warm, compressed proofs, $\Hash = \Poseidon{}$); the global challenge was measured on one block, Merkle roots over six and twelve blocks with the two configurations interleaved, the block count in parentheses.}
 \label{tab:pq}
 \setlength{\tabcolsep}{3pt}\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.14\textwidth}rr>{\raggedright\arraybackslash}p{0.12\textwidth}@{}}
 \toprule
@@ -160,23 +139,15 @@ Option & a shard publishes & composition checks & soundness rests on & 1 GPU & 4
 \end{tabular}
 \end{table}
 
-\paragraph{Option 1: elliptic-curve multiset hash.} Each interaction tuple is mapped into a commutative group, sends add its image and receives subtract it, each shard publishes its running sum, its \emph{cross-shard digest} $D$, and the root compose node checks that the sums over the execution add to the identity: the multiset hash of Clarke et al.~\citep{multiset-hash} on the incremental hashing of Bellare and Micciancio~\citep{bellare-micciancio}. On an elliptic curve~\citep{ec-multiset-hash}, which SP1 introduced to zkVM memory checking~\citep{sp1-turbo-memo}, a tuple $\bm m \in \F^7$ is lifted to a point of $E: y^2 = x^3 + 3\zeta x - 3$ over $\F_{p^7} = \F[\zeta]/(\zeta^7 + 2\zeta - 8)$. One row per interaction witnesses the point, checks the curve equation and a sign band for $y$ that separates sends from receives, and adds the point to a running sum on an accumulation bus; the sum starts at a public offset point $D_{\mathrm{off}}$, so two digests combine as $D + D' - D_{\mathrm{off}}$ and the empty digest is $D_{\mathrm{off}}$. The \emph{lift} applies no hash: the message is the $x$-coordinate, up to a prover-chosen byte $\mathsf{offset}$ that makes the curve's right-hand side a square, which keeps the chip at a few dozen columns; \S\ref{sec:air-digest-security} gives what soundness then rests on.
-
-\paragraph{Option 2: lattice multiset hash.} The group can instead be a lattice, as in LtHash~\citep{lthash}, the instantiation of Bellare and Micciancio's incremental hash over a product of small rings, which ZisK uses for its challenge derivation~\citep{zisk-lthash}. A tuple $\bm m$ is hashed to $h(\bm m) \in \F^n$, sends add $h(\bm m)$ and receives subtract it, each shard publishes its running sum, and composition checks that the sums over the execution add to zero, exactly as for the curve. A collision is a short integer relation among hash outputs (\S\ref{sec:pq}). The cost is $h$: it must be constrained in the chip for every interaction, and it must behave as a random function, since a linear $h$ makes any two multisets with equal message sums collide, which is what our prototype with a fixed public linear map did. A map strong enough for the lattice assumption needs $n = 800$ or more over the 31-bit field and at least $19.6\times$ today's committed area by our count, so this option is costed, not built.
-
-\paragraph{Option 3: global challenge.} Every shard commits its main trace first; one \LogUp{} challenge is then drawn from a hash chain over all the commitments, each shard proves its cross-shard interactions as \LogUp{} fractions under that challenge and publishes their sum, and the recursion checks that the sums over the execution add to zero. Soundness rests on the hash chain and on the \LogUp{} argument the shards already use, and the option adds no hashing to the machine. The price is order: every shard must be committed before any can be proved, which on the GPU pipeline means a commit pass ahead of the proving pass.
-
-\paragraph{Option 4: Merkle roots over touched memory.} Memory is a Merkle tree under $\Hash$, a height-27 tree of four-word leaves (guest memory lies below $2^{31}$) and a height-4 tree of registers joined under one root, and each shard publishes the root before it and the root after it. A boundary unit recomputes, for every leaf the shard touches, its path in the initial tree and in the final tree: it sends the leaf's initial words on the memory bus and receives its final words, so the shard's accesses balance inside the shard, and the untouched siblings along the paths enter both trees through one lookup. A per-word initialisation bit replaces the initialisation table, and precompile and syscall pairings balance in the shard that issues them, the executor closing a shard before a precompile that would give its recursion leaf an area no recursion shape admits. Composition checks that each shard's outgoing root is the next shard's incoming root and that the first is the image root the verifying key fixes. Soundness rests only on the collision resistance of $\Hash$; the accumulation rows and cross-shard memory units leave the machine, the Merkle rows take their place, and every measured block proves through compression with the root chain closed.
-
 \subsection{The bus argument}
 \label{sec:air-logup}
 
-One \LogUp{} instance, the bus argument, proves all interactions of a shard on the program, state, memory, byte, range, syscall, global and accumulation buses. After the trace is committed, the verifier samples $\alpha, \beta \in \EF$, and the fraction of each interaction (\S\ref{sec:prelim-lookups}) is a leaf of a layered GKR circuit whose transitions sumcheck proves from the root down; the final layer leaves evaluation claims on the participating columns. A Reth shard has on the order of $10^8$ leaves, one per (row, interaction) pair, so interactions per row cost separately from columns (\S\ref{sec:perf-prover}). Its soundness is $\deg/|\EF|$ per sumcheck round plus the fingerprint's collision probability, which grows with the number of leaves (\S\ref{sec:iopp-soundness}); the schedule of Table~\ref{tab:whir-schedule} grinds the \LogUp{} challenge by 22 bits.
+One \LogUp{} instance, the bus argument, proves all interactions of a shard on the program, state, memory, byte, range, syscall, global and accumulation buses. After the trace is committed, the verifier samples $\alpha, \beta \in \EF$, and the fraction of each interaction (\S\ref{sec:prelim-lookups}) is a leaf of a layered GKR circuit whose transitions sumcheck proves from the root down; the final layer leaves evaluation claims on the participating columns. A shard of the block workload has on the order of $10^8$ leaves, one per (row, interaction) pair, so interactions per row cost separately from columns (\S\ref{sec:perf-prover}). Its soundness is $\deg/|\EF|$ per sumcheck round plus the fingerprint's collision probability, which grows with the number of leaves (\S\ref{sec:iopp-soundness}); the schedule of Table~\ref{tab:whir-schedule} grinds the \LogUp{} challenge by 22 bits.
 
 \subsection{The constraint argument}
 \label{sec:air-zerocheck}
 
-The constraint system is uniform: a chip imposes the same constraints on every row, so nothing about it is committed and the verifier evaluates the constraint polynomials itself at the closing point. All chips' constraints are proved by \emph{one} zerocheck. We first describe the binary protocol underlying the soundness figures of \S\ref{sec:iopp-soundness}, then its univariate refinement in \S\ref{sec:air-skip}.
+The constraint system is uniform: a chip imposes the same constraints on every row, so nothing about it is committed and the verifier evaluates the constraint polynomials itself at the closing point. All chips' constraints are proved by \emph{one} zerocheck. We first describe the binary protocol, to which the soundness figures of \S\ref{sec:iopp-soundness} refer, then its univariate refinement (\S\ref{sec:air-skip}).
 
 Let $2^n$ be the logical row domain and $\bm T_c(\bm X)$ the vector of multilinear extensions of chip $c$'s main and preprocessed columns, zero beyond its height $h_c$. The preceding \LogUp{} argument leaves claims on these columns at a common point $\bm\zeta$. The verifier samples batching challenges $\mu$, $\beta_{\mathrm{open}}$ and $\eta$, in that order: $\mu$ combines each chip's constraints into $C_c$, powers of $\beta_{\mathrm{open}}$ combine its column openings into the linear form $B_c$, and $\eta$ combines chips in a fixed order. Write $a_c=C_c(\bm 0)$, with the public values held fixed, and let $P_c$ be the multilinear extension of $[r\ge h_c]$. For a valid trace,
 \[
@@ -191,14 +162,14 @@ satisfies $G_c(\bm b)=B_c(\bm T_c(\bm b))$ on the Boolean cube: constraints vani
   \qquad
   S=\sum_c\eta^c B_c(\bm T_c(\bm\zeta)).
 \end{equation}
-The rightmost expression is computed from the \LogUp{} opening claims; the zerocheck binds those claims together with the AIR constraints.
+The rightmost expression is computed from the \LogUp{} opening claims, so the zerocheck binds those claims together with the chip constraints.
 
-Each binary round sends a polynomial $q_i$. The verifier checks $q_i(0)+q_i(1)$ against the running claim, absorbs its coefficients, samples $u_i$, and replaces the claim by $q_i(u_i)$. Constraint degree three gives round degree at most four. The prover folds pairs of column entries with weights $(1-u_i,u_i)$, so four rounds leave one-sixteenth as many entries. At the final point $\bm z$, the verifier reconstructs the integrand of Equation~\eqref{eq:zerocheck-seeded} from column openings and the analytic virtual-$\ge$ padding factor. The jagged commitment authenticates those openings with row weights $\eqf(\bm z,r)$ (\S\ref{sec:pcs-jagged}). The GPU's constraint kernels are compiled per chip from the description the verifier uses, except for the widest accelerator chips, which are interpreted (Table~\ref{tab:census}), and host verification catches any mismatch. What remains is about $3.6\cdot10^4$ column claims per shard, reduced to one dense-polynomial opening.
+Each binary round sends a polynomial $q_i$. The verifier checks $q_i(0)+q_i(1)$ against the running claim, absorbs its coefficients, samples $u_i$, and replaces the claim by $q_i(u_i)$, while the prover folds pairs of column entries with weights $(1-u_i,u_i)$. Constraint degree three gives round degree at most four. At the final point $\bm z$, the verifier reconstructs the integrand of Equation~\eqref{eq:zerocheck-seeded} from column openings and the padding factor $P_c(\bm z)$, which it evaluates itself. The jagged commitment authenticates those openings with row weights $\eqf(\bm z,r)$ (\S\ref{sec:pcs-jagged}): about $3.6\cdot10^4$ column claims per shard, reduced to one dense-polynomial opening.
 
 \subsection{A univariate skip of four zerocheck rounds}
 \label{sec:air-skip}
 
-The refinement replaces the first four binary rounds and their intermediate folds by one round over a sixteen-point domain, followed by one $16{:}1$ fold. It changes the polynomial extension used for the four lowest row bits while preserving the sum in Equation~\eqref{eq:zerocheck-seeded}. The remaining variables use the binary protocol above; the \LogUp{} circuit itself is unchanged.
+The refinement replaces the first four binary rounds and their intermediate folds by one round over a sixteen-point domain, followed by one $16{:}1$ fold. It changes the polynomial extension used for the four lowest row bits while preserving the sum in Equation~\eqref{eq:zerocheck-seeded}; the remaining variables use the binary protocol, and the \LogUp{} circuit is unchanged.
 
 \paragraph{Block interpolation.}
 Assume $n>4$ and write a row as $r=16x+b$, where $b\in\{0,\ldots,15\}$ is the low digit and $\bm x\in\{0,1\}^{n-4}$ encodes the block index $x$. Let $\omega\in\F$ have order sixteen and $D=\{\omega^b:0\le b<16\}$. For each column define
@@ -207,22 +178,15 @@ Assume $n>4$ and write a row as $r=16x+b$, where $b\in\{0,\ldots,15\}$ is the lo
   T^\sharp(Z,\bm x)=\sum_{b=0}^{15}L_b(Z)T(16x+b),
   \qquad
   L_b(Z)=\prod_{j\ne b}\frac{Z-\omega^j}{\omega^b-\omega^j}
-        =\frac{\omega^b(Z^{16}-1)}{16(Z-\omega^b)}.
+        =\frac{\omega^b(Z^{16}-1)}{16(Z-\omega^b)},
 \end{equation}
-The product defines $L_b$ everywhere; the quotient is evaluated away from its removable singularity. At $Z=\omega^j$ the weights are one-hot. The formula follows from $V(Z)=Z^{16}-1$ and its formal derivative $V'(\omega^b)=16/\omega^b$. Each column has degree at most fifteen in $Z$ and is extended multilinearly in the block bits.
-
-Split the anchor into low and high coordinates, $\bm\zeta_{\mathrm{lo}}$ and $\bm\zeta_{\mathrm{hi}}$, pairing the low coordinates with the bits of $b$. Interpolate its low equality factor as
-\[
-  e^\sharp(Z)=\sum_{b=0}^{15}
-                 \eqf(\bm\zeta_{\mathrm{lo}},b)L_b(Z).
-\]
-Interpolate the padding indicator similarly, obtaining $P_c^\sharp$, and set
+of degree at most fifteen in $Z$ and multilinear in the block bits. Split the anchor into low and high coordinates, $\bm\zeta_{\mathrm{lo}}$ and $\bm\zeta_{\mathrm{hi}}$, pairing the low coordinates with the bits of $b$, and interpolate its low equality factor as $e^\sharp(Z)=\sum_{b=0}^{15}\eqf(\bm\zeta_{\mathrm{lo}},b)L_b(Z)$. Interpolate the padding indicator in the same way, obtaining $P_c^\sharp$, and set
 \[
   G_c^\sharp(Z,\bm x)
     =C_c(\bm T_c^\sharp(Z,\bm x))-a_cP_c^\sharp(Z,\bm x)
       +B_c(\bm T_c^\sharp(Z,\bm x)).
 \]
-The constraints are evaluated \emph{after} interpolating their input columns. Interpolating only the original constraint residuals would give a different polynomial and would not bind the nonlinear constraints on the folded columns.
+The constraints are evaluated \emph{after} interpolating their input columns; interpolating the constraint residuals instead would give a different polynomial, which would not bind the nonlinear constraints on the folded columns.
 
 \paragraph{The skip message and its check.}
 The prover sends the coefficients of
@@ -233,34 +197,29 @@ The prover sends the coefficients of
       \eqf(\bm\zeta_{\mathrm{hi}},\bm x)
       \sum_c\eta^cG_c^\sharp(Z,\bm x).
 \end{equation}
-At $Z=\omega^b$, every interpolant recovers its original row value, hence $\sum_{Z\in D}s(Z)=S$. Cubic constraints on degree-fifteen columns have degree at most 45; multiplication by $e^\sharp$ raises the bound to 60. The message contains exactly 61 coefficients $c_0,\ldots,c_{60}$, including trailing zeros. Since $\sum_{Z\in D}Z^k$ is sixteen when $16\mid k$ and zero otherwise, the verifier checks
+At $Z=\omega^b$ every interpolant recovers its original row value, hence $\sum_{Z\in D}s(Z)=S$. Cubic constraints on degree-fifteen columns have degree at most 45, and multiplication by $e^\sharp$ raises the bound to 60, so the message has 61 coefficients $c_0,\ldots,c_{60}$. Since $\sum_{Z\in D}Z^k$ is sixteen when $16\mid k$ and zero otherwise, the verifier checks
 \begin{equation}
 \label{eq:skip-domain-sum}
   16(c_0+c_{16}+c_{32}+c_{48})=S.
 \end{equation}
 It then absorbs all coefficients and samples $r_0\in\EF$, setting the running claim to $s(r_0)$. The domain-sum check alone does not bind the message to the trace; the subsequent sumcheck and commitment opening supply that binding.
 
-\paragraph{Continuation and padding.}
-The prover folds each block once, using $T'(\bm x)=\sum_bL_b(r_0)T(16x+b)$ for every column, and runs $n-4$ binary degree-four rounds on Equation~\eqref{eq:skip-message} with $Z=r_0$. The factor $e^\sharp(r_0)$ is now constant. The message count is $1+(n-4)=n-3$, and the four intermediate pairwise folds are not constructed. Folded rows need not satisfy the nonlinear AIR constraints, so the optimization that drops a vanishing constraint value on an initial real row is disabled after the skip.
+To construct the message, the prover uses that on a valid trace the constraint part of the inner sum, with its padding correction, vanishes on $D$, so it equals $(Z^{16}-1)Q(Z)$ with $\deg Q\le29$: it interpolates $Q$ from values on two disjoint cosets of $D$ and the linear opening part from its sixteen domain values, and multiplies their sum by $e^\sharp$. The larger first message buys fewer passes over the row tables, not a smaller proof.
 
-For a partial block, write $h_c=16q_c+s_c$, $0\le s_c<16$, and set $\rho_c(Z)=\sum_{b=s_c}^{15}L_b(Z)$. On Boolean block indices,
+\paragraph{Continuation and padding.}
+The prover folds each block once, $T'(\bm x)=\sum_bL_b(r_0)T(16x+b)$ for every column, and runs $n-4$ binary degree-four rounds on Equation~\eqref{eq:skip-message} with $Z=r_0$, where $e^\sharp(r_0)$ is a constant; the message count is $1+(n-4)=n-3$. For a chip whose height ends inside a block, write $h_c=16q_c+s_c$, $0\le s_c<16$, and set $\rho_c(Z)=\sum_{b=s_c}^{15}L_b(Z)$. On Boolean block indices,
 \[
   P_c^\sharp(Z,\bm x)
-    =[x\ge q_c]-(1-\rho_c(Z))[x=q_c].
+    =[x\ge q_c]-(1-\rho_c(Z))[x=q_c],
 \]
-This is zero below the boundary block, $\rho_c(Z)$ on it, and one above it. Its multilinear extension in $\bm x$ handles partial blocks without allocating the zero tail.
-
-At the final high-bit challenges $\bm z_{\mathrm{hi}}$, each column opening is
+which is zero below the boundary block, $\rho_c(Z)$ on it and one above it, and is extended multilinearly in $\bm x$. At the final high-bit challenges $\bm z_{\mathrm{hi}}$, each column opening is
 \begin{equation}
 \label{eq:skip-row-opening}
   y_k^\sharp=\sum_{r<h_k}\mathbf c_k[r]\,
       \eqf(\bm z_{\mathrm{hi}},r\mathbin{\gg}4)
       L_{r\bmod16}(r_0).
 \end{equation}
-The jagged reduction must use these weights; four copies of $r_0$ cannot be interpreted as an ordinary multilinear point. Section~\ref{sec:pcs-skip} gives the corresponding indicator and branching-program change.
-
-\paragraph{Constructing the message.}
-On a valid trace the adjusted constraint part of the inner sum in Equation~\eqref{eq:skip-message} vanishes on $D$. Its degree is at most 45, so it equals $(Z^{16}-1)Q(Z)$ with $\deg Q\le29$. The implementation evaluates this part on two disjoint cosets of $D$, divides by $Z^{16}-1$, and interpolates $Q$ from the resulting 32 values. It obtains the linear GKR-opening part, of degree at most fifteen, from its sixteen domain values, then multiplies their sum by $e^\sharp$. The larger first message trades additional univariate arithmetic for fewer passes over the row tables; it is not a claim of smaller proof size.
+The jagged reduction must use these weights, since four copies of $r_0$ are not an ordinary multilinear point; Section~\ref{sec:pcs-skip} gives the corresponding change to the indicator and its branching program.
 
 \paragraph{Round error.}
 A fixed incorrect skip polynomial of degree at most 60 agrees with the intended polynomial at a uniform $r_0$ with probability at most $60/|\EF|$. The remaining binary rounds contribute $4(n-4)/|\EF|$, giving the sumcheck term
@@ -272,29 +231,7 @@ A fixed incorrect skip polynomial of degree at most 60 agrees with the intended 
 \end{equation}
 The binary term is $4n/|\EF|$. This comparison concerns only the sumcheck rounds; batching, the initial constraint test and commitment binding remain separate terms.
 
-\begin{example}[Thirty-two rows]
-\label{ex:skip}
-For arithmetic that can be checked by hand, work over $\mathbb F_{97}$, rather than the production field. Take one column with block zero $(1,2,\ldots,1,2)$ and block one $(2,1,\ldots,2,1)$, no padding, constraint $C(T)=(T-1)(T-2)$ and opening term $B(T)=T$. Choose $\bm\zeta_{\mathrm{lo}}=(1/2)^4$ and $\zeta_{\mathrm{hi}}=3$. Every original row satisfies the constraint, and the seeded claim is $S=(-2\cdot24+3\cdot24)/16=50$. With $\omega=8$, an order-sixteen root with $\omega^8=-1$,
-\[
-  T^\sharp(Z,0)=\frac{3-Z^8}{2},\qquad
-  T^\sharp(Z,1)=\frac{3+Z^8}{2},\qquad
-  C(T^\sharp(Z,x))=\frac{Z^{16}-1}{4}.
-\]
-Since $e^\sharp=1/16$, the skip message and its check are
-\[
-  s(Z)=\frac{Z^{16}-1}{64}+\frac{3+5Z^8}{32}
-      =41+82Z^8+47Z^{16},\qquad
-  16(41+47)=50\pmod{97}.
-\]
-For the illustrative challenge $r_0=3$, $s(3)=38$ and the folded column is $(19,81)$, with $T'(X)=19+62X$. Both folded constraint values are 15, rather than zero. The single remaining binary message is
-\[
-  q(X)=\frac{\eqf(3,X)}{16}\bigl(C(T'(X))+T'(X)\bigr)
-      =20+59X+23X^2+13X^3.
-\]
-It satisfies $q(0)+q(1)=20+18=38$. At the illustrative high-bit challenge $t=4$, $q(4)=1$ and the trace opening is $T'(4)=73$. The verifier reconstructs $\eqf(3,4)(C(73)+73)/16=1$, while the PCS binds $73=\sum_{x,b}\eqf(4,x)L_b(3)T(16x+b)$. Actual challenges are derived from the transcript after the corresponding messages.
-\end{example}
-
 \subsection{The cost of a row}
 \label{sec:air-cost}
 
-Counting a step's committed elements shows that an instruction's cost lies in the state its row reads and writes, not in the function it computes. The R-type frame is 30 columns, 22 of them for the three register accesses, the I-type frame 27 and the shift-amount frame 24 (Table~\ref{tab:frame}). With the program-counter pair each chip owns, an instruction pays 32 columns before it computes anything; \texttt{Bitwise} then adds five and \texttt{AddSub} four. The six-column register access saves three columns on every access of every instruction. \S\S\ref{sec:base} and~\ref{sec:ext} report each chip against this floor, and Section~\ref{sec:perf-estimate} turns the widths into a cost per executed instruction.
+An instruction's cost lies in the state its row reads and writes, not in the function it computes. The R-type frame is 30 columns, 22 of them for the three register accesses, the I-type frame 27 and the shift-amount frame 24 (Appendix~\ref{sec:app-chips}). With the program-counter pair each chip owns, an instruction pays 32 columns before it computes anything; the bitwise chip then adds five columns and the addition chip four. The six-column register access saves three columns on every access of every instruction. Section~\ref{sec:perf-estimate} turns the widths into a cost per executed instruction.

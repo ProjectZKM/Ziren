@@ -1,14 +1,12 @@
 \section{The jagged commitment}
 \label{sec:pcs}
 
-After the bus argument and the zerocheck of a shard (\S\S\ref{sec:air-logup} and~\ref{sec:air-zerocheck}), the verifier holds evaluation claims on individual chip columns (\S\ref{sec:air-zerocheck}), with heights from 32 rows to millions. Committing each column or table separately costs one Merkle root and one query phase per commitment, and puts every table's height into the verifier, so that each height profile needs a verifier circuit of its own~\citep[p.~4]{jagged-pcs}. The jagged polynomial commitment of Hemo et al.~\citep{jagged-pcs} commits the non-zero part of all columns as one dense multilinear and reduces every column claim to one evaluation of it. \Ziren{} uses its basic construction~\citep[Thm.~1.4]{jagged-pcs} with its jagged assist~\citep[Thm.~1.5]{jagged-pcs}; it uses neither the ``fancy'' variant for columns of equal height (\S6 there) nor committed heights proved by GKR (\S1.1.2 there), because the machine's columns are too heterogeneous for grouping into power-of-two tables to pay.
-
-Sections~\ref{sec:pcs-jagged-fn}--\ref{sec:pcs-jagged-assist} restate the construction in our notation. Sections~\ref{sec:pcs-stacking}--\ref{sec:pcs-geometry} describe what \Ziren{} adds: several ordered commitments opened as one, the stacked layout of the opening, and a quantised geometry that makes the verifier a function of a small class rather than of a shard's row counts. A chip can therefore be widened, added or removed without changing the layer above it; the chip revisions of \S\ref{sec:perf-changes} left this protocol unchanged. Figure~\ref{fig:jagged} shows the construction end to end.
+After the bus argument and the zerocheck of a shard (\S\S\ref{sec:air-logup} and~\ref{sec:air-zerocheck}), the verifier holds evaluation claims on individual chip columns, with heights from 32 rows to millions. Committing each column or table separately costs one Merkle root and one query phase per commitment, and puts every table's height into the verifier~\citep[p.~4]{jagged-pcs}. The jagged polynomial commitment of Hemo et al.~\citep{jagged-pcs} commits the non-zero part of all columns as one dense multilinear and reduces every column claim to one evaluation of it. \Ziren{} uses its basic construction with its jagged assist~\citep[Thms.~1.4 and~1.5]{jagged-pcs}, restated in \S\S\ref{sec:pcs-jagged-fn}--\ref{sec:pcs-jagged-assist}, and adds several ordered commitments opened as one and a quantised geometry that makes the verifier a function of a small class rather than of a shard's row counts (\S\S\ref{sec:pcs-stacking}--\ref{sec:pcs-geometry}). Figure~\ref{fig:jagged} shows the construction.
 
 \begin{figure}[t]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/jagged_system}}
-\caption{The jagged commitment. (a) The sparse view: $K$ columns of different heights inside a $2^n$-row box; the dotted cells above each column are virtual zeros, never committed; hatched columns, $c_3$ and $c_6$, are the synthetic padding of \S\ref{sec:pcs-stacking} and count among the $K$ columns. (b) The dense representation $\mathbf Q$: the columns laid end to end, located by the public prefix sums $t_k$, split into two ordered input rounds with separate Merkle roots, and extended to $2^m$ by implicit zeros (the dashed tail, which has no column and so no weight in $W$); the indicator $W$ is aligned with it cell for cell. Protocol~\ref{prot:jagged} reduces the $K$ column claims to one opening of $\mathbf Q$.}
+\caption{The jagged commitment. (a) The sparse view: $K$ columns of different heights inside a $2^n$-row box; the cells above each column are virtual zeros, never committed, and hatched columns are the synthetic padding of \S\ref{sec:pcs-stacking}. (b) The dense representation $\mathbf Q$: the columns laid end to end, located by the public prefix sums $t_k$ and split into two ordered input rounds with separate Merkle roots; the indicator $W$ is aligned with it cell for cell.}
 \label{fig:jagged}
 \end{figure}
 
@@ -21,29 +19,7 @@ Let there be $K$ columns $\mathbf c_0, \ldots, \mathbf c_{K-1}$ with heights $h_
   \qquad
   t_0 = 0,\quad t_{k+1} = t_k + h_k,\quad A = t_K,
 \]
-padded with zeros to $M = 2^m$, $m = \lceil \log_2 A \rceil$, and written $\widetilde Q$ as a multilinear in $m$ variables. Column $k$ occupies $[t_k, t_{k+1})$ in $\mathbf Q$, and the prefix sums are public: they enter the transcript before any challenge. $\mathbf Q$ and the prefix sums determine $p$~\citep[Fact~1.3]{jagged-pcs}, so committing to $\widetilde Q$ commits to every column at the cost of the real area $A$ rather than $K \cdot 2^n$.
-
-Table~\ref{tab:jagged-notation} maps our notation to the paper's. Two differences are inessential: our prefix sums are exclusive ($t_k$ starts column $k$), and a boundary takes $m+1$ bits because $t_K = A$ may equal $2^m$. Heights may reach $2^n$ rather than $2^n - 1$, which is harmless because only boundaries are encoded.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Notation of this section against that of Hemo et al.~\citep{jagged-pcs}.}
-\label{tab:jagged-notation}
-\begin{tabular}{@{}lll@{}}
-\toprule
-Here & \citep{jagged-pcs} & Meaning \\
-\midrule
-$K$, $\kappa = \lceil \log_2 K \rceil$ & $2^k$, $k$ & number of columns \\
-$n$, $m$, $M = 2^m$ & $n$, $m$, $M$ & log height of the row cube; log and size of the dense domain \\
-$h_k$, $t_k$ (exclusive) & $h_y$, $t_y$ (inclusive) & column heights and prefix sums \\
-$\mathbf Q$, $\widetilde Q$ & $q$, $\widehat q$ & dense representation \\
-$W$ & $f_t(z_r, z_c, \cdot)$ & the indicator of Equation~\eqref{eq:jagged-global-claim} \\
-$\bm z_{\mathrm{row}}$, $\bm z_c$, $\bm z^{*}$ & $z_r$, $z_c$, $i$ & row point, column point, dense point \\
-$\mathsf{BP}$, $u_k$ & $\widehat g$, $(t_{y-1}, t_y)$ & branching program and its boundary input \\
-\bottomrule
-\end{tabular}
-\end{table}
+padded with zeros to $M = 2^m$, $m = \lceil \log_2 A \rceil$, and written $\widetilde Q$ as a multilinear in $m$ variables. Column $k$ occupies $[t_k, t_{k+1})$ in $\mathbf Q$, and the prefix sums are public: they enter the transcript before any challenge. $\mathbf Q$ and the prefix sums determine $p$~\citep[Fact~1.3]{jagged-pcs}, so committing to $\widetilde Q$ commits to every column at the cost of the real area $A$ rather than $K \cdot 2^n$. Our prefix sums are exclusive ($t_k$ starts column $k$), and a boundary takes $m+1$ bits because $t_K = A$ may equal $2^m$.
 
 \subsection{The jagged reduction}
 \label{sec:pcs-jagged}
@@ -56,12 +32,12 @@ The verifier samples a column point $\bm z_c\in\EF^\kappa$, which turns the $K$ 
 \[
   T = \sum_{k<K} \eqf(k,\bm z_c)\, y_k = \widetilde p(\bm z_{\mathrm{row}}, \bm z_c)
 \]
-at an error of $\kappa/|\EF|$ by Schwartz--Zippel; this is the input of the basic jagged construction. With $w_k = \eqf(k, \bm z_c)$, the length-$M$ table
+at an error of $\kappa/|\EF|$ by Schwartz--Zippel. With $w_k = \eqf(k, \bm z_c)$, the length-$M$ table
 \[
   W[t_k+j]=w_k\,\eqf(j,\bm z_{\mathrm{row}})\quad(0\le j<h_k),
   \qquad W[i]=0\quad\text{elsewhere},
 \]
-is the paper's indicator $f_t(\bm z_{\mathrm{row}}, \bm z_c, \cdot)$ on the Boolean cube~\citep[Eqs.~(3)--(4)]{jagged-pcs}, and
+is the indicator of Hemo et al.\ on the Boolean cube~\citep[Eqs.~(3)--(4)]{jagged-pcs}, and
 \begin{equation}
 \label{eq:jagged-global-claim}
   T
@@ -78,7 +54,7 @@ There is an $m$-round protocol in which the prover holds $\mathbf Q$ and the ver
 \emph{Efficiency:} the prover performs at most $5 \cdot 2^m + 2^n + K$ multiplications; the verifier's work is an arithmetic circuit determined by $m$ and $K$ alone, dominated by one evaluation of $\widetilde W(\bm z^{*})$.
 \end{theorem}
 
-The protocol is the sumcheck for a product of two multilinears~\citep[Lemma~2.3]{jagged-pcs} applied to Equation~\eqref{eq:jagged-global-claim}, the \emph{jagged sumcheck}. Each round polynomial has degree two and is sent as its values at $0,1,2$, one value more than the paper's accounting~\citep[App.~A]{jagged-pcs}. With challenges $\bm z^*=(r_0,\ldots,r_{m-1})$ in sampling order, least-significant variable first, the closing claim is
+The protocol is the sumcheck for a product of two multilinears~\citep[Lemma~2.3]{jagged-pcs} applied to Equation~\eqref{eq:jagged-global-claim}, the \emph{jagged sumcheck}, with round polynomials of degree two. With challenges $\bm z^*=(r_0,\ldots,r_{m-1})$ in sampling order, least-significant variable first, the closing claim is
 \begin{equation}
 \label{eq:jagged-closing}
   T_{\mathrm{final}}=\widetilde Q(\bm z^*)\,\widetilde W(\bm z^*).
@@ -93,7 +69,7 @@ Materialising $W$ would cost $\Theta(M)$ extension-field elements. Instead, the 
   \widetilde W(\bm z^{*}) = \sum_{k<K} w_k\, \widehat g(\bm z_{\mathrm{row}}, \bm z^{*}, t_k, t_{k+1}),
   \qquad g(a, b, c, d) = 1 \iff b < d \ \wedge\ b = a + c,
 \]
-where $g$ is computed by a width-four read-once branching program that reads one bit of each of $(a, b, c, d)$ at a time, least significant first, tracking the carry of $a + c$ and whether $b < d$~\citep[Claim~3.2.2]{jagged-pcs}. Its multilinear extension is evaluated by the dynamic program of Holmgren and Rothblum~\citep{hr18}, stated and proved as in Hemo et al.~\citep[Lemma~4.2]{jagged-pcs}. Points are passed to the program most-significant coordinate first~\citep[p.~5]{jagged-pcs} while the sumcheck samples least-significant first, so the program's point is $\operatorname{rev}(\bm z^*)$. Evaluated directly, the indicator costs $O(m K)$~\citep[Prop.~3.2]{jagged-pcs}, too much for a recursion circuit at $K \approx 3.6 \cdot 10^4$.
+where $g$ is computed by a width-four read-once branching program that reads one bit of each of $(a, b, c, d)$ at a time, least significant first, tracking the carry of $a + c$ and whether $b < d$~\citep[Claim~3.2.2]{jagged-pcs}. Its multilinear extension is evaluated by the dynamic program of Holmgren and Rothblum~\citep{hr18}, as in Hemo et al.~\citep[Lemma~4.2]{jagged-pcs}; the program takes points most-significant coordinate first while the sumcheck samples least-significant first, so its point is $\operatorname{rev}(\bm z^*)$. Evaluated directly, the indicator costs $O(m K)$~\citep[Prop.~3.2]{jagged-pcs}, too much for a recursion circuit at $K \approx 3.6 \cdot 10^4$.
 
 The \emph{jagged assist}~\citep[Thm.~1.5]{jagged-pcs} delegates it. With $u_k=\operatorname{bits}_{\mathrm{BE}}(t_k)\Vert\operatorname{bits}_{\mathrm{BE}}(t_{k+1})$ the $2(m+1)$ boundary bits of column $k$, the prover proves
 \begin{equation}
@@ -105,7 +81,7 @@ The \emph{jagged assist}~\citep[Thm.~1.5]{jagged-pcs} delegates it. With $u_k=\o
       \eqf((x,y),u_k)\,
       \mathsf{BP}(\bm z_{\mathrm{row}},\operatorname{rev}(\bm z^*),x,y)
 \end{equation}
-by one degree-two sumcheck over the $2(m+1)$ boundary variables of Equation~\eqref{eq:jagged-assist}. This is the batch evaluation protocol of Hemo et al.~\citep[Lemma~5.1]{jagged-pcs} specialised: the $K$ evaluations are already combined by the weights $w_k$ rather than by fresh random coefficients, so no further randomness is needed and the error is that of the sumcheck alone (Theorem~\ref{thm:jagged-assist}).
+by one degree-two sumcheck over the $2(m+1)$ boundary variables. This is the batch evaluation protocol of Hemo et al.~\citep[Lemma~5.1]{jagged-pcs} specialised: the $K$ evaluations are already combined by the weights $w_k$, so no further randomness is needed and the error is that of the sumcheck alone.
 
 \begin{theorem}[Jagged assist {\citep[Thm.~1.5, Lemma~5.1]{jagged-pcs}}, as instantiated]
 \label{thm:jagged-assist}
@@ -114,32 +90,30 @@ by one degree-two sumcheck over the $2(m+1)$ boundary variables of Equation~\eqr
 \emph{Efficiency:} the verifier evaluates $\mathsf{BP}$ once, $48(m+1)$ multiplications, and the $K$ equality factors $\sum_k w_k\,\eqf(\bm\rho, u_k)$ at the closing point $\bm\rho$, $O(mK)$ operations; the prover's cost is $O(m w^2 (K + w))$ operations for a program of width $w$~\citep[Lemma~4.6]{jagged-pcs}.
 \end{theorem}
 
-The second verifier term dominates: it is linear in the number of columns, about $2 \cdot 10^6$ extension multiplications at the core shard's $m$ and $K$, against a few thousand for the branching program, consistent with the paper's $m \cdot 2^k$~\citep[p.~7]{jagged-pcs}. The native verifier computes the value by the closed form and replays the assist transcript; the recursion circuit checks the assist's closing identity explicitly.
+The second verifier term dominates: about $2 \cdot 10^6$ extension multiplications at the core shard's $m$ and $K$, against a few thousand for the branching program.
 
 \subsection{Row weights after the univariate skip}
 \label{sec:pcs-skip}
 
-The construction above uses the binary row extension. For the refinement of \S\ref{sec:air-skip}, replace each row factor $\eqf(j,\bm z_{\mathrm{row}})$ in the column claims and Equation~\eqref{eq:jagged-global-claim} by
+For the refinement of \S\ref{sec:air-skip}, each row factor $\eqf(j,\bm z_{\mathrm{row}})$ in the column claims and in Equation~\eqref{eq:jagged-global-claim} is replaced by the weight of Equation~\eqref{eq:skip-row-opening},
 \[
   \psi(j)=\eqf(\bm z_{\mathrm{hi}},j\mathbin{\gg}4)
            L_{j\bmod16}(r_0),\qquad
   W^\sharp[t_k+j]=w_k\psi(j)\quad(0\le j<h_k).
 \]
-The implicit dense tail still has zero weight. The product sumcheck on $\langle\widetilde Q,\widetilde W^\sharp\rangle$ remains degree two: the row weights determine a Boolean table whose extension in the dense index is multilinear.
-
-The assist uses the same boundaries and a modified branching-program evaluation. If $\bm b$ is the four-bit encoding of $b$, its boundary polynomial is
+The implicit dense tail still has zero weight, and the product sumcheck on $\langle\widetilde Q,\widetilde W^\sharp\rangle$ remains degree two, since the row weights determine a Boolean table whose extension in the dense index is multilinear. The assist uses the same boundaries and, with $\bm b$ the four-bit encoding of $b$, the boundary polynomial
 \[
   \mathsf{BP}^\sharp(r_0,\bm z_{\mathrm{hi}},\bm z^*,x,y)
     =\sum_{b=0}^{15}L_b(r_0)\,
        \mathsf{BP}((\bm z_{\mathrm{hi}},\bm b),
-                  \operatorname{rev}(\bm z^*),x,y).
+                  \operatorname{rev}(\bm z^*),x,y),
 \]
-The high row bits follow the ordinary dynamic program; the four low row bits are enumerated with Boolean values, and the sixteen branches are combined with $L_b(r_0)$. This polynomial is still multilinear in the boundary inputs, so the degree-two assist and its $4(m+1)/|\EF|$ sumcheck term are unchanged, although the branching-program evaluation has additional constant-size work. The native and recursive verifiers must use this same extension. The dense commitment, prefix sums, stacking layout and final \WHIR{} opening are unchanged.
+in which the high row bits follow the ordinary dynamic program and the four low row bits are enumerated over Boolean values and combined with $L_b(r_0)$. This polynomial is still multilinear in the boundary inputs, so the degree-two assist and its $4(m+1)/|\EF|$ sumcheck term are unchanged, although the branching-program evaluation has additional constant-size work. The dense commitment, prefix sums, stacking layout and final \WHIR{} opening are unchanged.
 
 \subsection{Several commitments opened as one}
 \label{sec:pcs-stacking}
 
-The construction of Hemo et al.~\citep{jagged-pcs} assumes one dense oracle. \Ziren{} commits a shard in several ordered \emph{input-commitment rounds}, preprocessed first and main last, each with its own root, and opens them together; each round uses the stacked layout of SP1 Hypercube~\citep{sp1-hypercube}, which the paper's concrete evaluation also uses, cutting the dense side into $2^8$ blocks of $2^{21}$ cells~\citep[\S7]{jagged-pcs}.
+The construction of Hemo et al.~\citep{jagged-pcs} assumes one dense oracle. \Ziren{} commits a shard in several ordered \emph{input-commitment rounds}, preprocessed first and main last, each with its own root, and opens them together; each round uses the stacked layout of SP1 Hypercube~\citep{sp1-hypercube}.
 
 Round $r$ contains columns $\mathbf c_{r,0},\ldots,\mathbf c_{r,K_r-1}$ of real area $a_r = \sum_k h_{r,k}$, committed over an area $A_r \ge a_r$ that is a multiple of the stacking height $H=2^\ell$:
 \[
@@ -149,21 +123,21 @@ Round $r$ contains columns $\mathbf c_{r,0},\ldots,\mathbf c_{r,K_r-1}$ of real 
   \mathbf Q = \mathbf q_0\Vert\mathbf q_1\Vert\cdots\Vert\mathbf q_{R-1},
   \qquad A=\sum_{r<R}A_r.
 \]
-The reduction of \S\ref{sec:pcs-jagged} runs on this logical $\mathbf Q$; the Merkle roots $C_0,\ldots,C_{R-1}$ authenticate the input rounds separately. Their fixed order determines the stripe order used for batching and authentication. Each gap $A_r-a_r$ is represented by explicit synthetic zero columns of zero claim and height at most $2^n$, so the prefix sums describe every committed cell and only the suffix from $A$ to $M$ is implicit. That unallocated suffix is the ``free padding'' of Hemo et al.~\citep[fn.~4]{jagged-pcs}, on which the indicator vanishes because $g$ requires $b<d$. Under a recursion area pin the gap is split into a fixed number of columns, zero-height ones allowed, so the recursion program's column count does not depend on a child's row counts.
+The reduction of \S\ref{sec:pcs-jagged} runs on this logical $\mathbf Q$, and the Merkle roots $C_0,\ldots,C_{R-1}$ authenticate the input rounds separately. Each gap $A_r-a_r$ is represented by explicit synthetic zero columns of zero claim and height at most $2^n$, so the prefix sums describe every committed cell and only the suffix from $A$ to $M$ is implicit; on that suffix the indicator vanishes because $g$ requires $b<d$~\citep[fn.~4]{jagged-pcs}.
 
-Each round is cut into $S_r=A_r/H$ stripes of $H$ consecutive entries under its own root. With $S=\sum_r S_r$ and $b=\lceil\log_2\max(S,1)\rceil$, the opening domain has $\ell+b$ variables, which equals $m$ for the nonempty stacked layout defined above. Its point is $(\bm z_{\mathrm{stack}},\bm z_{\mathrm{batch}})$: $\ell$ coordinates select a position inside a stripe and $b$ interpolate the ordered list of stripes across all rounds.
+Each round is cut into $S_r=A_r/H$ stripes of $H$ consecutive entries under its own root. With $S=\sum_r S_r$ and $b=\lceil\log_2\max(S,1)\rceil$, the opening domain has $\ell+b$ variables, which equals $m$ for this layout. Its point is $(\bm z_{\mathrm{stack}},\bm z_{\mathrm{batch}})$: $\ell$ coordinates select a position inside a stripe and $b$ interpolate the ordered list of stripes across all rounds. Were the reduction point shorter than $\ell+b$ coordinates, further coordinates would be sampled after the assist, each contributing a factor $1-r_j$ (step~4 of Protocol~\ref{prot:jagged}); in this layout none are needed.
 
 \subsection{One opening across all roots}
 \label{sec:pcs-multiround-open}
 
-If the reduction point has fewer than $\ell+b$ coordinates, the prover appends Fiat--Shamir coordinates after the assist, each contributing a factor $1-r_j$; in the multi-round layout above, $m=\ell+b$, so no coordinates are appended. For round $r$ and stripe $s$ let $e_{r,s}=\widetilde{\mathbf q_{r,s}}(\bm z_{\mathrm{stack}})$. The prover reports these in round-major, stripe-major order; the verifier zero-pads the list to $2^b$ and checks
+For round $r$ and stripe $s$ let $e_{r,s}=\widetilde{\mathbf q_{r,s}}(\bm z_{\mathrm{stack}})$. The prover reports these in round-major, stripe-major order; the verifier zero-pads the list to $2^b$ and checks
 \begin{equation}
 \label{eq:stacking-bind}
   v_Q
   =\widetilde{(e_{0,0},\ldots,e_{0,S_0-1},e_{1,0},\ldots,e_{R-1,S_{R-1}-1})}
      (\bm z_{\mathrm{batch}}).
 \end{equation}
-One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while each input round retains its own Merkle root. All rounds must share the stacking height.
+One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots,C_{R-1}$ at the common stack point, so the reduction, assist and opening each run once while each input round retains its own Merkle root; all rounds must share the stacking height. Protocol~\ref{prot:jagged} collects the steps.
 
 \begin{figure}[t]
 \centering
@@ -195,9 +169,7 @@ One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots
 \end{minipage}}
 \end{figure}
 
-The step order, the round order and the reversal convention fix the challenges; changing any of them is a protocol change.
-
-\paragraph{Soundness.} The three algebraic steps contribute $\kappa/|\EF|$ (column batching), $2m/|\EF|$ (jagged sumcheck, Theorem~\ref{thm:jagged}) and $4(m+1)/|\EF|$ (assist, Theorem~\ref{thm:jagged-assist}), which together form the row ``reduction to the dense polynomial'' of Table~\ref{tab:components}. The paper states plain soundness of each reduction; the round-by-round form Theorem~\ref{thm:composition} assumes follows because each is a sumcheck, round-by-round sound with the same per-round errors~\citep{chiesa-yogev}. The opening's terms are those of Section~\ref{sec:iopp}, and all of them are accounted in \S\ref{sec:iopp-soundness}.
+\paragraph{Soundness.} The three algebraic steps contribute $\kappa/|\EF|$ (column batching), $2m/|\EF|$ (jagged sumcheck, Theorem~\ref{thm:jagged}) and $4(m+1)/|\EF|$ (assist, Theorem~\ref{thm:jagged-assist}), which together form the row ``reduction to the dense polynomial'' of Table~\ref{tab:components}. Hemo et al.\ state plain soundness of each reduction; the round-by-round form Theorem~\ref{thm:composition} assumes follows because each is a sumcheck, round-by-round sound with the same per-round errors~\citep{chiesa-yogev}. The opening's terms are those of Section~\ref{sec:iopp}, and all of them are accounted in \S\ref{sec:iopp-soundness}.
 
 \subsection{Quantised committed geometry}
 \label{sec:pcs-geometry}
@@ -206,13 +178,11 @@ The stacking height is $H=2^{21}$, so a round is committed as a whole number of 
 \[
   1,\;2,\;3,\;4,\;8,\;16,\;24,\;\ldots\ \text{blocks}.
 \]
-For an unpinned round, which is every core round, the gap is split into
+For a core round the gap is split into
 \[
   \Bigl\lceil \frac{(\hat\nu-\hat\nu_{\mathrm{prev}})\,H}{2^{22}} \Bigr\rceil
   \ \text{columns},\qquad \hat\nu_{\mathrm{prev}}=\text{the bucket below }\hat\nu,
 \]
-at least one: the number the widest gap of the bucket needs, so the count depends on the bucket alone, and a narrower gap leaves trailing columns short or empty. A pinned round, as in the compress machine, uses a fixed column count.
+at least one: the number the widest gap of the bucket needs, so the count depends on the bucket alone, and a narrower gap leaves trailing columns short or empty. A round whose area is pinned, as in the recursion machine, uses a fixed number of columns instead, zero-height ones allowed, so the recursion program's column count does not depend on a child's row counts.
 
-Both rules make a shard's committed geometry, and hence the recursion program that verifies it and that program's key, a function of the chip set, the first-shard flag and the two buckets rather than of exact row counts. Rounding up to the next block, or letting the padding-column count follow the gap, would make every row profile a distinct verifier program. Under the quantised rule the key space is small enough to enumerate offline, which lets a verifier hold a fixed allowlist covering every shard shape the declared clusters admit (Section~\ref{sec:argument-block}). The overhead is the padding inside a bucket, committed and opened like any other cell.
-
-The reduction's memory stays proportional to the real data: $W$ is never materialised (\S\ref{sec:pcs-jagged-assist}); the suffix from $A$ to $M$ is treated as zero rather than allocated, which is why inter-round padding must be explicit and the suffix need not be; and the stripe evaluations of Equation~\eqref{eq:stacking-bind} are read off the committed interleaved layout, so a round is traversed once to commit and once to open.
+Both rules make a shard's committed geometry, and hence the recursion program that verifies it and that program's key, a function of the chip set, the first-shard flag and the two buckets rather than of exact row counts. Without the quantisation every row profile would be a distinct verifier program; with it the key space is small enough to enumerate in advance, which lets a verifier hold a fixed allowlist covering every shard shape the declared clusters admit (Section~\ref{sec:argument-block}). The overhead is the padding inside a bucket, committed and opened like any other cell.
