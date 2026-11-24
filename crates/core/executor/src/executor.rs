@@ -319,6 +319,11 @@ pub struct Executor<'a> {
     #[doc(hidden)]
     pub force_interpreter: bool,
 
+    /// The native producer's cache key for this executor's program and chip
+    /// widths, set on first use.
+    #[doc(hidden)]
+    pub producer_key: Option<u64>,
+
     /// The hint stream was RECORDED by a prior pass and pre-seeded, so the
     /// syscalls that would produce it must not run again.
     ///
@@ -699,6 +704,7 @@ impl<'a> Executor<'a> {
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
             force_interpreter: false,
+            producer_key: None,
             hint_stream_prerecorded: false,
             flat_mem: None,
             recording_chunk_mem_reads: Vec::new(),
