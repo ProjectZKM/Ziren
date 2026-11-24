@@ -116,6 +116,26 @@ by one degree-two sumcheck over the $2(m+1)$ boundary variables of Equation~\eqr
 
 The second verifier term dominates: it is linear in the number of columns, about $2 \cdot 10^6$ extension multiplications at the core shard's $m$ and $K$, against a few thousand for the branching program, consistent with the paper's $m \cdot 2^k$~\citep[p.~7]{jagged-pcs}. The native verifier computes the value by the closed form and replays the assist transcript; the recursion circuit checks the assist's closing identity explicitly.
 
+\subsection{Row weights after the univariate skip}
+\label{sec:pcs-skip}
+
+The construction above uses the binary row extension. For the refinement of \S\ref{sec:air-skip}, replace each row factor $\eqf(j,\bm z_{\mathrm{row}})$ in the column claims and Equation~\eqref{eq:jagged-global-claim} by
+\[
+  \psi(j)=\eqf(\bm z_{\mathrm{hi}},j\mathbin{\gg}4)
+           L_{j\bmod16}(r_0),\qquad
+  W^\sharp[t_k+j]=w_k\psi(j)\quad(0\le j<h_k).
+\]
+The implicit dense tail still has zero weight. The product sumcheck on $\langle\widetilde Q,\widetilde W^\sharp\rangle$ remains degree two: the row weights determine a Boolean table whose extension in the dense index is multilinear.
+
+The assist uses the same boundaries and a modified branching-program evaluation. If $\bm b$ is the four-bit encoding of $b$, its boundary polynomial is
+\[
+  \mathsf{BP}^\sharp(r_0,\bm z_{\mathrm{hi}},\bm z^*,x,y)
+    =\sum_{b=0}^{15}L_b(r_0)\,
+       \mathsf{BP}((\bm z_{\mathrm{hi}},\bm b),
+                  \operatorname{rev}(\bm z^*),x,y).
+\]
+The high row bits follow the ordinary dynamic program; the four low row bits are enumerated with Boolean values, and the sixteen branches are combined with $L_b(r_0)$. This polynomial is still multilinear in the boundary inputs, so the degree-two assist and its $4(m+1)/|\EF|$ sumcheck term are unchanged, although the branching-program evaluation has additional constant-size work. The native and recursive verifiers must use this same extension. The dense commitment, prefix sums, stacking layout and final \WHIR{} opening are unchanged.
+
 \subsection{Several commitments opened as one}
 \label{sec:pcs-stacking}
 

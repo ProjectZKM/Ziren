@@ -43,6 +43,9 @@ We use the calculator to evaluate the component errors of the interactive protoc
 
 Query soundness is counted in the unique-decoding regime for the core schedule and under the Johnson bound for the compress schedule~\citep{proximity-gaps-2025}; neither needs a proximity-gap conjecture. A proof's level is $-\log_2$ of the \emph{sum} of its component errors, a union bound rather than the smallest component, and a block's level sums over every node of its recursion tree. The analysis follows \WHIR{}'s~\citep{whir}, adding the batching over several commitments and the jagged terms; levels computed by other calculators, such as RISC Zero's~\citep{risc0-soundness}, are comparable only when they charge the same components.
 
+\paragraph{Scope of the zerocheck figures.}
+The numerical table below retains the binary zerocheck configuration. Instantiating the univariate refinement of \S\ref{sec:air-skip} replaces its $4n/|\EF|$ sumcheck term by $(4n+44)/|\EF|$ (Equation~\eqref{eq:skip-round-error}), an additional $44/|\EF|$ per proof using the skip. This adjustment must be included before recomputing a stage or recursion-tree bound; the table is not a separate numerical evaluation of the skipped configuration.
+
 \begin{table}[t]
 \centering
 \small
@@ -82,6 +85,8 @@ A $k$-round public-coin functional interactive oracle proof (FIOP) with query cl
 \end{definition}
 
 The shard protocol of Section~\ref{sec:argument} is an FIOP for the \emph{evaluation} query class $\mathcal Q_{\mathrm{ev}}$ over $\Sigma = \F$: a committed table $\Pi \in \F^{2^n}$ is read only through $\alpha_{\bm z}(\Pi) = \widetilde\Pi(\bm z) \in \EF$ for points $\bm z \in \EF^{n}$, the claims $(\bm z, v)$ of Section~\ref{sec:prelim}. Its rounds are the committed traces, the \LogUp{} layers, the zerocheck, the batching of column claims and the jagged reduction; a message the verifier reads in full, such as a sumcheck round polynomial, is a short string queried at every position. In Table~\ref{tab:components}, the rows for \LogUp{}, the zerocheck and the reduction to the dense polynomial bound $\varepsilon_{\mathrm{FIOP}}$, and the rows for query phases, folding rounds, the final polynomial and the out-of-domain samples belong to the opening of Layer~2; batching sits at the boundary, since it combines claims just before they are opened.
+
+For the univariate refinement, the column query is the weighted linear functional of Equation~\eqref{eq:skip-row-opening}, rather than an ordinary row-MLE evaluation. Section~\ref{sec:pcs-skip} reduces it to the same dense-polynomial evaluation query. A function-binding statement for the skipped instantiation must cover these modified column queries.
 
 \paragraph{Layer 2: the interactive commit-and-open argument.} The Funky compiler~\citep{funky26} replaces each oracle $\Pi_i$ by a commitment under a functional commitment scheme for the same query class and, after the last round, opens every queried constraint. For \Ziren{} the functional commitment is the jagged commitment of Section~\ref{sec:pcs} opened through \WHIR{}: the jagged reduction turns the shard's column claims into one evaluation claim on the dense polynomial, and the batched \WHIR{} proof opens it. Its security requirement is \emph{function binding}: no efficient prover opens one commitment to constraints that no single string satisfies.
 

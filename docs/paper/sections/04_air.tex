@@ -176,7 +176,123 @@ One \LogUp{} instance, the bus argument, proves all interactions of a shard on t
 \subsection{The constraint argument}
 \label{sec:air-zerocheck}
 
-The constraint system is uniform: a chip imposes the same constraints on every row, so nothing about it is committed and the verifier evaluates the constraint polynomials itself at the closing point. All chips' constraints are proved by \emph{one} zerocheck. The verifier samples $\eta$ to combine chips and $\mu$ to combine a chip's constraints, so that $C_c(\bm X) = \sum_k \mu^k\, c_{c,k}(\text{row}(\bm X))$ must vanish on chip $c$'s real rows, and the prover proves $\sum_{\bm b} \eqf(\bm b, \bm r)\, \sum_c \eta^c C_c(\bm b) = 0$ for a random $\bm r$ by sumcheck over the tallest chip's variables, with shorter chips handled by an analytic ``virtual $\ge$'' factor rather than padding. Constraint degree three gives round polynomials of degree four. The GPU's constraint kernels are compiled per chip from the description the verifier uses, except for the widest accelerator chips, which are interpreted (Table~\ref{tab:census}), and host verification catches any mismatch. The zerocheck is seeded from the \LogUp{} openings, so the two share one opening of each column; what remains is about $3.6 \cdot 10^4$ (chip, column, point, value) claims per shard, which the commitment layer reduces to one.
+The constraint system is uniform: a chip imposes the same constraints on every row, so nothing about it is committed and the verifier evaluates the constraint polynomials itself at the closing point. All chips' constraints are proved by \emph{one} zerocheck. We first describe the binary protocol underlying the soundness figures of \S\ref{sec:iopp-soundness}, then its univariate refinement in \S\ref{sec:air-skip}.
+
+Let $2^n$ be the logical row domain and $\bm T_c(\bm X)$ the vector of multilinear extensions of chip $c$'s main and preprocessed columns, zero beyond its height $h_c$. The preceding \LogUp{} argument leaves claims on these columns at a common point $\bm\zeta$. The verifier samples batching challenges $\mu$, $\beta_{\mathrm{open}}$ and $\eta$, in that order: $\mu$ combines each chip's constraints into $C_c$, powers of $\beta_{\mathrm{open}}$ combine its column openings into the linear form $B_c$, and $\eta$ combines chips in a fixed order. Write $a_c=C_c(\bm 0)$, with the public values held fixed, and let $P_c$ be the multilinear extension of $[r\ge h_c]$. For a valid trace,
+\[
+  G_c(\bm X)=C_c(\bm T_c(\bm X))-a_cP_c(\bm X)
+             +B_c(\bm T_c(\bm X))
+\]
+satisfies $G_c(\bm b)=B_c(\bm T_c(\bm b))$ on the Boolean cube: constraints vanish on real rows, and the subtraction cancels their value on zero-padded rows. The zerocheck proves
+\begin{equation}
+\label{eq:zerocheck-seeded}
+  S=\sum_{\bm b\in\{0,1\}^n}
+       \eqf(\bm\zeta,\bm b)\sum_c\eta^cG_c(\bm b),
+  \qquad
+  S=\sum_c\eta^c B_c(\bm T_c(\bm\zeta)).
+\end{equation}
+The rightmost expression is computed from the \LogUp{} opening claims; the zerocheck binds those claims together with the AIR constraints.
+
+Each binary round sends a polynomial $q_i$. The verifier checks $q_i(0)+q_i(1)$ against the running claim, absorbs its coefficients, samples $u_i$, and replaces the claim by $q_i(u_i)$. Constraint degree three gives round degree at most four. The prover folds pairs of column entries with weights $(1-u_i,u_i)$, so four rounds leave one-sixteenth as many entries. At the final point $\bm z$, the verifier reconstructs the integrand of Equation~\eqref{eq:zerocheck-seeded} from column openings and the analytic virtual-$\ge$ padding factor. The jagged commitment authenticates those openings with row weights $\eqf(\bm z,r)$ (\S\ref{sec:pcs-jagged}). The GPU's constraint kernels are compiled per chip from the description the verifier uses, except for the widest accelerator chips, which are interpreted (Table~\ref{tab:census}), and host verification catches any mismatch. What remains is about $3.6\cdot10^4$ column claims per shard, reduced to one dense-polynomial opening.
+
+\subsection{A univariate skip of four zerocheck rounds}
+\label{sec:air-skip}
+
+The refinement replaces the first four binary rounds and their intermediate folds by one round over a sixteen-point domain, followed by one $16{:}1$ fold. It changes the polynomial extension used for the four lowest row bits while preserving the sum in Equation~\eqref{eq:zerocheck-seeded}. The remaining variables use the binary protocol above; the \LogUp{} circuit itself is unchanged.
+
+\paragraph{Block interpolation.}
+Assume $n>4$ and write a row as $r=16x+b$, where $b\in\{0,\ldots,15\}$ is the low digit and $\bm x\in\{0,1\}^{n-4}$ encodes the block index $x$. Let $\omega\in\F$ have order sixteen and $D=\{\omega^b:0\le b<16\}$. For each column define
+\begin{equation}
+\label{eq:skip-column}
+  T^\sharp(Z,\bm x)=\sum_{b=0}^{15}L_b(Z)T(16x+b),
+  \qquad
+  L_b(Z)=\prod_{j\ne b}\frac{Z-\omega^j}{\omega^b-\omega^j}
+        =\frac{\omega^b(Z^{16}-1)}{16(Z-\omega^b)}.
+\end{equation}
+The product defines $L_b$ everywhere; the quotient is evaluated away from its removable singularity. At $Z=\omega^j$ the weights are one-hot. The formula follows from $V(Z)=Z^{16}-1$ and its formal derivative $V'(\omega^b)=16/\omega^b$. Each column has degree at most fifteen in $Z$ and is extended multilinearly in the block bits.
+
+Split the anchor into low and high coordinates, $\bm\zeta_{\mathrm{lo}}$ and $\bm\zeta_{\mathrm{hi}}$, pairing the low coordinates with the bits of $b$. Interpolate its low equality factor as
+\[
+  e^\sharp(Z)=\sum_{b=0}^{15}
+                 \eqf(\bm\zeta_{\mathrm{lo}},b)L_b(Z).
+\]
+Interpolate the padding indicator similarly, obtaining $P_c^\sharp$, and set
+\[
+  G_c^\sharp(Z,\bm x)
+    =C_c(\bm T_c^\sharp(Z,\bm x))-a_cP_c^\sharp(Z,\bm x)
+      +B_c(\bm T_c^\sharp(Z,\bm x)).
+\]
+The constraints are evaluated \emph{after} interpolating their input columns. Interpolating only the original constraint residuals would give a different polynomial and would not bind the nonlinear constraints on the folded columns.
+
+\paragraph{The skip message and its check.}
+The prover sends the coefficients of
+\begin{equation}
+\label{eq:skip-message}
+  s(Z)=e^\sharp(Z)
+    \sum_{\bm x\in\{0,1\}^{n-4}}
+      \eqf(\bm\zeta_{\mathrm{hi}},\bm x)
+      \sum_c\eta^cG_c^\sharp(Z,\bm x).
+\end{equation}
+At $Z=\omega^b$, every interpolant recovers its original row value, hence $\sum_{Z\in D}s(Z)=S$. Cubic constraints on degree-fifteen columns have degree at most 45; multiplication by $e^\sharp$ raises the bound to 60. The message contains exactly 61 coefficients $c_0,\ldots,c_{60}$, including trailing zeros. Since $\sum_{Z\in D}Z^k$ is sixteen when $16\mid k$ and zero otherwise, the verifier checks
+\begin{equation}
+\label{eq:skip-domain-sum}
+  16(c_0+c_{16}+c_{32}+c_{48})=S.
+\end{equation}
+It then absorbs all coefficients and samples $r_0\in\EF$, setting the running claim to $s(r_0)$. The domain-sum check alone does not bind the message to the trace; the subsequent sumcheck and commitment opening supply that binding.
+
+\paragraph{Continuation and padding.}
+The prover folds each block once, using $T'(\bm x)=\sum_bL_b(r_0)T(16x+b)$ for every column, and runs $n-4$ binary degree-four rounds on Equation~\eqref{eq:skip-message} with $Z=r_0$. The factor $e^\sharp(r_0)$ is now constant. The message count is $1+(n-4)=n-3$, and the four intermediate pairwise folds are not constructed. Folded rows need not satisfy the nonlinear AIR constraints, so the optimization that drops a vanishing constraint value on an initial real row is disabled after the skip.
+
+For a partial block, write $h_c=16q_c+s_c$, $0\le s_c<16$, and set $\rho_c(Z)=\sum_{b=s_c}^{15}L_b(Z)$. On Boolean block indices,
+\[
+  P_c^\sharp(Z,\bm x)
+    =[x\ge q_c]-(1-\rho_c(Z))[x=q_c].
+\]
+This is zero below the boundary block, $\rho_c(Z)$ on it, and one above it. Its multilinear extension in $\bm x$ handles partial blocks without allocating the zero tail.
+
+At the final high-bit challenges $\bm z_{\mathrm{hi}}$, each column opening is
+\begin{equation}
+\label{eq:skip-row-opening}
+  y_k^\sharp=\sum_{r<h_k}\mathbf c_k[r]\,
+      \eqf(\bm z_{\mathrm{hi}},r\mathbin{\gg}4)
+      L_{r\bmod16}(r_0).
+\end{equation}
+The jagged reduction must use these weights; four copies of $r_0$ cannot be interpreted as an ordinary multilinear point. Section~\ref{sec:pcs-skip} gives the corresponding indicator and branching-program change.
+
+\paragraph{Constructing the message.}
+On a valid trace the adjusted constraint part of the inner sum in Equation~\eqref{eq:skip-message} vanishes on $D$. Its degree is at most 45, so it equals $(Z^{16}-1)Q(Z)$ with $\deg Q\le29$. The implementation evaluates this part on two disjoint cosets of $D$, divides by $Z^{16}-1$, and interpolates $Q$ from the resulting 32 values. It obtains the linear GKR-opening part, of degree at most fifteen, from its sixteen domain values, then multiplies their sum by $e^\sharp$. The larger first message trades additional univariate arithmetic for fewer passes over the row tables; it is not a claim of smaller proof size.
+
+\paragraph{Round error.}
+A fixed incorrect skip polynomial of degree at most 60 agrees with the intended polynomial at a uniform $r_0$ with probability at most $60/|\EF|$. The remaining binary rounds contribute $4(n-4)/|\EF|$, giving the sumcheck term
+\begin{equation}
+\label{eq:skip-round-error}
+  \varepsilon_{\mathrm{sc,skip}}
+   \le\frac{60+4(n-4)}{|\EF|}
+   =\frac{4n+44}{|\EF|}.
+\end{equation}
+The binary term is $4n/|\EF|$. This comparison concerns only the sumcheck rounds; batching, the initial constraint test and commitment binding remain separate terms.
+
+\begin{example}[Thirty-two rows]
+\label{ex:skip}
+For arithmetic that can be checked by hand, work over $\mathbb F_{97}$, rather than the production field. Take one column with block zero $(1,2,\ldots,1,2)$ and block one $(2,1,\ldots,2,1)$, no padding, constraint $C(T)=(T-1)(T-2)$ and opening term $B(T)=T$. Choose $\bm\zeta_{\mathrm{lo}}=(1/2)^4$ and $\zeta_{\mathrm{hi}}=3$. Every original row satisfies the constraint, and the seeded claim is $S=(-2\cdot24+3\cdot24)/16=50$. With $\omega=8$, an order-sixteen root with $\omega^8=-1$,
+\[
+  T^\sharp(Z,0)=\frac{3-Z^8}{2},\qquad
+  T^\sharp(Z,1)=\frac{3+Z^8}{2},\qquad
+  C(T^\sharp(Z,x))=\frac{Z^{16}-1}{4}.
+\]
+Since $e^\sharp=1/16$, the skip message and its check are
+\[
+  s(Z)=\frac{Z^{16}-1}{64}+\frac{3+5Z^8}{32}
+      =41+82Z^8+47Z^{16},\qquad
+  16(41+47)=50\pmod{97}.
+\]
+For the illustrative challenge $r_0=3$, $s(3)=38$ and the folded column is $(19,81)$, with $T'(X)=19+62X$. Both folded constraint values are 15, rather than zero. The single remaining binary message is
+\[
+  q(X)=\frac{\eqf(3,X)}{16}\bigl(C(T'(X))+T'(X)\bigr)
+      =20+59X+23X^2+13X^3.
+\]
+It satisfies $q(0)+q(1)=20+18=38$. At the illustrative high-bit challenge $t=4$, $q(4)=1$ and the trace opening is $T'(4)=73$. The verifier reconstructs $\eqf(3,4)(C(73)+73)/16=1$, while the PCS binds $73=\sum_{x,b}\eqf(4,x)L_b(3)T(16x+b)$. Actual challenges are derived from the transcript after the corresponding messages.
+\end{example}
 
 \subsection{The cost of a row}
 \label{sec:air-cost}

@@ -18,10 +18,10 @@ and a cost estimate before the measurements.
 | `02_preliminaries` | field and MLEs, argument and PCS definitions, codes, hashing, lookups and memory checking, chips/buses/determinism |
 | `03_architecture` | architecture: Ziren up to the compressed proof (figure, Algorithm 1, execution, shard and block protocols, parameters), then applications (shrink, then wrap for on-chain or binary/narrow for garbled verification) |
 | `03_isa` | MIPS32 and the execution relation: machine state and instruction format, step-transition figure, program formatting, shards, execution relation, statement |
-| `04_air` | instruction frame and buses: words and padding, preprocessed/byte tables, frame, memory argument, global digest and its security, trace uniqueness, cost of a row |
+| `04_air` | instruction frame and buses: words and padding, preprocessed/byte tables, frame, memory argument, global digest, binary zerocheck and its four-bit univariate refinement, cost of a row |
 | `045_base` | chips for the base instruction set, family by family |
 | `046_ext` | multiplication, division, bit manipulation and system calls |
-| `05_pcs` | dense packing, stacking, jagged reduction and branching program |
+| `05_pcs` | dense packing, stacking, jagged reduction and branching program, including univariate-skip row weights |
 | `06_iopp` | WHIR protocol, interleaved commitment, schedule, soundness, proof size |
 | `065_security` | security relation, soundness accounting, compose and root checks, verifying-key binding and cross-shard digest |
 | `075_verification` | trusted base, conformance, extracted determinism, defects |
