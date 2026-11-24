@@ -17,7 +17,7 @@ Ziren V2.0 has no CPU chip. The work a CPU table used to do (fetch the instructi
 - `RTypeFrameCols`: three registers, with the opcode and operand indices stored as single columns. Used by `AddSub`, `Bitwise`, `Lt`, `Mul`, `DivRem`, `ShiftLeft`, `ShiftRight` and `SyscallInstrs`.
 - `ShamtFrameCols`: `op_a` and `op_b` registers and a 5-bit shift amount held in one column. Used by `ShiftLeftImm` and `ShiftRightImm`.
 
-Each register access holds the value, the clock of the previous access to that register, and one 16-bit limb of the clock difference: six columns. The previous access is always in the same shard because the `MemoryBump` chip inserts a read of every touched register at `(shard, 0)` (see [Memory](./memory.md)).
+Each register access holds the value and the clock of the previous access to that register: five columns. The clock difference is not stored; it is range-checked as an expression with one 16-bit lookup. The previous access is always in the same shard and fewer than \\( 2^{16} \\) clock ticks back, because the `MemoryBump` chip inserts a read of the register wherever that would not hold (see [Memory](./memory.md)).
 
 ## Frame constraints
 
