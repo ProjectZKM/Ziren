@@ -82,12 +82,14 @@ where
             .when(local.is_jump + local.is_jumpi)
             .assert_word_eq(local.next_next_pc, local.frame.op_b_val());
 
-        crate::operations::AddOperation::<AB::F>::eval(
+        crate::operations::AddOperation::<AB::F>::eval_carries_only(
             builder,
             local.next_pc,
             local.frame.op_b_val(),
             crate::operations::AddOperation { value: local.next_next_pc },
             local.is_jumpdirect.into(),
         );
+        builder.slice_range_check_u8(&local.next_pc.0, local.is_jumpdirect.into());
+        builder.slice_range_check_u8(&local.next_next_pc.0, local.is_jumpdirect.into());
     }
 }

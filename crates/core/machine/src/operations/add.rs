@@ -43,6 +43,13 @@ impl<F: Field> AddOperation<F> {
         expected
     }
 
+    /// [`Self::populate`] for a site that range checks all three words
+    /// itself (or trusts them): no byte events, matching
+    /// [`Self::eval_carries_only`].
+    pub fn populate_carries_only(&mut self, a_u32: u32, b_u32: u32) -> u32 {
+        self.populate_carries(a_u32, b_u32)
+    }
+
     fn populate_carries(&mut self, a_u32: u32, b_u32: u32) -> u32 {
         let expected = a_u32.wrapping_add(b_u32);
         self.value = Word::from(expected);
@@ -102,5 +109,30 @@ impl<F: Field> AddOperation<F> {
         builder_is_real.assert_bool(is_real.clone());
 
         builder.slice_range_check_u8(&cols.value.0, is_real);
+    }
+
+    /// [`Self::eval`] with no range checks at all: the caller byte checks the
+    /// operands and the result elsewhere on the row, or they are trusted (a
+    /// register read or a program immediate).  The carry argument still needs
+    /// all three words byte shaped.
+    ///
+    /// Pair with [`Self::populate_carries_only`].
+    pub fn eval_carries_only<AB: ZKMAirBuilder>(
+        builder: &mut AB,
+        a: Word<AB::Var>,
+        b: Word<AB::Var>,
+        cols: AddOperation<AB::Var>,
+        is_real: AB::Expr,
+    ) {
+        let base_inv = AB::F::from_u32(256).inverse();
+
+        let mut builder_is_real = builder.when(is_real.clone());
+
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..zkm_primitives::consts::WORD_SIZE {
+            carry = (a[i] + b[i] - cols.value[i] + carry) * base_inv;
+            builder_is_real.assert_bool(carry.clone());
+        }
+        builder_is_real.assert_bool(is_real);
     }
 }

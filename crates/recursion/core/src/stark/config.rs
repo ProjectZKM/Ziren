@@ -430,8 +430,8 @@ mod whir_over_bn254_roundtrip_test {
         let commitment = precompute.commit.original_commitment.clone();
 
         let claims: Vec<Vec<JaggedChallenge>> = {
-            let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
-            let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
+            let eq_c =
+                zkm_pcs::shard_level::univariate_skip::skip_row_eq_table::<JaggedChallenge>(&z_row);
             traces
                 .iter()
                 .map(|(_, t)| {
@@ -613,8 +613,8 @@ mod whir_over_bn254_roundtrip_test {
                 .collect()
         };
         let claims = |ts: &[(String, RowMajorMatrix<JaggedVal>)]| -> Vec<Vec<JaggedChallenge>> {
-            let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
-            let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
+            let eq_c =
+                zkm_pcs::shard_level::univariate_skip::skip_row_eq_table::<JaggedChallenge>(&z_row);
             ts.iter()
                 .map(|(_, t)| {
                     let w = t.width;

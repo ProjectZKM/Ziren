@@ -14,12 +14,12 @@
   tap/.style={-{Latex[length=1.6mm]}, thin, zirenslate!90},
 ]
   % instruction chips (functional chips), pitch 2.3 cm
-  \node[chip] (alu)   at (0,0)    {ALU\\\texttt{AddSub}, \texttt{Bitwise}};
-  \node[chip] (shift) at (2.3,0)  {Shift\\\texttt{ShiftLeft}\\\texttt{(Imm)}};
-  \node[chip] (mul)   at (4.6,0)  {Mul/Div\\\texttt{Mul}, \texttt{DivRem}};
-  \node[chip] (ctl)   at (6.9,0)  {Control\\\texttt{Branch}, \texttt{Jump}};
-  \node[chip] (ld)    at (9.2,0)  {Load/Store\\\texttt{LoadWord}, \ldots};
-  \node[chip] (sys)   at (11.5,0) {Syscall\\\texttt{Syscall}\\\texttt{Instrs}};
+  \node[chip] (alu)   at (0,0)    {ALU\\add, bitwise};
+  \node[chip] (shift) at (2.3,0)  {Shift\\left, right};
+  \node[chip] (mul)   at (4.6,0)  {Mul/Div\\multiply, divide};
+  \node[chip] (ctl)   at (6.9,0)  {Control\\branch, jump};
+  \node[chip] (ld)    at (9.2,0)  {Load/Store\\word, narrow};
+  \node[chip] (sys)   at (11.5,0) {Syscall\\instructions};
   \node[accel, text width=2.5cm] (pre) at (14.9,0) {Accelerators\\Keccak, SHA, EC, \ldots};
 
   % buses
@@ -35,13 +35,13 @@
   \draw[tap] (sys.east) -- node[above=1pt, font=\scriptsize, black!70, align=center] {syscall\\bus} (pre.west);
 
   % tables and memory chips
-  \node[rom] (prog) at (1.2,2.5)  {\texttt{Program} ROM\\(preprocessed, in vk)};
+  \node[rom] (prog) at (1.2,2.5)  {Program ROM\\(preprocessed, in vk)};
   \node[rom, text width=3.4cm] (pv)   at (5.6,2.5)  {Public values\\entry/exit state, digests};
-  \node[mem] (bump) at (0.6,-2.9)  {\texttt{MemoryBump}\\register anchors};
-  \node[rom] (byte) at (4.0,-2.9)  {\texttt{Byte} / \texttt{Range} tables\\(preprocessed)};
-  \node[mem] (loc)  at (7.6,-2.9)  {\texttt{MemoryLocal}\\shard first/last touch};
-  \node[mem] (glob) at (11.0,-2.9) {\texttt{Global}\\septic digest};
-  \node[mem] (init) at (14.6,-2.9) {\texttt{MemoryGlobal}\\\texttt{Init}/\texttt{Finalize}};
+  \node[mem] (bump) at (0.6,-2.9)  {Shadow reads\\register anchors};
+  \node[rom] (byte) at (4.0,-2.9)  {Byte / range tables\\(preprocessed)};
+  \node[mem] (loc)  at (7.6,-2.9)  {Shard-boundary memory\\first/last touch};
+  \node[mem] (glob) at (11.0,-2.9) {Cross-shard digest\\septic curve};
+  \node[mem] (init) at (14.6,-2.9) {Memory\\initialise/finalise};
 
   \draw[tap] (prog.south) -- (1.2,1.35);
   \draw[tap] (pv.south) -- (5.6,1.0);

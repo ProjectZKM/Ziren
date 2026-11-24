@@ -71,4 +71,4 @@ The SDK's `ProverClient::new()` selects its prover from the `ZKM_PROVER` environ
 | `network` | ZKM Prover Network (requires the SDK's `network` feature) |
 | `mock` | Mock prover for testing, which produces no real proof |
 
-Groth16 and PLONK circuit artifacts are downloaded on first use into `~/.zkm/circuits/{groth16,plonk}/<version>`, where `<version>` is the SDK's circuit version (`v2.0.0` for Ziren 2.0.0).
+Groth16 and PLONK circuit artifacts are downloaded on first use into `~/.zkm/circuits/{groth16,plonk}/<version>`, where `<version>` is the SDK's circuit version (`v2.1.0` for Ziren 2.1.0).

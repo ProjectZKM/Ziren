@@ -77,10 +77,10 @@ pub struct JaggedPacking<F> {
     /// Cumulative offsets: `offsets[k]` is the starting index of the
     /// k-th column in `dense_values`.  The slice carries `total_cols + 1`
     /// entries with the final sentinel `offsets[total_cols] = total_values`.
-    /// The recursion lift (`shard_level_witness.rs:lift_jagged_bundle`)
-    /// emits `col_prefix_sums.len() = num_cols + 1`, and
-    /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`;
-    /// the sentinel keeps the host and recursion lengths in agreement.
+    /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`.
+    /// The recursion lift (`lift_jagged_bundle_outer` / `_generic` in
+    /// `shard_level_witness.rs`) bit-decomposes the same `total_cols + 1`
+    /// entries into `col_prefix_sums`.
     pub offsets: Vec<usize>,
     /// Total number of values in the dense vector.
     pub total_values: usize,

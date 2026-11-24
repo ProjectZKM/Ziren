@@ -45,6 +45,7 @@ pub mod stark;
 pub mod sumcheck;
 pub mod symbolic;
 pub mod univariate;
+pub mod univariate_skip;
 pub(crate) mod utils;
 pub mod whir_circuit;
 pub mod witness;

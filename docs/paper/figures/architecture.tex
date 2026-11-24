@@ -30,11 +30,11 @@
 \draw[a] (prog) -- node[lab, right] {compile} (elf);
 
 % ---- execute and prove
-\node[stage] (exec) at (3.9,0) {Execution\\{\scriptsize compiled run, cut into shard descriptors $d_i$}};
+\node[stage] (exec) at (3.9,0) {Execution\\{\scriptsize one run, cut into shard descriptors $d_i$}};
 \foreach \k in {2,1} {
   \node[stage, minimum height=1.25cm] at ($(7.0,0)+(0.16*\k,0.16*\k)$) {};
 }
-\node[stage, minimum height=1.25cm] (shard) at (7.0,0) {ShardProve\\{\scriptsize replay $d_i$, prove; one shard per GPU}};
+\node[stage, minimum height=1.25cm] (shard) at (7.0,0) {ShardProve\\{\scriptsize re-execute $d_i$, prove; one shard per GPU}};
 \node[stage, minimum height=1.25cm] (rec) at (10.3,0) {};
 \node[font=\small, anchor=north] at (rec.north) {Recursion};
 \begin{scope}[shift={(10.3,-0.3)}]
@@ -76,7 +76,7 @@
 \node[tag, below=0.08cm of wrap] (tW) {\Poseidon{} over BN254};
 \draw[a] (wrap) -- node[lab, above] {$\pi_{\mathrm w}$} (snark);
 \node[stage, dashed] (bin) at (7.25,-6.4) {Binary stage\\{\scriptsize emulates \KB{} over bits}};
-\node[stage, dashed] (nar) at (10.6,-6.4) {Narrow recursion\\{\scriptsize proves a recorded verifier tape}};
+\node[stage, dashed] (nar) at (10.6,-6.4) {Narrow recursion\\{\scriptsize proves the verifier's execution}};
 \node[tag, below=0.08cm of bin] (tB) {$\F = \mathbb F_{2^{128}}$, $\Hash = \Blake$};
 \draw[a, dashed] (bin) -- node[lab, above] {$\pi_{\mathrm n}$} (nar);
 \draw[a, dashed] (nar.south east) .. controls +(0.55,-0.85) and +(-0.55,-0.85) .. node[lab, below] (rp) {repeats} (nar.south west);

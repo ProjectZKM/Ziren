@@ -36,7 +36,11 @@ The zerocheck proves that every constraint vanishes on every real row. Constrain
 
 \\[ \sum_{b \in \\{0,1\\}^n} \mathrm{eq}(r, b) \cdot C(b) = \text{(the combination of the GKR claims)}, \\]
 
-where \\( r \\) is a random point and \\( \mathrm{eq} \\) is the multilinear equality polynomial. Each round polynomial has degree 4 (degree 3 from the constraints, 1 from \\( \mathrm{eq} \\)), and there is one round per row variable of a fixed cube, \\( 2^{22} \\) rows for core shards (`CORE_MAX_LOG_ROW_COUNT`). A chip shorter than the cube is extended virtually, and the contribution of the virtual rows is removed analytically, so they need not satisfy the constraints. The sumcheck ends with claimed evaluations of every column of every chip at one point \\( z^* \\).
+where \\( r \\) is a random point and \\( \mathrm{eq} \\) is the multilinear equality polynomial. The cube is fixed, \\( 2^{22} \\) rows for core shards (`CORE_MAX_LOG_ROW_COUNT`). A chip shorter than the cube is extended virtually, and the contribution of the virtual rows is removed analytically, so they need not satisfy the constraints.
+
+The four lowest row variables are handled in one round, a *univariate skip*. Rows are grouped in blocks of 16, and each column is interpolated over a 16-point multiplicative subgroup within every block, so the first message is a univariate polynomial of degree at most 60 (61 coefficients): degree 15 per column, cubed by the constraints, times the interpolated \\( \mathrm{eq} \\) factor. The verifier checks that the message sums to the claim over the subgroup, which only needs the coefficients \\( c_0, c_{16}, c_{32}, c_{48} \\), and samples one challenge \\( r_0 \\). The prover folds every block of 16 rows once with the Lagrange weights \\( L_b(r_0) \\) and continues with ordinary rounds of degree 4 (degree 3 from the constraints, 1 from \\( \mathrm{eq} \\)), one per remaining row variable. A cube of \\( 2^n \\) rows therefore takes \\( n - 3 \\) messages instead of \\( n \\), and one 16-to-1 fold of the tables replaces the first four 2-to-1 folds.
+
+The sumcheck ends with claimed evaluations of every column of every chip at one point \\( z^* = (r_0, z_{hi}) \\). Because of the skip this is not an ordinary multilinear point: row \\( j \\) has weight \\( L_{j \bmod 16}(r_0) \cdot \mathrm{eq}(z_{hi}, \lfloor j / 16 \rfloor) \\).
 
 ## Jagged commitment
 
@@ -48,7 +52,7 @@ without padding the columns to a common height. Prefix sums \\( t_k \\) of the c
 
 \\[ p(z_r, z_c) = \sum_j q(j) \cdot \mathrm{eq}(\mathrm{row}(j), z_r) \cdot \mathrm{eq}(\mathrm{col}(j), z_c), \\]
 
-where \\( \mathrm{col}(j) \\) and \\( \mathrm{row}(j) \\) are the column and row that position \\( j \\) belongs to according to \\( t \\).
+where \\( \mathrm{col}(j) \\) and \\( \mathrm{row}(j) \\) are the column and row that position \\( j \\) belongs to according to \\( t \\). For the zerocheck's point the row factor is the skip weight above instead of \\( \mathrm{eq}(\mathrm{row}(j), z_r) \\); the reduction and the verifier's evaluation of the jagged indicator use the same weights.
 
 The dense vector is cut into stripes of \\( 2^{21} \\) values (the stacking height, `DEFAULT_LOG_STACKING_HEIGHT`). Each stripe is Reed-Solomon encoded, and all stripes of a round are committed in one Merkle tree. The preprocessed traces form a round committed at setup, whose root is in the verifying key; the main traces form a round committed per shard.
 

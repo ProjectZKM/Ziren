@@ -12,10 +12,13 @@
 //!      analytically by `VirtualGeq`.
 //!   3. Seed each chip's claim from its GKR openings
 //!      (`Σ openings · β^(1..)`).
-//!   4. Reduce via
-//!      [`super::sumcheck_poly::reduce_sumcheck_to_evaluation`]
-//!      (λ-RLC across chips, name order) into `univariate_polys` /
-//!      `claimed_sum` / `point_and_eval`.
+//!   4. Send the univariate skip message for the four lowest row
+//!      variables ([`super::univariate_skip`], λ-RLC across chips, name
+//!      order), sample `r0` and fold every 16-row block with `L_b(r0)`.
+//!   5. Reduce the remaining variables via
+//!      [`super::sumcheck_poly::reduce_sumcheck_to_evaluation`] into
+//!      `univariate_polys` / `claimed_sum` / `point_and_eval`; the point
+//!      carries `r0` in its last four slots.
 
 use std::collections::BTreeMap;
 
@@ -55,7 +58,9 @@ where
 ///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
 ///      padded tail is handled analytically by `VirtualGeq`).
 ///   3. Seed per-chip claims from the GKR openings.
-///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
+///   4. Send the univariate skip message, sample `r0`, fold each 16-row block.
+///   5. Reduce the remaining variables via `reduce_sumcheck_to_evaluation`
+///      (λ-RLC across chips).
 ///
 /// * `alpha`, `gkr_batch_open`: squeezed by the caller in that order right
 ///   before this call; `lambda` is squeezed here, so the transcript order is
@@ -104,12 +109,26 @@ where
     use crate::shard_level::zerocheck_poly::{
         compute_padded_row_adjustment, VirtualGeq, ZeroCheckPoly,
     };
+    use p3_maybe_rayon::prelude::*;
 
-    let n_chips = chips.len();
-    let mut zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, Val<SC>, Challenge<SC>, A>> =
-        Vec::with_capacity(n_chips);
-    let mut chip_sumcheck_claims: Vec<Challenge<SC>> = Vec::with_capacity(n_chips);
+    use crate::shard_level::univariate_skip::{
+        eq_low_bits, fold_rows_16, lagrange_weights, skip_round_poly, tail_weight, SkipChipInput,
+        SKIP_BITS, SKIP_SIZE,
+    };
+    use p3_challenger::CanObserve;
 
+    struct ChipPrep<'c, F: p3_field::Field, EF> {
+        main_cells: &'c [F],
+        main_width: usize,
+        prep_cells: Option<&'c [F]>,
+        prep_width: usize,
+        height: usize,
+        gkr_powers: Vec<EF>,
+        pra: EF,
+    }
+
+    let mut chip_sumcheck_claims: Vec<Challenge<SC>> = Vec::with_capacity(chips.len());
+    let mut preps: Vec<ChipPrep<'_, Val<SC>, Challenge<SC>>> = Vec::with_capacity(chips.len());
     for &chip_idx in name_order.iter() {
         let chip = chips[chip_idx];
         let pm = &shared_trace_mles[chip_idx];
@@ -133,27 +152,9 @@ where
                 gkr_powers.push(acc);
             }
         }
-
-        let log_h = if main_height == 0 {
-            0usize
-        } else if main_height.is_power_of_two() {
-            (main_height as u64).trailing_zeros() as usize
-        } else {
-            (usize::BITS - main_height.leading_zeros()) as usize
-        };
-        if log_h > num_variables as usize {
-            tracing::info!(
-                "ZC-DIAG OVERTALL chip='{}' chip_idx={} main_height={} main_width={} log_h={} num_variables(max_log_row_count)={}",
-                name, chip_idx, main_height, main_width, log_h, num_variables
-            );
-        }
-        let main_full_opt: Option<&[Challenge<SC>]> =
-            opening.main_trace_evaluations_full.as_deref();
-        let prep_full_opt: Option<&[Challenge<SC>]> =
-            opening.preprocessed_trace_evaluations_full.as_deref();
         let claim: Challenge<SC> = {
-            let main_full = main_full_opt.unwrap_or(&[]);
-            let prep_full = prep_full_opt.unwrap_or(&[]);
+            let main_full = opening.main_trace_evaluations_full.as_deref().unwrap_or(&[]);
+            let prep_full = opening.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]);
             main_full
                 .iter()
                 .chain(prep_full.iter())
@@ -162,62 +163,125 @@ where
         };
         chip_sumcheck_claims.push(claim);
 
-        let main_cells: Vec<Val<SC>> = {
-            let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
-                Some(mle) => mle.guts().as_slice(),
-                None => &[],
-            };
-            cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
+        let main_cells: &[Val<SC>] = match pm.inner().as_ref() {
+            Some(mle) => mle.guts().as_slice(),
+            None => &[],
         };
-        let prep_cells: Option<Vec<Val<SC>>> = prep_trace
-            .real_trace_ref()
-            .map(|pt| pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect());
-
-        let zeta_anchor: Vec<Challenge<SC>> = zeta.iter().rev().copied().collect();
-
-        let padded_row_adjustment = compute_padded_row_adjustment::<Val<SC>, Challenge<SC>, A>(
+        let prep_cells: Option<&[Val<SC>]> = prep_trace.real_trace_ref().map(|pt| pt.values);
+        let pra = compute_padded_row_adjustment::<Val<SC>, Challenge<SC>, A>(
             chip,
             alpha,
             public_values,
             main_width,
             prep_width,
         );
-        let initial_geq_value =
-            if main_height > 0 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
-        let virtual_geq = VirtualGeq::new(
-            main_height as u32,
-            Challenge::<SC>::ONE,
-            Challenge::<SC>::ZERO,
-            num_variables,
-        );
-
-        let poly = ZeroCheckPoly::<Val<SC>, Val<SC>, Challenge<SC>, A>::new(
-            chip,
-            public_values,
-            alpha,
-            gkr_powers,
-            zeta_anchor,
+        preps.push(ChipPrep {
             main_cells,
             main_width,
             prep_cells,
             prep_width,
-            main_height,
-            num_variables,
-            Challenge::<SC>::ONE,
-            initial_geq_value,
-            padded_row_adjustment,
-            virtual_geq,
-        );
-        zerocheck_polys.push(poly);
+            height: main_height,
+            gkr_powers,
+            pra,
+        });
     }
 
-    let (sumcheck_proof, component_poly_evals) =
+    let skip_polys: Vec<crate::shard_level::types::UnivariatePolynomial<Challenge<SC>>> =
+        name_order
+            .par_iter()
+            .zip(preps.par_iter())
+            .map(|(&chip_idx, p)| {
+                skip_round_poly::<Val<SC>, Challenge<SC>, A>(
+                    &SkipChipInput {
+                        chip: chips[chip_idx],
+                        main_cells: p.main_cells,
+                        num_main_cols: p.main_width,
+                        prep_cells: p.prep_cells,
+                        num_prep_cols: p.prep_width,
+                        height: p.height,
+                        gkr_powers: &p.gkr_powers,
+                        padded_row_adjustment: p.pra,
+                    },
+                    alpha,
+                    public_values,
+                    &zeta,
+                )
+            })
+            .collect();
+    let mut skip_msg = vec![Challenge::<SC>::ZERO; skip_polys[0].coefficients.len()];
+    for sp in &skip_polys {
+        for (acc, c) in skip_msg.iter_mut().zip(sp.coefficients.iter()) {
+            *acc = *acc * lambda + *c;
+        }
+    }
+    for c in &skip_msg {
+        for b in c.as_basis_coefficients_slice() {
+            challenger.observe(*b);
+        }
+    }
+    let r0: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let weights = lagrange_weights::<Val<SC>, Challenge<SC>>(r0);
+    let eq_lo = eq_low_bits(&zeta[..SKIP_BITS]);
+    let eq_sharp_r0 =
+        eq_lo.iter().zip(weights.iter()).fold(Challenge::<SC>::ZERO, |a, (&e, &w)| a + e * w);
+    let zeta_anchor_hi: Vec<Challenge<SC>> = zeta[SKIP_BITS..].iter().rev().copied().collect();
+    let num_vars_hi = num_variables - SKIP_BITS as u32;
+
+    let post_claims: Vec<Challenge<SC>> =
+        skip_polys.iter().map(|sp| sp.eval_at_point(r0)).collect();
+    let zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, Challenge<SC>, Challenge<SC>, A>> = name_order
+        .iter()
+        .zip(preps)
+        .map(|(&chip_idx, p)| {
+            let h = p.height;
+            let main_folded =
+                fold_rows_16::<Val<SC>, Challenge<SC>>(p.main_cells, p.main_width, h, &weights);
+            let prep_folded = p
+                .prep_cells
+                .map(|c| fold_rows_16::<Val<SC>, Challenge<SC>>(c, p.prep_width, h, &weights));
+            let rho = tail_weight(&weights, h % SKIP_SIZE);
+            let virtual_geq = VirtualGeq::new(
+                (h / SKIP_SIZE) as u32,
+                Challenge::<SC>::ONE,
+                rho - Challenge::<SC>::ONE,
+                num_vars_hi,
+            );
+            let initial_geq_value =
+                if h > 0 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
+            ZeroCheckPoly::<Val<SC>, Challenge<SC>, Challenge<SC>, A>::new(
+                chips[chip_idx],
+                public_values,
+                alpha,
+                p.gkr_powers,
+                zeta_anchor_hi.clone(),
+                main_folded,
+                p.main_width,
+                prep_folded,
+                p.prep_width,
+                h.div_ceil(SKIP_SIZE),
+                num_vars_hi,
+                eq_sharp_r0,
+                initial_geq_value,
+                p.pra,
+                virtual_geq,
+            )
+            .folded_rows()
+        })
+        .collect();
+
+    let (mut sumcheck_proof, component_poly_evals) =
         crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation::<
             Val<SC>,
             Challenge<SC>,
             _,
             SC::Challenger,
-        >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda);
+        >(zerocheck_polys, challenger, post_claims, 1, lambda);
+    sumcheck_proof
+        .univariate_polys
+        .insert(0, crate::shard_level::types::UnivariatePolynomial { coefficients: skip_msg });
+    sumcheck_proof.claimed_sum =
+        chip_sumcheck_claims.iter().fold(Challenge::<SC>::ZERO, |acc, &c| acc * lambda + c);
+    sumcheck_proof.point_and_eval.0.extend(core::iter::repeat_n(r0, SKIP_BITS));
     let mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>> =
         std::collections::BTreeMap::new();
     for (k, &chip_idx) in name_order.iter().enumerate() {

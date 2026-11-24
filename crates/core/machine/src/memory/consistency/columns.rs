@@ -101,32 +101,26 @@ pub struct MemoryAccessCols<T> {
 /// Register access.
 ///
 /// Register accesses use the same argument and the same address space as memory accesses, but the
-/// `MemoryBump` chip inserts a shadow read at `(shard, 0)` on the first touch of a register in a
-/// shard.  Since `clk` restarts at 0 every shard and real register accesses live at the sub-cycle
-/// positions `1..=4`, that shadow read is always the first link of the shard's access chain, so
-/// **every** register access is guaranteed to have `prev_shard == shard`.
+/// `MemoryBump` chip inserts a shadow read just before an access whose previous access to the
+/// register is in an earlier shard or `2^16` or more clk ticks back.  So **every** register
+/// access is guaranteed to have `prev_shard == shard` and `clk - prev_clk - 1 < 2^16`.
 ///
-/// That guarantee removes three columns relative to [`MemoryAccessCols`]:
+/// That guarantee removes four columns relative to [`MemoryAccessCols`]:
 ///  * `prev_shard` — it is `shard`, which the caller already has;
 ///  * `compare_clk` — it is always 1, so the timestamp check is unconditionally a clk comparison;
-///  * `diff_high_limb` — the high limb of `clk - prev_clk - 1` is re-derived as the linear
-///    expression `(clk - prev_clk - 1 - diff_16bit_limb) / 2^16` and range-checked in place.
+///  * `diff_16bit_limb`, `diff_high_limb` — `clk - prev_clk - 1` is one 16-bit value, range
+///    checked as an expression with a single `U16Range` lookup.
 ///
-/// 9 columns -> 6, on every register access of every cycle.
+/// 9 columns -> 5, and one byte lookup, on every register access of every cycle.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct RegisterAccessCols<T> {
     /// The value of the register access.
     pub value: Word<T>,
 
-    /// The clk of the previous access to this register.  Always in the current shard.
+    /// The clk of the previous access to this register.  Always in the current shard, and less
+    /// than `2^16` ticks before this access.
     pub prev_clk: T,
-
-    /// The least significant 16 bit limb of `clk - prev_clk - 1`.  The 10-bit
-    /// high limb (a per-shard `clk` runs to `2^26`) is recovered as a linear
-    /// expression and checked against the parametric range table — ONE
-    /// witnessed limb per access.
-    pub diff_16bit_limb: T,
 }
 
 /// Register read access.

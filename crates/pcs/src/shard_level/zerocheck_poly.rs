@@ -339,6 +339,10 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     padded_row_adjustment: EF,
     /// Virtual padded-row indicator.
     virtual_geq: VirtualGeq<EF>,
+    /// The first round may drop the constraint value at `X = 0`: true for
+    /// boolean base-field rows, false once the rows are folded (after the
+    /// univariate skip).
+    c0_vanishes: bool,
     _marker: PhantomData<A>,
 }
 
@@ -388,8 +392,17 @@ where
             geq_value,
             padded_row_adjustment,
             virtual_geq,
+            c0_vanishes: true,
             _marker: PhantomData,
         }
+    }
+
+    /// Mark the rows as folded, so no round drops the `X = 0` constraint
+    /// value (the post-skip poly).
+    #[must_use]
+    pub(crate) fn folded_rows(mut self) -> Self {
+        self.c0_vanishes = false;
+        self
     }
 
     /// Evaluate the chip's α-RLC'd constraints at a single `K` row,
@@ -431,6 +444,7 @@ where
         let partial = partial_lagrange_prefix(rest_point, num_real.div_ceil(2));
 
         let compute_y3 = zerocheck_eq_root(last).is_none();
+        let is_first_round = is_first_round && self.c0_vanishes;
         let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round, compute_y3);
         let threshold_half = num_real.div_ceil(2) - 1;
         let partial_at_threshold = partial.get(threshold_half).copied().unwrap_or(EF::ZERO);
@@ -653,6 +667,7 @@ where
                 geq_value: self.geq_value,
                 padded_row_adjustment: self.padded_row_adjustment,
                 virtual_geq: new_virtual_geq,
+                c0_vanishes: false,
                 _marker: PhantomData,
             };
         }
@@ -683,6 +698,7 @@ where
             geq_value,
             padded_row_adjustment: self.padded_row_adjustment,
             virtual_geq: new_virtual_geq,
+            c0_vanishes: false,
             _marker: PhantomData,
         }
     }
@@ -1144,37 +1160,12 @@ mod tests {
     }
 
     // sumcheck-reduction end-to-end identity (host sum_as_poly)
-    use crate::air::{AirLookup, BaseAirBuilder, LookupScope};
-    use crate::air::{MachineAir, MachineProgram};
+    use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir};
     use crate::chip::Chip;
     use crate::lookup::LookupKind;
-    use crate::record::MachineRecord;
-    use crate::septic_digest::SepticDigest;
+    use crate::shard_level::test_machine::{MockProgram, MockRecord};
     use p3_air::{Air, BaseAir, WindowAccess};
     use p3_matrix::dense::RowMajorMatrix;
-
-    #[derive(Clone, Default)]
-    struct MockRecord;
-    impl MachineRecord for MockRecord {
-        type Config = ();
-        fn stats(&self) -> hashbrown::HashMap<String, usize> {
-            hashbrown::HashMap::new()
-        }
-        fn append(&mut self, _other: &mut Self) {}
-        fn public_values<FF: p3_field::PrimeCharacteristicRing>(&self) -> Vec<FF> {
-            Vec::new()
-        }
-    }
-    #[derive(Clone, Default)]
-    struct MockProgram;
-    impl MachineProgram<InnerVal> for MockProgram {
-        fn pc_start(&self) -> InnerVal {
-            InnerVal::ZERO
-        }
-        fn initial_global_cumulative_sum(&self) -> SepticDigest<InnerVal> {
-            SepticDigest::<InnerVal>::zero()
-        }
-    }
     #[derive(Clone)]
     struct MockAir {
         ncols: usize,

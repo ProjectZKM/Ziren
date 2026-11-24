@@ -1,28 +1,28 @@
 \section{Evaluation}
 \label{sec:performance}
 
-We evaluate three quantities: \emph{instruction efficiency}, the committed area and bus interactions an executed instruction costs, which is a property of the arithmetisation (\S\ref{sec:perf-estimate}); \emph{proving efficiency}, the rate at which an implementation turns that area into a proof on named hardware (\S\ref{sec:perf-prover}); and \emph{proof size}, the bytes of the compressed proof a verifier reads, with the parameters that control it (\S\ref{sec:perf-proofsize}). One primary workload, one GPU model and one host are used, with interleaved repetitions, so that differences between configurations are attributable. No cross-system comparison is attempted: other systems' figures are self-reported on different guests and mostly on clusters, and nothing here is a same-hardware baseline.
+We evaluate \emph{instruction efficiency}, the committed area and bus interactions an executed instruction costs (\S\ref{sec:perf-estimate}); \emph{proving efficiency}, the rate at which that area becomes a proof on named hardware (\S\ref{sec:perf-prover}); and \emph{proof size} (\S\ref{sec:perf-proofsize}). One workload family, one GPU model and one host are used, with interleaved repetitions. No cross-system comparison is attempted: other systems' figures are self-reported on different guests and hardware.
 
 \subsection{Experimental setup}
 \label{sec:perf-setup}
 
-\paragraph{Workload.} Ethereum mainnet block 25\,907\,955, executed by a MIPS32 build of the Reth execution client with an arena-represented witness trie; the guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. A word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and the arena trie reduce it from 379 to 288 million cycles. The single-GPU timing of \emph{Memory traffic and shard size} (\S\ref{sec:perf-after}) uses that cached record; the multi-GPU measurements of Table~\ref{tab:cards} use three blocks of Table~\ref{tab:clients} with the Reth guest, 26\,138\,428, 26\,138\,416 and 26\,138\,421 (206, 348 and 508\,M cycles), and the instruction-efficiency census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles) in the analysed configuration.
+\paragraph{Workload.} Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth and the block keeper of Geth; each guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. The census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles), Table~\ref{tab:clients} the 15 consecutive blocks 26\,138\,416 to 26\,138\,430, and \S\ref{sec:perf-skip} and Table~\ref{tab:cards} 25 blocks in the range 26\,413\,605 to 26\,413\,714 with the Reth guest, of 72 to 579\,M cycles and 8.31\,G in total.
 
-\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the runs of Table~\ref{tab:cards} use one, two and four, and those of Table~\ref{tab:clients} one and all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU server for Tables~\ref{tab:cards} and~\ref{tab:clients} runs in a CUDA 12.8.1 container based on Ubuntu 24.04. The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
+\paragraph{Hardware.} NVIDIA RTX~5090 GPUs (32\,GB) in a virtual machine with eight of them, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory. Table~\ref{tab:cards} uses one, two and four GPUs and Table~\ref{tab:clients} one and all eight (driver 570.153.02, CUDA 12.8). The GPU backend is a separate CUDA implementation of the same protocol.
 
-\paragraph{Configurations.}\label{sec:perf-revision} Sections~\ref{sec:air}--\ref{sec:security} describe the \emph{analysed configuration}. Most timings below, and the proof-size comparison of \S\ref{sec:perf-after}, were taken on an earlier \emph{measured configuration}, which differs in five respects: the $\Poseidon{}$ permutation used 13 partial rounds rather than the corrected 20; the lookup challenge was not ground; the syscall bus carried the sum of two 16-bit half-words rather than the half-words themselves (\S\ref{sec:air-chips}); the set of three soundness fixes of Table~\ref{tab:det-findings} was not applied; and the system-call tables did not enumerate the numbers they accept (Appendix~\ref{sec:app-isa}). Each of the last two adds constraints. Comparisons between measured-configuration runs are therefore internal to that configuration, and the soundness figures of \S\ref{sec:iopp-soundness} are for the analysed one. Unless a caption or the text says otherwise, every timing below is of the measured configuration and every area of the analysed one; the exceptions are the timings of Tables~\ref{tab:cards} and~\ref{tab:clients} and the compressed-proof size of \S\ref{sec:perf-proofsize}, which are of the analysed configuration.
+\paragraph{Configurations.}\label{sec:perf-revision} Sections~\ref{sec:air}--\ref{sec:security} describe the \emph{analysed configuration}, and Table~\ref{tab:clients} measures it. The kernel profile of Table~\ref{tab:census} and the ablations of \S\ref{sec:perf-prover} were taken on an earlier \emph{measured configuration}, which used 13 partial rounds of $\Poseidon{}$ rather than the corrected 20, did not grind the lookup challenge, and lacked the three soundness fixes of Table~\ref{tab:det-findings} and the enumeration of accepted system calls (Appendix~\ref{sec:app-isa}); comparisons between its runs are internal to it. The measurements of \S\ref{sec:perf-skip}, Table~\ref{tab:cards} and \S\ref{sec:perf-proofsize} are of the \emph{current configuration}: the analysed one with the area reductions of \S\ref{sec:perf-changes} and the univariate refinement of \S\ref{sec:air-skip}, whose sumcheck term is that of Equation~\eqref{eq:skip-round-error}. Areas are of the analysed configuration unless stated.
 
-\paragraph{Metrics and protocol.} \emph{Trace area} (\S\ref{sec:prelim-chips}) is taken from the emulator's shard-close census; Table~\ref{tab:census} takes its kernel shares from the measured configuration. \emph{Proving time}, used by Tables~\ref{tab:cards} and~\ref{tab:clients}, runs from the prove request at the prover to the compressed proof, over shard proving and recursion, and excludes the client's execution and verification; the measured-configuration timings are \emph{wall-clock}, from reading the cached input to writing the compressed proof, and include 2--3\,s of host verification. \emph{Proving throughput} is guest cycles divided by the time, reported in MHz ($10^6$ guest instructions/s). \emph{Proof size} is the serialised compressed proof. A ten-shard \texttt{nsys} sample attributes kernel time. Table~\ref{tab:cards} reports the mean of three consecutive warm proofs per configuration, warm meaning after a first proof has loaded the keys and compiled the programs. Every proof contributing to Tables~\ref{tab:cards} and~\ref{tab:clients} is checked by a native verifier. No other proving ran on the host during the runs of Tables~\ref{tab:cards} and~\ref{tab:clients}. The per-run timings and build and runtime metadata of the 11 October 2026 rerun are archived separately.
+\paragraph{Metrics and protocol.} \emph{Trace area} (\S\ref{sec:prelim-chips}) is counted when a shard closes. \emph{Proving time} runs from the prove request to the compressed proof, over shard proving and recursion, and excludes the client's execution and verification. \emph{Proving throughput} is guest cycles divided by proving time, in MHz. All proofs are warm, and single-block rows report the mean of three consecutive proofs. Every proof contributing to Tables~\ref{tab:cards} and~\ref{tab:clients} was checked by a native verifier. Table~\ref{tab:clients} is of 11 October 2026 and the current-configuration runs of 24 November 2026, the latter with unrelated light workloads on other GPUs of the host.
 
 \subsection{Instruction efficiency}
 \label{sec:perf-estimate}
 
-We first estimate what one executed instruction costs, from the chip widths and interaction counts of \S\S\ref{sec:base} and~\ref{sec:ext}, in committed cells and bus interactions (\S\ref{sec:intro-costs}). Table~\ref{tab:estimate} counts an instruction's own row only; the memory-argument rows for each shard's first and last access to a word, and the tables' multiplicity columns, are paid per shard and are measured below.
+Table~\ref{tab:estimate} gives what one executed instruction costs in committed cells and bus interactions (\S\ref{sec:intro-costs}), counting the instruction's own row only; the memory-argument rows for each shard's first and last access to a word are paid per shard and measured below.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Committed cells and bus interactions per executed instruction, for the most frequent chips. The frame includes the program-counter pair; interactions count the program fetch, the state bus, the memory bus and table lookups.}
+\caption{Committed cells and bus interactions per executed instruction for the most frequent chips, analysed configuration. The frame includes the program-counter pair; interactions count the program fetch, the state bus, the memory bus and table lookups.}
 \label{tab:estimate}
 \begin{tabular}{@{}lrrrrrr@{}}
 \toprule
@@ -30,75 +30,77 @@ We first estimate what one executed instruction costs, from the chip widths and 
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 Chip & frame & own & row & frame & own & row \\
 \midrule
-\texttt{AddSubImm} & 29 & 4 & 33 & 16 & 0 & 16 \\
-\texttt{AddSub} & 32 & 4 & 36 & 20 & 0 & 20 \\
-\texttt{Bitwise} & 32 & 5 & 37 & 20 & 4 & 24 \\
-\texttt{Lt} & 32 & 18 & 50 & 20 & 3 & 23 \\
-\texttt{ShiftLeftImm} & 26 & 19 & 45 & 16 & 4 & 20 \\
-\texttt{ShiftRight} & 32 & 57 & 89 & 20 & 25 & 45 \\
-\texttt{Branch} & 29 & 27 & 56 & 16 & $\le 9$ & $\le 25$ \\
-\texttt{LoadWord} & 29 & 19 & 48 & 16 & 9 & 25 \\
-\texttt{StoreWord} & 29 & 23 & 52 & 16 & 9 & 25 \\
-\texttt{LoadNarrow} & 29 & 30 & 59 & 16 & 10 & 26 \\
-\texttt{Mul} & 32 & 42 & 74 & 20 & 22 & 42 \\
-\texttt{DivRem} & 32 & 131 & 163 & 20 & 44 & 64 \\
+Addition, immediate & 29 & 4 & 33 & 16 & 0 & 16 \\
+Addition & 32 & 4 & 36 & 20 & 0 & 20 \\
+Bitwise & 32 & 5 & 37 & 20 & 4 & 24 \\
+Comparison & 32 & 18 & 50 & 20 & 3 & 23 \\
+Shift left, immediate & 26 & 19 & 45 & 16 & 4 & 20 \\
+Shift right & 32 & 57 & 89 & 20 & 25 & 45 \\
+Branch & 29 & 27 & 56 & 16 & $\le 9$ & $\le 25$ \\
+Load word & 29 & 19 & 48 & 16 & 9 & 25 \\
+Store word & 29 & 23 & 52 & 16 & 9 & 25 \\
+Narrow load & 29 & 30 & 59 & 16 & 10 & 26 \\
+Multiplication & 32 & 42 & 74 & 20 & 22 & 42 \\
+Division & 32 & 131 & 163 & 20 & 44 & 64 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Per instruction.} The frame is most of every common row: an addition or bitwise operation pays 29--32 cells and 16--20 interactions of frame for at most five cells and four interactions of its own, so the per-instruction floor is set by the register memory check. Expensive instructions are expensive in columns, not rows: a division is one row of 163 cells where Jolt's sequence takes eight steps~\citep{jolt}. Per-opcode chips are what keep the common rows narrow: one table carrying every opcode's columns would pay the widest row on every instruction, over 400 cells (\texttt{MiscInstrs} alone has 432 columns) where the common instructions pay 33 to 37; SP1 makes the same choice~\citep{sp1}.
+\paragraph{Per instruction.} The frame is most of every common row: an addition or bitwise operation pays 29--32 cells and 16--20 interactions of frame for at most five cells and four interactions of its own, so the per-instruction floor is set by the register memory check. Expensive instructions are expensive in columns, not rows: a division is one row of 163 cells where Jolt's sequence takes eight steps~\citep{jolt}. Per-opcode chips keep the common rows narrow, as in SP1~\citep{sp1}: one table carrying every opcode's columns would pay over 400 cells on every instruction.
 
-\paragraph{Per block.}\label{sec:perf-profile} Block 25\,955\,640, 495.6 million cycles, commits 29.2\,G cells and raises 12.8\,G (row, interaction) pairs, 58.9 cells and 25.8 pairs per executed instruction (Table~\ref{tab:census}, Figure~\ref{fig:area}). This is larger than the single-row costs of Table~\ref{tab:estimate} mainly because of the per-shard memory-argument rows: the \texttt{Global} chip holds 15\% of the area, 8.8 cells per instruction, because every word a shard touches costs two rows of it, which is the cost of sharding. The figure depends on the workload, not only on the instruction set. A precompile call is one guest cycle and many rows of an accelerator chip, and since a shard closes at the area budget (\S\ref{sec:isa-record}), the precompile share sets both the cells per cycle and the shard count: two Ethereum mainnet blocks of 949 and 943 million cycles proved in production as 702 and 213 shards. These are cells of a 31-bit field and do not convert into Jolt's bit-weighted count.
+\paragraph{Per block.}\label{sec:perf-profile} Block 25\,955\,640 commits 29.2\,G cells and raises 12.8\,G (row, interaction) pairs, 58.9 cells and 25.8 pairs per executed instruction (Table~\ref{tab:census}, Figure~\ref{fig:area}). This exceeds the single-row costs mainly because of the per-shard memory-argument rows: the cross-shard digest chip holds 15\% of the area, because every word a shard touches costs two rows of it. The figure depends on the workload: a precompile call is one guest cycle and many rows of an accelerator chip, and a shard closes at an area budget (\S\ref{sec:isa-record}).
 
-\paragraph{Effect of reducing area.}\label{sec:perf-changes} The census identifies two cost measures to reduce: trace cells for the commitment and constraint argument, and (row, interaction) pairs for the bus argument. Two changes follow from it, both mechanisms rather than tuning: replacing a boolean sign decomposition in the cross-shard digest chip with three byte lookups, and dropping byte checks on memory-instruction accesses that another chip already enforces. Both change the constraint system, and with it the chip keys and the recursion-key allowlist; neither changes the statement proved.
+\paragraph{Effect of reducing area.}\label{sec:perf-changes} The census names two quantities to reduce: trace cells, for the commitment and the constraint argument, and (row, interaction) pairs, for the bus argument. The current configuration (\S\ref{sec:perf-revision}) reduces both without changing the statement proved. The cross-shard digest chip replaces a boolean sign decomposition by three byte lookups. A store takes the word it writes from the register access of the same row, and a taken branch or jump proves its target addition on the word it sends on the state bus, constraining only the carries. A register access no longer witnesses a limb of its timestamp difference: the register shadow-read chip also inserts a read before any access that follows the register's previous one by $2^{16}$ clock ticks or more, so the difference is one 16-bit quantity, range-checked with one lookup, and the access falls from six columns and two lookups to five and one. The R-type frame thereby falls from 30 columns and 20 interactions to 27 and 16; an addition row is 33 cells and 16 interactions against the 36 and 20 of Table~\ref{tab:estimate}, a word store 46 and 20 against 52 and 25, and a branch 50 and at most 18 against 56 and at most 25. These changes alter the constraint system, and with it the chip keys and the set of admissible recursion keys.
 
 \subsection{Proving efficiency}
 \label{sec:perf-prover}
 
 \begin{table}[t]
 \centering
-\caption{GPU kernel time by kernel group, and trace area by chip. Kernel shares are from a ten-shard \texttt{nsys} sample of the measured configuration; area is from the analysed configuration's census of block 25\,955\,640 (29.2\,G cells).}
+\caption{GPU kernel time by kernel group, from a ten-shard device profile of the measured configuration, and trace area by chip, from the analysed configuration's census of block 25\,955\,640 (29.2\,G cells).}
 \label{tab:census}
 \footnotesize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{p{0.42\textwidth}r@{\quad}p{0.32\textwidth}r}
 \toprule
-Kernel group & share & Chip & area share \\
+Kernel group & share & Chip (rows $\times$ width) & area share \\
 \midrule
-\LogUp{} layers (fold-and-sum, transitions, first layer) & 42\% & \texttt{LoadWord} (92.6\,M rows $\times$ 48) & 15.2\% \\
-Zerocheck, compiled constraint kernels & 16.5\% & \texttt{Global} (67.2\,M $\times$ 65) & 15.0\% \\
-Zerocheck, interpreted (wide precompile chips) & 7.1\% & \texttt{StoreWord} (81.8\,M $\times$ 52) & 14.6\% \\
-Zerocheck fold & 2.3\% & \texttt{MemoryUnaligned} (42.7\,M $\times$ 59) & 8.6\% \\
-\WHIR{} commit and open (Merkle absorb, DFT) & 19\% & \texttt{Branch} (36.1\,M $\times$ 56) & 6.9\% \\
-Jagged reduction & 8\% & \texttt{AddSubImm} (59.4\,M $\times$ 33) & 6.7\% \\
-Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
+\LogUp{} layers (fold-and-sum, transitions, first layer) & 42\% & Load word (92.6\,M $\times$ 48) & 15.2\% \\
+Zerocheck, compiled constraint kernels & 16.5\% & Cross-shard digest (67.2\,M $\times$ 65) & 15.0\% \\
+Zerocheck, interpreted (wide accelerator chips) & 7.1\% & Store word (81.8\,M $\times$ 52) & 14.6\% \\
+Zerocheck fold & 2.3\% & Unaligned access (42.7\,M $\times$ 59) & 8.6\% \\
+\WHIR{} commit and open (Merkle absorb, DFT) & 19\% & Branch (36.1\,M $\times$ 56) & 6.9\% \\
+Jagged reduction & 8\% & Addition, immediate (59.4\,M $\times$ 33) & 6.7\% \\
+Other & 5\% & Shift left, immediate (34.8\,M $\times$ 45) & 5.4\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{figure}[t]
 \centering
-\begin{subfigure}[t]{0.49\textwidth}\centering\input{figures/area_bar}\caption{Trace area by chip; \texttt{Global} and the three largest memory-instruction chips hold 53\%.}\label{fig:area}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\textwidth}\centering\input{figures/area_bar}\caption{Trace area by chip; the cross-shard digest chip and the three largest memory-instruction chips hold 53\%.}\label{fig:area}\end{subfigure}\hfill
 \begin{subfigure}[t]{0.49\textwidth}\centering\input{figures/kernel_bar}\caption{Kernel time by kernel group.}\label{fig:kernel}\end{subfigure}
 \caption{Trace area by chip in the analysed configuration and kernel time by group in the measured configuration, for block 25\,955\,640 (Table~\ref{tab:census}).}
 \label{fig:profile}
 \end{figure}
 
-\paragraph{Time breakdown.} Kernels account for about 340\,ms of the 500\,ms of GPU time per shard in the measured configuration; launch gaps and host synchronisation account for the remaining time (Table~\ref{tab:census}, Figure~\ref{fig:kernel}). The lookup argument is the largest consumer, and its cost scales with (row, interaction) pairs rather than with columns: memory-instruction chips carry 25--26 interactions per row and 47\% of all pairs, while the \texttt{Global} chip holds 15\% of the area but 3.7\% of the pairs. The cost model is therefore area for the commitment and zerocheck and pairs for the lookup, with one (row, interaction) pair weighted as about two cells in this profile.
+\paragraph{Where the time goes.} In the measured configuration the lookup argument is the largest consumer of kernel time (Table~\ref{tab:census}, Figure~\ref{fig:kernel}), and its cost scales with (row, interaction) pairs rather than with columns: memory-instruction chips carry 25--26 interactions per row and 47\% of all pairs, while the cross-shard digest chip holds 15\% of the area but 3.7\% of the pairs. The cost model is therefore area for the commitment and zerocheck and pairs for the lookup, with one pair weighted as about two cells in this profile.
 
-\paragraph{Memory traffic and shard size.}\label{sec:perf-after} A byte-level profile of the \LogUp{} circuit showed that its first layer paired fractions across the most-significant index bit, so short chips were carried through every layer of the tallest and the traffic summed over layers was 5.2$\times$ that of the first. The prover therefore pairs on the least-significant bit, so each chip folds out after $\log_2$ of its own height, and the memory this frees admits shards of twice the size. The two changes are enabled together: the old-pairing, doubled-shard configuration does not fit in memory, so their effects are not separated. With both, the cached 288\,M-cycle block 25\,907\,955 proves in 48.7\,s on one GPU ($5.9$\,MHz), against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$), with the compressed proof unchanged in size.
+\paragraph{Layer order and shard size.}\label{sec:perf-after} Pairing the fractions of the first \LogUp{} layer on the least-significant index bit lets each chip fold out after $\log_2$ of its own height, where pairing on the most-significant bit carried short chips through every layer of the tallest; the memory this frees admits shards of twice the size. With both, a 288\,M-cycle block proves in 48.7\,s on one GPU against 67.8\,s without either ($-28\%$, measured configuration), with the compressed proof unchanged in size.
 
-\paragraph{Scaling across devices.}\label{sec:perf-scaling} Table~\ref{tab:cards} and Figure~\ref{fig:scaling} report proving time and throughput on one to four GPUs for three blocks of Table~\ref{tab:clients} proved with the Reth guest, of 206, 348 and 508\,M cycles. Two GPUs prove each block $1.9$--$2.0\times$ faster than one and four $3.3$--$3.5\times$, reaching 16.5--23.6\,MHz. The gap to linear scaling is the serial recursion tail and the start-up interval before the emulator has produced a shard for every GPU; both are fixed per block, so the larger the block, the closer the scaling is to linear.
+\paragraph{Univariate skip and narrower lookups.}\label{sec:perf-skip} The univariate refinement (\S\ref{sec:air-skip}) replaces the four largest zerocheck rounds, and the folds between them, by one round over sixteen-row blocks followed by one $16{:}1$ fold; the reductions of \S\ref{sec:perf-changes} remove (row, interaction) pairs from every instruction row. We measured the two together against the configuration without them, with the arms interleaved in the order A, B, B, A on two GPUs over the 25 blocks of \S\ref{sec:perf-setup}. Total proving time falls from 436.8\,s to 398.6\,s ($-8.7\%$), the median block from 17.2\,s to 15.7\,s and the 90th percentile from 25.0\,s to 22.9\,s; every block is faster, the repeated arms agree within 2.6\%, and zerocheck kernel time falls by 28\%. On four GPUs the same comparison gives 388.0\,s against 344.2\,s ($-11.3\%$). The refinement leaves the chips' constraints unchanged; it changes the shard verifier, and with it the recursion programs and the set of admissible recursion keys.
+
+\paragraph{Scaling across devices.}\label{sec:perf-scaling} Table~\ref{tab:cards} and Figure~\ref{fig:scaling} report the current configuration on one, two and four GPUs. One GPU proves the 25 blocks at 14.0\,MHz, with a median of 22.6\,s per block. Two GPUs are $1.51\times$ faster: 21.2\,MHz, a median of 15.1\,s, a 90th percentile of 22.4\,s and 29.8\,s for the slowest block. Four add little: 357.4\,s against 391.5\,s, with a median of 13.7\,s. One GPU completes the set in 592.6\,s, so, the device work being the same, the two GPUs of the 391.5\,s run are idle for at least 24\% of their time and the four of the 357.4\,s run for at least 59\%. We attribute the remainder to work that does not spread over devices: each shard is re-executed and its traces generated on the host before a GPU can prove it (\S\ref{sec:perf-host}), and the top of the recursion tree is serial (\S\ref{sec:perf-pipeline}). The analysed configuration, which proved a 348\,M-cycle block in 55.1, 29.2 and 16.4\,s on one, two and four GPUs, was further from that bound: since then the single-GPU time of a block of that size has more than halved, and the four-GPU time has fallen by about 12\%.
 
 \begin{figure}[t]
 \centering
 \input{figures/scaling}
-\caption{Throughput on one to four GPUs for three blocks proved with the Reth guest. The dotted line is linear scaling from one GPU on the 508\,M-cycle block.}
+\caption{Throughput on one to four GPUs for three blocks proved with the Reth guest, current configuration. The dotted line is linear scaling from one GPU on the 579\,M-cycle block.}
 \label{fig:scaling}
 \end{figure}
 
 \begin{table}[t]
 \centering
-\caption{Proving time and throughput on one, two and four GPUs for three Ethereum mainnet blocks of Table~\ref{tab:clients} proved with the Reth guest, analysed configuration; mean of three consecutive warm proofs.}
+\caption{Proving time and throughput on one, two and four GPUs with the Reth guest, current configuration: three of the 25 blocks of \S\ref{sec:perf-setup} (fewest, median and most guest cycles; mean of three consecutive warm proofs) and the 25 blocks in total.}
 \label{tab:cards}
 \begin{tabular}{lrrrrrr}
 \toprule
@@ -106,18 +108,20 @@ Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 \midrule
-26\,138\,428 (206\,M) & 41.4 & 21.5 & 12.5 & 5.0 & 9.6 & 16.5 \\
-26\,138\,416 (348\,M) & 55.1 & 29.2 & 16.4 & 6.3 & 11.9 & 21.2 \\
-26\,138\,421 (508\,M) & 75.8 & 38.9 & 21.5 & 6.7 & 13.1 & 23.6 \\
+26\,413\,689 (72\,M) & 7.6 & 5.4 & 4.5 & 9.4 & 13.4 & 16.1 \\
+26\,413\,708 (338\,M) & 24.9 & 16.7 & 14.4 & 13.6 & 20.3 & 23.5 \\
+26\,413\,640 (579\,M) & 41.8 & 27.0 & 26.4 & 13.8 & 21.5 & 21.9 \\
+\midrule
+25 blocks (8.31\,G) & 592.6 & 391.5 & 357.4 & 14.0 & 21.2 & 23.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client compiled to MIPS32 from different languages: Reth, written in Rust, and the block keeper of Geth, written in Go, whose runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting. Both guests call the precompiles for Keccak, SHA-256 and the elliptic curves, and the Geth guest was tuned for 32-bit MIPS in its BN254 backend, hashing, jump-destination analysis, signature recovery and trie handling, which removes 43\% of its cycles on these blocks. Table~\ref{tab:clients} shows that a block costs in proportion to its shards rather than its cycles: a shard takes about 0.47\,s on one GPU under either guest, and the Reth guest, which also runs the EVM's 256-bit arithmetic on a precompile, closes its shards after 2.3 million cycles on average against 5.1 million for Geth, so it runs at the lower rate and still proves every block in less time. Its blocks are also smaller, so on eight GPUs the serial tail after the last shard (\S\ref{sec:perf-pipeline}) is a larger share of each.
+\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} The system proves Ethereum blocks with execution clients compiled to MIPS32 from different languages: Reth, written in Rust, and the block keeper of Geth, written in Go. Table~\ref{tab:clients} shows, for the analysed configuration, that a block costs in proportion to its shards rather than its cycles: a shard takes about 0.47\,s on one GPU under either guest, and the Reth guest, which also runs the EVM's 256-bit arithmetic on a precompile, closes its shards after 2.3 million cycles on average against 5.1 million for Geth, so it runs at the lower rate and still proves every block in less time.
 
 \begin{table}[t]
 \centering
-\caption{The same 15 consecutive Ethereum mainnet blocks, 26\,138\,416 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. The initial block 26\,138\,415 is excluded to avoid startup effects, as are the separately flagged warm-up proofs. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion. For each client, the range row gives the minimum and maximum per-block values. In the total (15) row, guest cycles, shards and proving time are sums across the 15 blocks; throughput is total guest cycles divided by total proving time.}
+\caption{The 15 consecutive Ethereum mainnet blocks 26\,138\,416 to 26\,138\,430 proved with two execution clients on the same GPUs, analysed configuration. The range rows give the minimum and maximum per-block values; in the total rows, cycles, shards and proving time are sums over the 15 blocks, and throughput is total cycles divided by total proving time.}
 \label{tab:clients}
 \small
 \begin{tabular}{@{}llrrrrrr@{}}
@@ -135,33 +139,22 @@ Geth (Go) & range & 0.25--2.99\,G & 64--537 & 33.9--257 & 10.3--39.4 & 7.5--12.0
 \end{tabular}
 \end{table}
 
-\paragraph{The host.}\label{sec:perf-emu}\label{sec:perf-host} On one core of an AMD EPYC~9355, the just-in-time compiler executes block 25\,955\,640 (496\,M cycles) at 198\,MHz once compiled (166\,MHz including its single compilation pass), and the interpreter at 40.6\,MHz without the event record and 14.6\,MHz with it; the coordinator's whole producer job takes 6.1\,s for a 420\,M-cycle block, about 69\,MHz. On one GPU, emulation does not limit proving throughput. It can limit throughput when one host feeds several GPUs, because each shard is re-emulated by the worker that proves it, at about one second of host time per shard against half a second of GPU time in the measured configuration, so the event record carries only what a column witnesses and the coordinator never holds the whole execution (\S\ref{sec:arch-execution}).
+\paragraph{The host.}\label{sec:perf-emu}\label{sec:perf-host} On one core of the host the executor runs block 25\,955\,640 at 198\,MHz when it compiles the guest and at 14.6\,MHz when it interprets it and records the events a trace needs. On one GPU, emulation does not limit proving. It does when one host feeds several GPUs, because each shard is re-executed by the worker that proves it (\S\ref{sec:arch-execution}): in the current configuration the GPUs wait for at least a quarter of the time on two GPUs and more than half on four (\S\ref{sec:perf-scaling}).
 
-\paragraph{GPU implementation.} Three kinds of engineering act on different costs. \emph{Fused kernels} cut memory traffic: the jagged fold and the round polynomial it feeds are one kernel, as are the layer transition and the round over the mixed round-0 slab. \emph{A cross-stage pipeline} cuts idleness (\S\ref{sec:perf-pipeline}). \emph{Occupancy tuning} caps the register budget for the measured card. Field arithmetic rests on the inline-PTX Montgomery primitives of \texttt{sppark}~\citep{sppark}, which we use and did not write.
-
-\paragraph{Prover cost of the soundness target.}\label{sec:perf-grind} The level of \S\ref{sec:iopp-soundness} is paid for in queries and in proof-of-work. We measured the grinds separately, on four GPUs, at a build that grinds the lookup challenge, with the arms interleaved on one cached block. The $22/22/14$-bit query, \LogUp{} and batching grinds took $33.4$\,s against $33.9$\,s for $16/16/8$, a difference within run-to-run spread, while buying the same bits with queries (133, 95 and 91 queries in the three \WHIR{} rounds at a 16-bit grind) cost $8.6$\%. That holds only because the search runs on the device: with the grinds on the host the same schedule took $166$\,s, $123$\,s of it the \LogUp{} grind.
+\paragraph{Prover cost of the soundness target.}\label{sec:perf-grind} The level of \S\ref{sec:iopp-soundness} is paid for in queries and in proof-of-work. With the arms interleaved on one block on four GPUs, the $22/22/14$-bit query, \LogUp{} and batching grinds took $33.4$\,s against $33.9$\,s for $16/16/8$, within run-to-run spread, while buying the same bits with queries cost $8.6$\%. That holds only because the search runs on the device: with the grinds on the host the same schedule took $166$\,s.
 
 \subsection{Controlling proof size}
 \label{sec:perf-proofsize}
 
-The shard proofs of a block total on the order of $10^{8}$ bytes before recursion; the published object is the compressed proof at the root of the tree, whose size does not grow with the execution. It is dominated by the openings of the first \WHIR{} oracle, about four fifths of it in the instrumented proofs, because each query authenticates one coset row of every stripe; the later \WHIR{} rounds, the \LogUp{} layer proofs and the other sumchecks share the rest. To first order the size is
+The published object is the compressed proof at the root of the tree, whose size does not grow with the execution. Openings of the first \WHIR{} oracle are about four fifths of it, because each query authenticates one coset row of every stripe; to first order the size is
 \[
   t_0 \cdot \big(\text{stripes} \cdot 2^{k_0} + \text{roots} \cdot \log_2(\text{leaves}) \cdot |\text{digest}|\big) + \textstyle\sum_{i \ge 1} t_i \cdot (\text{folded leaf} + \text{path}),
 \]
-with $t_i$ the queries of round $i$ and $k_0$ the first folding factor. Each term is controlled by a parameter of the schedule (\S\ref{sec:iopp}), fixed per stage, and each trades against something else at a fixed soundness level:
+with $t_i$ the queries of round $i$ and $k_0$ the first folding factor. A lower rate cuts every round's queries at a prover cost that grows as $1/\rho$; each bit of grinding removes about one bit's worth of queries at a doubling of a search that is cheap on the device (\S\ref{sec:perf-grind}); and a smaller $k_0$ narrows every first-round leaf. These parameters need to apply only to the published proof: the core shards and every recursion node below the root keep the schedule tuned for prover time, and the root alone, a compose of arity one whose committed area is the same for every tree (\S\ref{sec:argument-block}), proves under the compress schedule of Table~\ref{tab:whir-schedule}. That schedule opens $58 \cdot 2^{2}$ values per stripe in the first oracle against $124 \cdot 2^{3}$ for the core schedule, under a quarter, with both stage union bounds above 100 bits (Table~\ref{tab:components}), for 27 bits of grinding paid once per proof.
 
-\begin{itemize}
-  \item \emph{Queries per round.} A query at rate $\rho$ yields $-\log_2\frac{1+\rho}{2}$ bits under unique decoding and close to $\frac12\log_2\frac1\rho$ under the Johnson bound, which is also proven but adds proximity-gap terms paid for by the grinding of \S\ref{sec:iopp-commit}. Lowering $\rho$ therefore cuts every round's queries, most of all under the Johnson-bound analysis; the first round's rate is bounded by the field, since the stacking height times $1/\rho$ must not exceed the two-adic subgroup ($2^{24}$ for \KB{}), and the prover's encoding work and memory grow as $1/\rho$.
-  \item \emph{Grinding.} Each bit of query grinding removes about one bit's worth of queries, at a doubling of the search, which on the device is cheap (\S\ref{sec:perf-grind}); the size of a grinding witness, one field element, bounds how far this goes.
-  \item \emph{Leaf width.} A smaller first folding factor $k_0$ narrows every first-round leaf and moves the variables to later rounds, whose queries are fewer.
-  \item \emph{Stripes.} The number of stripes a query opens follows the committed area of the stage, which for a compress node is set by the recursion verifier program rather than by the guest.
-\end{itemize}
-
-The parameters that make the proof small need to apply only to the published proof: the core shards and every recursion node below the root keep the schedule tuned for prover time, since each of those proofs is consumed by its parent and never leaves the prover, and the root alone proves under the compress schedule of Table~\ref{tab:whir-schedule}. The root is a compose of arity one over the node that covers the execution (\S\ref{sec:argument-block}), so its verifier program, and with it the committed area that sets the number of stripes, is the same small one for every tree, and the root commits under a fixed class of 32 stripes per round. The two schedules are two instances of one ring type, so the field, the hash and the transcript are shared and only the schedule differs; a verifier takes the schedule from the stage it expects, never from the proof.
-
-Taken together, the Johnson-bound schedule at a first rate of $2^{-3}$ with $k_0 = 2$ opens $58 \cdot 2^{2}$ values per stripe in the first oracle against $124 \cdot 2^{3}$ for the unique-decoding schedule at rate $2^{-2}$ with $k_0 = 3$, under a quarter, with both stage union bounds above 100 bits (Table~\ref{tab:components}), for 27 bits of grinding on the folding and batching challenges, paid once per proof at the root, which is the prover-time cost of the smaller proof. Measured on 14 October 2026 at revision \texttt{cf0b3742} with the Fibonacci guest ($n=500$), the compressed proof is 290\,643 bytes (284\,KiB). Both the prover's in-circuit child-key allowlist checks and the native verifier's root-key check are enabled, using the regenerated key map of that revision. Native verification takes 25.2\,ms (median of five warm runs, 24.8--25.3\,ms) on the host of \S\ref{sec:perf-setup}, excluding setup, deserialisation and one warm-up verification. The serialised object is the compressed proof together with its recursion key; the SDK container adds 38 bytes for the variant, public outputs and version. For this fixed root program and commitment shape, proof size is independent of the guest's execution length.
+In the current configuration, with a Fibonacci guest, the compressed proof is 291\,162 bytes (284\,KiB), independent of the guest's execution length, and native verification takes 17.7\,ms (median of five warm runs on the host of \S\ref{sec:perf-setup}; 16.4--20.3\,ms over six repetitions), with the prover's in-circuit child-key checks and the verifier's root-key check enabled. Without the univariate refinement the same measurement, taken alongside, gives 290\,530 bytes and 22.0\,ms. The size grows because the 61-coefficient first message replaces four messages of five coefficients. The time falls because the verifier evaluates the jagged indicator at each column's integer offsets, where a layer of the branching program costs at most twelve multiplications; this more than offsets the sixteen-way first layer the refinement adds (\S\ref{sec:pcs-skip}), with which alone the verification took 30.4\,ms.
 
 \subsection{Threats to validity}
 \label{sec:perf-threats}
 
-\emph{Internal.} The spread of the interleaved repetitions is small relative to the effects reported, though another process shared the host (\S\ref{sec:perf-setup}). \emph{Construct.} The timings of Table~\ref{tab:census} and of the ablations predate the $\Poseidon{}$ correction, which adds seven partial rounds to commitments, transcripts and recursion and changes absolute performance by an unmeasured amount; they are evidence about mechanisms to the extent the correction leaves relative costs unchanged. The timings of Tables~\ref{tab:cards} and~\ref{tab:clients} and the compressed-proof size postdate it (\S\ref{sec:perf-revision}). Trace area estimates work from committed cell counts; the kernel profile measures elapsed device time. The pipelining of \S\ref{sec:perf-pipeline} is not ablated: no run defers recursion until every shard is proved, so its effect on wall-clock time is not separated from the rest. \emph{External.} The primary workload is one Ethereum block, and other guests have different instruction mixes. The per-run timings for Tables~\ref{tab:cards} and~\ref{tab:clients} are archived separately; the earlier raw per-run timings are not retained, and the retained area census is for the analysed configuration rather than the measured one.
+\emph{Internal.} The spread of the interleaved repetitions is small relative to the effects reported, but unrelated workloads shared the host during the current-configuration runs. \emph{Construct.} The kernel profile and the ablations predate the $\Poseidon{}$ correction; they are evidence about mechanisms to the extent the correction leaves relative costs unchanged. The multi-GPU figures of the current configuration are bounded by the host rather than by the devices (\S\ref{sec:perf-scaling}), and the eight-GPU columns of Table~\ref{tab:clients} have not been repeated in it. \emph{External.} The workload is Ethereum block execution, and other guests have different instruction mixes.
