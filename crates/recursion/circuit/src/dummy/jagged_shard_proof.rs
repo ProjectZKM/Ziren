@@ -339,7 +339,7 @@ where
 ///
 /// Field LENGTHS (all derived from the shape; see
 /// `ref_p2c_witness_the_bundle_plan` for the full law derivation):
-/// * packing via [`pack_traces_jagged`] on zero matrices → offsets,
+/// * layout via [`compute_jagged_metadata_from_dims`] (no cells allocated) → offsets,
 ///   total_values, log_dense_size (L), column_counts.
 /// * whir proof: [`dummy_stacked_whir_proof`] under the child's WHIR
 ///   schedule `profile`, one batch-evaluation vector per round.
@@ -362,9 +362,8 @@ pub fn dummy_jagged_bundle(
     pins: Option<zkm_pcs::jagged::RecursionPins>,
     profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
-    use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
-    use zkm_pcs::jagged::pack_traces_jagged;
+    use zkm_pcs::jagged::compute_jagged_metadata_from_dims;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
     use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProof, PackingMeta};
     use zkm_pcs::jagged_pcs::{pick_log_stacking_height, JaggedCommit};
@@ -379,16 +378,12 @@ pub fn dummy_jagged_bundle(
         if prep_dims.is_empty() { vec![chip_dims] } else { vec![prep_dims, chip_dims] };
 
     let pack_round = |dims: &[(usize, usize)]| {
-        let traces: Vec<(String, RowMajorMatrix<F>)> = dims
+        let dims: Vec<(String, usize, usize)> = dims
             .iter()
             .enumerate()
-            .map(|(i, (width, rows))| {
-                let w = (*width).max(1);
-                let h = *rows;
-                (format!("chip{i}"), RowMajorMatrix::new(vec![F::ZERO; w * h], w))
-            })
+            .map(|(i, (width, rows))| (format!("chip{i}"), *rows, (*width).max(1)))
             .collect();
-        pack_traces_jagged::<F>(&traces)
+        compute_jagged_metadata_from_dims::<F>(&dims)
     };
     let packings: Vec<_> = round_dims.iter().map(|d| pack_round(d)).collect();
 
