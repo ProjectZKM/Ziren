@@ -1098,20 +1098,10 @@ where
     let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
-        chips,
-        zerocheck_proof,
-        gkr_evaluations,
-        public_values,
-        _alpha,
-        gkr_batch_open,
-        lambda,
-        opened_values,
-    );
-    if rlc_eval != zerocheck_proof.point_and_eval.1 {
-        return Err(JaggedShardVerifyError::Zerocheck(
-            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)".to_string(),
-        ));
+    if max_log_row_count < crate::shard_level::univariate_skip::SKIP_BITS {
+        return Err(JaggedShardVerifyError::Zerocheck(format!(
+            "max_log_row_count {max_log_row_count} is below the skip width"
+        )));
     }
 
     let point_dim = zerocheck_proof.point_and_eval.0.len();
@@ -1127,6 +1117,22 @@ where
             gkr_evaluations.point.len(),
             point_dim
         )));
+    }
+
+    let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
+        chips,
+        zerocheck_proof,
+        gkr_evaluations,
+        public_values,
+        _alpha,
+        gkr_batch_open,
+        lambda,
+        opened_values,
+    );
+    if rlc_eval != zerocheck_proof.point_and_eval.1 {
+        return Err(JaggedShardVerifyError::Zerocheck(
+            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)".to_string(),
+        ));
     }
 
     let _ = public_values;

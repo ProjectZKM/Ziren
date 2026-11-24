@@ -618,6 +618,30 @@ fn forge_count_tamper_row_fibonacci() {
     tracing::info!("[forgery] fibonacci ROW-count tamper (hash-bind) => {tag}");
 }
 
+/// Cut the zerocheck point below the four skip slots.  The verifier must
+/// return an error for it, not index past the end.
+fn forge_short_zerocheck_point(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    sp.jagged_shard_proof.as_mut().zerocheck_proof.point_and_eval.0.truncate(2);
+}
+
+/// Drop the zerocheck point entirely.
+fn forge_empty_zerocheck_point(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    sp.jagged_shard_proof.as_mut().zerocheck_proof.point_and_eval.0.clear();
+}
+
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_short_zerocheck_point_fibonacci() {
+    setup_logger();
+    for (label, forge) in [
+        ("fibonacci/short-zerocheck-point", forge_short_zerocheck_point as fn(&mut _, _, &_)),
+        ("fibonacci/empty-zerocheck-point", forge_empty_zerocheck_point),
+    ] {
+        let tag = run_forgery(label, fibonacci_program(), fib_stdin(), true, forge);
+        assert!(tag.contains("zerocheck point dim"), "[{label}] rejected elsewhere: {tag}");
+    }
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
