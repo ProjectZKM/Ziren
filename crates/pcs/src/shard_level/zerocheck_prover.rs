@@ -26,7 +26,7 @@ use super::types::PartialSumcheckProof;
 use crate::air::MachineAir;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
 use p3_challenger::FieldChallenger;
-use p3_field::Field;
+use p3_field::{BasedVectorSpace, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
 /// Squeeze the two batching challenges [`prove_shard_zerocheck`] consumes, in

@@ -14,9 +14,9 @@ use super::{
     VerifierConstraintFolder,
 };
 use crate::{
-    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, WhirRing,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData, PcsProverData,
-    ProverConstraintFolder, ShardProof, StarkVerifyingKey,
+    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, Challenger,
+    DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData, PcsProverData,
+    ProverConstraintFolder, ShardProof, StarkVerifyingKey, WhirRing,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
@@ -73,7 +73,7 @@ pub fn into_padded<F: p3_field::Field>(
             ),
         }
     } else {
-        let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(mat));
+        let mle = std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(mat));
         crate::multilinear::PaddedMle::padded_with_zeros(mle, cube)
     }
 }
@@ -159,7 +159,7 @@ where
 }
 
 /// What `commit()` retains for the shard prove — the jagged hash-bind digest
-/// (the transcript's `main_commitment`) and the precomputed BaseFold commit
+/// (the transcript's `main_commitment`) and the precomputed WHIR commit
 /// (codewords + tree + packing).
 pub struct RetainedJaggedCommit<SC>
 where
@@ -167,7 +167,7 @@ where
 {
     /// The jagged hash-bind digest the Stage-1 prologue observes.
     pub main_commitment: [Val<SC>; 8],
-    /// The precomputed BaseFold commit consumed by the jagged open.
+    /// The precomputed WHIR commit consumed by the jagged open.
     pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::WhirMmcs>,
     /// GPU-only: the device dense-Q channel threaded to
     /// `prove_trusted_evaluations_gpu` (type-erased so the host crate needs
@@ -193,7 +193,7 @@ where
 {
     /// The hash-bound digest of the round.
     pub commitment: [Val<SC>; 8],
-    /// The precomputed BaseFold commit of the round.
+    /// The precomputed WHIR commit of the round.
     pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::WhirMmcs>,
     /// GPU-only: the round's device dense, as in
     /// [`RetainedJaggedCommit::device_dense_q`]; `None` on the CPU prover.
@@ -226,7 +226,7 @@ pub type PcsMainTraceData<SC, PCS> =
 /// The error a shard PCS component's commit or open can fail with.
 pub type ShardPcsError<SC, PCS> = <PCS as ShardPcsProver<SC>>::Error;
 
-/// The host jagged/BaseFold scheme: traces in row-major host memory, the
+/// The host jagged/WHIR scheme: traces in row-major host memory, the
 /// commit retained by `commit()` for `open()`, and the host prover's error.
 pub struct HostJaggedPcs<SC>(core::marker::PhantomData<fn() -> SC>);
 
@@ -235,7 +235,7 @@ where
     SC: 'static + StarkGenericConfig + WhirRing + Send + Sync,
 {
     type Matrix = RowMajorMatrix<Val<SC>>;
-    // `commit()` builds the jagged/BaseFold main-trace commitment and RETAINS
+    // `commit()` builds the jagged/WHIR main-trace commitment and RETAINS
     // it here for `open()` to consume.  `None` on the wrap ring (BN254 Mmcs;
     // single shard), which builds the commit inside the prove pass instead.
     type ProverData = Option<RetainedJaggedCommit<SC>>;
@@ -390,14 +390,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     ) -> Option<Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, crate::Challenge<SC>>>>
     where
         SC: WhirRing,
-        A: crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
-        SC::Challenger: p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-        >,
+        A: crate::shard_level::constraint_folder::ShardProvableAir<SC>,
+        SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
         Self: Sized,
-{
+    {
         None
     }
 
@@ -450,7 +446,7 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'a,
                 Val<SC>,
                 SC::Challenge,
@@ -459,7 +455,7 @@ where
         >
         // The K = F (base-field first round) folder instance.
         + for<'a> Air<
-            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+            crate::shard_level::constraint_folder::ShardConstraintFolder<
                 'a,
                 Val<SC>,
                 Val<SC>,
@@ -471,16 +467,11 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
-    SC::Challenger: Clone,
     // Threaded through to `prove_trusted_evaluations`'s static
-    // OUTER generic BaseFold open (see its where-clause).
+    // OUTER generic WHIR open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-        >,
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     <SC as WhirRing>::WhirMmcs:
         p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
     <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
@@ -520,11 +511,8 @@ where
             pad_to_cluster(&mut named_traces, &cluster_widths, |_| true);
         }
 
-        let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
-            .keys()
-            .enumerate()
-            .map(|(i, name)| (name.to_owned(), i))
-            .collect();
+        let chip_ordering: hashbrown::HashMap<String, usize> =
+            named_traces.keys().enumerate().map(|(i, name)| (name.to_owned(), i)).collect();
 
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
@@ -590,7 +578,7 @@ where
 
         challenger.observe_slice(&data.public_values[0..self.machine().num_pv_elts()]);
 
-        let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
+        let jagged_challenger_snapshot: SC::Challenger = challenger.clone();
 
         let jagged_shard_proof = prove_shard_with_data_boxed::<SC, A>(
             &chips,
@@ -599,16 +587,13 @@ where
             &pk.chip_ordering,
             pk.main_pin,
             data.public_values.clone(),
-            &basefold_challenger_snapshot,
+            &jagged_challenger_snapshot,
             data.main_data,
             self.machine().global_round(),
             data.global_challenge.as_ref(),
         );
 
-        Ok(ShardProof::<SC> {
-            public_values: data.public_values,
-            jagged_shard_proof,
-        })
+        Ok(ShardProof::<SC> { public_values: data.public_values, jagged_shard_proof })
     }
 
     /// Prove the execution record is valid.
@@ -666,7 +651,9 @@ where
 
                     tracing::info!(
                         ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",
-                        trace_gen_ms, commit_ms, open_ms,
+                        trace_gen_ms,
+                        commit_ms,
+                        open_ms,
                         trace_gen_ms + commit_ms + open_ms
                     );
 
@@ -722,7 +709,7 @@ impl Error for CpuProverError {}
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
-    pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
+    pk_preprocessed_mles: &[std::sync::Arc<crate::whir::mle::Mle<Val<SC>>>],
     pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         SC::WhirMmcs,
     >,
@@ -743,14 +730,8 @@ fn prove_shard_with_data_boxed<SC, A>(
 >
 where
     SC: StarkGenericConfig + WhirRing,
-    A: MachineAir<Val<SC>>
-        + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
-    SC::Challenger: Clone
-        + p3_challenger::CanObserve<
-            <<SC as WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-        >,
+    A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
+    SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     use crate::{InnerChallenge, InnerVal};
     use core::any::TypeId;

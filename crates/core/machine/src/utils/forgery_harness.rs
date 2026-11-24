@@ -1098,7 +1098,6 @@ fn altered_image_rejected_by_the_honest_vk() {
         &fib_stdin(),
         ZKMCoreOpts::default(),
         ZKMContext::default(),
-        None,
     )
     .unwrap();
     let res = verify(&machine, &vk, &proof);

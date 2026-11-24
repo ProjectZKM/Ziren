@@ -168,7 +168,7 @@ mod tests {
             builder.assert_ext_eq(global.alpha, alpha);
             for (beta, expected) in global.betas.iter().zip(&host.betas) {
                 let expected: Ext<InnerVal, InnerChallenge> = builder.eval(expected.cons());
-                builder.assert_ext_eq(beta.clone(), expected);
+                builder.assert_ext_eq(*beta, expected);
             }
         }
         run_test_recursion(builder.into_operations(), std::iter::empty());

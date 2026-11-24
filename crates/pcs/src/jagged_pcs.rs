@@ -2060,7 +2060,7 @@ mod test {
     /// SUM of the two preceding committed areas, and the verifier must be handed
     /// both preceding roots in round order.
     #[test]
-    fn test_jagged_basefold_three_round_layout() {
+    fn test_jagged_three_round_layout() {
         const STRIPE: usize = 1usize << DEFAULT_LOG_STACKING_HEIGHT;
         const PREP_PAD_COLS: usize = 16;
 
@@ -2158,7 +2158,6 @@ mod test {
                 &r_row_v,
                 &z_row_v,
                 preceding,
-                prep_traces.len(),
                 &bundle,
                 &bundle.y_per_chip,
                 &mut v_chal,

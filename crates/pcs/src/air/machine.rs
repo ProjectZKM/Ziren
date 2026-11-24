@@ -1,13 +1,36 @@
 use std::error::Error;
 
-use p3_air::BaseAir;
+use p3_air::{
+    capture_symbolic_constraints, Air, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicConstraints,
+};
 use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 
-use crate::{MachineRecord, PicusInfo};
+use crate::{MachineRecord, PicusInfo, PROOF_MAX_NUM_PVS};
 
 pub use zkm_derive::MachineAir;
 
+/// Capture a machine AIR's constraints using the shared public-values buffer layout.
+///
+/// Machine AIRs receive `PROOF_MAX_NUM_PVS` public-value slots, independently of
+/// `BaseAir::num_public_values` (which they may leave at its default of zero). We therefore
+/// use `capture_symbolic_constraints` without validating the layout against that metadata.
+/// Keep this layout shared by degree inference, constraint counts, and the soundness census.
+pub fn capture_machine_constraints<F, A>(air: &A) -> SymbolicConstraints<F>
+where
+    F: Field,
+    A: MachineAir<F> + Air<SymbolicAirBuilder<F>>,
+{
+    capture_symbolic_constraints(
+        AirLayout {
+            preprocessed_width: air.preprocessed_width(),
+            main_width: air.width(),
+            num_public_values: PROOF_MAX_NUM_PVS,
+            ..Default::default()
+        },
+        |builder| air.eval(builder),
+    )
+}
 /// An AIR that is part of a multi table AIR arithmetization.
 pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     /// The execution record containing events for producing the air trace.
@@ -50,11 +73,6 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
 
     /// Whether this execution record contains events for this air.
     fn included(&self, shard: &Self::Record) -> bool;
-
-    /// The width of the preprocessed trace.
-    fn preprocessed_width(&self) -> usize {
-        0
-    }
 
     /// The number of rows in the preprocessed trace
     fn preprocessed_num_rows(&self, _program: &Self::Program, _instrs_len: usize) -> Option<usize> {
@@ -104,5 +122,21 @@ pub trait MachineProgram<F>: Send + Sync {
     /// leaves the choice to the machine.
     fn area_pins(&self) -> Option<crate::jagged::RecursionPins> {
         None
+    }
+}
+
+/// Asserts that each AIR's `BaseAir::preprocessed_width` equals the width of the trace its
+/// `generate_preprocessed_trace` produces for `program`, or zero when it produces none.
+pub fn assert_preprocessed_widths_match<F, A>(
+    airs: impl IntoIterator<Item = A>,
+    program: &A::Program,
+) where
+    F: Field,
+    A: MachineAir<F>,
+{
+    for air in airs {
+        let trace = air.generate_preprocessed_trace(program);
+        let expected = trace.as_ref().map_or(0, |trace| trace.width());
+        assert_eq!(BaseAir::<F>::preprocessed_width(&air), expected, "chip {}", air.name());
     }
 }

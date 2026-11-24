@@ -1,11 +1,11 @@
-//! Basefold call site for the core recursion stage.
+//! WHIR call site for the core recursion stage.
 //!
 //! Consumes
 //! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`]
 //! and dispatches to
-//! [`crate::shard_basefold::JaggedShardVerifier::verify_shard`].
+//! [`crate::shard::JaggedShardVerifier::verify_shard`].
 //!
-//! Verifies every shard via the basefold shard verifier, then asserts
+//! Verifies every shard via the whir shard verifier, then asserts
 //! the shard-to-shard consistency chain (shard index,
 //! execution shard, pc, memory init/finalize address bits, committed
 //! value digest, deferred proofs digest, exit code), and finally commits
@@ -14,7 +14,6 @@
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
 };
 
 use itertools::Itertools;
@@ -50,7 +49,7 @@ use crate::{
     serialize = "StarkVerifyingKey<SC>: Serialize",
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>"
 ))]
-pub struct ZKMCoreBasefoldWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
+pub struct ZKMCoreWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub vk: StarkVerifyingKey<SC>,
     pub shard_proofs: Vec<JaggedShardProof<InnerVal, InnerChallenge>>,
     pub is_complete: bool,
@@ -65,14 +64,9 @@ pub struct ZKMCoreBasefoldWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub global_pow_witness: SC::Val,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCoreBasefoldVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
 /// In-circuit variable form — the `shard_proof_tuples` field carries
 /// per-shard tuples in the shape returned by [`crate::shard_level_witness`].
-pub struct ZKMCoreBasefoldWitnessVariable<
+pub struct ZKMCoreWitnessVariable<
     C: CircuitConfig<F = p3_koala_bear::KoalaBear>,
     SC: KoalaBearFriParametersVariable<C>,
 > {
@@ -92,7 +86,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
-        crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
+        crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         crate::shard_level_witness::ShardRoundsWitness<C>,
     )>,
     pub is_complete: Felt<C::F>,
@@ -103,7 +97,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
     pub global_pow_witness: Felt<C::F>,
 }
 
-/// Verify a list of basefold shard proofs, asserting the
+/// Verify a list of whir shard proofs, asserting the
 /// shard-to-shard consistency chain, and commit the aggregated
 /// [`RecursionPublicValues`] to the recursion-public-values stream.
 ///
@@ -116,9 +110,9 @@ pub struct ZKMCoreBasefoldWitnessVariable<
 ///     list from `logup_gkr_proof.logup_evaluations.chip_openings`
 ///   * `opened_values` reconstructed via
 ///     [`crate::shard_proof_variable_lift::build_opened_values_from_chip_openings`]
-pub fn verify_core_basefold<C, SC, A>(
+pub fn verify_core_jagged<C, SC, A>(
     builder: &mut Builder<C>,
-    input: ZKMCoreBasefoldWitnessVariable<C, SC>,
+    input: ZKMCoreWitnessVariable<C, SC>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
 ) where
@@ -130,13 +124,9 @@ pub fn verify_core_basefold<C, SC, A>(
     >,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
-    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
-        SC,
-    >(max_log_row_count, max_log_row_count as u32);
-
-    let ZKMCoreBasefoldWitnessVariable {
+    let ZKMCoreWitnessVariable {
         vk: vk_legacy,
         shard_proof_tuples,
         is_complete,
@@ -146,10 +136,9 @@ pub fn verify_core_basefold<C, SC, A>(
         global_h_star,
         global_pow_witness,
     } = input;
-    let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
-        C,
-        SC,
-    >(builder, &vk_legacy);
+    let jagged_vk = crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
+        builder, &vk_legacy,
+    );
 
     let mut initial_shard: Felt<_> = builder.uninit();
     let mut current_shard: Felt<_> = builder.uninit();
@@ -181,7 +170,7 @@ pub fn verify_core_basefold<C, SC, A>(
     assert_eq!(
         shard_proof_tuples.len(),
         1,
-        "normalize is single-shard: verify_core_basefold expects exactly \
+        "normalize is single-shard: verify_core_jagged expects exactly \
          one shard proof per normalize, got {}",
         shard_proof_tuples.len()
     );
@@ -203,8 +192,7 @@ pub fn verify_core_basefold<C, SC, A>(
         })
         .collect();
 
-    let basefold_vk_ref = &basefold_vk;
-    let basefold_shard_verifier_ref = &basefold_shard_verifier;
+    let jagged_vk_ref = &jagged_vk;
 
     let global_round = machine.global_round();
     let has_global_lookups = machine.has_global_lookups();
@@ -271,7 +259,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     .chips()
                     .iter()
                     .filter_map(|c| {
-                        let w = MachineAir::<
+                        let w = p3_air::BaseAir::<
                             <SC as zkm_pcs::StarkGenericConfig>::Val,
                         >::preprocessed_width(c);
                         (w > 0).then(|| {
@@ -316,50 +304,32 @@ pub fn verify_core_basefold<C, SC, A>(
             let mut preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = Vec::new();
             if !prep_widths_pre.is_empty() {
                 preceding_commitments
-                    .push((rounds_witness.preprocessed_raw_commit, basefold_vk_ref.preprocessed_commit));
+                    .push((rounds_witness.preprocessed_raw_commit, jagged_vk_ref.preprocessed_commit));
             }
             preceding_commitments.extend(
                 rounds_witness.global.map(|round| (round.raw, round.hash_bound)),
             );
 
             use crate::shard_level_witness::LiftedEvalProof;
-            let mut whir_evaluation_proof_var = None;
-            let mut pack_info: Option<(usize, usize)> = None;
-            let evaluation_proof_var = match &evaluation_proof {
-                LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                    pack_info = Some((
+            let (whir_evaluation_proof_var, pack_info) = match &evaluation_proof {
+                LiftedEvalProof::WhirBundle {
+                    host,
+                    whir_proof,
+                    sumcheck,
+                    jagged_eval,
+                    expected_eval,
+                    commit_root,
+                    modified_commitment,
+                } => {
+                    let pack_info = (
                         host.packing.offsets.len().saturating_sub(1),
                         host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
-                    ));
-                    whir_evaluation_proof_var =
-                        Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
-                            builder,
-                            host,
-                            whir_proof.clone(),
-                            whir_proof.batch_evaluations.clone(),
-                            sumcheck.clone(),
-                            jagged_eval.clone(),
-                            *expected_eval,
-                            *commit_root,
-                            *modified_commitment,
-                            &preceding_commitments,
-                            &rounds_witness.padding_heights,
-                            max_log_row_count,
-                            &column_counts_by_round_pre,
-                            None,
-                            cps_heights,
-                        ));
-                    None
-                }
-                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                    pack_info = Some((
-                        host.packing.offsets.len().saturating_sub(1),
-                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
-                    ));
-                    Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+                    );
+                    let lifted = crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
                         builder,
                         host,
-                        basefold_proof.clone(),
+                        whir_proof.as_ref().clone(),
+                        whir_proof.batch_evaluations.clone(),
                         sumcheck.clone(),
                         jagged_eval.clone(),
                         *expected_eval,
@@ -371,23 +341,8 @@ pub fn verify_core_basefold<C, SC, A>(
                         &column_counts_by_round_pre,
                         None,
                         cps_heights,
-                    ))
-                }
-                LiftedEvalProof::Bytes(bytes) => {
-                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                        builder,
-                        bytes,
-                        max_log_row_count,
-                        &column_counts_by_round_pre,
-                    ))
-                }
-                LiftedEvalProof::Empty => {
-                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                        builder,
-                        &[],
-                        max_log_row_count,
-                        &column_counts_by_round_pre,
-                    ))
+                    );
+                    (lifted, pack_info)
                 }
                 LiftedEvalProof::OuterBundle { .. } => {
                     unreachable!("core path never carries an OUTER (gnark) bundle")
@@ -412,7 +367,7 @@ pub fn verify_core_basefold<C, SC, A>(
             use p3_air::BaseAir;
             let _preprocessed_widths: Vec<usize> = shard_chips
                 .iter()
-                .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
+                .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
                 .collect();
             let main_widths: Vec<usize> = shard_chips
                 .iter()
@@ -420,52 +375,38 @@ pub fn verify_core_basefold<C, SC, A>(
                 .collect();
             let _ = main_widths;
             let column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
-            let chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
-                crate::basefold_verifier::RecursiveBasefoldVerifier,
+            let chip_metadata = crate::shard::JaggedShardVerifier::<
+                crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
             >::chip_metadata_from_chips::<SC, A>(&shard_chips);
-            let insertion_points = crate::shard_basefold::JaggedShardVerifier::<
-                crate::basefold_verifier::RecursiveBasefoldVerifier,
+            let insertion_points = crate::shard::JaggedShardVerifier::<
+                crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
             >::insertion_points_from_column_counts(&column_counts_by_round);
-            let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
+            let whir_pv =
                 crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
                     rounds_witness.global.map(|round| round.hash_bound),
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
-                    epv,
-                    chip_height_bits.clone(),
-                )
-            });
-            let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
-                crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
-                    main_commit,
-                    rounds_witness.global.map(|round| round.hash_bound),
-                    public_values_raw.clone(),
-                    &logup_gkr_proof,
-                    &zerocheck_proof,
-                    epv,
+                    whir_evaluation_proof_var,
                     chip_height_bits,
-                )
-            });
+                );
             let opened_values = proof_opened_values;
             let eval_public_values_fn =
                 |folder: &mut crate::public_values_folder::RecursivePublicValuesConstraintFolder<C>| {
                     zkm_pcs::air::eval_public_values(folder);
                 };
             let jagged_evaluator_fn =
-                super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
+                super::compress_jagged::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                     builder,
                     {
                         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
                         let witness_pads: usize =
                             rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-                        match pack_info {
-                            Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
-                                total_cols, widths, packing_pads, Some(witness_pads), "core",
-                            ),
-                            None => widths + witness_pads,
-                        }
+                        let (total_cols, packing_pads) = pack_info;
+                        zkm_pcs::jagged_pcs::jagged_column_count(
+                            total_cols, widths, packing_pads, Some(witness_pads), "core",
+                        )
                     },
                 );
             let mut challenger = machine.config().challenger_variable(builder);
@@ -479,73 +420,32 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
 
-            let global_sum = if let Some(whir_pv) = &whir_shard_proof_variable {
-                let lsh = match &evaluation_proof {
-                    LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
-                    _ => unreachable!("whir proof variable implies a WhirBundle"),
-                };
-                let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
-                    crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
-                > {
-                    stacked_pcs_verifier:
-                        crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
-                            crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                                config: zkm_pcs::whir::jagged::whir_config_for_profile(
-                        <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
-                        lsh as usize,
-                    ),
-                                log_stacking_height: lsh,
-                                _hasher: core::marker::PhantomData,
-                            },
-                            lsh,
-                        ),
-                    max_log_row_count,
-                };
-                builder.cycle_tracker_v2_exit();
-                whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
-                    builder,
-                    basefold_vk_ref,
-                    whir_pv,
-                    &shard_chips,
-                    &chip_metadata,
-                    &opened_values,
-                    &insertion_points,
-                    &mut challenger,
-                    machine.num_pv_elts(),
-                    eval_public_values_fn,
-                    jagged_evaluator_fn,
-                    global_ref,
-                    layout.membership(),
-                )
-            } else {
-            let jagged_shard_proof_variable =
-                jagged_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
-            let per_proof_verifier;
-            let active_verifier = match &evaluation_proof {
-                LiftedEvalProof::Bundle { host, .. } => {
-                    let bundle_num_vars =
-                        host.basefold_proof.basefold_proof.fri_commitments.len();
-                    crate::shard_level_witness::assert_recursion_stacking_height_fixed(
-                        bundle_num_vars,
-                        host.commit.log_stacking_height,
-                        "core_basefold",
-                    );
-                    per_proof_verifier =
-                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
-                            max_log_row_count,
-                            host.commit.log_stacking_height,
-                            host.commit.log_stacking_height as usize,
-                        );
-                    &per_proof_verifier
-                }
-                _ => basefold_shard_verifier_ref,
+            let lsh = match &evaluation_proof {
+                LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+                _ => unreachable!("whir proof variable implies a WhirBundle"),
             };
-
+            let whir_verifier = crate::shard::JaggedShardVerifier::<
+                crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
+            > {
+                stacked_pcs_verifier:
+                    crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
+                        crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
+                            config: zkm_pcs::whir::jagged::whir_config_for_profile(
+                                <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
+                                lsh as usize,
+                            ),
+                            log_stacking_height: lsh,
+                            _hasher: core::marker::PhantomData,
+                        },
+                        lsh,
+                    ),
+                max_log_row_count,
+            };
             builder.cycle_tracker_v2_exit();
-            active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+            let global_sum = whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
                 builder,
-                basefold_vk_ref,
-                &jagged_shard_proof_variable,
+                jagged_vk_ref,
+                &whir_pv,
                 &shard_chips,
                 &chip_metadata,
                 &opened_values,
@@ -556,8 +456,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 jagged_evaluator_fn,
                 global_ref,
                 layout.membership(),
-            )
-            };
+            );
             let global_sum: Ext<C::F, C::EF> = builder.eval(global_sum);
             let global_sum = builder.ext2felt_v2(global_sum);
 
@@ -849,15 +748,27 @@ pub fn verify_core_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *recursion_public_values);
 }
 
-impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+/// Domain tag hashed first into
+/// [`ZKMCoreWitnessValues::shape_key`], the normalize program's
+/// cache key.
+///
+/// It keeps a core key distinct from a compress or wrap key even when the
+/// fields hashed after it coincide; those keys open with
+/// `COMPRESS_SHAPE_KEY_DOMAIN` and `WRAP_SHAPE_KEY_DOMAIN`.  The value is
+/// arbitrary and only has to differ from theirs.  Changing it changes every
+/// core key, including the names of normalize programs in the on-disk
+/// program cache.
+const CORE_SHAPE_KEY_DOMAIN: u32 = 0xC0_FE_BA_12;
+
+impl ZKMCoreWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy witness for a given recursion shape.
-    /// Drives the multi-chip basefold dummy helper for each shard
+    /// Drives the multi-chip whir dummy helper for each shard
     /// in `shape.proof_shapes`, producing a witness whose
     /// `chip_heights` cardinality matches a real proof
     /// shard-by-shard.
     ///
-    /// Sole dummy constructor for the basefold recursion pipeline.
-    /// Used by `program_from_shape` to build basefold recursion
+    /// Sole dummy constructor for the whir recursion pipeline.
+    /// Used by `program_from_shape` to build whir recursion
     /// programs from cached shapes.
     pub fn dummy(
         machine: &zkm_pcs::StarkMachine<
@@ -869,7 +780,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         assert_eq!(
             shape.proof_shapes.len(),
             1,
-            "normalize is single-shard: ZKMCoreBasefoldWitnessValues::dummy \
+            "normalize is single-shard: ZKMCoreWitnessValues::dummy \
              expects exactly one proof shape, got {}",
             shape.proof_shapes.len()
         );
@@ -893,7 +804,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         rows: &[(String, usize)],
         is_complete: bool,
     ) -> Self {
-        let (vk0, proof0) = crate::stark::dummy_basefold_vk_and_shard_proof_rows::<
+        let (vk0, proof0) = crate::stark::dummy_vk_and_shard_proof_rows::<
             _,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >(machine, rows);
@@ -952,10 +863,10 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     /// `shape_key(a) == shape_key(b)  ⟹  normalize_program(a) == normalize_program(b)`
     /// bytewise.  The walk hashes every variable-length collection the
     /// `Witnessable::write` traversal meets, in write order, plus the two
-    /// host-side (compile-time) projections `build_normalize_basefold_program`
+    /// host-side (compile-time) projections `build_normalize_program`
     /// feeds the builder alongside the witness:
     ///
-    ///   * the per-shard `chip_heights` KEY SET — `verify_core_basefold`
+    ///   * the per-shard `chip_heights` KEY SET — `verify_core_jagged`
     ///     filters the machine's chips by these names and derives
     ///     `column_counts_by_round` from the survivors.  The height VALUES are
     ///     not baked: both consumers
@@ -976,7 +887,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        0xC0_FE_BA_12_u32.hash(&mut h);
+        CORE_SHAPE_KEY_DOMAIN.hash(&mut h);
 
         self.vk.chip_information.len().hash(&mut h);
         self.vk.chip_ordering.len().hash(&mut h);

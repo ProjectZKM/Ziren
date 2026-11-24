@@ -200,6 +200,8 @@ where
     where
         C: p3_challenger::FieldChallenger<F>
             + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + Clone
+            + Sync
             + 'static,
     {
         Self::absorb(&mut challenger, &h_star);

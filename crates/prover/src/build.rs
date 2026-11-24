@@ -250,11 +250,8 @@ fn build_outer_circuit(template_input: &ZKMWrapWitnessValues<OuterSC>) -> Vec<Co
 
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
     let input = template_input.read(&mut builder);
-    let ZKMWrapWitnessVariable {
-        vks_and_proofs,
-        chip_heights_per_input,
-        vk_merkle_data: _,
-    } = input;
+    let ZKMWrapWitnessVariable { vks_and_proofs, chip_heights_per_input, vk_merkle_data: _ } =
+        input;
 
     if !zkm_imm_wrap_vk_mode() {
         let vk = &vks_and_proofs.first().unwrap().0;

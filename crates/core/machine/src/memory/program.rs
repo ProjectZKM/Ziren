@@ -71,10 +71,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryProgramChip {
         "MemoryProgram".to_string()
     }
 
-    fn preprocessed_width(&self) -> usize {
-        NUM_MEMORY_PROGRAM_PREPROCESSED_COLS
-    }
-
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let nb_rows = program.image.len();
         let size_log2 = None;
@@ -142,7 +138,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryProgramChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         Some(next_power_of_two(
             input.program.image.len(),
-            input.fixed_log2_rows::<F, _>(self),
+            None,
             <MemoryProgramChip as MachineAir<F>>::name(self).as_str(),
         ))
     }
@@ -155,6 +151,10 @@ impl<F: PrimeField32> MachineAir<F> for MemoryProgramChip {
 impl<F> BaseAir<F> for MemoryProgramChip {
     fn width(&self) -> usize {
         NUM_MEMORY_PROGRAM_MULT_COLS
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_MEMORY_PROGRAM_PREPROCESSED_COLS
     }
 }
 

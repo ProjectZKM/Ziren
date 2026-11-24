@@ -12,7 +12,7 @@ use p3_field::PrimeField32;
 use strum_macros::{EnumDiscriminants, EnumIter};
 use zkm_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm_pcs::{
-    air::{LookupScope, MachineAir, PicusInfo, ZKM_PROOF_NUM_PV_ELTS},
+    air::{MachineAir, PicusInfo, ZKM_PROOF_NUM_PV_ELTS},
     Chip, StarkGenericConfig, StarkMachine,
 };
 

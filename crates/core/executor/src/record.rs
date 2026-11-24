@@ -1,16 +1,11 @@
 use crate::event_vec::EventVec;
-use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
-use p3_field::{PrimeCharacteristicRing, PrimeField};
-use zkm_pcs::{
-    air::{MachineAir, PublicValues},
-    shape::Shape,
-    MachineRecord, SplitOpts, ZKMCoreOpts,
-};
+use p3_field::PrimeCharacteristicRing;
+use zkm_pcs::{air::PublicValues, MachineRecord, SplitOpts, ZKMCoreOpts};
 
 use serde::{Deserialize, Serialize};
-use std::{mem::take, str::FromStr, sync::Arc};
+use std::{mem::take, sync::Arc};
 
 use crate::{
     events::{
@@ -19,7 +14,7 @@ use crate::{
         MemoryRecordEnum, MiscEvent, MovCondEvent, PrecompileEvent, PrecompileEvents, SyscallEvent,
     },
     syscalls::SyscallCode,
-    MipsAirId, Program,
+    Program,
 };
 
 /// A record of the execution of a program.
@@ -99,10 +94,6 @@ pub struct ExecutionRecord {
     pub syscall_events: EventVec<SyscallEvent>,
     /// The public values.
     pub public_values: PublicValues<u32, u32>,
-    /// The shape of the proof.
-    pub shape: Option<Shape<MipsAirId>>,
-    /// The predicted counts of the proof.
-    pub counts: Option<EnumMap<MipsAirId, u64>>,
 }
 
 impl ExecutionRecord {
@@ -367,16 +358,6 @@ impl ExecutionRecord {
         }
 
         shards
-    }
-
-    /// Return the number of rows needed for a chip, according to the proof shape specified in the
-    /// struct.
-    pub fn fixed_log2_rows<F: PrimeField, A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
-        self.shape.as_ref().map(|shape| {
-            shape
-                .log2_height(&MipsAirId::from_str(&air.name()).unwrap())
-                .unwrap_or_else(|| panic!("Chip {} not found in specified shape", air.name()))
-        })
     }
 
     /// Determines whether the execution record contains CPU events.

@@ -37,7 +37,7 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
 {
-    use crate::{WhirRing, InnerChallenge, InnerVal};
+    use crate::{InnerChallenge, InnerVal, WhirRing};
     use core::any::TypeId;
 
     assert!(
@@ -76,7 +76,7 @@ where
             })
         };
         let raw_root_inner: [InnerVal; 8] =
-            crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+            crate::jagged_pcs::whir_commit_digest(&precomputed.commit);
 
         let digest_inner: [InnerVal; 8] = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
@@ -234,18 +234,13 @@ pub fn prove_shard_with_data<SC, A>(
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::WhirRing,
-    A: MachineAir<Val<SC>> + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
+    A: MachineAir<Val<SC>> + crate::shard_level::constraint_folder::ShardProvableAir<SC>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + CanObserve<crate::WhirRingCommitment<SC>>,
 {
     let ShardData {
         chips,
@@ -684,7 +679,7 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
         chips.len(),
         name_sorted.iter().map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
             let evals: &[Challenge<SC>] =
                 trace_at_z.get(&name).map(|v| v.as_slice()).unwrap_or(&[]);
             let split = prep_width.min(evals.len());
@@ -735,7 +730,7 @@ where
                 if let Some(m) = remat {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
+                    let mle = std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(m));
                     return crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h);
                 }
                 return pm.clone();
@@ -876,7 +871,7 @@ where
         .iter()
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
-            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+            let prep_width = p3_air::BaseAir::<Val<SC>>::preprocessed_width(**chip);
             let mut prep_local: Vec<Challenge<SC>> = trace_at_z.remove(&name).unwrap_or_default();
             let split = prep_width.min(prep_local.len());
             let main_local = prep_local.split_off(split);
@@ -909,7 +904,7 @@ where
 
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
-/// BaseFold root (`main_original_commitment`) from `evaluation_proof`, then
+/// WHIR root (`main_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
@@ -973,7 +968,7 @@ where
 
     let main_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
-            let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+            let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
         }
         _ => main_commitment,
@@ -986,7 +981,7 @@ where
                     && bundle.packing.round_counts.len() >= 2 + n_main_preceding =>
             {
                 let raw_inner =
-                    crate::jagged_pcs::basefold_commit_digest_felts(&bundle.preceding_commits[0]);
+                    crate::jagged_pcs::whir_commit_digest_felts(&bundle.preceding_commits[0]);
                 let raw = unsafe {
                     core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
                 };
@@ -1016,7 +1011,7 @@ where
                     .preceding_commits
                     .last()
                     .expect("a shard with a global round has its raw root before the main round's");
-                let raw_inner = crate::jagged_pcs::basefold_commit_digest_felts(raw);
+                let raw_inner = crate::jagged_pcs::whir_commit_digest_felts(raw);
                 Some(unsafe {
                     core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
                 })
@@ -1100,15 +1095,10 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
     prove_trusted_evaluations_with_global::<SC, A>(
         chips,
@@ -1159,17 +1149,12 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger:
-        'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
 {
-    use crate::{WhirRing, InnerChallenge, InnerVal};
+    use crate::{InnerChallenge, InnerVal, WhirRing};
     use core::any::TypeId;
 
     assert!(

@@ -5,18 +5,13 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
-use std::str::FromStr;
 
-use p3_field::Field;
 use p3_field::PrimeField32;
-use p3_maybe_rayon::prelude::IndexedParallelIterator;
-use p3_maybe_rayon::prelude::IntoParallelRefIterator;
-use p3_maybe_rayon::prelude::ParallelIterator;
+use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use zkm_pcs::air::{MachineAir, MachineProgram};
-use zkm_pcs::shape::Shape;
+use zkm_pcs::air::MachineProgram;
 
-use crate::{Instruction, MipsAirId, Register};
+use crate::{Instruction, Register};
 
 pub const MAX_MEMORY: usize = 0x7F000000;
 pub const MAX_CODE_MEMORY: usize = 0x3F000000;
@@ -45,8 +40,6 @@ pub struct Program {
     pub next_pc: u32,
     /// The initial memory image
     pub image: BTreeMap<u32, u32>,
-    /// The shape for the preprocessed tables.
-    pub preprocessed_shape: Option<Shape<MipsAirId>>,
 }
 
 impl Program {
@@ -226,17 +219,6 @@ impl Program {
             pc_base: base_address,
             next_pc: entry + 4,
             image,
-            preprocessed_shape: None,
-        })
-    }
-
-    /// Custom logic for padding the trace to a power of two according to the proof shape.
-    pub fn fixed_log2_rows<F: Field, A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
-        let id = MipsAirId::from_str(&air.name()).unwrap();
-        self.preprocessed_shape.as_ref().map(|shape| {
-            shape
-                .log2_height(&id)
-                .unwrap_or_else(|| panic!("Chip {} not found in specified shape", air.name()))
         })
     }
 

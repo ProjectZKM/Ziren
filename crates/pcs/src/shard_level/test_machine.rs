@@ -2,7 +2,6 @@
 
 use crate::air::MachineProgram;
 use crate::record::MachineRecord;
-use crate::septic_digest::SepticDigest;
 use crate::InnerVal;
 use p3_field::PrimeCharacteristicRing;
 
@@ -29,9 +28,5 @@ pub(crate) struct MockProgram;
 impl MachineProgram<InnerVal> for MockProgram {
     fn pc_start(&self) -> InnerVal {
         InnerVal::ZERO
-    }
-
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<InnerVal> {
-        SepticDigest::<InnerVal>::zero()
     }
 }

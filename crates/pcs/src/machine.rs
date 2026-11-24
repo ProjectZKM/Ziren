@@ -7,7 +7,7 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
+use p3_uni_stark::SymbolicAirBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -15,9 +15,8 @@ use std::{fmt::Debug, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
-use crate::PROOF_MAX_NUM_PVS;
 use crate::{
-    air::{LookupScope, MachineAir, MachineProgram},
+    air::{capture_machine_constraints, LookupScope, MachineAir, MachineProgram},
     config::PrepCommitRoot,
     count_permutation_constraints,
     lookup::{debug_lookups_with_all_chips, Lookup, LookupKind},
@@ -144,8 +143,8 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// Not serialized: it is derived from `traces`, and rebuilding it is a
     /// one-time cost per key.  A deserialized key simply rebuilds on demand.
     #[serde(skip)]
-    preprocessed_mles: std::sync::OnceLock<Vec<std::sync::Arc<crate::basefold::Mle<Val<SC>>>>>,
-    /// The PRECOMPUTED preprocessed commit — the commitment plus the BaseFold
+    preprocessed_mles: std::sync::OnceLock<Vec<std::sync::Arc<crate::whir::mle::Mle<Val<SC>>>>>,
+    /// The PRECOMPUTED preprocessed commit — the commitment plus the WHIR
     /// prover data and jagged packing needed to OPEN the preprocessed traces,
     /// not merely observe them.  `self.commit` is the root of exactly this
     /// commit: `setup` puts the commit in the verifying key and this data in
@@ -268,12 +267,12 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// `self.traces[i]` (`Mle::from_row_major` moves the backing buffer and
     /// preserves row-major order, so `Mle::as_trace_ref()` round-trips the
     /// original cells byte-for-byte).
-    pub fn preprocessed_mles(&self) -> &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>] {
+    pub fn preprocessed_mles(&self) -> &[std::sync::Arc<crate::whir::mle::Mle<Val<SC>>>] {
         self.preprocessed_mles.get_or_init(|| {
             use p3_maybe_rayon::prelude::*;
             self.traces
                 .par_iter()
-                .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t.clone())))
+                .map(|t| std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(t.clone())))
                 .collect()
         })
     }
@@ -298,9 +297,9 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         if self.preprocessed_mles.get().is_none() {
             use p3_maybe_rayon::prelude::*;
             let traces = std::mem::take(&mut self.traces);
-            let mles: Vec<std::sync::Arc<crate::basefold::Mle<Val<SC>>>> = traces
+            let mles: Vec<std::sync::Arc<crate::whir::mle::Mle<Val<SC>>>> = traces
                 .into_par_iter()
-                .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t)))
+                .map(|t| std::sync::Arc::new(crate::whir::mle::Mle::from_row_major(t)))
                 .collect();
             let _ = self.preprocessed_mles.set(mles);
         } else {
@@ -317,10 +316,10 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// Row-major view of preprocessed trace `i`: from `traces`, or from the
     /// MLE form on a slimmed key (`Mle::as_trace_ref` is the same cells,
     /// byte for byte).
-    pub fn preprocessed_trace_view(&self, i: usize) -> crate::basefold::TraceRef<'_, Val<SC>> {
+    pub fn preprocessed_trace_view(&self, i: usize) -> crate::whir::mle::TraceRef<'_, Val<SC>> {
         if !self.traces.is_empty() {
             let t = &self.traces[i];
-            crate::basefold::TraceRef::new(&t.values, t.width)
+            crate::whir::mle::TraceRef::new(&t.values, t.width)
         } else {
             self.preprocessed_mles()[i].as_trace_ref()
         }
@@ -580,18 +579,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut chip_cumulative_sums = Vec::with_capacity(chips.len());
             tracing::debug_span!("generate permutation traces").in_scope(|| {
-                chips
-                    .par_iter()
-                    .zip(traces.par_iter_mut())
-                    .map(|(chip, (main_trace, pre_trace))| {
+                let permutation_data = chips.par_iter().zip(traces.par_iter_mut()).map(
+                    |(chip, (main_trace, pre_trace))| {
                         let (trace, local_sum) = chip.generate_permutation_trace(
                             *pre_trace,
                             main_trace,
                             &permutation_challenges,
                         );
                         (trace, local_sum)
-                    })
+                    },
+                );
+                #[cfg(not(target_os = "zkvm"))]
+                permutation_data
                     .unzip_into_vecs(&mut permutation_traces, &mut chip_cumulative_sums);
+                #[cfg(target_os = "zkvm")]
+                {
+                    (permutation_traces, chip_cumulative_sums) = permutation_data.unzip();
+                }
             });
 
             let local_cumulative_sum = chip_cumulative_sums.iter().copied().sum::<SC::Challenge>();
@@ -692,16 +696,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
-                        let num_main_constraints = get_symbolic_constraints(
-                            &chip.air,
-                            AirLayout {
-                                preprocessed_width: chip.preprocessed_width(),
-                                main_width: chip.width(),
-                                num_public_values: PROOF_MAX_NUM_PVS,
-                                ..Default::default()
-                            },
-                        )
-                        .len();
+                        let num_main_constraints =
+                            capture_machine_constraints(&chip.air).constraint_counts().base;
 
                         let num_permutation_constraints = count_permutation_constraints(
                             &chip.sends,
@@ -928,7 +924,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .chips()
             .iter()
             .filter_map(|c| {
-                let w = <A as MachineAir<Val<SC>>>::preprocessed_width(&c.air);
+                let w = <A as p3_air::BaseAir<Val<SC>>>::preprocessed_width(&c.air);
                 (w > 0).then(|| (<A as MachineAir<Val<SC>>>::name(&c.air), w))
             })
             .collect();
@@ -961,7 +957,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
         for record in records.iter_mut() {
             if !serial {
-                use rayon::prelude::*;
                 let t_par = std::time::Instant::now();
                 let included: Vec<&_> = chips
                     .iter()
@@ -1063,7 +1058,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         A: Sync
             + for<'a> Air<VerifierConstraintFolder<'a, SC>>
             + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+                crate::shard_level::constraint_folder::ShardConstraintFolder<
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
@@ -1074,11 +1069,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         let global = {
             let mut vk_challenger = challenger.clone();
@@ -1121,7 +1112,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         A: Sync
             + for<'a> Air<VerifierConstraintFolder<'a, SC>>
             + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
+                crate::shard_level::constraint_folder::ShardConstraintFolder<
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
@@ -1132,11 +1123,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as crate::WhirRing>::WhirMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
         match (self.has_global_lookups(), global) {
             (false, Some(_)) => {

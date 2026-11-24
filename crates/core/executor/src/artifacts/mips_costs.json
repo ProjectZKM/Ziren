@@ -58,7 +58,7 @@
   "Bitwise": 34,
   "MemoryLocal": 72,
   "MemoryProgram": 9,
-  "MemoryBump": 12,
+  "MemoryBump": 14,
   "Byte": 22,
   "Bls12381AddAssign": 2533
 }

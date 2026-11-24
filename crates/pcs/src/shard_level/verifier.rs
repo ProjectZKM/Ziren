@@ -406,8 +406,7 @@ impl JaggedShardVerifier {
                                 .into(),
                         ));
                     };
-                    let raw_global_inner =
-                        crate::jagged_pcs::basefold_commit_digest_felts(raw_global);
+                    let raw_global_inner = crate::jagged_pcs::whir_commit_digest_felts(raw_global);
                     let claimed_raw_inner: [InnerVal; 8] = unsafe {
                         core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(claimed_raw)
                     };
