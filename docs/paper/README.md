@@ -41,7 +41,7 @@ the soundness table's stage bounds of 100.74 and 101.10 bits. The Fiat–Shamir 
 and unquantified binding and digest terms remain separate.
 
 The local evidence also includes the allowlist-enabled compressed-proof benchmark:
-291,162 bytes and 31.4 ms median native verification over five warm runs.
+291,162 bytes and 17.7 ms median native verification over five warm runs.
 
 Authoring conventions: section content lives in `sections/`, only `ziren-mips32-gpu.tex`
 contains `\input{}`; natbib `\citep{}`; math macros (`\F`, `\EF`, `\KB`,

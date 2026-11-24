@@ -1,6 +1,6 @@
 # Performance
 
-Version 2.1.0 (24 November 2026) proves 25 Ethereum mainnet blocks with the Reth guest in a median of **15.1 s per block on two RTX 5090 GPUs** (21.2 MHz aggregate) and **13.7 s on four** (23.2 MHz). The eight-GPU benchmarks of version 2.0 (1 November 2026) reach **75.1 MHz**, with **65.3 MHz aggregate throughput** across 15 blocks using Geth. The compressed proof measures **291,162 bytes (284 KiB)** with **31.4 ms native verification**. The workloads and measurement conditions are detailed below.
+Version 2.1.0 (24 November 2026) proves 25 Ethereum mainnet blocks with the Reth guest in a median of **15.1 s per block on two RTX 5090 GPUs** (21.2 MHz aggregate) and **13.7 s on four** (23.2 MHz). The eight-GPU benchmarks of version 2.0 (1 November 2026) reach **75.1 MHz**, with **65.3 MHz aggregate throughput** across 15 blocks using Geth. The compressed proof measures **291,162 bytes (284 KiB)** with **17.7 ms native verification**. The workloads and measurement conditions are detailed below.
 
 ## Metrics
 
@@ -112,7 +112,7 @@ On 24 November 2026, a freshly generated Fibonacci proof (`n = 500`) at version 
 | Measurement | Result |
 |-------------|-------:|
 | Compressed proof including its recursion key (`ZKMReduceProof`) | 291,162 bytes (284 KiB) |
-| Native verification, median of five warm runs | 31.4 ms |
-| Range of that median over six repetitions | 30.2–32.0 ms |
+| Native verification, median of five warm runs | 17.7 ms |
+| Range of that median over six repetitions | 16.4–20.3 ms |
 
-The same measurement on the previous version, taken alongside, gives 290,530 bytes and 23.1 ms: the univariate skip's first message has 61 coefficients where the four rounds it replaces had 20, which adds 632 bytes. The verifier's jagged evaluation now goes through all sixteen values of the four skipped row bits for every column, which is the likely source of the extra time (not measured separately). Verification time excludes proving, setup, deserialization and one warm-up verification. The compressed proof uses the root's compress schedule (rate 1/8, Johnson-bound WHIR); openings of the first WHIR oracle account for most of its size. For a fixed root program and commitment shape, proof size is independent of the guest's execution length. Groth16 and PLONK wrapping produce separate constant-size SNARKs for on-chain verification; the measurements above are for the native compressed proof.
+The same measurement on the previous version, taken alongside, gives 290,530 bytes and 22.0 ms: the univariate skip's first message has 61 coefficients where the four rounds it replaces had 20, which adds 632 bytes. The verifier's jagged evaluation goes through all sixteen values of the four skipped row bits for every column; it now evaluates each column directly at its integer offsets, which takes a few multiplications per layer and makes verification faster than before the skip. Verification time excludes proving, setup, deserialization and one warm-up verification. The compressed proof uses the root's compress schedule (rate 1/8, Johnson-bound WHIR); openings of the first WHIR oracle account for most of its size. For a fixed root program and commitment shape, proof size is independent of the guest's execution length. Groth16 and PLONK wrapping produce separate constant-size SNARKs for on-chain verification; the measurements above are for the native compressed proof.
