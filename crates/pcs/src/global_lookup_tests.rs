@@ -168,7 +168,7 @@ fn prove(
             prover.open(&pk, data, &mut challenger.clone()).unwrap()
         })
         .collect();
-    (MachineProof { shard_proofs }, vk)
+    (MachineProof::from_shards(shard_proofs), vk)
 }
 
 fn verify(
@@ -234,9 +234,10 @@ fn shards_proven_under_another_challenge_are_rejected() {
 
     let (mixed_a, vk) = prove(bus_machine(true), &[sender(&[3, 5, 7])], &global);
     let (mixed_b, _) = prove(bus_machine(true), &[receiver(&[7, 3, 5])], &other);
-    let mixed = MachineProof {
-        shard_proofs: vec![mixed_a.shard_proofs[0].clone(), mixed_b.shard_proofs[0].clone()],
-    };
+    let mixed = MachineProof::from_shards(vec![
+        mixed_a.shard_proofs[0].clone(),
+        mixed_b.shard_proofs[0].clone(),
+    ]);
     verify(&machine, &vk, &mixed, Some(&global))
         .expect_err("shards proven under different challenges must not combine");
 }
@@ -328,4 +329,103 @@ fn a_proof_verifies_only_under_its_global_proof_of_work() {
         let err = verify(&failing).expect_err("a witness that fails the proof of work");
         assert!(err.contains("witness fails"), "{err}");
     }
+}
+
+/// The bus machine with its global lookups deferred to global proofs.
+fn deferring_machine() -> StarkMachine<SC, BusAir> {
+    bus_machine(true).with_deferred_global()
+}
+
+/// Proves `records` in one pass, each as its own shard.
+fn prove_deferring(records: &[BusRecord]) -> (MachineProof<SC>, StarkVerifyingKey<SC>) {
+    let prover = CpuProver::new(deferring_machine());
+    let (pk, vk) = prover.setup(&BusProgram);
+    let mut challenger = prover.machine().config().challenger();
+    let proof = prover
+        .prove(&pk, records.to_vec(), &mut challenger, crate::ZKMCoreOpts::default())
+        .expect("the shards prove");
+    (proof, vk)
+}
+
+fn verify_deferring(vk: &StarkVerifyingKey<SC>, proof: &MachineProof<SC>) -> Result<(), String> {
+    let machine = deferring_machine();
+    let mut challenger = machine.config().challenger();
+    machine.verify(vk, proof, &mut challenger).map_err(|e| format!("{e:?}"))
+}
+
+#[test]
+fn deferred_global_lookups_close_across_shards() {
+    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    assert_eq!(proof.global_proofs.len(), 2);
+    assert!(proof.shard_proofs.iter().all(|p| p.jagged_shard_proof.global_pow_witness.is_none()));
+    verify_deferring(&vk, &proof).expect("a balanced bus must verify");
+}
+
+#[test]
+fn an_unbalanced_deferred_bus_is_rejected() {
+    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 6])]);
+    let error = verify_deferring(&vk, &proof).expect_err("an unbalanced bus must not verify");
+    assert!(error.contains("sum"), "{error}");
+}
+
+#[test]
+fn every_global_round_needs_its_global_proof() {
+    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+
+    let mut dropped = proof.clone();
+    dropped.global_proofs.pop();
+    verify_deferring(&vk, &dropped).expect_err("a shard without its global proof");
+
+    let mut none = proof.clone();
+    none.global_proofs.clear();
+    verify_deferring(&vk, &none).expect_err("no global proofs at all");
+
+    let mut swapped = proof.clone();
+    swapped.global_proofs.swap(0, 1);
+    verify_deferring(&vk, &swapped).expect_err("global proofs out of shard order");
+
+    let mut repeated = proof;
+    repeated.global_proofs[1] = repeated.global_proofs[0].clone();
+    verify_deferring(&vk, &repeated).expect_err("one global proof standing in for two shards");
+}
+
+#[test]
+fn a_global_proof_opens_the_round_its_shard_committed() {
+    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let (other, _) = prove_deferring(&[sender(&[3, 5, 8]), receiver(&[8, 3, 5])]);
+
+    let mut mixed = proof.clone();
+    mixed.global_proofs = other.global_proofs.clone();
+    verify_deferring(&vk, &mixed).expect_err("global proofs of other tables");
+
+    let mut mixed = proof;
+    mixed.shard_proofs[0] = other.shard_proofs[0].clone();
+    verify_deferring(&vk, &mixed).expect_err("a shard replaced after the challenge was drawn");
+}
+
+#[test]
+fn deferred_global_proofs_carry_the_proof_of_work() {
+    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let witness = proof.global_proofs[0].jagged_shard_proof.global_pow_witness;
+    assert!(witness.is_some());
+
+    let mut forged = proof.clone();
+    for global_proof in forged.global_proofs.iter_mut() {
+        global_proof.jagged_shard_proof.global_pow_witness = witness.map(|w| w + F::ONE);
+    }
+    verify_deferring(&vk, &forged).expect_err("another proof-of-work witness");
+
+    let mut forged = proof;
+    forged.global_proofs[0].jagged_shard_proof.global_pow_witness = None;
+    verify_deferring(&vk, &forged).expect_err("a global proof without the witness");
+}
+
+#[test]
+fn a_shard_without_a_global_round_needs_no_global_proof() {
+    let machine = deferring_machine();
+    assert!(machine.defers_global() && !machine.has_global_lookups());
+    let (proof, vk) = prove_deferring(&[sender(&[4, 9]), receiver(&[9, 4])]);
+    let mut extra = proof.clone();
+    extra.global_proofs.push(proof.global_proofs[0].clone());
+    verify_deferring(&vk, &extra).expect_err("more global proofs than global rounds");
 }

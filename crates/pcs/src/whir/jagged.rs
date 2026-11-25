@@ -287,6 +287,17 @@ pub enum WhirProfile {
     Wrap,
 }
 
+impl WhirProfile {
+    /// Whether the schedule counts its queries in the unique-decoding regime:
+    /// a committed word that passes them is, up to the schedule's error,
+    /// within half the code's distance of exactly one codeword. Two openings
+    /// of one commitment in separate proofs then speak of the same table,
+    /// which a Johnson-bound schedule does not give.
+    pub const fn unique_decoding(self) -> bool {
+        matches!(self, Self::Core | Self::Shrink)
+    }
+}
+
 /// The schedule of `profile` at stacking height `lsh`.
 pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
     match profile {

@@ -932,7 +932,7 @@ fn prove_tampered(
             prover.open(&pk, data, &mut challenger.clone()).unwrap()
         })
         .collect();
-    MachineProof { shard_proofs }
+    MachineProof::from_shards(shard_proofs)
 }
 
 /// The honest machine and the verifying key of `program`.

@@ -1988,9 +1988,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .machine()
                                     .verify(
                                         &vk,
-                                        &zkm_pcs::MachineProof {
-                                            shard_proofs: vec![proof.clone()],
-                                        },
+                                        &zkm_pcs::MachineProof::from_shards(vec![proof.clone()]),
                                         &mut self.compress_prover.machine().config().challenger(),
                                     )
                                     .unwrap();
@@ -3533,7 +3531,7 @@ pub mod tests {
 
         let machine = prover.core_prover.machine();
         let mut challenger = machine.config().challenger();
-        let machine_proof = MachineProof { shard_proofs: core.proof.0.clone() };
+        let machine_proof = MachineProof::from_shards(core.proof.0.clone());
         let machine_result = machine.verify(&vk.vk, &machine_proof, &mut challenger);
         tracing::info!("StarkMachine::verify: {machine_result:?}");
         assert!(

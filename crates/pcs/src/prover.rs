@@ -616,6 +616,66 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
+        if self.machine().defers_global() {
+            let global_round = self.machine().global_round();
+            let proved = tracing::info_span!("prove_shards").in_scope(|| {
+                records
+                    .into_par_iter()
+                    .map(|record| {
+                        let named_traces = self.generate_traces(&record).map_err(|e| {
+                            tracing::error!("generate traces error: {:?}", e);
+                            CpuProverError
+                        })?;
+                        let shard_data = self.commit(&record, named_traces, None);
+                        let tables = shard_data
+                            .main_data
+                            .as_ref()
+                            .and_then(|retained| retained.main_store.as_ref())
+                            .and_then(|store| {
+                                crate::shard_level::prover::split_global_round(store, global_round)
+                            })
+                            .map(|(tables, _)| tables);
+                        let proof = self.open(pk, shard_data, &mut challenger.clone())?;
+                        Ok((proof, tables))
+                    })
+                    .collect::<Result<Vec<_>, ShardPcsError<SC, Self::Pcs>>>()
+            })?;
+            let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+
+            let rounds = shard_proofs
+                .iter()
+                .map(|proof| self.machine().global_round_binding(proof))
+                .collect::<Vec<_>>();
+            let committed = rounds
+                .iter()
+                .zip(tables)
+                .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+                .collect::<Vec<_>>();
+            let global_proofs = if committed.is_empty() {
+                Vec::new()
+            } else {
+                let global = self
+                    .machine()
+                    .global_challenge(challenger, rounds.iter().map(Option::as_ref))
+                    .expect("a machine that defers global lookups has them");
+                tracing::info_span!("prove_global_rounds").in_scope(|| {
+                    committed
+                        .into_par_iter()
+                        .map(|(round, tables)| {
+                            prove_global_round(
+                                self.machine(),
+                                pk,
+                                round,
+                                tables,
+                                &global,
+                                challenger,
+                            )
+                        })
+                        .collect()
+                })
+            };
+            return Ok(MachineProof { shard_proofs, global_proofs });
+        }
         let rounds = records
             .par_iter()
             .map(|record| self.global_round_binding(record, None))
@@ -662,8 +722,75 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })?;
 
-        Ok(MachineProof { shard_proofs })
+        Ok(MachineProof::from_shards(shard_proofs))
     }
+}
+
+/// Proves the sum of the global lookups of a shard, from the global round
+/// `round` the shard committed over `tables`, its global-round chips' traces
+/// under their chip names, and under the cross-shard challenge `global`.
+/// `vk_challenger` is the machine's challenger after the verifying key.
+///
+/// The proof is a shard proof of the round's chips seen as
+/// [`crate::air::GlobalView`]s. It commits `tables` again, which reproduces
+/// the shard's commitment.
+///
+/// # Panics
+/// When the ring's schedule is not a unique-decoding one (see
+/// [`crate::whir::jagged::WhirProfile::unique_decoding`]), or `tables` do not
+/// commit to `round`.
+pub fn prove_global_round<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    pk: &StarkProvingKey<SC>,
+    round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+    tables: crate::traces::Traces<Val<SC>>,
+    global: &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    vk_challenger: &SC::Challenger,
+) -> ShardProof<SC>
+where
+    SC: StarkGenericConfig + WhirRing,
+    A: MachineAir<Val<SC>>,
+    SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
+{
+    assert!(
+        <SC as WhirRing>::WHIR_PROFILE.unique_decoding(),
+        "a global proof reopens a shard's global round, which binds one table only under a \
+         unique-decoding schedule",
+    );
+    let chips = machine.global_view_chips(round, 0).expect("the round of a shard of this machine");
+    let views = crate::traces::Traces {
+        named_traces: tables
+            .named_traces
+            .into_iter()
+            .map(|(name, table)| (crate::air::GlobalView::<A>::name_in_slot(0, &name), table))
+            .collect(),
+    };
+    let (main_commitment, precomputed) =
+        crate::shard_level::prover::commit_traces::<SC>(&views, None);
+    assert_eq!(
+        main_commitment, round.commitment,
+        "the tables of a global proof do not commit to its shard's global round",
+    );
+    let retained = RetainedJaggedCommit {
+        main_commitment,
+        precomputed,
+        device_dense_q: None,
+        main_store: Some(views),
+        global: None,
+    };
+    let jagged_shard_proof = prove_shard_with_data_boxed::<SC, crate::air::GlobalView<A>>(
+        &chips.iter().collect::<Vec<_>>(),
+        pk.preprocessed_mles(),
+        <SC as WhirRing>::prep_open_data(pk.preprocessed_data()),
+        &pk.chip_ordering,
+        None,
+        Vec::new(),
+        vk_challenger,
+        Some(retained),
+        None,
+        Some(global),
+    );
+    ShardProof { public_values: Vec::new(), jagged_shard_proof }
 }
 
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>

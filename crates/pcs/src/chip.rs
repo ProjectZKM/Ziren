@@ -8,7 +8,8 @@ use p3_util::log2_ceil_usize;
 
 use crate::{
     air::{
-        capture_machine_constraints, LookupScope, MachineAir, MultiTableAirBuilder, ZKMAirBuilder,
+        capture_machine_constraints, GlobalView, LookupScope, MachineAir, MultiTableAirBuilder,
+        ZKMAirBuilder,
     },
     local_permutation_trace_width,
     lookup::{Lookup, LookupBuilder, LookupKind},
@@ -27,6 +28,12 @@ pub struct Chip<F: Field, A> {
     pub receives: Vec<Lookup<F>>,
     /// The relative log degree of the quotient polynomial, i.e. `log2(max_constraint_degree - 1)`.
     pub log_quotient_degree: usize,
+    /// The global lookups the chip sends that its machine proves in a global
+    /// proof instead of the chip's shard proof (see [`Self::defer_global`]).
+    pub deferred_sends: Vec<Lookup<F>>,
+    /// The global lookups the chip receives that its machine proves in a
+    /// global proof.
+    pub deferred_receives: Vec<Lookup<F>>,
 }
 
 impl<F: Field, A> Chip<F, A> {
@@ -48,6 +55,56 @@ impl<F: Field, A> Chip<F, A> {
     /// Consumes the chip and returns the underlying air.
     pub fn into_inner(self) -> A {
         self.air
+    }
+
+    /// Moves the chip's global lookups out of its shard proof. The shard
+    /// proof then closes the local lookups alone and needs no cross-shard
+    /// challenge; a global proof sums the moved lookups over the chip's
+    /// committed columns (see [`Self::global_view`]).
+    pub fn defer_global(&mut self) {
+        let (global, local) =
+            core::mem::take(&mut self.sends).into_iter().partition(Lookup::is_global);
+        self.sends = local;
+        self.deferred_sends.extend::<Vec<_>>(global);
+        let (global, local) =
+            core::mem::take(&mut self.receives).into_iter().partition(Lookup::is_global);
+        self.receives = local;
+        self.deferred_receives.extend::<Vec<_>>(global);
+    }
+
+    /// Whether a global proof carries lookups of this chip.
+    pub fn has_deferred_global(&self) -> bool {
+        !self.deferred_sends.is_empty() || !self.deferred_receives.is_empty()
+    }
+
+    /// The chip's global lookups, whether its shard proof or a global proof
+    /// closes them.
+    pub fn global_lookups(&self) -> impl Iterator<Item = &Lookup<F>> {
+        self.sends
+            .iter()
+            .chain(self.receives.iter())
+            .filter(|lookup| lookup.is_global())
+            .chain(self.deferred_sends.iter())
+            .chain(self.deferred_receives.iter())
+    }
+}
+
+impl<F: Field, A: MachineAir<F>> Chip<F, A> {
+    /// The chip's main columns as the table slot `slot` of a global proof:
+    /// no constraints, and the lookups [`Self::defer_global`] moved out of
+    /// the shard proof.
+    pub fn global_view(&self, slot: usize) -> Chip<F, GlobalView<A>> {
+        Chip {
+            air: GlobalView::new(
+                GlobalView::<A>::name_in_slot(slot, &self.air.name()),
+                self.air.width(),
+            ),
+            sends: self.deferred_sends.clone(),
+            receives: self.deferred_receives.clone(),
+            log_quotient_degree: self.log_quotient_degree,
+            deferred_sends: Vec::new(),
+            deferred_receives: Vec::new(),
+        }
     }
 }
 
@@ -88,7 +145,14 @@ where
         }
         let log_quotient_degree = log2_ceil_usize(max_constraint_degree - 1);
 
-        Self { air, sends, receives, log_quotient_degree }
+        Self {
+            air,
+            sends,
+            receives,
+            log_quotient_degree,
+            deferred_sends: Vec::new(),
+            deferred_receives: Vec::new(),
+        }
     }
 
     /// Returns the number of lookups in the chip.
