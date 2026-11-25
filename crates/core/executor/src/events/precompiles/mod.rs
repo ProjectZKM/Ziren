@@ -13,7 +13,7 @@ use crate::syscalls::SyscallCode;
 pub use ec::*;
 pub use edwards::*;
 pub use fptower::*;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 pub use keccak_sponge::*;
 pub use linux::*;
 pub use poseidon2_permute::*;
@@ -275,59 +275,94 @@ impl PrecompileEvents {
     /// same balance, two global interactions and a local memory entry fewer.
     /// Consecutive calls of one precompile family (an elliptic-curve scalar
     /// multiplication's doubles and adds on one accumulator) chain this way.
+    ///
+    /// The events are walked in time order with one open chain per address.
+    /// A chain's head and the events it absorbed are addressed by position, so
+    /// only the address lookup hashes.
     pub fn merge_chained_local_mem_events(&mut self) -> usize {
-        type Slot = (SyscallCode, usize, usize);
-        let mut order: Vec<(u32, u32, SyscallCode, usize)> = self
-            .events
+        struct Chain {
+            head: (usize, usize, usize),
+            last: MemoryRecord,
+            extended: bool,
+        }
+
+        let mut lists: Vec<&mut Vec<(SyscallEvent, PrecompileEvent)>> =
+            self.events.values_mut().collect();
+        let mut order: Vec<(u32, u32, usize, usize)> = lists
             .iter()
-            .flat_map(|(code, events)| {
-                events.iter().enumerate().map(|(i, (s, _))| (s.shard, s.clk, *code, i))
+            .enumerate()
+            .flat_map(|(list, events)| {
+                events.iter().enumerate().map(move |(i, (s, _))| (s.shard, s.clk, list, i))
             })
             .collect();
         order.sort_unstable_by_key(|&(shard, clk, _, _)| (shard, clk));
 
-        let mut open: HashMap<u32, (Slot, MemoryRecord)> = HashMap::new();
-        let mut finals: HashMap<Slot, MemoryRecord> = HashMap::new();
-        let mut dropped: HashSet<Slot> = HashSet::new();
-        for (_, _, code, i) in order {
-            for (k, local) in self.events[&code][i].1.local_mem_access().iter().enumerate() {
+        let starts: Vec<Vec<usize>> = lists
+            .iter()
+            .map(|events| {
+                let mut starts = Vec::with_capacity(events.len() + 1);
+                let mut next = 0;
+                for (_, event) in events.iter() {
+                    starts.push(next);
+                    next += event.local_mem_access().len();
+                }
+                starts.push(next);
+                starts
+            })
+            .collect();
+        let mut dropped: Vec<Vec<bool>> =
+            starts.iter().map(|starts| vec![false; starts[starts.len() - 1]]).collect();
+
+        let mut open: HashMap<u32, Chain, rustc_hash::FxBuildHasher> = HashMap::default();
+        let mut finals: Vec<((usize, usize, usize), MemoryRecord)> = Vec::new();
+        let mut removed = 0;
+        for (_, _, list, i) in order {
+            for (k, local) in lists[list][i].1.local_mem_access().iter().enumerate() {
                 let initial = local.initial_mem_access;
+                let chain =
+                    Chain { head: (list, i, k), last: local.final_mem_access, extended: false };
                 match open.get_mut(&local.addr) {
-                    Some((head, last))
-                        if (last.shard, last.timestamp, last.value)
+                    Some(earlier)
+                        if (earlier.last.shard, earlier.last.timestamp, earlier.last.value)
                             == (initial.shard, initial.timestamp, initial.value) =>
                     {
-                        *last = local.final_mem_access;
-                        finals.insert(*head, local.final_mem_access);
-                        dropped.insert((code, i, k));
+                        earlier.last = local.final_mem_access;
+                        earlier.extended = true;
+                        dropped[list][starts[list][i] + k] = true;
+                        removed += 1;
                     }
-                    _ => {
-                        open.insert(local.addr, ((code, i, k), local.final_mem_access));
+                    Some(earlier) => {
+                        if earlier.extended {
+                            finals.push((earlier.head, earlier.last));
+                        }
+                        *earlier = chain;
+                    }
+                    None => {
+                        open.insert(local.addr, chain);
                     }
                 }
             }
         }
-        if dropped.is_empty() {
+        if removed == 0 {
             return 0;
         }
+        finals.extend(open.into_values().filter(|c| c.extended).map(|c| (c.head, c.last)));
 
-        for (code, events) in self.events.iter_mut() {
+        for ((list, i, k), last) in finals {
+            lists[list][i].1.local_mem_access_mut()[k].final_mem_access = last;
+        }
+        for (list, events) in lists.iter_mut().enumerate() {
             for (i, (_, event)) in events.iter_mut().enumerate() {
-                let locals = event.local_mem_access_mut();
-                for (k, local) in locals.iter_mut().enumerate() {
-                    if let Some(last) = finals.get(&(*code, i, k)) {
-                        local.final_mem_access = *last;
-                    }
+                let flags = &dropped[list][starts[list][i]..starts[list][i + 1]];
+                if flags.contains(&true) {
+                    let mut flags = flags.iter();
+                    event
+                        .local_mem_access_mut()
+                        .retain(|_| !*flags.next().expect("one flag per local event"));
                 }
-                let mut k = 0;
-                locals.retain(|_| {
-                    let keep = !dropped.contains(&(*code, i, k));
-                    k += 1;
-                    keep
-                });
             }
         }
-        dropped.len()
+        removed
     }
 
     /// Get all the local events from all the precompile events.
