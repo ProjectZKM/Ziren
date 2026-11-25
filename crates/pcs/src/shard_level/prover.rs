@@ -365,7 +365,10 @@ where
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
 
-    let prep_chip_infos = &preprocessed_commit_data.packing.chip_infos;
+    let has_preprocessed =
+        chips.iter().any(|chip| p3_air::BaseAir::<Val<SC>>::preprocessed_width(*chip) > 0);
+    let prep_chip_infos: &[_] =
+        if has_preprocessed { &preprocessed_commit_data.packing.chip_infos } else { &[] };
     let mut preprocessed_named: Vec<(String, crate::multilinear::PaddedMle<Val<SC>>)> =
         Vec::with_capacity(prep_chip_infos.len());
     let mut preprocessed_claims: Vec<Vec<Challenge<SC>>> =

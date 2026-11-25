@@ -1,5 +1,5 @@
 use crate::{
-    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip, MemoryProgramChip},
+    memory::{MemoryBumpChip, MemoryChipType, MemoryImageChip, MemoryLocalChip, MemoryProgramChip},
     syscall::precompiles::{
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
@@ -78,6 +78,8 @@ pub enum MipsAir<F: PrimeField32> {
     Program(ProgramChip),
     /// A table for the program's memory image.
     MemoryProgram(MemoryProgramChip),
+    /// The table that sends the program's memory image across shards.
+    MemoryImage(MemoryImageChip),
     /// An AIR for the register-form MIPS ADD and SUB instructions.
     Add(AddSubChip),
     /// An AIR for the immediate-form MIPS ADD and SUB instructions.
@@ -210,6 +212,7 @@ impl<F: PrimeField32> MipsAir<F> {
             .collect::<std::collections::BTreeSet<_>>();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
             .with_global_round(Some(global_round))
+            .with_deferred_global()
     }
 
     /// Get all the different MIPS AIRs.
@@ -242,6 +245,10 @@ impl<F: PrimeField32> MipsAir<F> {
         let memory_program = Chip::new(MipsAir::MemoryProgram(MemoryProgramChip::new()));
         costs.insert(memory_program.name(), memory_program.cost());
         chips.push(memory_program);
+
+        let memory_image = Chip::new(MipsAir::MemoryImage(MemoryImageChip::new()));
+        costs.insert(memory_image.name(), memory_image.cost());
+        chips.push(memory_image);
 
         let sha_extend = Chip::new(MipsAir::Sha256Extend(ShaExtendChip::default()));
         costs.insert(sha_extend.name(), 48 * sha_extend.cost());

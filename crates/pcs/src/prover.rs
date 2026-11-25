@@ -405,6 +405,28 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>>;
 
+    /// The traces of the global round `data` commits, under their chip
+    /// names, for a machine that defers its global lookups: what
+    /// [`Self::prove_global_round`] takes once the cross-shard challenge is
+    /// known. `None` for a shard without a global round.
+    fn global_round_tables(
+        &self,
+        data: &PcsMainTraceData<SC, Self::Pcs>,
+    ) -> Option<crate::Traces<Val<SC>>>;
+
+    /// Proves the sum of the global lookups of a shard that committed the
+    /// global round `round` over `tables` ([`Self::global_round_tables`]),
+    /// under the cross-shard challenge `global`. `vk_challenger` is the
+    /// machine's challenger after the verifying key.
+    fn prove_global_round(
+        &self,
+        pk: &Self::DeviceProvingKey,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        tables: crate::Traces<Val<SC>>,
+        global: &crate::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>,
+        vk_challenger: &SC::Challenger,
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>>;
+
     /// Generate a proof for the given records.
     fn prove(
         &self,
@@ -596,6 +618,26 @@ where
         Ok(ShardProof::<SC> { public_values: data.public_values, jagged_shard_proof })
     }
 
+    fn global_round_tables(
+        &self,
+        data: &PcsMainTraceData<SC, Self::Pcs>,
+    ) -> Option<crate::Traces<Val<SC>>> {
+        let store = data.main_data.as_ref()?.main_store.as_ref()?;
+        crate::shard_level::prover::split_global_round(store, self.machine().global_round())
+            .map(|(tables, _)| tables)
+    }
+
+    fn prove_global_round(
+        &self,
+        pk: &StarkProvingKey<SC>,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        tables: crate::Traces<Val<SC>>,
+        global: &crate::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>,
+        vk_challenger: &SC::Challenger,
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>> {
+        Ok(prove_global_round(self.machine(), pk, round, tables, global, vk_challenger))
+    }
+
     /// Prove the execution record is valid.
     ///
     /// Given a proving key `pk` and a matching execution record `record`, this function generates
@@ -617,7 +659,6 @@ where
 
         pk.observe_into(challenger);
         if self.machine().defers_global() {
-            let global_round = self.machine().global_round();
             let proved = tracing::info_span!("prove_shards").in_scope(|| {
                 records
                     .into_par_iter()
@@ -627,14 +668,7 @@ where
                             CpuProverError
                         })?;
                         let shard_data = self.commit(&record, named_traces, None);
-                        let tables = shard_data
-                            .main_data
-                            .as_ref()
-                            .and_then(|retained| retained.main_store.as_ref())
-                            .and_then(|store| {
-                                crate::shard_level::prover::split_global_round(store, global_round)
-                            })
-                            .map(|(tables, _)| tables);
+                        let tables = self.global_round_tables(&shard_data);
                         let proof = self.open(pk, shard_data, &mut challenger.clone())?;
                         Ok((proof, tables))
                     })

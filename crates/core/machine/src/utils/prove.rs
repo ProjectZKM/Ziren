@@ -82,28 +82,6 @@ where
     let mut challenger = prover.machine().config().challenger();
     pk.observe_into(&mut challenger);
 
-    let commit_global_round =
-        |record: ExecutionRecord,
-         (),
-         cluster_widths: Option<std::collections::BTreeMap<String, usize>>| {
-            prover.global_round_binding(&record, cluster_widths.as_ref()).map_err(|e| {
-                tracing::error!("Trace generation error: {:?}", e);
-                ZKMCoreProverError::TracesGenerationError
-            })
-        };
-    let (rounds, _) = tracing::debug_span!("commit global rounds").in_scope(|| {
-        run_pass::<SC, P, _, _>(
-            prover,
-            &program,
-            opts,
-            checkpoint.clone(),
-            &|_| Ok(()),
-            &commit_global_round,
-            None,
-        )
-    })?;
-    let global = prover.machine().global_challenge(&challenger, rounds.iter().map(Option::as_ref));
-
     #[cfg(feature = "debug")]
     let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
     #[cfg(feature = "debug")]
@@ -118,18 +96,9 @@ where
         })
     };
     let prove_shard = |record, traces, cluster_widths| {
-        Ok(prove_bound_shard::<SC, P>(
-            prover,
-            pk,
-            &challenger,
-            global.as_ref(),
-            &rounds,
-            record,
-            traces,
-            cluster_widths,
-        ))
+        Ok(prove_shard_alone::<SC, P>(prover, pk, &challenger, record, traces, cluster_widths))
     };
-    let (shard_proofs, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
+    let (proved, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
         run_pass::<SC, P, _, _>(
             prover,
             &program,
@@ -168,7 +137,33 @@ where
         }
     }
 
-    let proof = MachineProof::<SC> { shard_proofs };
+    let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    let rounds = shard_proofs
+        .iter()
+        .map(|proof| prover.machine().global_round_binding(proof))
+        .collect::<Vec<_>>();
+    let committed = rounds
+        .iter()
+        .zip(tables)
+        .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+        .collect::<Vec<_>>();
+    let global_proofs = tracing::debug_span!("prove global rounds").in_scope(|| {
+        let Some(global) = prover
+            .machine()
+            .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+            .filter(|_| !committed.is_empty())
+        else {
+            return Vec::new();
+        };
+        committed
+            .into_iter()
+            .map(|(round, tables)| {
+                prover.prove_global_round(pk, round, tables, &global, &challenger).unwrap()
+            })
+            .collect()
+    });
+
+    let proof = MachineProof::<SC> { shard_proofs, global_proofs };
     let cycles = report_aggregate.total_instruction_count();
 
     let proving_time = proving_start.elapsed().as_secs_f64();
@@ -260,24 +255,22 @@ where
     Ok(records_rx.into_iter().flatten().collect())
 }
 
-/// Proves one shard and checks it against the global round fixed by the global commit pass.
-#[allow(clippy::too_many_arguments)]
-fn prove_bound_shard<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+/// Proves one shard on its own, and keeps the tables of its global round for
+/// the global proof made once every shard has committed.
+fn prove_shard_alone<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     pk: &P::DeviceProvingKey,
     challenger: &SC::Challenger,
-    global: Option<&zkm_pcs::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>>,
-    rounds: &[Option<zkm_pcs::logup_gkr::GlobalRoundBinding<Val<SC>>>],
     record: ExecutionRecord,
     main_traces: zkm_pcs::Traces<Val<SC>>,
     cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-) -> zkm_pcs::ShardProof<SC>
+) -> (zkm_pcs::ShardProof<SC>, Option<zkm_pcs::Traces<Val<SC>>>)
 where
     SC::Val: PrimeField32,
 {
     let t_commit = std::time::Instant::now();
-    let mut main_data = prover.commit(&record, main_traces, cluster_widths);
-    main_data.global_challenge = global.cloned();
+    let main_data = prover.commit(&record, main_traces, cluster_widths);
+    let tables = prover.global_round_tables(&main_data);
     let commit_ms = t_commit.elapsed().as_millis();
 
     let opening_span = tracing::debug_span!("opening").entered();
@@ -293,26 +286,14 @@ where
         commit_ms + open_ms
     );
 
-    let shard = record.public_values.shard as usize;
-    let bound = shard
-        .checked_sub(1)
-        .and_then(|i| rounds.get(i))
-        .expect("the global commit pass covers every shard");
-    assert_eq!(
-        &prover.machine().global_round_binding(&proof),
-        bound,
-        "shard {shard}: the global round differs between the \
-         two passes"
-    );
-
     rayon::spawn(move || {
         drop(record);
     });
 
-    proof
+    (proof, tables)
 }
 
-/// Replays and cuts records identically for both passes.
+/// Replays the program from `checkpoint` and cuts it into shard records.
 /// `prepare` runs in the trace workers; `process` consumes the prepared value
 /// in the prover worker. Their shared type prevents a prove pass from receiving
 /// a shard without traces. Results preserve shard order across both stages.

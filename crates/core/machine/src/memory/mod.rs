@@ -1,6 +1,7 @@
 mod bump;
 mod consistency;
 mod global;
+mod image;
 mod instructions;
 mod local;
 mod program;
@@ -8,6 +9,7 @@ mod program;
 pub use bump::*;
 pub use consistency::*;
 pub use global::*;
+pub use image::*;
 pub use instructions::*;
 pub use local::*;
 pub use program::*;

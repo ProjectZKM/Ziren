@@ -70,6 +70,10 @@ pub enum LookupKind {
     /// precompile's chain (e.g. SHA_COMPRESS sends only balance SHA_COMPRESS
     /// receives), so a single kind serves all multi-row precompiles.
     PrecompileChain = 13,
+
+    /// The program's memory image, from its preprocessed table to the table
+    /// that sends it on the cross-shard memory bus: `(addr, value)`.
+    MemoryImage = 14,
 }
 
 impl LookupKind {
@@ -87,6 +91,7 @@ impl LookupKind {
             LookupKind::State,
             LookupKind::MemoryGlobalInitControl,
             LookupKind::MemoryGlobalFinalizeControl,
+            LookupKind::MemoryImage,
         ]
     }
 
@@ -206,6 +211,7 @@ impl Display for LookupKind {
             LookupKind::MemoryGlobalInitControl => write!(f, "MemoryGlobalInitControl"),
             LookupKind::MemoryGlobalFinalizeControl => write!(f, "MemoryGlobalFinalizeControl"),
             LookupKind::PrecompileChain => write!(f, "PrecompileChain"),
+            LookupKind::MemoryImage => write!(f, "MemoryImage"),
         }
     }
 }

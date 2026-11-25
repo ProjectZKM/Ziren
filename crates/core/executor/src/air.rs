@@ -21,6 +21,8 @@ pub enum MipsAirId {
     Program = 1,
     /// The program memory image chip.
     MemoryProgram = 66,
+    /// The chip that sends the program memory image across shards.
+    MemoryImage = 67,
     /// The SHA-256 extend chip.
     ShaExtend = 2,
     /// The SHA-256 extend control chip (bookends the `PrecompileChain` state bus).
@@ -172,6 +174,7 @@ impl MipsAirId {
             Self::Cpu => "Cpu",
             Self::Program => "Program",
             Self::MemoryProgram => "MemoryProgram",
+            Self::MemoryImage => "MemoryImage",
             Self::ShaExtend => "ShaExtend",
             Self::ShaCompress => "ShaCompress",
             Self::ShaCompressControl => "ShaCompressControl",

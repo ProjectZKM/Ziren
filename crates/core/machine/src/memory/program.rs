@@ -47,10 +47,10 @@ pub struct MemoryProgramMultCols<T> {
     pub is_first_shard: IsZeroOperation<T>,
 }
 
-/// The program's memory image as a preprocessed table. Every shard carries it,
-/// and the first shard sends each word `(0, 0, addr, value)` as the initial
-/// value of its address on the cross-shard memory bus, so the image is bound
-/// by the verifying key.
+/// The program's memory image as a preprocessed table, so the image is bound
+/// by the verifying key. Every shard carries it, and the first shard sends
+/// each word `(addr, value)` to [`super::MemoryImageChip`], which puts it on
+/// the cross-shard memory bus as the initial value of its address.
 #[derive(Default)]
 pub struct MemoryProgramChip;
 
@@ -194,11 +194,11 @@ where
             .assert_eq(mult_local.multiplicity, prep_local.is_real);
         builder.when_not(mult_local.is_first_shard.result).assert_zero(mult_local.multiplicity);
 
-        let mut values = vec![AB::Expr::ZERO, AB::Expr::ZERO, prep_local.addr.into()];
+        let mut values = vec![prep_local.addr.into()];
         values.extend(prep_local.value.map(Into::into));
         builder.send(
-            AirLookup::new(values, mult_local.multiplicity.into(), LookupKind::Memory),
-            LookupScope::Global,
+            AirLookup::new(values, mult_local.multiplicity.into(), LookupKind::MemoryImage),
+            LookupScope::Local,
         );
     }
 }

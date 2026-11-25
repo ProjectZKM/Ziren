@@ -861,8 +861,8 @@ type GlobalChallenge = zkm_pcs::logup_gkr::GlobalChallenge<Val, Challenge>;
 /// Proves `program` on `stdin` under `opts` with `prover`, whose machine
 /// decides which chips commit in the global round. `tamper` edits every
 /// shard's raw chip traces, in shard order, before they are committed;
-/// `challenge` picks, per shard, the challenge it is proven under from the one
-/// the shards' global rounds fix.
+/// `challenge` picks, per shard, the challenge its global proof is made under
+/// from the one the shards' global rounds fix.
 fn prove_tampered(
     prover: &CpuProver<SC, MipsAir<Val>>,
     program: &Program,
@@ -908,31 +908,36 @@ fn prove_tampered(
 
     let mut challenger = prover.machine().config().challenger();
     zkm_pcs::MachineProvingKey::observe_into(&pk, &mut challenger);
-    let rounds = traces
+    let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
         .iter()
-        .map(|t| {
-            zkm_pcs::shard_level::prover::bind_global_round::<SC>(
-                t,
-                prover.machine().global_round(),
-            )
+        .zip(traces)
+        .map(|(record, traces)| {
+            let data = prover.commit(record, traces, None);
+            let tables = prover.global_round_tables(&data);
+            (prover.open(&pk, data, &mut challenger.clone()).unwrap(), tables)
         })
+        .unzip();
+    let rounds = shard_proofs
+        .iter()
+        .map(|proof| prover.machine().global_round_binding(proof))
         .collect::<Vec<_>>();
     let global = prover
         .machine()
         .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
         .expect("the core machine has global lookups");
 
-    let shard_proofs = records
+    let global_proofs = rounds
         .iter()
-        .zip(traces)
+        .zip(tables)
         .enumerate()
-        .map(|(i, (record, traces))| {
-            let mut data = prover.commit(record, traces, None);
-            data.global_challenge = Some(challenge(i, &global));
-            prover.open(&pk, data, &mut challenger.clone()).unwrap()
+        .filter_map(|(i, (round, tables))| Some((i, round.as_ref()?, tables?)))
+        .map(|(i, round, tables)| {
+            prover
+                .prove_global_round(&pk, round, tables, &challenge(i, &global), &challenger)
+                .unwrap()
         })
         .collect();
-    MachineProof::from_shards(shard_proofs)
+    MachineProof { shard_proofs, global_proofs }
 }
 
 /// The honest machine and the verifying key of `program`.
