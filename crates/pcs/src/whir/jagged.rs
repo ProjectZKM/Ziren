@@ -285,6 +285,9 @@ pub enum WhirProfile {
     /// the compress schedule's shape, tuned for the circuit's size, with its
     /// own knobs ([`wrap_whir_config`]).
     Wrap,
+    /// Size-oriented shrink schedule; hash selection belongs to the suite.
+    #[cfg(feature = "compact-shrink")]
+    CompactShrink,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -294,6 +297,8 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
         WhirProfile::Compress => compress_whir_config(lsh),
         WhirProfile::Shrink => shrink_whir_config(lsh),
         WhirProfile::Wrap => wrap_whir_config(lsh),
+        #[cfg(feature = "compact-shrink")]
+        WhirProfile::CompactShrink => super::compact_params::compact_whir_config(lsh),
     }
 }
 
