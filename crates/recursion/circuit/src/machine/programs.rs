@@ -61,6 +61,36 @@ where
     program
 }
 
+/// Build the global-round program: verifies one global proof of the core
+/// machine and emits [`RecursionPublicValues`] that step the global hash chain
+/// backwards over the round the proof opens.
+pub fn build_global_round_program<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+    input: &super::global_jagged::ZKMGlobalRoundWitnessValues<KoalaBearPoseidon2>,
+    max_log_row_count: usize,
+) -> RecursionProgram<KoalaBear>
+where
+    A: MachineAir<KoalaBear>,
+{
+    let builder_span = tracing::debug_span!("build global round program").entered();
+    let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
+    let input_var = input.read(&mut builder);
+    super::global_jagged::verify_global_round_jagged::<InnerConfig, KoalaBearPoseidon2, A>(
+        &mut builder,
+        input_var,
+        machine,
+        max_log_row_count,
+    );
+    let operations = builder.into_operations();
+    builder_span.exit();
+
+    let compiler_span = tracing::debug_span!("compile global round program").entered();
+    let mut compiler = AsmCompiler::<InnerConfig>::default();
+    let program = compiler.compile(operations);
+    compiler_span.exit();
+    program
+}
+
 /// Build the Compose(arity) program.  Verifies a batch of recursive
 /// proofs (from previous Normalize or Compose outputs) and aggregates
 /// their public values into a single output.

@@ -235,7 +235,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let mut challenger = self.core_prover.machine().config().challenger();
-        let machine_proof = MachineProof::from_shards(proof.0.to_vec());
+        let machine_proof =
+            MachineProof { shard_proofs: proof.0.to_vec(), global_proofs: proof.1.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
 
         Ok(())

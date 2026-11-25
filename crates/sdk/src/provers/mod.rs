@@ -156,7 +156,8 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
-                let last = proof.last().ok_or(ZKMVerificationError::MalformedProof)?;
+                let core = ZKMCoreProofData::from_flat(proof.clone());
+                let last = core.0.last().ok_or(ZKMVerificationError::MalformedProof)?;
                 if last.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
                     return Err(ZKMVerificationError::MalformedProof);
                 }
@@ -177,9 +178,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     }
                 }
 
-                self.zkm_prover()
-                    .verify(&ZKMCoreProofData(proof.clone()), vkey)
-                    .map_err(ZKMVerificationError::Core)
+                self.zkm_prover().verify(&core, vkey).map_err(ZKMVerificationError::Core)
             }
             ZKMProof::Compressed(proof) => {
                 if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {

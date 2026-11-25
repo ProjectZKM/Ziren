@@ -482,17 +482,22 @@ pub fn verify_compress_jagged<C, SC, A>(
         {
             builder.assert_felt_eq(*chain, *current);
         }
+        builder.assert_felt_eq(
+            _current_public_values.global_pow_witness
+                * (_current_public_values.global_pow_witness
+                    - _compress_public_values.global_pow_witness),
+            C::F::ZERO,
+        );
         for (h_star, current) in _compress_public_values
             .global_h_star
             .iter()
             .zip_eq(_current_public_values.global_h_star.iter())
         {
-            builder.assert_felt_eq(*h_star, *current);
+            builder.assert_felt_eq(
+                _current_public_values.global_pow_witness * (*h_star - *current),
+                C::F::ZERO,
+            );
         }
-        builder.assert_felt_eq(
-            _compress_public_values.global_pow_witness,
-            _current_public_values.global_pow_witness,
-        );
 
         C::range_check_felt(
             builder,

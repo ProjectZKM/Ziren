@@ -141,8 +141,31 @@ pub type ZKMGroth16Bn254Proof = ZKMProofWithMetadata<ZKMGroth16Bn254ProofData>;
 /// A Ziren proof that has been wrapped into a single proof and can be verified onchain.
 pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
+/// A core proof: the shard proofs, then the global proofs, which prove the
+/// lookups that cross shards, one for each shard that commits a global round.
 #[derive(Serialize, Deserialize, Clone)]
-pub struct ZKMCoreProofData(pub Vec<ShardProof<CoreSC>>);
+pub struct ZKMCoreProofData(
+    pub Vec<ShardProof<CoreSC>>,
+    #[serde(default)] pub Vec<ShardProof<CoreSC>>,
+);
+
+impl ZKMCoreProofData {
+    /// The proof as one list, the shard proofs followed by the global proofs.
+    pub fn into_flat(self) -> Vec<ShardProof<CoreSC>> {
+        let Self(mut proofs, global_proofs) = self;
+        proofs.extend(global_proofs);
+        proofs
+    }
+
+    /// The proof [`Self::into_flat`] flattened: a global proof is told from a
+    /// shard proof by its empty public values.
+    pub fn from_flat(mut proofs: Vec<ShardProof<CoreSC>>) -> Self {
+        let shards =
+            proofs.iter().position(|proof| proof.public_values.is_empty()).unwrap_or(proofs.len());
+        let global_proofs = proofs.split_off(shards);
+        Self(proofs, global_proofs)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMReducedProofData(pub ShardProof<InnerSC>);
@@ -238,6 +261,9 @@ pub enum ZKMCircuitWitness {
     /// the core prover (carried on `ShardProof.jagged_shard_proof`).
     /// Dispatches to `build_normalize_program` during compress.
     CoreJagged(ZKMCoreWitnessValues<CoreSC>),
+    /// A global proof of the core prover. Dispatches to
+    /// `build_global_round_program`.
+    GlobalJagged(zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>),
     /// jagged-shape compose input — tree-reduction layer.
     /// Dispatches to `build_compose_program`.
     ComposeJagged(ZKMCompressWitnessValues<InnerSC>),

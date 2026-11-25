@@ -230,8 +230,6 @@ mod jagged_witness {
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
             let global_chain_start = self.global_chain_start.read(builder);
-            let global_h_star = self.global_h_star.read(builder);
-            let global_pow_witness = self.global_pow_witness.read(builder);
             ZKMCoreWitnessVariable {
                 vk,
                 shard_proof_tuples,
@@ -239,8 +237,6 @@ mod jagged_witness {
                 is_first_shard,
                 vk_root,
                 global_chain_start,
-                global_h_star,
-                global_pow_witness,
             }
         }
 
@@ -251,6 +247,39 @@ mod jagged_witness {
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
             self.global_chain_start.write(witness);
+        }
+    }
+
+    impl<C> Witnessable<C>
+        for crate::machine::global_jagged::ZKMGlobalRoundWitnessValues<KoalaBearPoseidon2>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable =
+            crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable<C, KoalaBearPoseidon2>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vk = self.vk.read(builder);
+            let proof = self.proof.read(builder);
+            let vk_root = self.vk_root.read(builder);
+            let global_chain_end = self.global_chain_end.read(builder);
+            let global_h_star = self.global_h_star.read(builder);
+            let global_pow_witness = self.global_pow_witness.read(builder);
+            crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable {
+                vk,
+                proof,
+                vk_root,
+                global_chain_end,
+                global_h_star,
+                global_pow_witness,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vk.write(witness);
+            self.proof.write(witness);
+            self.vk_root.write(witness);
+            self.global_chain_end.write(witness);
             self.global_h_star.write(witness);
             self.global_pow_witness.write(witness);
         }
@@ -306,8 +335,6 @@ mod jagged_witness {
                 init_addr_bits: self.init_addr_bits.read(builder),
                 finalize_addr_bits: self.finalize_addr_bits.read(builder),
                 global_chain: self.global_chain.read(builder),
-                global_h_star: self.global_h_star.read(builder),
-                global_pow_witness: self.global_pow_witness.read(builder),
                 is_complete: InnerVal::from_bool(self.is_complete).read(builder),
             }
         }
@@ -325,8 +352,6 @@ mod jagged_witness {
             self.init_addr_bits.write(witness);
             self.finalize_addr_bits.write(witness);
             self.global_chain.write(witness);
-            self.global_h_star.write(witness);
-            self.global_pow_witness.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }

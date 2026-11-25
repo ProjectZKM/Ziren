@@ -495,6 +495,16 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         max_arity.next_power_of_two().trailing_zeros() as usize
     }
 
+    /// The views of every chip whose global lookups the machine defers, for
+    /// the table slot `slot` of a global proof.
+    pub fn global_views(&self, slot: usize) -> Vec<Chip<Val<SC>, crate::air::GlobalView<A>>> {
+        self.chips
+            .iter()
+            .filter(|chip| chip.has_deferred_global())
+            .map(|chip| chip.global_view(slot))
+            .collect()
+    }
+
     /// The table slot `slot` of a global proof for a shard whose global round
     /// is `round`: the views of the round's chips, in the round's order.
     pub fn global_view_chips(
@@ -918,6 +928,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// `rounds`, in shard order, under the verifying key `vk_challenger` has
     /// observed: its start `h_0`, then its value after each shard. The last
     /// entry is the `h_star` [`Self::global_challenge`] derives from.
+    ///
+    /// On a machine that defers its global lookups a shard without a global
+    /// round leaves the chain where it is, so the chain is the one over the
+    /// rounds alone: what the global proofs reopen.
     pub fn global_chain<'a>(
         &self,
         vk_challenger: &SC::Challenger,
@@ -929,7 +943,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let mut chain = vec![crate::logup_gkr::global_digest(vk_challenger.clone())];
         for round in rounds {
             let h = chain.last().expect("the chain holds at least its start");
-            let next = crate::logup_gkr::global_chain_step(self.config.challenger(), h, round);
+            let next = if round.is_none() && self.defers_global() {
+                *h
+            } else {
+                crate::logup_gkr::global_chain_step(self.config.challenger(), h, round)
+            };
             chain.push(next);
         }
         chain

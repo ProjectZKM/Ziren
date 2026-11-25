@@ -1029,7 +1029,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Self::check_for_high_cycles(cycles);
         let public_values = ZKMPublicValues::from(&public_values_stream);
         Ok(ZKMCoreProof {
-            proof: ZKMCoreProofData(proof.shard_proofs),
+            proof: ZKMCoreProofData(proof.shard_proofs, proof.global_proofs),
             stdin: stdin.clone(),
             public_values,
             cycles,
@@ -1178,6 +1178,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     band,
                     if input.is_complete { "normalize-root" } else { "normalize" },
                 )
+            },
+        )
+    }
+
+    /// The program that verifies the global proof of `input`, cached by the
+    /// proof's shape with the normalize programs.
+    pub fn global_round_program(
+        &self,
+        input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        self.cached_program(
+            &self.normalize_programs_cache,
+            self.band_keyed(input.shape_key(), None),
+            "global",
+            || {
+                let program =
+                    Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
+                        self.core_prover.machine(),
+                        input,
+                        Self::pcs_max_log_row_count(),
+                    ));
+                self.snapped(&program, None, "normalize")
             },
         )
     }
@@ -1596,7 +1618,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
         let chain = self.global_chain(vk, shard_proofs);
-        let global_h_star = *chain.last().expect("the chain holds at least its start");
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -1613,18 +1634,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 batch_idx == 0,
                 is_complete,
                 chain[batch_idx],
-                global_h_star,
             ));
         }
 
         core_inputs
     }
 
-    /// The normalize input of one core shard proof, for a caller that holds
-    /// the proof's global hash chain: `global_chain_start` is the chain's value
-    /// before the shard ([`Self::global_chain`]'s entry at the shard's index)
-    /// and `global_h_star` its end. The global challenge's proof-of-work
-    /// witness is the one the shard proof carries.
+    /// The normalize input of one core shard proof: `global_chain_start` is
+    /// the global hash chain's value before the shard, [`Self::global_chain`]'s
+    /// entry at the shard's index. It depends on the shards before this one
+    /// only, so a shard can be normalized as soon as it is proven.
     pub fn get_recursion_core_input(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1632,7 +1651,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         is_first_shard: bool,
         is_complete: bool,
         global_chain_start: [KoalaBear; DIGEST_SIZE],
-        global_h_star: [KoalaBear; DIGEST_SIZE],
     ) -> ZKMCoreWitnessValues<CoreSC> {
         ZKMCoreWitnessValues {
             vk: vk.clone(),
@@ -1641,25 +1659,63 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             is_first_shard,
             vk_root: self.recursion_vk_root,
             global_chain_start,
-            global_h_star,
-            global_pow_witness: shard_proof
-                .jagged_shard_proof
-                .global_pow_witness
-                .unwrap_or(KoalaBear::ZERO),
         }
+    }
+
+    /// The inputs of the global-round programs of a core proof, in the order
+    /// the compress tree takes them: before the shards, last round first, so
+    /// that each one starts the global hash chain where the one before it
+    /// ends. `shard_proofs[i]`'s round is opened by the `global_proofs` entry
+    /// at its position among the shards that commit one.
+    pub fn get_recursion_global_inputs(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+        global_proofs: &[ShardProof<CoreSC>],
+    ) -> Vec<zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>> {
+        let chain = self.global_chain(vk, shard_proofs);
+        let global_h_star = *chain.last().expect("the chain holds at least its start");
+        let machine = self.core_prover.machine();
+        let before_round = shard_proofs
+            .iter()
+            .enumerate()
+            .filter(|(_, proof)| machine.global_round_binding(proof).is_some())
+            .map(|(i, _)| chain[i])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            before_round.len(),
+            global_proofs.len(),
+            "a core proof holds one global proof for each shard with a global round"
+        );
+        before_round
+            .into_iter()
+            .zip(global_proofs)
+            .rev()
+            .map(|(global_chain_end, proof)| {
+                zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
+                    vk: vk.clone(),
+                    proof: (*proof.jagged_shard_proof).clone(),
+                    vk_root: self.recursion_vk_root,
+                    global_chain_end,
+                    global_h_star,
+                    global_pow_witness: proof
+                        .jagged_shard_proof
+                        .global_pow_witness
+                        .unwrap_or(KoalaBear::ZERO),
+                }
+            })
+            .collect()
     }
 
     /// Constructs `ZKMDeferredWitnessValues` from each batch, taking
     /// the `JaggedShardProof` each input proof carries. The deferred proofs
-    /// follow the last shard, so they pass through the global hash chain's
-    /// end `global_h_star` and the global challenge's proof-of-work witness
-    /// `global_pow_witness`.
+    /// follow the last shard, so they pass through `global_chain`, the global
+    /// hash chain's end.
     pub fn get_recursion_deferred_inputs<'a>(
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
-        global_h_star: [KoalaBear; DIGEST_SIZE],
-        global_pow_witness: KoalaBear,
+        global_chain: [KoalaBear; DIGEST_SIZE],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMDeferredWitnessValues<CompressedSC>>, VkNotAllowed> {
@@ -1689,9 +1745,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 finalize_addr_bits: last_proof_pv.last_finalize_addr_bits,
                 committed_value_digest: last_proof_pv.committed_value_digest,
                 deferred_proofs_digest: last_proof_pv.deferred_proofs_digest,
-                global_chain: global_h_star,
-                global_h_star,
-                global_pow_witness,
+                global_chain,
             });
             deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
         }
@@ -1714,10 +1768,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &'a self,
         vk: &'a ZKMVerifyingKey,
         shard_proofs: &[ShardProof<CoreSC>],
+        global_proofs: &[ShardProof<CoreSC>],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
         let mut inputs = Vec::new();
+
+        let global_inputs = self.get_recursion_global_inputs(&vk.vk, shard_proofs, global_proofs);
+        inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
         let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, false);
         tracing::debug!("emitting {} CoreJagged witness(es)", jagged_inputs.len());
@@ -1728,15 +1786,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .global_chain(&vk.vk, shard_proofs)
             .last()
             .expect("the chain holds at least its start");
-        let global_pow_witness = shard_proofs
-            .last()
-            .and_then(|sp| sp.jagged_shard_proof.global_pow_witness)
-            .unwrap_or(KoalaBear::ZERO);
         let jagged_deferred = self.get_recursion_deferred_inputs(
             &vk.vk,
             last_proof_pv,
             global_h_star,
-            global_pow_witness,
             deferred_proofs,
             batch_size,
         )?;
@@ -1761,6 +1814,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let first_layer_inputs = self.get_first_layer_inputs(
             vk,
             shard_proofs,
+            &proof.proof.1,
             &deferred_proofs,
             first_layer_batch_size,
         )?;
@@ -1830,6 +1884,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
                                     (self.recursion_program(&input).0, witness_stream)
+                                }
+                                ZKMCircuitWitness::GlobalJagged(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (self.global_round_program(&input).0, witness_stream)
                                 }
                                 ZKMCircuitWitness::ComposeJagged(input) => {
                                     let mut witness_stream = Vec::new();
@@ -3531,7 +3590,10 @@ pub mod tests {
 
         let machine = prover.core_prover.machine();
         let mut challenger = machine.config().challenger();
-        let machine_proof = MachineProof::from_shards(core.proof.0.clone());
+        let machine_proof = MachineProof {
+            shard_proofs: core.proof.0.clone(),
+            global_proofs: core.proof.1.clone(),
+        };
         let machine_result = machine.verify(&vk.vk, &machine_proof, &mut challenger);
         tracing::info!("StarkMachine::verify: {machine_result:?}");
         assert!(
@@ -3687,7 +3749,7 @@ pub mod tests {
 
         let accepts = |proof: &ZKMCoreProofData| -> bool {
             let input = prover
-                .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, n == 1)
+                .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, false)
                 .into_iter()
                 .next()
                 .unwrap();
@@ -3703,6 +3765,61 @@ pub mod tests {
         };
         assert!(accepts(&core.proof), "the normalize program rejected the honest first shard");
         assert!(!accepts(&entry), "the normalize program accepted a forged start_next_pc");
+        Ok(())
+    }
+
+    /// The program of a global proof steps the global hash chain over the
+    /// round its shard committed, and rejects the proof under a challenge
+    /// derived from another chain end.
+    #[test]
+    #[serial]
+    #[ignore = "proves a core execution; run with --ignored"]
+    fn global_round_program_opens_the_committed_round() -> Result<()> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core = prover.prove_core(
+            &pk_d,
+            program,
+            &fib_stdin(10),
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        let chain = prover.global_chain(&vk.vk, &core.proof.0);
+        let h_star = *chain.last().unwrap();
+        let inputs = prover.get_recursion_global_inputs(&vk.vk, &core.proof.0, &core.proof.1);
+        assert!(!inputs.is_empty(), "the first shard commits the program image");
+
+        let run = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
+            let (program, _) = prover.global_round_program(input);
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                program,
+                prover.compress_prover.machine().config().perm.clone(),
+            );
+            let mut ws = Vec::new();
+            Witnessable::<InnerConfig>::write(input, &mut ws);
+            runtime.witness_stream = ws.into();
+            match catch_unwind(AssertUnwindSafe(|| runtime.run())) {
+                Ok(Ok(())) => Some(runtime.record.public_values),
+                _ => None,
+            }
+        };
+
+        let mut after = h_star;
+        for input in inputs.iter() {
+            let public_values = run(input).expect("the honest global proof is rejected");
+            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(public_values.global_chain_end, input.global_chain_end);
+            assert_eq!(public_values.global_h_star, h_star);
+            after = input.global_chain_end;
+        }
+        assert_eq!(after, chain[0], "the global proofs do not unwind the chain to its origin");
+
+        let mut forged = inputs[0].clone();
+        forged.global_h_star[0] += KoalaBear::ONE;
+        assert!(run(&forged).is_none(), "a global proof passed under another chain end");
         Ok(())
     }
 
@@ -3972,8 +4089,6 @@ pub mod tests {
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
                 global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
-                global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
-                global_pow_witness: KoalaBear::ZERO,
             };
             let vk_real_1 = prover
                 .compress_prover
@@ -4187,8 +4302,6 @@ pub mod tests {
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
                 global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
-                global_h_star: [KoalaBear::ZERO; DIGEST_SIZE],
-                global_pow_witness: KoalaBear::ZERO,
             };
             let prog_real = prover.recursion_program(&real_witness).0;
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();

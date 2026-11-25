@@ -53,7 +53,7 @@ impl CudaProver {
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             let proof_with_pv = ZKMProofWithPublicValues {
-                proof: ZKMProof::Core(proof.proof.0),
+                proof: ZKMProof::Core(proof.proof.into_flat()),
                 public_values: proof.public_values,
                 zkm_version: self.version().to_string(),
             };

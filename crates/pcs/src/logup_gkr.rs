@@ -195,7 +195,8 @@ where
 {
     /// Prover side: absorbs the domain and `h_star` on `challenger`, which
     /// must be a fresh challenger of the machine's configuration, grinds the
-    /// proof-of-work witness and samples the challenge.
+    /// proof-of-work witness and samples the challenge. The witness is never
+    /// zero: a recursion proof that holds no global proof carries zero there.
     pub fn grind<C>(mut challenger: C, h_star: [F; 8], beta_seed_dim: usize) -> Self
     where
         C: p3_challenger::FieldChallenger<F>
@@ -205,13 +206,23 @@ where
             + 'static,
     {
         Self::absorb(&mut challenger, &h_star);
-        let pow_witness: F = gkr_grind(&mut challenger, global_grinding_bits());
+        let absorbed = challenger.clone();
+        let mut pow_witness: F = gkr_grind(&mut challenger, global_grinding_bits());
+        if pow_witness.is_zero() {
+            loop {
+                pow_witness += F::ONE;
+                challenger = absorbed.clone();
+                if gkr_check_witness(&mut challenger, global_grinding_bits(), pow_witness) {
+                    break;
+                }
+            }
+        }
         Self::sample(challenger, h_star, beta_seed_dim, pow_witness)
     }
 
     /// Verifier side: the challenge of `h_star` and `pow_witness`, or `None`
-    /// when the witness fails the proof of work. `challenger` must be a fresh
-    /// challenger of the machine's configuration.
+    /// when the witness is zero or fails the proof of work. `challenger` must
+    /// be a fresh challenger of the machine's configuration.
     pub fn derive<C>(
         mut challenger: C,
         h_star: [F; 8],
@@ -223,6 +234,9 @@ where
             + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + 'static,
     {
+        if pow_witness.is_zero() {
+            return None;
+        }
         Self::absorb(&mut challenger, &h_star);
         gkr_check_witness(&mut challenger, global_grinding_bits(), pow_witness)
             .then(|| Self::sample(challenger, h_star, beta_seed_dim, pow_witness))

@@ -8,8 +8,11 @@ use zkm_recursion_core::air::RecursionPublicValues;
 /// Assertions on recursion public values which represent a complete proof.
 ///
 /// The assertions consist of checking all the expected boundary conditions from a compress proof
-/// that represents the end of the recursion tower. The global hash chain must end at the digest
-/// every shard's global challenge was derived from, and the shards' global sums must cancel.
+/// that represents the end of the recursion tower. The global hash chain must end where it
+/// starts, and that is the digest the global challenge was derived from: the global proofs
+/// unwind the chain from there to its origin and the shards wind it back, so both went over the
+/// same global rounds. A proof without a global proof carries no challenge, a zero
+/// proof-of-work witness, and its chain stands still. The global sums must cancel.
 pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
     builder: &mut Builder<C>,
     public_values: &RecursionPublicValues<Felt<C::F>>,
@@ -23,8 +26,10 @@ pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
         start_execution_shard,
         start_reconstruct_deferred_digest,
         end_reconstruct_deferred_digest,
+        global_chain_start,
         global_chain_end,
         global_h_star,
+        global_pow_witness,
         global_sum,
         contains_execution_shard,
         ..
@@ -52,8 +57,11 @@ pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
             .assert_felt_eq(is_complete * (*end_digest_word - *deferred_digest_word), C::F::ZERO);
     }
 
-    for (end, h_star) in global_chain_end.iter().zip_eq(global_h_star.iter()) {
-        builder.assert_felt_eq(is_complete * (*end - *h_star), C::F::ZERO);
+    for ((start, end), h_star) in
+        global_chain_start.iter().zip_eq(global_chain_end.iter()).zip_eq(global_h_star.iter())
+    {
+        builder.assert_felt_eq(is_complete * (*start - *end), C::F::ZERO);
+        builder.assert_felt_eq(is_complete * *global_pow_witness * (*start - *h_star), C::F::ZERO);
     }
 
     for coefficient in global_sum {

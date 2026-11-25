@@ -34,6 +34,11 @@ impl<A> GlobalView<A> {
         assert!(slot < 100, "a global proof holds fewer than 100 table slots");
         format!("{slot:02}.{chip}")
     }
+
+    /// The chip a view named by [`Self::name_in_slot`] is a view of.
+    pub fn chip_name(view: &str) -> &str {
+        view.split_once('.').map_or(view, |(_, chip)| chip)
+    }
 }
 
 impl<F, A> BaseAir<F> for GlobalView<A> {
