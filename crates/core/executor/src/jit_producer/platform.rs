@@ -267,19 +267,28 @@ enum Built {
 /// decide the per-instruction area charges).
 static PRODUCER_CACHE: OnceLock<Mutex<HashMap<u64, Arc<Built>>>> = OnceLock::new();
 
-fn cache_key(exec: &Executor<'_>) -> u64 {
+/// The cache key of the executor's program and chip widths. Hashing the
+/// program walks every instruction, so the key is kept on the executor: the
+/// producer is looked up once per shard batch.
+fn cache_key(exec: &mut Executor<'_>) -> u64 {
+    if let Some(key) = exec.producer_key {
+        return key;
+    }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     program_fingerprint_of(&exec.program).hash(&mut h);
     for i in 0..<MipsAirId as enum_map::Enum>::LENGTH {
         exec.split_acct.cost(<MipsAirId as enum_map::Enum>::from_usize(i)).hash(&mut h);
     }
-    h.finish()
+    let key = h.finish();
+    exec.producer_key = Some(key);
+    key
 }
 
-fn cached_producer(exec: &Executor<'_>) -> Option<(Arc<JitFunction>, Arc<[u32]>)> {
+fn cached_producer(exec: &mut Executor<'_>) -> Option<(Arc<JitFunction>, Arc<[u32]>)> {
+    let key = cache_key(exec);
     let cache = PRODUCER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().expect("producer cache poisoned");
-    let built = guard.entry(cache_key(exec)).or_insert_with(|| Arc::new(build(exec))).clone();
+    let built = guard.entry(key).or_insert_with(|| Arc::new(build(exec))).clone();
     drop(guard);
     match &*built {
         Built::Fn(f, bail_sites) => Some((f.clone(), bail_sites.clone())),

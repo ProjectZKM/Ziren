@@ -361,13 +361,18 @@ impl ShardSplitAccumulator {
     /// heights[air]`, plus the touched-address count. The producer charges by subtracting and
     /// fences at `<= 0`, which is exactly `check_shard_limit`'s `>=`.
     ///
+    /// `heights` is walked as a slice, which is in slot order: this runs around every
+    /// instruction the producer hands to the interpreter.
+    ///
     /// # Panics
     ///
     /// Panics if `height_left` has fewer than `MipsAirId::LENGTH` slots.
     pub fn export_budgets(&self, area_left: &mut i64, height_left: &mut [i64], touched: &mut u64) {
         *area_left = self.element_threshold as i64 - self.trace_area as i64;
-        for (air, &height) in &self.heights {
-            height_left[Self::slot(air)] = self.height_threshold as i64 - height as i64;
+        let heights = self.heights.as_slice();
+        let threshold = self.height_threshold as i64;
+        for (left, &height) in height_left[..heights.len()].iter_mut().zip(heights) {
+            *left = threshold - height as i64;
         }
         *touched = self.touched_addresses;
     }
@@ -379,13 +384,15 @@ impl ShardSplitAccumulator {
     /// Panics if `height_left` has fewer than `MipsAirId::LENGTH` slots.
     pub fn import_budgets(&mut self, area_left: i64, height_left: &[i64], touched: u64) {
         self.trace_area = (self.element_threshold as i64 - area_left) as u64;
-        self.max_height = 0;
-        for (air, height) in &mut self.heights {
-            *height = (self.height_threshold as i64 - height_left[Self::slot(air)]) as u64;
-            if *height > self.max_height {
-                self.max_height = *height;
-            }
+        let heights = self.heights.as_mut_slice();
+        let height_left = &height_left[..heights.len()];
+        let threshold = self.height_threshold as i64;
+        let mut max_height = 0;
+        for (height, &left) in heights.iter_mut().zip(height_left) {
+            *height = (threshold - left) as u64;
+            max_height = max_height.max(*height);
         }
+        self.max_height = max_height;
         self.touched_addresses = touched;
     }
 }
