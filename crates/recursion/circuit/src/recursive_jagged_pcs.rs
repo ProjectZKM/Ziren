@@ -111,6 +111,13 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
     /// them into the transcript if the next phase depends on
     /// prefix-sum consistency.
     ///
+    /// Every round's columns and padding must fill exactly the area the
+    /// round commits, so a column sits at the same cells of its commitment in
+    /// every proof that opens it. A shard's global round is opened by the
+    /// shard proof, after the preprocessed round, and by its global proof, as
+    /// the only round; without this a prover could move the padding of an
+    /// earlier round and have the two proofs read different cells.
+    ///
     /// # Reference
     ///
     /// Mirrors `RecursiveJaggedPcsVerifier::verify_trusted_evaluations` (crates/recursion/circuit/src/jagged/verifier.rs).
@@ -232,7 +239,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             }
         }
 
+        assert_eq!(
+            pcs_proof.batch_evaluations.len(),
+            row_counts.len(),
+            "jagged-pcs: one committed round for each round of columns",
+        );
+        let log_stacking_height = self.stacked_pcs_verifier.log_stacking_height as usize;
         let mut repeated_row_counts: Vec<Felt<C::F>> = Vec::new();
+        let mut round_ends: Vec<(usize, usize)> = Vec::with_capacity(row_counts.len());
+        let mut committed_area = 0usize;
         for (round_idx, (round_rows, round_cols)) in
             row_counts.iter().zip(column_counts.iter()).enumerate()
         {
@@ -242,12 +257,21 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             if let Some(pads) = padding_row_heights.get(round_idx) {
                 repeated_row_counts.extend(pads.iter().copied());
             }
+            committed_area += pcs_proof.batch_evaluations[round_idx].len() << log_stacking_height;
+            round_ends.push((repeated_row_counts.len(), committed_area));
         }
+        let mut round_ends = round_ends.into_iter().peekable();
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
-        for (row_count, expected) in repeated_row_counts.iter().zip(prefix_sum_felts.iter()) {
+        for (column, (row_count, expected)) in
+            repeated_row_counts.iter().zip(prefix_sum_felts.iter()).enumerate()
+        {
             builder.assert_felt_eq(acc, *expected);
             acc = builder.eval(acc + *row_count);
+            while let Some((_, area)) = round_ends.next_if(|(end, _)| *end == column + 1) {
+                builder.assert_felt_eq(acc, C::F::from_usize(area));
+            }
         }
+        assert!(round_ends.next().is_none(), "jagged-pcs: a round ends past the prefix sums");
 
         let two: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
         let last_sum = params
