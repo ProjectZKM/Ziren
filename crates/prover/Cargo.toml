@@ -120,3 +120,7 @@ type_complexity = "allow"
 [[bin]]
 name = "proof_breakdown"
 path = "scripts/proof_breakdown.rs"
+
+[[bin]]
+name = "wrap_circuit_census"
+path = "scripts/wrap_circuit_census.rs"

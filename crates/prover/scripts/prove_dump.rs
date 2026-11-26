@@ -8,6 +8,10 @@
 //! Usage:
 //!   prove_dump <program.bin> <stdin.bin>     a captured guest and input
 //!   prove_dump <program.bin> -               a guest that reads no input
+//!   prove_dump <program.bin> u32:<n>         a guest that reads one `u32`
+//!   prove_dump <program.bin> <stdin> <dir>   also write `compressed.bin` and
+//!                                            `vk.bin` to `dir`, the inputs of
+//!                                            `proof_breakdown`
 //!   prove_dump agg <aggregation elf> <fibonacci elf>
 //!                                            the aggregation example: three
 //!                                            compressed fibonacci proofs
@@ -53,6 +57,10 @@ fn main() {
         let elf = std::fs::read(&args[1]).expect("read program");
         let stdin: ZKMStdin = if args[2] == "-" {
             ZKMStdin::new()
+        } else if let Some(n) = args[2].strip_prefix("u32:") {
+            let mut stdin = ZKMStdin::new();
+            stdin.write(&n.parse::<u32>().expect("a u32 input"));
+            stdin
         } else {
             bincode::deserialize(&std::fs::read(&args[2]).expect("read stdin"))
                 .expect("decode stdin")
@@ -68,6 +76,12 @@ fn main() {
     let compressed = prover.compress(&vk, core, deferred, opts).expect("compress");
     let bytes = bincode::serialize(&compressed).unwrap().len();
     prover.verify_compressed(&compressed, &vk).expect("verify compressed");
+    if let (false, Some(dir)) = (args[1] == "agg", args.get(3)) {
+        let dir = std::path::Path::new(dir);
+        std::fs::write(dir.join("compressed.bin"), bincode::serialize(&compressed).unwrap())
+            .expect("write compressed.bin");
+        std::fs::write(dir.join("vk.bin"), bincode::serialize(&vk).unwrap()).expect("write vk.bin");
+    }
     println!(
         "COMPRESS_OK shards={shards} deferred={} bytes={bytes} secs={:.0}",
         stdin.proofs.len(),

@@ -113,15 +113,15 @@ kind column ({widest_chip})",
 /// folds and commits nothing, so its `num_queries` is never read.  The final
 /// queries open the last committed oracle.  The lists below therefore hold
 /// one entry per committed round, and the final phase its own keys.
-/// `query_phase_bits` is `q · bits_per_query(rate) + pow` for each phase under
-/// the profile's accounting, the figure the per-component target is solved
-/// against.
+/// `query_phase_bits` is `q · bits_per_query(oracle, rate) + pow` for each
+/// phase under the accounting of the oracle it opens, the figure the
+/// per-component target is solved against.
 fn whir_schedule(
     name: &str,
     config: &zkm_pcs::whir::config::WhirConfig,
     log_stacking_height: usize,
     accounting: &str,
-    bits_per_query: impl Fn(usize) -> f64,
+    bits_per_query: impl Fn(usize, usize) -> f64,
 ) {
     let rounds = &config.round_parameters;
     let committed = &rounds[..rounds.len() - 1];
@@ -137,7 +137,10 @@ fn whir_schedule(
         .zip(&queried_rates)
         .map(|(r, &rate)| (r.num_queries, rate, r.queries_pow_bits))
         .chain(core::iter::once((config.final_queries, final_rate, config.final_pow_bits)))
-        .map(|(q, rate, pow)| format!("{:.2}", q as f64 * bits_per_query(rate) + pow as f64))
+        .enumerate()
+        .map(|(oracle, (q, rate, pow))| {
+            format!("{:.2}", q as f64 * bits_per_query(oracle, rate) + pow as f64)
+        })
         .collect();
     println!("[{name}.schedule]");
     println!("log_stacking_height = {log_stacking_height}");
@@ -152,13 +155,8 @@ fn whir_schedule(
         join(rounds.iter().map(|r| r.folding_factor.to_string()).collect())
     );
     println!(
-        "grinding_bits_folding = [{}]   # per round, on every folding challenge",
-        join(
-            rounds
-                .iter()
-                .map(|r| r.pow_bits.iter().copied().max().unwrap_or(0).to_string())
-                .collect()
-        )
+        "grinding_bits_folding = [{}]   # per round, one per folding challenge",
+        join(rounds.iter().map(|r| format!("{:?}", r.pow_bits)).collect())
     );
     println!(
         "num_queries = [{}]   # per committed round",
@@ -193,20 +191,32 @@ fn main() {
     // published compressed proof) under the compress profile; every other
     // recursion node shares the core one.  The wrap opens under its own.
     let lsh = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-    whir_schedule(
-        "core",
-        &zkm_pcs::whir::jagged::core_whir_config(lsh),
-        lsh,
-        "unique_decoding",
-        zkm_pcs::whir::jagged::bits_per_query,
-    );
+    let later_m = zkm_pcs::whir::jagged::later_round_johnson_m();
+    let core_like = |name: &str, config: &zkm_pcs::whir::config::WhirConfig| {
+        whir_schedule(
+            name,
+            config,
+            lsh,
+            &if later_m == 0 {
+                "unique_decoding".to_string()
+            } else {
+                format!("unique_decoding, later oracles johnson_m{later_m}")
+            },
+            |oracle, rate| match zkm_pcs::whir::jagged::core_round_johnson_m(oracle) {
+                0 => zkm_pcs::whir::jagged::bits_per_query(rate),
+                m => zkm_pcs::whir::jagged::bits_per_query_johnson(rate, m),
+            },
+        )
+    };
+    core_like("core", &zkm_pcs::whir::jagged::core_whir_config(lsh));
+    core_like("shrink", &zkm_pcs::whir::jagged::shrink_whir_config(lsh));
     let size_tuned = |name: &str, config: &zkm_pcs::whir::config::WhirConfig, m: usize| {
         whir_schedule(
             name,
             config,
             lsh,
             &if m == 0 { "unique_decoding".to_string() } else { format!("johnson_m{m}") },
-            |rate| {
+            |_, rate| {
                 if m == 0 {
                     zkm_pcs::whir::jagged::bits_per_query(rate)
                 } else {
