@@ -148,6 +148,20 @@ pub fn split_global_round<F: Clone>(
     ))
 }
 
+/// The area pin of the global round over `tables`
+/// (see [`crate::jagged::global_round_pin`]).
+pub fn global_round_pin<F: p3_field::Field>(
+    tables: &crate::traces::Traces<F>,
+) -> Option<crate::jagged::AreaPin> {
+    let cells = tables.values().map(|pm| pm.num_polynomials() * raw_chip_height(pm)).sum();
+    let cube = tables.values().next().map_or(0, |pm| 1usize << pm.num_variables());
+    crate::jagged::global_round_pin(
+        cells,
+        crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        cube,
+    )
+}
+
 /// The global round the shard of `main_traces` commits, as the global hash
 /// chain absorbs it: the round's commitment and its chips' heights. `None`
 /// when the shard names no chip of `global_round`.
@@ -162,7 +176,7 @@ where
     SC::Challenger: 'static,
 {
     let (global, _) = split_global_round(main_traces, global_round)?;
-    let (commitment, _) = commit_traces::<SC>(&global, None);
+    let (commitment, _) = commit_traces::<SC>(&global, global_round_pin(&global));
     let chips =
         global.named_traces.iter().map(|(name, pm)| (name.clone(), raw_chip_height(pm))).collect();
     Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips })
@@ -196,7 +210,8 @@ where
         }
         Some((global, local)) => {
             assert!(pin.is_none(), "a shard that commits a global round is never pinned");
-            let (global_commitment, global_precomputed) = commit_traces::<SC>(&global, None);
+            let (global_commitment, global_precomputed) =
+                commit_traces::<SC>(&global, global_round_pin(&global));
             let (commitment, precomputed) = commit_traces::<SC>(&local, None);
             (
                 Some(crate::prover::RetainedRound {

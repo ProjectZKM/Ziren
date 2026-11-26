@@ -676,7 +676,13 @@ impl ZKMProofShape {
         (
             rows.iter().map(|(n, _)| n.clone()).collect(),
             zkm_pcs::jagged::committed_dense_len(prep, LOG_STACK) / block,
-            zkm_pcs::jagged::committed_dense_len(global, LOG_STACK) / block,
+            zkm_pcs::jagged::global_round_dense_len(
+                global,
+                LOG_STACK,
+                1usize
+                    << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
+                        .max_log_row_count,
+            ) / block,
             zkm_pcs::jagged::committed_dense_len(main, LOG_STACK) / block,
         )
     }

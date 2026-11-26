@@ -322,7 +322,9 @@ where
             .push(vec![F::ZERO; pad_columns(round_real(true, None), pins.map(|p| p.prep))]);
     }
     if has_global_round {
-        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false, Some(true)), None)]);
+        let real = round_real(false, Some(true));
+        let pin = zkm_pcs::jagged::global_round_pin(real, log_stack, cube);
+        padding_row_heights.push(vec![F::ZERO; pad_columns(real, pin)]);
     }
     padding_row_heights
         .push(vec![F::ZERO; pad_columns(round_real(false, Some(false)), pins.map(|p| p.main))]);
@@ -403,6 +405,7 @@ pub fn dummy_jagged_bundle(
     if !prep_dims.is_empty() {
         round_dims.push(prep_dims);
     }
+    let global_round_index = (!global_dims.is_empty()).then_some(round_dims.len());
     if !global_dims.is_empty() {
         assert!(pins.is_none(), "a pinned machine commits no global round");
         round_dims.push(global_dims);
@@ -421,7 +424,11 @@ pub fn dummy_jagged_bundle(
 
     let log_stacking = pick_log_stacking_height(packings[0].total_values) as usize;
 
+    let cube = 1usize << max_log_row_count;
     let round_pin = |r: usize, n_rounds: usize| -> Option<zkm_pcs::jagged::AreaPin> {
+        if global_round_index == Some(r) {
+            return zkm_pcs::jagged::global_round_pin(packings[r].total_values, log_stacking, cube);
+        }
         let pins = pins?;
         if r + 1 == n_rounds {
             Some(pins.main)
@@ -442,7 +449,6 @@ pub fn dummy_jagged_bundle(
         })
         .collect();
 
-    let cube = 1usize << max_log_row_count;
     let mut offsets: Vec<usize> = Vec::new();
     let mut column_counts: Vec<usize> = Vec::new();
     let mut round_counts: Vec<Vec<(usize, usize)>> = Vec::with_capacity(packings.len());

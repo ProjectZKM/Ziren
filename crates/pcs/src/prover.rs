@@ -799,8 +799,9 @@ where
             .map(|(name, table)| (crate::air::GlobalView::<A>::name_in_slot(0, &name), table))
             .collect(),
     };
+    let pin = crate::shard_level::prover::global_round_pin(&views);
     let (main_commitment, precomputed) =
-        crate::shard_level::prover::commit_traces::<SC>(&views, None);
+        crate::shard_level::prover::commit_traces::<SC>(&views, pin);
     assert_eq!(
         main_commitment, round.commitment,
         "the tables of a global proof do not commit to its shard's global round",
@@ -817,7 +818,7 @@ where
         pk.preprocessed_mles(),
         <SC as WhirRing>::prep_open_data(pk.preprocessed_data()),
         &pk.chip_ordering,
-        None,
+        pin,
         Vec::new(),
         vk_challenger,
         Some(retained),

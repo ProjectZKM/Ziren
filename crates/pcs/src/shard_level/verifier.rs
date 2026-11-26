@@ -951,8 +951,29 @@ where
                 column_count,
             });
         }
-        let global_natural = crate::jagged::committed_dense_len(global_cells, log_stack);
-        push_padding(&mut chip_infos, global_cells, global_natural.saturating_sub(global_cells));
+        match crate::jagged::global_round_pin(global_cells, log_stack, cube) {
+            Some(pin) => {
+                for h in crate::jagged::AreaPin::split_padding(
+                    pin.area - global_cells,
+                    pin.pad_columns,
+                    cube,
+                ) {
+                    chip_infos.push(JaggedChipInfo {
+                        name: alloc::format!("<stacking-pad:{}>", chip_infos.len()),
+                        row_count: h,
+                        column_count: 1,
+                    });
+                }
+            }
+            None => {
+                let global_natural = crate::jagged::committed_dense_len(global_cells, log_stack);
+                push_padding(
+                    &mut chip_infos,
+                    global_cells,
+                    global_natural.saturating_sub(global_cells),
+                );
+            }
+        }
     }
     let n_global_end = chip_infos.len();
     for &i in layout.main_indices() {
