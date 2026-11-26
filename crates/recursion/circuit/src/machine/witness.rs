@@ -260,14 +260,14 @@ mod jagged_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
-            let proof = self.proof.read(builder);
+            let proofs = self.proofs.read(builder);
             let vk_root = self.vk_root.read(builder);
             let global_chain_end = self.global_chain_end.read(builder);
             let global_h_star = self.global_h_star.read(builder);
             let global_pow_witness = self.global_pow_witness.read(builder);
             crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable {
                 vk,
-                proof,
+                proofs,
                 vk_root,
                 global_chain_end,
                 global_h_star,
@@ -277,7 +277,7 @@ mod jagged_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
-            self.proof.write(witness);
+            self.proofs.write(witness);
             self.vk_root.write(witness);
             self.global_chain_end.write(witness);
             self.global_h_star.write(witness);

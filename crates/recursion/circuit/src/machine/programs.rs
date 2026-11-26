@@ -61,9 +61,9 @@ where
     program
 }
 
-/// Build the global-round program: verifies one global proof of the core
-/// machine and emits [`RecursionPublicValues`] that step the global hash chain
-/// backwards over the round the proof opens.
+/// Build the global-round program: verifies the global proofs of consecutive
+/// global rounds of the core machine and emits [`RecursionPublicValues`] that
+/// step the global hash chain backwards over the rounds they open.
 pub fn build_global_round_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &super::global_jagged::ZKMGlobalRoundWitnessValues<KoalaBearPoseidon2>,

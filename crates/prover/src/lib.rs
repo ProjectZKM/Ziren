@@ -244,6 +244,11 @@ const CORE_CACHE_SIZE: usize = 5;
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 3;
 
+/// The most global rounds one global-round program opens: the global proofs
+/// of up to that many consecutive rounds of one shape share a program, and a
+/// proof of it.
+pub const GLOBAL_ROUNDS_PER_PROGRAM: usize = 8;
+
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
@@ -329,11 +334,24 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// **Key**: [`ZKMCoreWitnessValues::shape_key`].
     pub normalize_programs_cache: Mutex<RecursionProgramCache>,
 
+    /// Per-shape cache for the global-round programs. A block uses a few of
+    /// them, each for many nodes, so they are kept apart from the normalize
+    /// programs, whose shapes would push them out between two uses.
+    ///
+    /// **Key**: `ZKMGlobalRoundWitnessValues::shape_key`.
+    pub global_programs_cache: Mutex<RecursionProgramCache>,
+
     /// Built-but-unsnapped Normalize / Compose programs, so a band can be
     /// chosen for a node AFTER its program exists — which is what deciding a
     /// band by SIBLING agreement requires.
     pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
     pub compose_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
+
+    /// The band of every compose shape asked for so far, by the key of its
+    /// unsnapped program. A band is a function of the program, so whoever
+    /// only places nodes in the tree needs the program once per shape, even
+    /// when a block has more shapes than the unsnapped cache holds.
+    pub compose_bands: Mutex<BTreeMap<u64, Option<usize>>>,
 
     /// Per-shape cache for the Compose recursion program — every
     /// interior node of the recursion tree.
@@ -724,8 +742,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             wrap_keys_cache: Mutex::new(None),
             wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_cache: Mutex::new(RecursionProgramCache::default()),
+            global_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
+            compose_bands: Mutex::new(BTreeMap::new()),
             compose_programs_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_cache: Mutex::new(RecursionPkCache::default()),
             recursion_pk_cache_ready: std::sync::Condvar::new(),
@@ -1182,14 +1202,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
-    /// The program that verifies the global proof of `input`, cached by the
-    /// proof's shape with the normalize programs.
+    /// The program that verifies the global proofs of `input`, cached by
+    /// their number and shapes.
     pub fn global_round_program(
         &self,
         input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.cached_program(
-            &self.normalize_programs_cache,
+            &self.global_programs_cache,
             self.band_keyed(input.shape_key(), None),
             "global",
             || {
@@ -1212,8 +1232,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// The band this compose program would choose for itself.
     pub fn compose_band_for(&self, input: &ZKMCompressWitnessValues<InnerSC>) -> Option<usize> {
+        let key = self.verification_keyed(input.shape_key());
+        if let Some(band) = self.compose_bands.lock().unwrap().get(&key) {
+            return *band;
+        }
         let program = self.compose_program_unsnapped(input);
-        self.band_of(&program)
+        let band = self.band_of(&program);
+        self.compose_bands.lock().unwrap().insert(key, band);
+        band
     }
 
     fn band_of(&self, program: &RecursionProgram<KoalaBear>) -> Option<usize> {
@@ -1663,10 +1689,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// The inputs of the global-round programs of a core proof, in the order
-    /// the compress tree takes them: before the shards, last round first, so
+    /// the compress tree takes them: before the shards, last rounds first, so
     /// that each one starts the global hash chain where the one before it
     /// ends. `shard_proofs[i]`'s round is opened by the `global_proofs` entry
-    /// at its position among the shards that commit one.
+    /// at its position among the shards that commit one, and one program
+    /// opens up to [`GLOBAL_ROUNDS_PER_PROGRAM`] consecutive rounds whose
+    /// global proofs have the same shape.
     pub fn get_recursion_global_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1687,33 +1715,55 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             global_proofs.len(),
             "a core proof holds one global proof for each shard with a global round"
         );
-        before_round
+        let shapes = global_proofs
+            .iter()
+            .map(|proof| {
+                zkm_recursion_circuit::machine::global_proof_shape_key(&proof.jagged_shard_proof)
+            })
+            .collect::<Vec<_>>();
+        let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+        for (round, shape) in shapes.iter().enumerate() {
+            match groups.last_mut() {
+                Some(group)
+                    if group.len() < GLOBAL_ROUNDS_PER_PROGRAM && shapes[group.start] == *shape =>
+                {
+                    group.end += 1
+                }
+                _ => groups.push(round..round + 1),
+            }
+        }
+        groups
             .into_iter()
-            .zip(global_proofs)
             .rev()
-            .map(|(global_chain_end, proof)| {
-                self.get_recursion_global_input(vk, proof, global_chain_end, global_h_star)
+            .map(|group| {
+                self.get_recursion_global_input(
+                    vk,
+                    &global_proofs[group.clone()],
+                    before_round[group.start],
+                    global_h_star,
+                )
             })
             .collect()
     }
 
-    /// The global-round input of one global proof: `global_chain_end` is the
-    /// global hash chain's value before the round the proof opens and
-    /// `global_h_star` the chain's end.
+    /// The global-round input of the global proofs of consecutive rounds, the
+    /// earliest first: `global_chain_end` is the global hash chain's value
+    /// before the first of those rounds and `global_h_star` the chain's end.
     pub fn get_recursion_global_input(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
-        global_proof: &ShardProof<CoreSC>,
+        global_proofs: &[ShardProof<CoreSC>],
         global_chain_end: [KoalaBear; DIGEST_SIZE],
         global_h_star: [KoalaBear; DIGEST_SIZE],
     ) -> zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC> {
+        let first = global_proofs.first().expect("a global-round program opens at least one round");
         zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
             vk: vk.clone(),
-            proof: (*global_proof.jagged_shard_proof).clone(),
+            proofs: global_proofs.iter().map(|proof| (*proof.jagged_shard_proof).clone()).collect(),
             vk_root: self.recursion_vk_root,
             global_chain_end,
             global_h_star,
-            global_pow_witness: global_proof
+            global_pow_witness: first
                 .jagged_shard_proof
                 .global_pow_witness
                 .unwrap_or(KoalaBear::ZERO),
@@ -1841,7 +1891,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .map(|input| {
                     let range = match &input {
                         ZKMCircuitWitness::DeferredJagged(_) => chain.deferred(),
-                        ZKMCircuitWitness::GlobalJagged(_) => chain.global_round(),
+                        ZKMCircuitWitness::GlobalJagged(input) => {
+                            chain.global_rounds(input.proofs.len() as u64)
+                        }
                         _ => chain.core(),
                     };
                     (range, input)

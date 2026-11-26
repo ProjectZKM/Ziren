@@ -113,8 +113,14 @@ impl ShardRange {
     /// The span of the global proof of the global round `round`, counted in
     /// shard order.
     pub fn global_round(round: u64) -> Self {
+        Self::global_rounds(round, 1)
+    }
+
+    /// The span of the global proofs of the `count` global rounds from
+    /// `round` on, counted in shard order.
+    pub fn global_rounds(round: u64, count: u64) -> Self {
         Self::new(
-            ShardBoundary::before_global_rounds(round + 1),
+            ShardBoundary::before_global_rounds(round + count),
             ShardBoundary::before_global_rounds(round),
         )
     }
@@ -180,14 +186,14 @@ impl ShardChain {
         Self { start, cursor: start }
     }
 
-    /// One global proof: the next round down.
-    pub fn global_round(&mut self) -> ShardRange {
+    /// The global proofs of the next `count` rounds down.
+    pub fn global_rounds(&mut self, count: u64) -> ShardRange {
         let start = self.cursor;
         debug_assert!(
-            start.global_round < ShardBoundary::GLOBAL_ROUNDS_UNWOUND,
+            count <= ShardBoundary::GLOBAL_ROUNDS_UNWOUND - start.global_round,
             "the chain holds more global proofs than global rounds"
         );
-        self.cursor.global_round += 1;
+        self.cursor.global_round += count;
         ShardRange::new(start, self.cursor)
     }
 
