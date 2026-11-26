@@ -258,9 +258,10 @@ pub const GLOBAL_ROUNDS_PER_PROGRAM: usize = 8;
 /// (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`), and it grows with the rows its
 /// queries open: every first-round query of a global proof opens one row of
 /// each block of the round. Measured on mainnet blocks, a round of 8 blocks
-/// costs the program 9,080 hash rows and one of 232 blocks 60,664, so 230 rows
-/// a block and 32 blocks' worth besides; the largest class holds about 200,000
-/// hash rows, 870 in this weight, and the bound leaves a third of it free.
+/// costs the program 10,792 hash rows and one of 232 blocks 71,224, so 270
+/// rows a block and 32 blocks' worth besides; the largest class holds about
+/// 200,000 hash rows, 740 in this weight, and the bound leaves a fifth of it
+/// free.
 pub const GLOBAL_BLOCKS_PER_PROGRAM: usize = 576;
 
 /// What a global round weighs besides its blocks: the part of verifying its
