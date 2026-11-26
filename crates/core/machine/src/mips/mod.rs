@@ -212,7 +212,7 @@ impl<F: PrimeField32> MipsAir<F> {
             .collect::<std::collections::BTreeSet<_>>();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
             .with_global_round(Some(global_round))
-            .with_deferred_global()
+            .with_deferred_global_lookups()
     }
 
     /// Get all the different MIPS AIRs.

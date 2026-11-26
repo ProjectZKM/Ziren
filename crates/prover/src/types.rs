@@ -151,15 +151,15 @@ pub struct ZKMCoreProofData(
 
 impl ZKMCoreProofData {
     /// The proof as one list, the shard proofs followed by the global proofs.
-    pub fn into_flat(self) -> Vec<ShardProof<CoreSC>> {
+    pub fn into_proof_list(self) -> Vec<ShardProof<CoreSC>> {
         let Self(mut proofs, global_proofs) = self;
         proofs.extend(global_proofs);
         proofs
     }
 
-    /// The proof [`Self::into_flat`] flattened: a global proof is told from a
-    /// shard proof by its empty public values.
-    pub fn from_flat(mut proofs: Vec<ShardProof<CoreSC>>) -> Self {
+    /// The proof [`Self::into_proof_list`] listed: a global proof is told
+    /// from a shard proof by its empty public values.
+    pub fn from_proof_list(mut proofs: Vec<ShardProof<CoreSC>>) -> Self {
         let shards =
             proofs.iter().position(|proof| proof.public_values.is_empty()).unwrap_or(proofs.len());
         let global_proofs = proofs.split_off(shards);

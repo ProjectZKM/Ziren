@@ -29,7 +29,7 @@ pub struct Chip<F: Field, A> {
     /// The relative log degree of the quotient polynomial, i.e. `log2(max_constraint_degree - 1)`.
     pub log_quotient_degree: usize,
     /// The global lookups the chip sends that its machine proves in a global
-    /// proof instead of the chip's shard proof (see [`Self::defer_global`]).
+    /// proof instead of the chip's shard proof (see [`Self::defer_global_lookups`]).
     pub deferred_sends: Vec<Lookup<F>>,
     /// The global lookups the chip receives that its machine proves in a
     /// global proof.
@@ -61,7 +61,7 @@ impl<F: Field, A> Chip<F, A> {
     /// proof then closes the local lookups alone and needs no cross-shard
     /// challenge; a global proof sums the moved lookups over the chip's
     /// committed columns (see [`Self::global_view`]).
-    pub fn defer_global(&mut self) {
+    pub fn defer_global_lookups(&mut self) {
         let (global, local) =
             core::mem::take(&mut self.sends).into_iter().partition(Lookup::is_global);
         self.sends = local;
@@ -73,7 +73,7 @@ impl<F: Field, A> Chip<F, A> {
     }
 
     /// Whether a global proof carries lookups of this chip.
-    pub fn has_deferred_global(&self) -> bool {
+    pub fn has_deferred_global_lookups(&self) -> bool {
         !self.deferred_sends.is_empty() || !self.deferred_receives.is_empty()
     }
 
@@ -91,7 +91,7 @@ impl<F: Field, A> Chip<F, A> {
 
 impl<F: Field, A: MachineAir<F>> Chip<F, A> {
     /// The chip's main columns as the table slot `slot` of a global proof:
-    /// no constraints, and the lookups [`Self::defer_global`] moved out of
+    /// no constraints, and the lookups [`Self::defer_global_lookups`] moved out of
     /// the shard proof.
     pub fn global_view(&self, slot: usize) -> Chip<F, GlobalView<A>> {
         Chip {

@@ -333,11 +333,13 @@ fn a_proof_verifies_only_under_its_global_proof_of_work() {
 
 /// The bus machine with its global lookups deferred to global proofs.
 fn deferring_machine() -> StarkMachine<SC, BusAir> {
-    bus_machine(true).with_deferred_global()
+    bus_machine(true).with_deferred_global_lookups()
 }
 
 /// Proves `records` in one pass, each as its own shard.
-fn prove_deferring(records: &[BusRecord]) -> (MachineProof<SC>, StarkVerifyingKey<SC>) {
+fn prove_with_deferred_global_lookups(
+    records: &[BusRecord],
+) -> (MachineProof<SC>, StarkVerifyingKey<SC>) {
     let prover = CpuProver::new(deferring_machine());
     let (pk, vk) = prover.setup(&BusProgram);
     let mut challenger = prover.machine().config().challenger();
@@ -347,7 +349,10 @@ fn prove_deferring(records: &[BusRecord]) -> (MachineProof<SC>, StarkVerifyingKe
     (proof, vk)
 }
 
-fn verify_deferring(vk: &StarkVerifyingKey<SC>, proof: &MachineProof<SC>) -> Result<(), String> {
+fn verify_with_deferred_global_lookups(
+    vk: &StarkVerifyingKey<SC>,
+    proof: &MachineProof<SC>,
+) -> Result<(), String> {
     let machine = deferring_machine();
     let mut challenger = machine.config().challenger();
     machine.verify(vk, proof, &mut challenger).map_err(|e| format!("{e:?}"))
@@ -355,57 +360,68 @@ fn verify_deferring(vk: &StarkVerifyingKey<SC>, proof: &MachineProof<SC>) -> Res
 
 #[test]
 fn deferred_global_lookups_close_across_shards() {
-    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
     assert_eq!(proof.global_proofs.len(), 2);
     assert!(proof.shard_proofs.iter().all(|p| p.jagged_shard_proof.global_pow_witness.is_none()));
-    verify_deferring(&vk, &proof).expect("a balanced bus must verify");
+    verify_with_deferred_global_lookups(&vk, &proof).expect("a balanced bus must verify");
 }
 
 #[test]
 fn an_unbalanced_deferred_bus_is_rejected() {
-    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 6])]);
-    let error = verify_deferring(&vk, &proof).expect_err("an unbalanced bus must not verify");
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 6])]);
+    let error = verify_with_deferred_global_lookups(&vk, &proof)
+        .expect_err("an unbalanced bus must not verify");
     assert!(error.contains("sum"), "{error}");
 }
 
 #[test]
 fn every_global_round_needs_its_global_proof() {
-    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
 
     let mut dropped = proof.clone();
     dropped.global_proofs.pop();
-    verify_deferring(&vk, &dropped).expect_err("a shard without its global proof");
+    verify_with_deferred_global_lookups(&vk, &dropped)
+        .expect_err("a shard without its global proof");
 
     let mut none = proof.clone();
     none.global_proofs.clear();
-    verify_deferring(&vk, &none).expect_err("no global proofs at all");
+    verify_with_deferred_global_lookups(&vk, &none).expect_err("no global proofs at all");
 
     let mut swapped = proof.clone();
     swapped.global_proofs.swap(0, 1);
-    verify_deferring(&vk, &swapped).expect_err("global proofs out of shard order");
+    verify_with_deferred_global_lookups(&vk, &swapped)
+        .expect_err("global proofs out of shard order");
 
     let mut repeated = proof;
     repeated.global_proofs[1] = repeated.global_proofs[0].clone();
-    verify_deferring(&vk, &repeated).expect_err("one global proof standing in for two shards");
+    verify_with_deferred_global_lookups(&vk, &repeated)
+        .expect_err("one global proof standing in for two shards");
 }
 
 #[test]
 fn a_global_proof_opens_the_round_its_shard_committed() {
-    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
-    let (other, _) = prove_deferring(&[sender(&[3, 5, 8]), receiver(&[8, 3, 5])]);
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let (other, _) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 8]), receiver(&[8, 3, 5])]);
 
     let mut mixed = proof.clone();
     mixed.global_proofs = other.global_proofs.clone();
-    verify_deferring(&vk, &mixed).expect_err("global proofs of other tables");
+    verify_with_deferred_global_lookups(&vk, &mixed).expect_err("global proofs of other tables");
 
     let mut mixed = proof;
     mixed.shard_proofs[0] = other.shard_proofs[0].clone();
-    verify_deferring(&vk, &mixed).expect_err("a shard replaced after the challenge was drawn");
+    verify_with_deferred_global_lookups(&vk, &mixed)
+        .expect_err("a shard replaced after the challenge was drawn");
 }
 
 #[test]
 fn deferred_global_proofs_carry_the_proof_of_work() {
-    let (proof, vk) = prove_deferring(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
     let witness = proof.global_proofs[0].jagged_shard_proof.global_pow_witness;
     assert!(witness.is_some());
 
@@ -413,19 +429,21 @@ fn deferred_global_proofs_carry_the_proof_of_work() {
     for global_proof in forged.global_proofs.iter_mut() {
         global_proof.jagged_shard_proof.global_pow_witness = witness.map(|w| w + F::ONE);
     }
-    verify_deferring(&vk, &forged).expect_err("another proof-of-work witness");
+    verify_with_deferred_global_lookups(&vk, &forged).expect_err("another proof-of-work witness");
 
     let mut forged = proof;
     forged.global_proofs[0].jagged_shard_proof.global_pow_witness = None;
-    verify_deferring(&vk, &forged).expect_err("a global proof without the witness");
+    verify_with_deferred_global_lookups(&vk, &forged)
+        .expect_err("a global proof without the witness");
 }
 
 #[test]
 fn a_shard_without_a_global_round_needs_no_global_proof() {
     let machine = deferring_machine();
-    assert!(machine.defers_global() && !machine.has_global_lookups());
-    let (proof, vk) = prove_deferring(&[sender(&[4, 9]), receiver(&[9, 4])]);
+    assert!(machine.defers_global_lookups() && !machine.has_global_lookups());
+    let (proof, vk) = prove_with_deferred_global_lookups(&[sender(&[4, 9]), receiver(&[9, 4])]);
     let mut extra = proof.clone();
     extra.global_proofs.push(proof.global_proofs[0].clone());
-    verify_deferring(&vk, &extra).expect_err("more global proofs than global rounds");
+    verify_with_deferred_global_lookups(&vk, &extra)
+        .expect_err("more global proofs than global rounds");
 }

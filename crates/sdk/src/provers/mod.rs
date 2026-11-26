@@ -156,7 +156,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
-                let core = ZKMCoreProofData::from_flat(proof.clone());
+                let core = ZKMCoreProofData::from_proof_list(proof.clone());
                 let last = core.0.last().ok_or(ZKMVerificationError::MalformedProof)?;
                 if last.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
                     return Err(ZKMVerificationError::MalformedProof);

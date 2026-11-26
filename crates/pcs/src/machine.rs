@@ -443,17 +443,17 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
     /// Moves every chip's global lookups out of the shard proofs, into
     /// global proofs made once the cross-shard challenge is known (see
-    /// [`Chip::defer_global`]). A shard proof then depends on no other shard,
+    /// [`Chip::defer_global_lookups`]). A shard proof then depends on no other shard,
     /// so the shards are proved in one pass. Consuming builder.
     ///
     /// # Panics
     /// When a chip with a global lookup is outside the machine's global
     /// round, or reads a preprocessed column: a global proof opens the
     /// shard's global round and nothing else.
-    pub fn with_deferred_global(mut self) -> Self {
+    pub fn with_deferred_global_lookups(mut self) -> Self {
         for chip in self.chips.iter_mut() {
-            chip.defer_global();
-            if chip.has_deferred_global() {
+            chip.defer_global_lookups();
+            if chip.has_deferred_global_lookups() {
                 let name = chip.name();
                 assert!(
                     self.global_round.as_ref().is_some_and(|set| set.contains(&name)),
@@ -470,9 +470,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
     }
 
     /// Whether global proofs, not the shard proofs, close the machine's
-    /// global lookups (see [`Self::with_deferred_global`]).
-    pub fn defers_global(&self) -> bool {
-        self.chips.iter().any(Chip::has_deferred_global)
+    /// global lookups (see [`Self::with_deferred_global_lookups`]).
+    pub fn defers_global_lookups(&self) -> bool {
+        self.chips.iter().any(Chip::has_deferred_global_lookups)
     }
 
     /// Whether some chip has a global lookup, in its shard proof or deferred.
@@ -500,7 +500,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
     pub fn global_views(&self, slot: usize) -> Vec<Chip<Val<SC>, crate::air::GlobalView<A>>> {
         self.chips
             .iter()
-            .filter(|chip| chip.has_deferred_global())
+            .filter(|chip| chip.has_deferred_global_lookups())
             .map(|chip| chip.global_view(slot))
             .collect()
     }
@@ -961,7 +961,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         h: &[Val<SC>; 8],
         round: Option<&crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
     ) -> [Val<SC>; 8] {
-        if round.is_none() && self.defers_global() {
+        if round.is_none() && self.defers_global_lookups() {
             *h
         } else {
             crate::logup_gkr::global_chain_step(self.config.challenger(), h, round)
@@ -1163,8 +1163,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
-        if self.defers_global() {
-            return self.verify_deferred_global(vk, proof, challenger);
+        if self.defers_global_lookups() {
+            return self.verify_deferred_global_lookups(vk, proof, challenger);
         }
         let global = {
             let mut vk_challenger = challenger.clone();
@@ -1185,7 +1185,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     }
 
     /// Verifies a proof of a machine that defers its global lookups (see
-    /// [`Self::with_deferred_global`]):
+    /// [`Self::with_deferred_global_lookups`]):
     ///
     /// * every shard proof verifies on its own, under no cross-shard
     ///   challenge;
@@ -1200,7 +1200,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// only where the commitment has a single codeword within the tested
     /// distance, so the ring's schedule must count its queries in the
     /// unique-decoding regime.
-    fn verify_deferred_global(
+    fn verify_deferred_global_lookups(
         &self,
         vk: &StarkVerifyingKey<SC>,
         proof: &MachineProof<SC>,
@@ -1344,6 +1344,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// the cross-shard challenge `global` of the machine's global-scope
     /// lookups (`None` on a machine without them): every shard proof
     /// verifies, and their global sums add to zero.
+    ///
+    /// On a machine that defers its global lookups this checks the shard
+    /// proofs alone, with `None`: no cross-shard lookup is verified. Use
+    /// [`Self::verify`] for a whole proof.
     #[instrument("verify", level = "info", skip_all)]
     #[allow(clippy::match_bool)]
     pub fn verify_with_global(

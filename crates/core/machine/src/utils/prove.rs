@@ -96,10 +96,17 @@ where
         })
     };
     let prove_shard = |record, traces, cluster_widths| {
-        Ok(prove_shard_alone::<SC, P>(prover, pk, &challenger, record, traces, cluster_widths))
+        Ok(prove_shard_and_keep_global_round::<SC, P>(
+            prover,
+            pk,
+            &challenger,
+            record,
+            traces,
+            cluster_widths,
+        ))
     };
     let (proved, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
-        run_pass::<SC, P, _, _>(
+        run_shard_pipeline::<SC, P, _, _>(
             prover,
             &program,
             opts,
@@ -186,12 +193,13 @@ where
     Ok((proof, public_values_stream, cycles))
 }
 
-/// The state a pass starts tracing from: its index, the executor state, and
-/// whether it runs to the end of the program, with the program's cycle count.
+/// The state [`run_shard_pipeline`] starts tracing from: its index, the
+/// executor state, and whether it runs to the end of the program, with the
+/// program's cycle count.
 type Checkpoint = (usize, ExecutionState, bool, u64);
 
-/// Executes `program` on `stdin` once, returning the checkpoint every pass of
-/// [`prove_with_context`] traces from and the public values stream.
+/// Executes `program` on `stdin` once, returning the checkpoint
+/// [`run_shard_pipeline`] traces from and the public values stream.
 fn execute_to_checkpoint(
     program: &Program,
     stdin: &ZKMStdin,
@@ -226,8 +234,8 @@ fn execute_to_checkpoint(
 }
 
 /// The records of the shards [`prove_with_context`] proves for `program` on
-/// `stdin`, in shard order, as its passes trace them: with
-/// their dependencies generated, ready for a prover to commit.
+/// `stdin`, in shard order, as its shard pipeline traces them: with their
+/// dependencies generated, ready for a prover to commit.
 pub fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     program: &Program,
@@ -243,7 +251,7 @@ where
 {
     let (checkpoint, _) = execute_to_checkpoint(program, stdin, opts, ZKMContext::default())?;
     let (records_tx, records_rx) = std::sync::mpsc::channel();
-    run_pass::<SC, P, _, _>(
+    run_shard_pipeline::<SC, P, _, _>(
         prover,
         program,
         opts,
@@ -257,7 +265,10 @@ where
 
 /// Proves one shard on its own, and keeps the tables of its global round for
 /// the global proof made once every shard has committed.
-fn prove_shard_alone<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+fn prove_shard_and_keep_global_round<
+    SC: StarkGenericConfig,
+    P: MachineProver<SC, MipsAir<SC::Val>>,
+>(
     prover: &P,
     pk: &P::DeviceProvingKey,
     challenger: &SC::Challenger,
@@ -294,18 +305,24 @@ where
 }
 
 /// Replays the program from `checkpoint` and cuts it into shard records.
-/// `prepare` runs in the trace workers; `process` consumes the prepared value
-/// in the prover worker. Their shared type prevents a prove pass from receiving
-/// a shard without traces. Results preserve shard order across both stages.
+/// `prepare_shard` runs in the trace workers; `consume_shard` takes the
+/// prepared value in the prover worker. Their shared type keeps a shard from
+/// reaching the prover without its traces. Results preserve shard order
+/// across both stages.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn run_pass<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>, T: Send, R: Send>(
+fn run_shard_pipeline<
+    SC: StarkGenericConfig,
+    P: MachineProver<SC, MipsAir<SC::Val>>,
+    T: Send,
+    R: Send,
+>(
     prover: &P,
     program: &Program,
     opts: ZKMCoreOpts,
     checkpoint: Checkpoint,
-    prepare: &(impl Fn(&ExecutionRecord) -> Result<T, ZKMCoreProverError> + Sync),
-    process: &(impl Fn(
+    prepare_shard: &(impl Fn(&ExecutionRecord) -> Result<T, ZKMCoreProverError> + Sync),
+    consume_shard: &(impl Fn(
         ExecutionRecord,
         T,
         Option<std::collections::BTreeMap<String, usize>>,
@@ -461,7 +478,7 @@ where
                                     .in_scope(|| {
                                         records
                                             .par_iter()
-                                            .map(prepare)
+                                            .map(prepare_shard)
                                             .collect::<Result<Vec<_>, _>>()
                                     })?;
 
@@ -508,7 +525,7 @@ where
 
                                 let cluster_widths = shard_clusters.cluster_widths(&record);
 
-                                process(record, prepared, cluster_widths)
+                                consume_shard(record, prepared, cluster_widths)
                             })
                             .collect::<Vec<_>>();
                         outputs.extend(results);

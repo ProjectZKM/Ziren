@@ -1695,7 +1695,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// at its position among the shards that commit one, and one program
     /// opens up to [`GLOBAL_ROUNDS_PER_PROGRAM`] consecutive rounds whose
     /// global proofs have the same shape.
-    pub fn get_recursion_global_inputs(
+    pub fn get_recursion_global_round_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
@@ -1736,7 +1736,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .into_iter()
             .rev()
             .map(|group| {
-                self.get_recursion_global_input(
+                self.get_recursion_global_round_input(
                     vk,
                     &global_proofs[group.clone()],
                     before_round[group.start],
@@ -1749,7 +1749,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// The global-round input of the global proofs of consecutive rounds, the
     /// earliest first: `global_chain_end` is the global hash chain's value
     /// before the first of those rounds and `global_h_star` the chain's end.
-    pub fn get_recursion_global_input(
+    pub fn get_recursion_global_round_input(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         global_proofs: &[ShardProof<CoreSC>],
@@ -1837,7 +1837,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
         let mut inputs = Vec::new();
 
-        let global_inputs = self.get_recursion_global_inputs(&vk.vk, shard_proofs, global_proofs);
+        let global_inputs =
+            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs);
         inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
         let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, false);
@@ -3856,7 +3857,7 @@ pub mod tests {
         )?;
         let chain = prover.global_chain(&vk.vk, &core.proof.0);
         let h_star = *chain.last().unwrap();
-        let inputs = prover.get_recursion_global_inputs(&vk.vk, &core.proof.0, &core.proof.1);
+        let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &core.proof.0, &core.proof.1);
         assert!(!inputs.is_empty(), "the first shard commits the program image");
 
         let run = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {

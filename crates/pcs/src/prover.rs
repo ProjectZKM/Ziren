@@ -658,7 +658,7 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
-        if self.machine().defers_global() {
+        if self.machine().defers_global_lookups() {
             let proved = tracing::info_span!("prove_shards").in_scope(|| {
                 records
                     .into_par_iter()

@@ -113,7 +113,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         if kind == ZKMProofKind::Core {
             return Ok((
                 ZKMProofWithPublicValues {
-                    proof: ZKMProof::Core(proof.proof.into_flat()),
+                    proof: ZKMProof::Core(proof.proof.into_proof_list()),
                     public_values: proof.public_values,
                     zkm_version: self.version().to_string(),
                 },

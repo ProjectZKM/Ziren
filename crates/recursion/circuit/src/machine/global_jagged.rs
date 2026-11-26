@@ -107,7 +107,10 @@ pub fn verify_global_round_jagged<C, SC, A>(
         global_h_star,
         global_pow_witness,
     } = input;
-    assert!(machine.defers_global(), "a global proof needs a machine that defers global lookups");
+    assert!(
+        machine.defers_global_lookups(),
+        "a global proof needs a machine that defers global lookups"
+    );
     let jagged_vk =
         crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(builder, &vk);
 
