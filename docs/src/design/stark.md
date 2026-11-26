@@ -24,7 +24,7 @@ Each column of a chip trace with \\( 2^n \\) rows is read as the multilinear ext
 
 ## Transcript prologue
 
-The verifier observes the verifying key (the preprocessed commitment, the start `pc` and the chip layout). For each shard it then observes the end of the global hash chain the shard's global lookups are proved under, the public values, the global commitment of a shard that has one, the main commitment, and the number, heights and names of the chips present. Binding the heights before any challenge prevents the prover from choosing trace dimensions after seeing randomness.
+The verifier observes the verifying key (the preprocessed commitment, the start `pc` and the chip layout). For each shard it then observes the public values, the global commitment of a shard that has one, the main commitment, and the number, heights and names of the chips present. The global proof of a shard's global lookups (see [Memory Checking](./memory-checking.md)) has the same prologue, with the end of the global hash chain observed before everything else. Binding the heights before any challenge prevents the prover from choosing trace dimensions after seeing randomness.
 
 ## Lookup argument
 
