@@ -6,10 +6,10 @@
 //! [`crate::profile::transcript_profile`], whose digest a consumer checks: an
 //! override moves the digest rather than silently changing the transcript.
 //!
-//! The defaults are solved so that the union bound over the transcript's
-//! components clears 100 bits, which is the level the deployment claims.  A
-//! lower setting is accepted, because experiments need one, and it is visible
-//! in the profile digest.
+//! The defaults are solved so that every component of the transcript reaches
+//! 128 bits, which is the level the deployment claims.  A lower setting is
+//! accepted, because experiments need one, and it is visible in the profile
+//! digest.
 
 /// Read a `usize` parameter, falling back to `default` if unset or unparsable.
 pub fn env_usize(name: &str, default: usize) -> usize {

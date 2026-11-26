@@ -98,10 +98,11 @@ use components::{DefaultProverComponents, ZKMProverComponents};
 
 pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 
-/// The configuration for the core prover (D=4, 100-bit security).
+/// The configuration for the core prover (KoalaBear with its quintic
+/// extension, 128-bit security).
 pub type CoreSC = KoalaBearPoseidon2;
 
-/// The configuration for the inner prover (D=4, 100-bit security): every
+/// The configuration for the inner prover: every
 /// recursion node below the root (leaves, interior composes, deferred nodes),
 /// under the core WHIR schedule, tuned for prover time.
 pub type InnerSC = KoalaBearPoseidon2;
@@ -121,7 +122,7 @@ pub type ShrinkSC = KoalaBearPoseidon2Shrink;
 /// `verify_compressed`) verifies it under this ring.
 pub type CompressedSC = KoalaBearPoseidon2Compress;
 
-/// The configuration for the outer prover (D=4, 100-bit security).
+/// The configuration for the outer prover, the wrap over BN254 Merkle trees.
 pub type OuterSC = KoalaBearPoseidon2Outer;
 
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<

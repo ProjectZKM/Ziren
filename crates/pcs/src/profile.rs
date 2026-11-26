@@ -80,6 +80,7 @@ pub type ProfileEntry = (&'static str, u64);
 pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
     alloc::vec![
         // Parameters.
+        ("field.challenge_degree", crate::air::EXTENSION_DEGREE as u64),
         ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
         ("whir.batch_grinding_bits", crate::whir::jagged::whir_batch_grinding_bits() as u64),
         ("logup_gkr.grinding_bits", crate::logup_gkr::gkr_grinding_bits() as u64),
@@ -89,6 +90,9 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         // without any consumer noticing.
         ("whir.query_grinding_bits", crate::whir::jagged::query_grinding_bits() as u64),
         ("whir.per_component_target_bits", crate::whir::jagged::per_component_target_bits() as u64),
+        // The regime the core schedule counts its later oracles in; it sets
+        // their query counts and folding grinds.
+        ("whir.later_round_johnson_m", crate::whir::jagged::later_round_johnson_m() as u64),
         // Which recursion proofs the compress schedule applies to: 1 = the
         // root only (the closing compose), every other node on the core
         // schedule.  The same two schedules applied to a different set of
@@ -320,7 +324,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "643a39733ea14a39629cf0634a0944443c49593431d424335ede0dcd3340d3a9",
+            "7d2c881650f0e1f06ee0bfa06d58bfdb71a9dd2024cf3f2f3bd07563178b8201",
             "the transcript profile changed -- see this test's documentation",
         );
     }
