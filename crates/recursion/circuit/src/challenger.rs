@@ -900,6 +900,88 @@ pub(crate) mod tests {
         PlonkBn254Prover::test::<C>(constraints, witness);
     }
 
+    /// A random straight-line program over a pool of extension and base
+    /// values, products of products included, run in the outer circuit and in
+    /// the field: the circuit keeps values unreduced and reduces them only
+    /// where a product would not fit the native field, and 200 steps on 9
+    /// values cross that bound many times.
+    #[test]
+    fn outer_arithmetic_matches_the_field_over_long_unreduced_chains() {
+        use crate::witness::WitnessWriter;
+        use p3_field::BasedVectorSpace;
+        use rand::{rngs::StdRng, Rng, SeedableRng};
+        use zkm_recursion_gnark_ffi::Groth16Bn254Prover;
+
+        let mut rng = StdRng::seed_from_u64(23);
+        let mut builder = Builder::<C>::default();
+        let mut witness = OuterWitness::default();
+
+        let mut exts: Vec<EF> = vec![];
+        let mut ext_vars: Vec<Ext<F, EF>> = vec![];
+        for _ in 0..6 {
+            let value =
+                EF::from_basis_coefficients_fn(|_| F::from_u32(rng.gen::<u32>() % F::ORDER_U32));
+            witness.write_ext(value);
+            exts.push(value);
+            ext_vars.push(builder.witness_ext());
+        }
+        let mut felts: Vec<F> = vec![];
+        let mut felt_vars: Vec<Felt<F>> = vec![];
+        for _ in 0..3 {
+            let value = F::from_u32(rng.gen::<u32>() % F::ORDER_U32);
+            witness.write_felt(value);
+            felts.push(value);
+            felt_vars.push(builder.witness_felt());
+        }
+
+        for _ in 0..200 {
+            let (i, j, k) = (rng.gen_range(0..6), rng.gen_range(0..6), rng.gen_range(0..6));
+            let (fi, fj, fk) = (rng.gen_range(0..3), rng.gen_range(0..3), rng.gen_range(0..3));
+            match rng.gen_range(0..8) {
+                0 | 1 => {
+                    exts[i] = exts[j] * exts[k];
+                    ext_vars[i] = builder.eval(ext_vars[j] * ext_vars[k]);
+                }
+                2 => {
+                    exts[i] = exts[j] * exts[j];
+                    ext_vars[i] = builder.eval(ext_vars[j] * ext_vars[j]);
+                }
+                3 => {
+                    exts[i] = exts[j] + exts[k];
+                    ext_vars[i] = builder.eval(ext_vars[j] + ext_vars[k]);
+                }
+                4 => {
+                    exts[i] = exts[j] - exts[k];
+                    ext_vars[i] = builder.eval(ext_vars[j] - ext_vars[k]);
+                }
+                5 => {
+                    exts[i] = exts[j] * felts[fk];
+                    ext_vars[i] = builder.eval(ext_vars[j] * felt_vars[fk]);
+                }
+                6 => {
+                    felts[fi] = felts[fj] * felts[fk];
+                    felt_vars[fi] = builder.eval(felt_vars[fj] * felt_vars[fk]);
+                }
+                _ => {
+                    felts[fi] = felts[fj] - felts[fk];
+                    felt_vars[fi] = builder.eval(felt_vars[fj] - felt_vars[fk]);
+                }
+            }
+        }
+
+        for (value, var) in zip(exts, ext_vars) {
+            builder.assert_ext_eq(var, value.cons());
+        }
+        for (value, var) in zip(felts, felt_vars) {
+            builder.assert_felt_eq(var, value);
+        }
+
+        let mut backend = ConstraintCompiler::<C>::default();
+        let constraints = backend.emit(builder.into_operations());
+        PlonkBn254Prover::test::<C>(constraints.clone(), witness.clone());
+        Groth16Bn254Prover::test::<C>(constraints, witness);
+    }
+
     #[test]
     fn test_select_chain_digest() {
         type N = <C as Config>::N;

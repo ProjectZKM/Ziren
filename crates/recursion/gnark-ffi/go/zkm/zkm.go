@@ -65,6 +65,34 @@ type Proof struct {
 	RawProof     string    `json:"raw_proof"`
 }
 
+// fitF reduces the operands of a product as far as the product needs and
+// stores the reduced forms: a value that is multiplied again is not reduced
+// again.
+func fitF(c *koalabear.Chip, felts map[string]koalabear.Variable, x, y string) (koalabear.Variable, koalabear.Variable) {
+	if x == y {
+		a := c.FitSquareF(felts[x])
+		felts[x] = a
+		return a, a
+	}
+	a, b := c.FitF(felts[x], felts[y])
+	felts[x] = a
+	felts[y] = b
+	return a, b
+}
+
+// fitE is fitF for an extension product.
+func fitE(c *koalabear.Chip, exts map[string]koalabear.ExtensionVariable, x, y string) (koalabear.ExtensionVariable, koalabear.ExtensionVariable) {
+	if x == y {
+		a := c.FitSquareE(exts[x])
+		exts[x] = a
+		return a, a
+	}
+	a, b := c.FitE(exts[x], exts[y])
+	exts[x] = a
+	exts[y] = b
+	return a, b
+}
+
 func (circuit *Circuit) Define(api frontend.API) error {
 	// Get the file name from an environment variable.
 	fileName := os.Getenv("CONSTRAINTS_JSON")
@@ -142,11 +170,16 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "MulV":
 			vars[cs.Args[0][0]] = api.Mul(vars[cs.Args[1][0]], vars[cs.Args[2][0]])
 		case "MulF":
-			felts[cs.Args[0][0]] = fieldAPI.MulF(felts[cs.Args[1][0]], felts[cs.Args[2][0]])
+			a, b := fitF(fieldAPI, felts, cs.Args[1][0], cs.Args[2][0])
+			felts[cs.Args[0][0]] = fieldAPI.MulF(a, b)
 		case "MulE":
-			exts[cs.Args[0][0]] = fieldAPI.MulE(exts[cs.Args[1][0]], exts[cs.Args[2][0]])
+			a, b := fitE(fieldAPI, exts, cs.Args[1][0], cs.Args[2][0])
+			exts[cs.Args[0][0]] = fieldAPI.MulE(a, b)
 		case "MulEF":
-			exts[cs.Args[0][0]] = fieldAPI.MulEF(exts[cs.Args[1][0]], felts[cs.Args[2][0]])
+			a, b := fieldAPI.FitEF(exts[cs.Args[1][0]], felts[cs.Args[2][0]])
+			exts[cs.Args[1][0]] = a
+			felts[cs.Args[2][0]] = b
+			exts[cs.Args[0][0]] = fieldAPI.MulEF(a, b)
 		case "DivE":
 			exts[cs.Args[0][0]] = fieldAPI.DivE(exts[cs.Args[1][0]], exts[cs.Args[2][0]])
 		case "DivEF":

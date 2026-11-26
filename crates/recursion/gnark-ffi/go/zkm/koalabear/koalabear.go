@@ -19,6 +19,23 @@ import (
 var modulus = new(big.Int).SetUint64(2130706433)
 var modulus_sub_1 = new(big.Int).SetUint64(2130706432)
 
+// A value is kept unreduced, as an integer with a known bound, for as long as
+// it can be: a reduction costs the circuit one constraint per bit of the
+// bound, so it pays to reduce a value once, late, rather than after every
+// operation.
+//
+// lazyBits bounds what an operation returns: a result whose bound has this
+// many bits is reduced.  nativeBits bounds every integer the chip forms,
+// products and their sums included: 2^nativeBits is below the 254-bit native
+// field with room for the reduction's own identity, so nothing wraps.
+const lazyBits = 244
+const nativeBits = 250
+
+// The bits a coefficient of an extension product has above the sum of its
+// operands' bits: it is a sum of five products, and the fold adds at most
+// four such sums or lifted moduli.
+const extProductSlack = 6
+
 func init() {
 	// These functions must be public so Gnark's hint system can access them.
 	solver.RegisterHint(InvFHint)
@@ -121,7 +138,29 @@ func (c *Chip) SubF(a, b Variable) Variable {
 	return c.AddF(a, negB)
 }
 
+// FitF returns the two operands of a product, the wider reduced first, such
+// that the product stays below 2^nativeBits.
+func (c *Chip) FitF(a, b Variable) (Variable, Variable) {
+	for a.UpperBound.BitLen()+b.UpperBound.BitLen() > nativeBits {
+		if a.UpperBound.BitLen() >= b.UpperBound.BitLen() {
+			a = c.ReduceSlow(a)
+		} else {
+			b = c.ReduceSlow(b)
+		}
+	}
+	return a, b
+}
+
+// FitSquareF is FitF for the product of a value with itself.
+func (c *Chip) FitSquareF(a Variable) Variable {
+	if 2*a.UpperBound.BitLen() > nativeBits {
+		return c.ReduceSlow(a)
+	}
+	return a
+}
+
 func (c *Chip) MulF(a, b Variable, forceReduce ...bool) Variable {
+	a, b = c.FitF(a, b)
 	result := Variable{
 		Value:      c.api.Mul(a.Value, b.Value),
 		UpperBound: new(big.Int).Mul(a.UpperBound, b.UpperBound),
@@ -133,6 +172,9 @@ func (c *Chip) MulF(a, b Variable, forceReduce ...bool) Variable {
 }
 
 func (c *Chip) MulFConst(a Variable, b int, forceReduce ...bool) Variable {
+	if a.UpperBound.BitLen()+big.NewInt(int64(b)).BitLen() > nativeBits {
+		a = c.ReduceSlow(a)
+	}
 	result := Variable{
 		Value:      c.api.Mul(a.Value, b),
 		UpperBound: new(big.Int).Mul(a.UpperBound, new(big.Int).SetUint64(uint64(b))),
@@ -258,6 +300,7 @@ func (c *Chip) SubEF(a ExtensionVariable, b Variable) ExtensionVariable {
 // X^6 = X - X^3, X^7 = X^2 - X^4 and X^8 = X^3 + X^2 - 1 fold c[5..8] into
 // the low coefficients.
 func (c *Chip) MulE(a, b ExtensionVariable) ExtensionVariable {
+	a, b = c.FitE(a, b)
 	var p [2*D - 1]Variable
 	for i := range p {
 		p[i] = Zero()
@@ -269,18 +312,79 @@ func (c *Chip) MulE(a, b ExtensionVariable) ExtensionVariable {
 	}
 
 	var r [D]Variable
-	r[0] = c.SubF(c.AddF(p[0], p[5], false), p[8])
+	r[0] = c.subLazy(c.AddF(p[0], p[5], false), p[8])
 	r[1] = c.AddF(p[1], p[6], false)
-	r[2] = c.AddF(c.AddF(c.SubF(p[2], p[5]), p[7], false), p[8], false)
-	r[3] = c.AddF(c.SubF(p[3], p[6]), p[8], false)
-	r[4] = c.SubF(p[4], p[7])
+	r[2] = c.AddF(c.AddF(c.subLazy(p[2], p[5]), p[7], false), p[8], false)
+	r[3] = c.AddF(c.subLazy(p[3], p[6]), p[8], false)
+	r[4] = c.subLazy(p[4], p[7])
 	for i := 0; i < D; i++ {
 		r[i] = c.reduceFast(r[i])
 	}
 	return ExtensionVariable{Value: r}
 }
 
+// The widest bound among the coefficients, in bits.
+func bitsE(a ExtensionVariable) int {
+	bits := 0
+	for i := 0; i < D; i++ {
+		if n := a.Value[i].UpperBound.BitLen(); n > bits {
+			bits = n
+		}
+	}
+	return bits
+}
+
+// FitE returns the two operands of an extension product, the wider reduced
+// first, such that every coefficient of the product stays below
+// 2^nativeBits: with x and y the operands' bits, a coefficient of the
+// unfolded product is a sum of five products, below 2^(x + y + 3), and a
+// folded one adds at most four such sums or lifted moduli, below
+// 2^(x + y + extProductSlack).
+func (c *Chip) FitE(a, b ExtensionVariable) (ExtensionVariable, ExtensionVariable) {
+	for bitsE(a)+bitsE(b)+extProductSlack > nativeBits {
+		if bitsE(a) >= bitsE(b) {
+			a = c.ReduceE(a)
+		} else {
+			b = c.ReduceE(b)
+		}
+	}
+	return a, b
+}
+
+// FitSquareE is FitE for the product of a value with itself.
+func (c *Chip) FitSquareE(a ExtensionVariable) ExtensionVariable {
+	if 2*bitsE(a)+extProductSlack > nativeBits {
+		return c.ReduceE(a)
+	}
+	return a
+}
+
+// FitEF is FitE for the product of an extension value and a base value.
+func (c *Chip) FitEF(a ExtensionVariable, b Variable) (ExtensionVariable, Variable) {
+	for bitsE(a)+b.UpperBound.BitLen() > nativeBits {
+		if bitsE(a) >= b.UpperBound.BitLen() {
+			a = c.ReduceE(a)
+		} else {
+			b = c.ReduceSlow(b)
+		}
+	}
+	return a, b
+}
+
+// subLazy returns a - b as a + (m - b), with m the least multiple of the
+// modulus above b's bound, and reduces nothing: MulE folds with it, so that
+// each coefficient of a product is reduced at most once.
+func (c *Chip) subLazy(a, b Variable) Variable {
+	divisor := new(big.Int).Div(b.UpperBound, modulus)
+	lifted := new(big.Int).Mul(divisor.Add(divisor, big.NewInt(1)), modulus)
+	return Variable{
+		Value:      c.api.Add(a.Value, c.api.Sub(lifted, b.Value)),
+		UpperBound: new(big.Int).Add(a.UpperBound, lifted),
+	}
+}
+
 func (c *Chip) MulEF(a ExtensionVariable, b Variable) ExtensionVariable {
+	a, b = c.FitEF(a, b)
 	var out ExtensionVariable
 	for i := 0; i < D; i++ {
 		out.Value[i] = c.MulF(a.Value[i], b)
@@ -341,7 +445,7 @@ func (c *Chip) ToBinary(in Variable) []frontend.Variable {
 }
 
 func (p *Chip) reduceFast(x Variable) Variable {
-	if x.UpperBound.BitLen() >= 120 {
+	if x.UpperBound.BitLen() >= lazyBits {
 		return Variable{
 			Value:      p.reduceWithMaxBits(x.Value, uint64(x.UpperBound.BitLen())),
 			UpperBound: modulus_sub_1,
