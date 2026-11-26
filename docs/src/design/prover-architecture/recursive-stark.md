@@ -31,7 +31,7 @@ Recursion programs run on a small virtual machine over KoalaBear whose execution
 | Chip | Role |
 |---|---|
 | `MemoryConst`, `MemoryVar` | the program's memory: constants and variables |
-| `BaseAlu`, `ExtAlu` | arithmetic in KoalaBear and in its degree-4 extension |
+| `BaseAlu`, `ExtAlu` | arithmetic in KoalaBear and in its degree-5 extension |
 | `Poseidon2Wide` | the Poseidon2 permutation, for Merkle paths and the transcript |
 | `Select` | conditional selection |
 | `Ext2Felt` | decomposition of an extension element into base-field coefficients |

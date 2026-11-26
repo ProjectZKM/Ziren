@@ -12,7 +12,7 @@ The code is in `crates/pcs/src/shard_level/` (prover and verifier), `crates/pcs/
 ## Fields, hash and transcript
 
 - Base field: KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\).
-- Challenge field: the degree-4 extension, `BinomialExtensionField<KoalaBear, 4>`.
+- Challenge field: the degree-5 extension by a root of \\( X^5 + X^2 - 1 \\), `QuinticTrinomialExtensionField<KoalaBear>`.
 - Hash: Poseidon2 over KoalaBear with width 16. Merkle trees use a padding-free sponge for leaves and a truncated permutation for internal nodes, with 8-element digests.
 - Transcript: a duplex challenger on the same permutation.
 
@@ -67,19 +67,22 @@ The production schedule for a core shard (`core_whir_config` in `crates/pcs/src/
 | Parameter | Value |
 |---|---|
 | Stacking height | \\( 2^{21} \\) |
-| Starting rate | \\( \rho = 2^{-2} \\); each committed round divides it by 8 |
+| Starting rate | \\( \rho = 2^{-1} \\); each committed round divides it by 8 |
 | Folding factors | 3, then 6, 6 |
-| Queries per committed round | 124, 88 (final: 85) |
+| Queries per committed round | 256, 60 (final: 33) |
 | Out-of-domain samples | 2 per committed round |
 | Query grinding | 22 bits (`ZIREN_WHIR_QUERY_GRINDING_BITS`) |
+| Folding grinding | none in the first round, then 4 to 11 bits per folding challenge |
 | Batching grinding | 14 bits (`ZIREN_WHIR_BATCH_GRINDING_BITS`) |
 | LogUp-GKR grinding | 22 bits (`ZIREN_LOGUP_GRINDING_BITS`) |
 
-The query counts are not listed in the code but solved. In the unique-decoding regime, a query into a code of rate \\( \rho \\) is worth \\( -\log_2((1 + \rho)/2) \\) bits, so a round with \\( q \\) queries and \\( g \\) grinding bits gives \\( q \cdot (-\log_2((1+\rho)/2)) + g \\) bits. The solver picks the least \\( q \\) that reaches the per-component target, `ZIREN_SOUNDNESS_TARGET_BITS` (default 106). At the defaults:
+The query counts are not listed in the code but solved. The first oracle, the stripe trees, is counted in the unique-decoding regime, where a query into a code of rate \\( \rho \\) is worth \\( -\log_2((1 + \rho)/2) \\) bits. The oracles committed later are counted under the Johnson bound with multiplicity \\( m = 3 \\), where a query is worth \\( -\log_2(\sqrt{\rho}\,(1 + 1/(2m))) \\) bits. A round with \\( q \\) queries and \\( g \\) grinding bits gives \\( q \\) times the bits of a query, plus \\( g \\). The solver picks the least \\( q \\) that reaches the per-component target, `ZIREN_SOUNDNESS_TARGET_BITS` (default 128). At the defaults:
 
-\\[ 124 \cdot 0.678 + 22 = 106.08, \quad 88 \cdot 0.956 + 22 = 106.09, \quad 85 \cdot 0.994 + 22 = 106.52. \\]
+\\[ 256 \cdot 0.415 + 22 = 128.25, \quad 60 \cdot 1.778 + 22 = 128.66, \quad 33 \cdot 3.278 + 22 = 130.16. \\]
 
-The target is 106 rather than 100 because a shard transcript has about two dozen components, and a union bound over them should still exceed 100 bits: \\( 100 + \log_2 24 \approx 104.6 \\). Lowering a grinding parameter through the environment raises the query counts instead of weakening a round. These are bounds on the interactive protocol; the Fiat-Shamir transformation costs a further factor in the number of hash queries an adversary makes.
+Under the Johnson bound a folding challenge has to beat the list of codewords near the oracle, so each folding challenge of the later rounds grinds what its own error needs to reach the target. The first round folds an oracle with one codeword in range and needs no grinding.
+
+The target applies to each component. A shard transcript has about two dozen components, and a union bound over them gives about 124 bits. Lowering a grinding parameter through the environment raises the query counts instead of weakening a round. These are bounds on the interactive protocol; the Fiat-Shamir transformation costs a further factor in the number of hash queries an adversary makes.
 
 ## Verification
 

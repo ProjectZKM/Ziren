@@ -30,7 +30,7 @@ This documentation describes Ziren V2.0.
 
 - **Cross-shard memory consistency by a global challenge.** Memory values handed from one shard to another are global lookups, balanced over the whole execution by one LogUp challenge drawn from a hash chain over every shard's committed global rows (see [Memory Consistency Checking](../design/memory-checking.md)), rather than by Merkle hashing.
 
-- **KoalaBear field.** Arithmetic is over the prime \\(2^{31} - 2^{24} + 1\\), with a degree-4 extension for challenges.
+- **KoalaBear field.** Arithmetic is over the prime \\(2^{31} - 2^{24} + 1\\), with a degree-5 extension for challenges.
 
 - **GPU proving.** A CUDA implementation of the same protocol generates traces and proves shards on the GPU; the host only executes the guest and coordinates.
 
