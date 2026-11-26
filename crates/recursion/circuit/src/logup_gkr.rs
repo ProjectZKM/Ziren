@@ -230,12 +230,16 @@ where
         accumulator: SymbolicExt::ZERO,
         public_values,
         local_interaction_digest: SymbolicExt::ZERO,
+        denominators: Vec::new(),
         _marker: PhantomData,
     };
 
     eval_public_values_fn(&mut folder);
 
     builder.assert_ext_eq(folder.accumulator, SymbolicExt::ZERO);
+    for denominator in folder.denominators {
+        builder.assert_ext_ne(denominator, SymbolicExt::<C::F, C::EF>::ZERO);
+    }
 
     folder.local_interaction_digest
 }
@@ -389,6 +393,7 @@ where
     let mut local_sum: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
     let mut global_sum: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
     for (k, (n, d)) in numerator.iter().zip(denominator.iter()).enumerate() {
+        builder.assert_ext_ne(*d, SymbolicExt::<C::F, C::EF>::ZERO);
         let n_sym: SymbolicExt<C::F, C::EF> = (*n).into();
         let d_sym: SymbolicExt<C::F, C::EF> = (*d).into();
         if lookup_is_global.get(k % columns).copied().unwrap_or(false) {

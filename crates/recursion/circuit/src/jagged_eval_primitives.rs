@@ -136,7 +136,7 @@ fn partial_lagrange_four<C: CircuitConfig>(
 /// child, 0.03%** — because the symbolic layer already shares those
 /// subexpressions before anything is emitted.  Reverted.
 pub fn emit_branching_program_eval<C: CircuitConfig>(
-    _builder: &mut Builder<C>,
+    builder: &mut Builder<C>,
     z_row: &[SymbolicExt<C::F, C::EF>],
     z_trace: &[SymbolicExt<C::F, C::EF>],
     prefix_sum: &[SymbolicExt<C::F, C::EF>],
@@ -193,6 +193,7 @@ where
         }
         branches = next;
     }
+    crate::univariate_skip::assert_off_skip_domain(builder, z_row[0]);
     let weights = crate::univariate_skip::lagrange_weights::<C>(z_row[0]);
     branches.iter().zip(weights.iter()).fold(SymbolicExt::ZERO, |acc, (s, &w)| acc + w * s[0])
 }

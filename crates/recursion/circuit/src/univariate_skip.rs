@@ -6,13 +6,28 @@
 
 use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use zkm_pcs::shard_level::univariate_skip::{skip_domain, SKIP_BITS, SKIP_SIZE};
-use zkm_recursion_compiler::ir::SymbolicExt;
+use zkm_recursion_compiler::ir::{Builder, SymbolicExt};
 
 use crate::zerocheck::{eq_eval, full_geq};
 use crate::CircuitConfig;
 
-/// `[L_0(z), …, L_15(z)]`.  `z` is a verifier challenge, so `z ∈ D` (a zero
-/// denominator) has probability `16 / |EF|`.
+/// Asserts that `z` lies off the skip domain `D`. On `D` a weight of
+/// [`lagrange_weights`] divides zero by zero, and the recursion machine
+/// accepts any quotient for that. `z` is a verifier challenge, so an honest
+/// proof lands on `D` with probability `16 / |EF|`.
+pub fn assert_off_skip_domain<C: CircuitConfig>(
+    builder: &mut Builder<C>,
+    z: SymbolicExt<C::F, C::EF>,
+) {
+    let mut zp = z;
+    for _ in 0..SKIP_BITS {
+        zp = zp * zp;
+    }
+    builder.assert_ext_ne(zp, SymbolicExt::<C::F, C::EF>::ONE);
+}
+
+/// `[L_0(z), …, L_15(z)]` for `z` off `D`: the caller asserts that with
+/// [`assert_off_skip_domain`].
 pub fn lagrange_weights<C: CircuitConfig>(
     z: SymbolicExt<C::F, C::EF>,
 ) -> Vec<SymbolicExt<C::F, C::EF>>

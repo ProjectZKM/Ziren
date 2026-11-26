@@ -311,6 +311,7 @@ where
         let n_point = point_symbolic.len();
         assert!(n_point > SKIP_BITS, "verify_zerocheck: point too short for the skip");
         let z_hi = &point_symbolic[..n_point - SKIP_BITS];
+        crate::univariate_skip::assert_off_skip_domain(builder, point_symbolic[n_point - 1]);
         let skip_weights: Vec<SymbolicExt<C::F, C::EF>> =
             crate::univariate_skip::lagrange_weights::<C>(point_symbolic[n_point - 1])
                 .into_iter()

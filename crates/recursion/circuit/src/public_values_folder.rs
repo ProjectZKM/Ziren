@@ -56,6 +56,11 @@ pub struct RecursivePublicValuesConstraintFolder<'a, C: Config> {
     /// accumulate into this; the verifier later compares it
     /// against the LogUp-GKR-derived value.
     pub local_interaction_digest: SymbolicExt<C::F, C::EF>,
+    /// The denominator of every fraction in the digest. The verifier asserts
+    /// each non-zero: the recursion machine accepts any quotient of zero by
+    /// zero, so a zero denominator under a zero multiplicity would leave
+    /// the digest free.
+    pub denominators: Vec<SymbolicExt<C::F, C::EF>>,
     /// Phantom for the circuit-config parameter.
     pub _marker: PhantomData<C>,
 }
@@ -133,7 +138,7 @@ where
     /// sum beta_i*value_i)` — mirrors the host
     /// [`zkm_pcs::air::PublicValuesConstraintFolder`].
     fn interaction_fraction(
-        &self,
+        &mut self,
         message: AirLookup<SymbolicExt<C::F, C::EF>>,
     ) -> SymbolicExt<C::F, C::EF> {
         let mut denominator: SymbolicExt<C::F, C::EF> = (*self.perm_challenges.0).into();
@@ -143,6 +148,7 @@ where
         for value in message.values {
             denominator += value * *betas.next().expect("beta_i (value term)");
         }
+        self.denominators.push(denominator);
         message.multiplicity / denominator
     }
 }
@@ -194,6 +200,7 @@ mod tests {
             accumulator: SymbolicExt::ZERO,
             public_values: &public_values,
             local_interaction_digest: SymbolicExt::ZERO,
+            denominators: Vec::new(),
             _marker: PhantomData,
         };
 
