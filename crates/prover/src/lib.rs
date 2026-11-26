@@ -249,6 +249,54 @@ pub const REDUCE_BATCH_SIZE: usize = 3;
 /// proof of it.
 pub const GLOBAL_ROUNDS_PER_PROGRAM: usize = 8;
 
+/// The weight of the global rounds one global-round program opens, at most,
+/// unless it opens a single round. A round weighs the stacking blocks it
+/// commits plus [`GLOBAL_ROUND_FIXED_BLOCKS`].
+///
+/// The program has to fit a recursion pin class
+/// (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`), and it grows with the rows its
+/// queries open: every first-round query of a global proof opens one row of
+/// each block of the round. Measured on mainnet blocks, a round of 8 blocks
+/// costs the program 9,080 hash rows and one of 232 blocks 60,664, so 230 rows
+/// a block and 32 blocks' worth besides; the largest class holds about 200,000
+/// hash rows, 870 in this weight, and the bound leaves a third of it free.
+pub const GLOBAL_BLOCKS_PER_PROGRAM: usize = 576;
+
+/// What a global round weighs besides its blocks: the part of verifying its
+/// global proof that does not grow with the round.
+pub const GLOBAL_ROUND_FIXED_BLOCKS: usize = 32;
+
+/// Cuts consecutive global rounds into the groups that one global-round
+/// program each opens, in order. `rounds` holds the shape and the stacking
+/// blocks of each round. A group holds rounds of one shape, at most
+/// `max_rounds` of them, and weighs at most [`GLOBAL_BLOCKS_PER_PROGRAM`]
+/// unless it is a single round.
+pub fn global_round_groups<S: PartialEq>(
+    rounds: &[(S, usize)],
+    max_rounds: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut weight = 0;
+    for (round, (shape, blocks)) in rounds.iter().enumerate() {
+        let round_weight = blocks + GLOBAL_ROUND_FIXED_BLOCKS;
+        match groups.last_mut() {
+            Some(group)
+                if group.len() < max_rounds
+                    && rounds[group.start].0 == *shape
+                    && weight + round_weight <= GLOBAL_BLOCKS_PER_PROGRAM =>
+            {
+                group.end += 1;
+                weight += round_weight;
+            }
+            _ => {
+                groups.push(round..round + 1);
+                weight = round_weight;
+            }
+        }
+    }
+    groups
+}
+
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
@@ -1693,8 +1741,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// that each one starts the global hash chain where the one before it
     /// ends. `shard_proofs[i]`'s round is opened by the `global_proofs` entry
     /// at its position among the shards that commit one, and one program
-    /// opens up to [`GLOBAL_ROUNDS_PER_PROGRAM`] consecutive rounds whose
-    /// global proofs have the same shape.
+    /// opens the consecutive rounds of one group of [`global_round_groups`].
     pub fn get_recursion_global_round_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1715,24 +1762,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             global_proofs.len(),
             "a core proof holds one global proof for each shard with a global round"
         );
-        let shapes = global_proofs
+        let blocks = shard_proofs
             .iter()
-            .map(|proof| {
-                zkm_recursion_circuit::machine::global_proof_shape_key(&proof.jagged_shard_proof)
+            .filter_map(|proof| machine.global_round_binding(proof))
+            .map(|round| machine.global_round_blocks(&round));
+        let rounds = global_proofs
+            .iter()
+            .zip(blocks)
+            .map(|(proof, blocks)| {
+                let shape = zkm_recursion_circuit::machine::global_proof_shape_key(
+                    &proof.jagged_shard_proof,
+                );
+                (shape, blocks)
             })
             .collect::<Vec<_>>();
-        let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
-        for (round, shape) in shapes.iter().enumerate() {
-            match groups.last_mut() {
-                Some(group)
-                    if group.len() < GLOBAL_ROUNDS_PER_PROGRAM && shapes[group.start] == *shape =>
-                {
-                    group.end += 1
-                }
-                _ => groups.push(round..round + 1),
-            }
-        }
-        groups
+        global_round_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM)
             .into_iter()
             .rev()
             .map(|group| {
@@ -3502,6 +3546,24 @@ pub mod tests {
 
         Ok(())
     }
+
+    /// The rounds of a large block, as `(shape, stacking blocks)`: small
+    /// rounds fill a program by count, a change of shape starts a program, the
+    /// memory shards' rounds of 232 blocks go two to a program (four of them in
+    /// one program fit no pin class), and a round past the whole budget still
+    /// gets a program of its own.
+    #[test]
+    fn global_round_groups_bound_what_a_program_opens() {
+        let mut rounds: Vec<(u8, usize)> = vec![(0, 8)];
+        rounds.extend([(1, 8); 19]);
+        rounds.extend([(2, 232); 5]);
+        rounds.push((3, 1024));
+        rounds.push((3, 1024));
+        let groups = global_round_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM);
+        assert_eq!(groups, vec![0..1, 1..9, 9..17, 17..20, 20..22, 22..24, 24..25, 25..26, 26..27]);
+        assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
+    }
+
     /// The fibonacci test guest reads its `n` from standard input (as
     /// `examples/fibonacci` does), so every caller has to supply one. Ten keeps
     /// the cycle count the tests were tuned against.

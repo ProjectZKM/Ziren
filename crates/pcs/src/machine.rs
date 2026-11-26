@@ -988,6 +988,33 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         Some(crate::logup_gkr::GlobalRoundBinding { commitment, chips })
     }
 
+    /// The stacking blocks the global round `round` commits
+    /// ([`crate::jagged::global_round_dense_len`]). Each first-round query of
+    /// the round's global proof opens one row of every block, so the blocks
+    /// measure what verifying that proof costs.
+    pub fn global_round_blocks(
+        &self,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+    ) -> usize {
+        let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let cube = 1usize
+            << crate::shard_level::verifier::JaggedShardVerifier::production_default()
+                .max_log_row_count;
+        let cells: usize = round
+            .chips
+            .iter()
+            .map(|(name, height)| {
+                let width = self
+                    .chips()
+                    .iter()
+                    .find(|chip| chip.name() == *name)
+                    .map_or(0, |chip| <A as BaseAir<Val<SC>>>::width(&chip.air));
+                height * width
+            })
+            .sum();
+        crate::jagged::global_round_dense_len(cells, log_stack, cube) >> log_stack
+    }
+
     /// Checks that every chip with a global-scope lookup is committed in
     /// the global round, so all the columns a global message reads are
     /// committed before the global challenge is drawn.
