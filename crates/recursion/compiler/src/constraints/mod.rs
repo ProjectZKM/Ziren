@@ -342,6 +342,17 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                         args: vec![vec![a.id()], vec![tmp]],
                     });
                 }
+                DslIr::AssertNeE(a, b) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::AssertNeE,
+                    args: vec![vec![a.id()], vec![b.id()]],
+                }),
+                DslIr::AssertNeEI(a, b) => {
+                    let tmp = self.alloc_e(&mut constraints, b);
+                    constraints.push(Constraint {
+                        opcode: ConstraintOpcode::AssertNeE,
+                        args: vec![vec![a.id()], vec![tmp]],
+                    });
+                }
                 DslIr::AssertEqEI(a, b) => {
                     let tmp = self.alloc_e(&mut constraints, b);
                     constraints.push(Constraint {

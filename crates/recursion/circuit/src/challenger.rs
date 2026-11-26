@@ -818,6 +818,48 @@ pub(crate) mod tests {
         PlonkBn254Prover::test::<C>(constraints, OuterWitness::default());
     }
 
+    /// The outer circuit of `a != b` over extension witnesses, `b` also as a
+    /// constant: the LogUp-GKR verifier asserts its denominators non-zero this
+    /// way, and the wrap circuit runs that verifier.
+    fn outer_ext_ne_circuit(a: EF, b: EF) {
+        use crate::witness::WitnessWriter;
+
+        let mut builder = Builder::<C>::default();
+        let mut witness = OuterWitness::default();
+        witness.write_ext(a);
+        witness.write_ext(b);
+        let a_var = builder.witness_ext();
+        let b_var = builder.witness_ext();
+        builder.assert_ext_ne(a_var, b_var);
+        builder.assert_ext_ne(a_var, b.cons());
+
+        let mut backend = ConstraintCompiler::<C>::default();
+        let constraints = backend.emit(builder.into_operations());
+        PlonkBn254Prover::test::<C>(constraints, witness);
+    }
+
+    #[test]
+    fn outer_ext_ne_accepts_elements_that_differ_in_one_coefficient() {
+        use p3_field::BasedVectorSpace;
+
+        let a = EF::from_basis_coefficients_fn(|i| F::from_u32(7 + i as u32));
+        for differing in 0..<EF as BasedVectorSpace<F>>::DIMENSION {
+            let b = EF::from_basis_coefficients_fn(|i| {
+                F::from_u32(7 + i as u32) + F::from_bool(i == differing)
+            });
+            outer_ext_ne_circuit(a, b);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Test failed")]
+    fn outer_ext_ne_rejects_equal_elements() {
+        use p3_field::BasedVectorSpace;
+
+        let a = EF::from_basis_coefficients_fn(|i| F::from_u32(7 + i as u32));
+        outer_ext_ne_circuit(a, a);
+    }
+
     #[test]
     fn test_select_chain_digest() {
         type N = <C as Config>::N;
