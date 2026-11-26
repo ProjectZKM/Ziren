@@ -2,7 +2,7 @@ use p3_air::AirBuilder;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{BinomialExtension, ExtensionAirBuilder};
+use zkm_pcs::air::{ExtensionAirBuilder, QuinticExtension};
 
 use std::ops::{Index, IndexMut};
 
@@ -47,9 +47,9 @@ impl<T> Block<T> {
 }
 
 impl<T: Clone> Block<T> {
-    pub fn as_extension<AB: ExtensionAirBuilder<Var = T>>(&self) -> BinomialExtension<AB::Expr> {
+    pub fn as_extension<AB: ExtensionAirBuilder<Var = T>>(&self) -> QuinticExtension<AB::Expr> {
         let arr: [AB::Expr; D] = self.0.clone().map(|x| AB::Expr::ZERO + x);
-        BinomialExtension(arr)
+        QuinticExtension(arr)
     }
 }
 

@@ -227,13 +227,13 @@ impl SysLinuxChip {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+    use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use zkm_core_executor::events::{ByteLookupMap, MemoryWriteRecord};
     use zkm_pcs::constraints_hold_on_row;
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
     const P: u32 = 0x7F00_0001;
 
     fn linux_row(code: SyscallCode, a0: u32, a1: u32, result: u32, a3: u32) -> Vec<F> {

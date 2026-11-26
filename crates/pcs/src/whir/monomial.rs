@@ -111,7 +111,10 @@ mod test {
     }
     fn rand_ef(r: &mut StdRng) -> EF {
         use p3_field::BasedVectorSpace;
-        <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| clamp(r))).unwrap()
+        <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
+            (0..crate::air::EXTENSION_DEGREE).map(|_| clamp(r)),
+        )
+        .unwrap()
     }
 
     /// The keystone: a monomial multilinear eval at `map_to_pow(x)` equals the

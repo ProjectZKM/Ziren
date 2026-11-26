@@ -1698,7 +1698,7 @@ mod test {
 
     fn rand_ef<R: Rng>(rng: &mut R) -> JaggedChallenge {
         <JaggedChallenge as BasedVectorSpace<JaggedVal>>::from_basis_coefficients_iter(
-            (0..4).map(|_| rand_kb(rng)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(rng)),
         )
         .unwrap()
     }

@@ -142,13 +142,13 @@ impl Poseidon2PermuteChip {
 mod tests {
     use super::*;
     use crate::operations::poseidon2::permutation::Poseidon2Cols;
-    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+    use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use zkm_core_executor::{events::MemoryWriteRecord, ByteOpcode};
     use zkm_pcs::{constraints_hold_on_row, Chip, LookupKind};
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
     const P: u32 = 0x7F00_0001;
 
     fn pointer_row(addr: u32) -> Vec<F> {

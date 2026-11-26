@@ -372,18 +372,18 @@ mod tests {
     use crate::shard_level::test_machine::{MockProgram, MockRecord};
     use crate::shard_level::zerocheck_poly::compute_padded_row_adjustment;
     use p3_air::{BaseAir, WindowAccess};
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{Rng, SeedableRng};
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     fn rand_ef(rng: &mut impl Rng) -> EF {
         EF::from_basis_coefficients_iter(
-            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
         )
         .unwrap()
     }

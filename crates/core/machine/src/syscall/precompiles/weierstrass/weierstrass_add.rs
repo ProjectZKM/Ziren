@@ -462,7 +462,7 @@ mod tests {
 
     use super::*;
     use crate::utils::{run_test, setup_logger};
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_koala_bear::KoalaBear;
     use zkm_curves::weierstrass::secp256k1::{Secp256k1, Secp256k1BaseField, Secp256k1Parameters};
     use zkm_curves::weierstrass::WeierstrassParameters;
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn adding_a_point_to_itself_is_rejected() {
         type F = KoalaBear;
-        type EF = BinomialExtensionField<KoalaBear, 4>;
+        type EF = QuinticTrinomialExtensionField<KoalaBear>;
         let width = num_weierstrass_add_cols::<Secp256k1BaseField>();
         let mut row = vec![F::ZERO; width];
         let cols: &mut Cols<F> = row.as_mut_slice().borrow_mut();

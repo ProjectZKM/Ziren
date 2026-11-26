@@ -10,7 +10,7 @@ use zkm_recursion_compiler::{
 };
 use zkm_recursion_core::{
     air::ChallengerPublicValues,
-    runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    runtime::{D, HASH_RATE, PERMUTATION_WIDTH},
     stark::{
         OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE, OUTER_MULTI_FIELD_CHALLENGER_RATE,
         OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
@@ -222,11 +222,8 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
     for DuplexChallengerVariable<C>
 {
     fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
-        let a = self.sample(builder);
-        let b = self.sample(builder);
-        let c = self.sample(builder);
-        let d = self.sample(builder);
-        builder.ext_from_base_slice(&[a, b, c, d])
+        let coefficients: [Felt<C::F>; D] = core::array::from_fn(|_| self.sample(builder));
+        builder.ext_from_base_slice(&coefficients)
     }
 
     fn check_witness(
@@ -858,6 +855,49 @@ pub(crate) mod tests {
 
         let a = EF::from_basis_coefficients_fn(|i| F::from_u32(7 + i as u32));
         outer_ext_ne_circuit(a, a);
+    }
+
+    #[test]
+    fn outer_extension_arithmetic_matches_the_field() {
+        use crate::witness::WitnessWriter;
+        use p3_field::BasedVectorSpace;
+        use rand::{rngs::StdRng, Rng, SeedableRng};
+
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut rand_ef =
+            || EF::from_basis_coefficients_fn(|_| F::from_u32(rng.gen::<u32>() % F::ORDER_U32));
+
+        let mut builder = Builder::<C>::default();
+        let mut witness = OuterWitness::default();
+        for _ in 0..4 {
+            let (a, b) = (rand_ef(), rand_ef());
+            witness.write_ext(a);
+            witness.write_ext(b);
+            let a_var = builder.witness_ext();
+            let b_var = builder.witness_ext();
+
+            let product: Ext<_, _> = builder.eval(a_var * b_var);
+            let expected: Ext<_, _> = builder.eval((a * b).cons());
+            builder.assert_ext_eq(product, expected);
+
+            let quotient: Ext<_, _> = builder.eval(a_var / b_var);
+            let expected: Ext<_, _> = builder.eval((a / b).cons());
+            builder.assert_ext_eq(quotient, expected);
+
+            let felts = builder.ext2felt_circuit(product);
+            let ab = a * b;
+            let coefficients: &[F] = ab.as_basis_coefficients_slice();
+            for (felt, coefficient) in zip(felts.iter(), coefficients) {
+                let expected: Felt<_> = builder.eval(*coefficient);
+                builder.assert_felt_eq(*felt, expected);
+            }
+            let rebuilt = builder.felts2ext(&felts);
+            builder.assert_ext_eq(rebuilt, product);
+        }
+
+        let mut backend = ConstraintCompiler::<C>::default();
+        let constraints = backend.emit(builder.into_operations());
+        PlonkBn254Prover::test::<C>(constraints, witness);
     }
 
     #[test]

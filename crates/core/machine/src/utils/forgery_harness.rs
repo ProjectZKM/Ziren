@@ -55,7 +55,7 @@ use crate::utils::{prove_with_context, setup_logger};
 
 type SC = KoalaBearPoseidon2;
 type Val = KoalaBear;
-type Challenge = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+type Challenge = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
 /// The fibonacci guest reads one `u32` from the input stream, so an empty
 /// stream fails its first syscall before any trace exists.

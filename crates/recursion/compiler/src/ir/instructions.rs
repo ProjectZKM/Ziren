@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use zkm_recursion_core::air::RecursionPublicValues;
+use zkm_recursion_core::{air::RecursionPublicValues, D};
 
 use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Config, Ext, Felt, FriFoldInput,
@@ -304,14 +304,14 @@ pub enum DslIr<C: Config> {
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
     CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts (D=4). Should only be used when target is a gnark circuit.
-    CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts (D=4) on the `Ext2Felt` CHIP: the
+    /// Converts an ext to its felts. Should only be used when target is a gnark circuit.
+    CircuitExt2Felt([Felt<C::F>; D], Ext<C::F, C::EF>),
+    /// Converts an ext to its felts on the `Ext2Felt` CHIP: the
     /// chip receives the input block and sends the limbs from the same trace
     /// cells, so the call site needs no monomial re-binding.  Only valid for
     /// programs proven on the compress machine (normalize/compose/deferred);
     /// shrink/wrap programs keep `CircuitExt2Felt` + the DSL binding.
-    CircuitV2Ext2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    CircuitV2Ext2Felt([Felt<C::F>; D], Ext<C::F, C::EF>),
     /// The jagged verifier's per-column prefix-sum check on the
     /// `PrefixSumChecks` CHIP: `(zero, one, accs, field_accs, bits, point)`,
     /// see `zkm_recursion_core::PrefixSumChecksIo`.  Only valid for programs
@@ -326,12 +326,8 @@ pub enum DslIr<C: Config> {
             Vec<Ext<C::F, C::EF>>,
         )>,
     ),
-    /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
-    CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.
-    CircuitExt2Felt5([Felt<C::F>; 5], Ext<C::F, C::EF>),
-    /// Converts a slice of felts to an ext (D=5). Should only be used when target is a gnark circuit.
-    CircuitFelts2Ext5([Felt<C::F>; 5], Ext<C::F, C::EF>),
+    /// Converts felts to an ext. Should only be used when target is a gnark circuit.
+    CircuitFelts2Ext([Felt<C::F>; D], Ext<C::F, C::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.

@@ -306,6 +306,6 @@ mod unsafe_record_tests {
         assert_eq!(exec.base_alu_events[2].in2, k(6));
         assert_eq!(exec.ext_alu_events.len(), 0);
         assert_eq!(exec.poseidon2_events.len(), 0);
-        let _ = Block([k(0); 4]);
+        let _ = Block([k(0); crate::D]);
     }
 }

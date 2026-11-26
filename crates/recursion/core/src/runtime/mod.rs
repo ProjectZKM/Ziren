@@ -63,7 +63,7 @@ pub const DIGEST_SIZE: usize = 8;
 
 pub const NUM_BITS: usize = 31;
 
-pub const D: usize = 4;
+pub const D: usize = zkm_pcs::air::EXTENSION_DEGREE;
 
 /// Per-walker mutable state for the parallel SeqBlock executor. Each parallel
 /// sub-walker allocates its own `WalkerState` on the stack so the walker
@@ -716,7 +716,8 @@ where
                     }
                 }
             },
-            Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+            Instruction::HintExt2Felts(instr) => {
+                let HintExt2FeltsInstr { output_addrs_mults, input_addr } = instr.as_ref();
                 state.nb_bit_decompositions += 1;
                 let fs = self.mr_us(*input_addr).val;
                 for (i, (f, (addr, mult))) in
@@ -732,7 +733,8 @@ where
                     }
                 }
             }
-            Instruction::Ext2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+            Instruction::Ext2Felts(instr) => {
+                let HintExt2FeltsInstr { output_addrs_mults, input_addr } = instr.as_ref();
                 state.nb_bit_decompositions += 1;
                 let fs = self.mr_us(*input_addr).val;
                 for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults.iter().copied()) {

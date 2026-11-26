@@ -225,7 +225,7 @@ mod eval_tests {
     use super::*;
     use crate::air::LookupScope;
 
-    type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
     #[test]
     fn eval_matches_generate_interaction_vals_send_and_receive() {

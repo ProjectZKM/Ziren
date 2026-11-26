@@ -199,7 +199,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     #[test]
     fn jagged_shard_proof_rmp_roundtrip() {

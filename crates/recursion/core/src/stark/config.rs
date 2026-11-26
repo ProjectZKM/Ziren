@@ -2,7 +2,7 @@ use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::QuinticTrinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -21,7 +21,7 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
 /// A configuration for outer recursion.
 pub type OuterVal = KoalaBear;
-pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
+pub type OuterChallenge = QuinticTrinomialExtensionField<OuterVal>;
 pub type OuterPerm = Poseidon2Bn254<3>;
 pub type OuterHash = MultiField32PaddingFreeSponge<
     OuterVal,

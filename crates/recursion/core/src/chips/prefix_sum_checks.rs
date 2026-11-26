@@ -9,7 +9,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use zkm_core_machine::utils::{next_multiple_of_32_rows, pad_rows};
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{BinomialExtension, MachineAir};
+use zkm_pcs::air::{MachineAir, QuinticExtension};
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -205,9 +205,9 @@ where
         let prep_local = prep.current_slice();
         let prep_local: &PrefixSumChecksPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
-        let x1: BinomialExtension<AB::Expr> = BinomialExtension::from_base(local.x1.into());
+        let x1: QuinticExtension<AB::Expr> = QuinticExtension::from_base(local.x1.into());
         let x2 = local.x2.as_extension::<AB>();
-        let one: BinomialExtension<AB::Expr> = BinomialExtension::from_base(AB::Expr::ONE);
+        let one: QuinticExtension<AB::Expr> = QuinticExtension::from_base(AB::Expr::ONE);
         let two = AB::Expr::TWO;
         let prod = x1.clone() * x2.clone();
         let sum = x1 + x2;
@@ -241,7 +241,9 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{extension::BinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing};
+    use p3_field::{
+        extension::QuinticTrinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing,
+    };
     use p3_koala_bear::KoalaBear;
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -249,7 +251,7 @@ mod tests {
     use crate::runtime::instruction as instr;
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<KoalaBear, D>;
+    type EF = QuinticTrinomialExtensionField<KoalaBear>;
 
     /// Random bit vectors against random points, each chain checked against
     /// the host's Lagrange product and Horner sum at the chain's end.

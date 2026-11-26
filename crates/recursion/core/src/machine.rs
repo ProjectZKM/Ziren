@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use zkm_pcs::{
     air::{MachineAir, PicusInfo},
     shape::OrderedShape,
@@ -33,7 +33,7 @@ use crate::{
 #[builder_path = "crate::builder::ZKMRecursionAirBuilder<F = F>"]
 #[error_path = "crate::RecursionChipError"]
 #[eval_trait_bound = "AB::Var: 'static"]
-pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> {
+pub enum RecursionAir<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
     BaseAlu(BaseAluChip),
@@ -69,7 +69,7 @@ pub struct RecursionAirEventCount {
     pub commit_pv_hash_events: usize,
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> RecursionAir<F, DEGREE> {
     /// A machine with dynamic chip sizes that includes the wide variant of the
     /// Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -189,10 +189,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
                 self.mem_var_events += output_addrs_mults.len()
             }
-            Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                output_addrs_mults,
-                input_addr: _,
-            }) => self.mem_var_events += output_addrs_mults.len(),
+            Instruction::HintExt2Felts(instr) => {
+                self.mem_var_events += instr.output_addrs_mults.len()
+            }
             Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
             Instruction::PrefixSumChecks(instr) => {
                 self.prefix_sum_checks_events += instr.addrs.x1.len()
@@ -302,7 +301,7 @@ pub mod tests {
 
     use crate::machine::RecursionAir;
     use p3_field::{
-        extension::{BinomialExtensionField, HasFrobenius},
+        extension::{HasFrobenius, QuinticTrinomialExtensionField},
         BasedVectorSpace, Field, PrimeCharacteristicRing,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
@@ -492,14 +491,15 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut addr = 0;
         for _ in 0..100 {
-            let inner: [F; 4] =
+            let inner: [F; D] =
                 std::iter::repeat_with(|| core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
                     .find(|xs| !xs.iter().all(F::is_zero))
                     .unwrap();
-            let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
+            let x =
+                QuinticTrinomialExtensionField::<F>::from_basis_coefficients_slice(&inner).unwrap();
             let gal = x.galois_orbit();
 
-            let mut acc = BinomialExtensionField::ONE;
+            let mut acc = QuinticTrinomialExtensionField::ONE;
 
             instructions.push(instr::mem_ext(MemAccessKind::Write, 1, addr, acc));
             for conj in gal {

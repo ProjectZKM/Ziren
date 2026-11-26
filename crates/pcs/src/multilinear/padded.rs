@@ -385,7 +385,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     // Random base-field element (masked below the KoalaBear prime).
     fn rand_f(rng: &mut StdRng) -> F {

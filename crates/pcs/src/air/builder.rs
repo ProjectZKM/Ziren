@@ -7,7 +7,7 @@ use p3_uni_stark::SymbolicAirBuilder;
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
-use super::{lookup::AirLookup, BinomialExtension};
+use super::{lookup::AirLookup, QuinticExtension};
 use crate::{lookup::LookupKind, ProverConstraintFolder, StarkGenericConfig, Word};
 
 /// The default increment for the program counter.  Is used for all instructions except
@@ -500,8 +500,8 @@ pub trait ExtensionAirBuilder: BaseAirBuilder {
     /// Asserts that the two field extensions are equal.
     fn assert_ext_eq<I: Into<Self::Expr>>(
         &mut self,
-        left: BinomialExtension<I>,
-        right: BinomialExtension<I>,
+        left: QuinticExtension<I>,
+        right: QuinticExtension<I>,
     ) {
         for (left, right) in left.0.into_iter().zip(right.0) {
             self.assert_eq(left, right);
@@ -511,7 +511,7 @@ pub trait ExtensionAirBuilder: BaseAirBuilder {
     /// Checks if an extension element is a base element.
     fn assert_is_base_element<I: Into<Self::Expr> + Clone>(
         &mut self,
-        element: BinomialExtension<I>,
+        element: QuinticExtension<I>,
     ) {
         let base_slice = element.as_base_slice();
         let degree = base_slice.len();
@@ -524,10 +524,10 @@ pub trait ExtensionAirBuilder: BaseAirBuilder {
     fn if_else_ext(
         &mut self,
         condition: impl Into<Self::Expr> + Clone,
-        a: BinomialExtension<impl Into<Self::Expr> + Clone>,
-        b: BinomialExtension<impl Into<Self::Expr> + Clone>,
-    ) -> BinomialExtension<Self::Expr> {
-        BinomialExtension(array::from_fn(|i| {
+        a: QuinticExtension<impl Into<Self::Expr> + Clone>,
+        b: QuinticExtension<impl Into<Self::Expr> + Clone>,
+    ) -> QuinticExtension<Self::Expr> {
+        QuinticExtension(array::from_fn(|i| {
             self.if_else(condition.clone(), a.0[i].clone(), b.0[i].clone())
         }))
     }

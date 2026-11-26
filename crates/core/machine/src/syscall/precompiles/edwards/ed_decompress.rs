@@ -293,7 +293,7 @@ where
 pub mod tests {
     use super::*;
     use itertools::Itertools;
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use test_artifacts::ED_DECOMPRESS_ELF;
@@ -336,7 +336,7 @@ pub mod tests {
     #[test]
     fn non_canonical_negated_x_is_rejected() {
         type F = KoalaBear;
-        type EF = BinomialExtensionField<KoalaBear, 4>;
+        type EF = QuinticTrinomialExtensionField<KoalaBear>;
         utils::setup_logger();
         let program = Program::from(ED_DECOMPRESS_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());

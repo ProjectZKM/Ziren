@@ -413,7 +413,8 @@ pub fn fold_soundness_bits(log_inv_rate: usize, log_dim: usize, m: usize) -> f64
             + mp / sqrt_rho;
         (mp / sqrt_rho, gap)
     };
-    let log_field = 4.0 * (<JaggedVal as p3_field::PrimeField64>::ORDER_U64 as f64).log2();
+    let log_field = crate::air::EXTENSION_DEGREE as f64
+        * (<JaggedVal as p3_field::PrimeField64>::ORDER_U64 as f64).log2();
     log_field - (3.0 * list + prox_gap).log2()
 }
 

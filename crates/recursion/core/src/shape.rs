@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use hashbrown::HashMap;
 
 use itertools::Itertools;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
 use zkm_pcs::{air::MachineAir, shape::OrderedShape};
 
@@ -64,7 +64,7 @@ pub struct RecursionShapeConfig<F, A> {
     _marker: PhantomData<(F, A)>,
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
     RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
@@ -257,7 +257,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> Default
     for RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
     fn default() -> Self {
@@ -283,7 +283,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(73_728)),
                 (mem_const.clone(), rows(2_048)),
                 (base_alu.clone(), rows(253_536)),
-                (ext_alu.clone(), rows(323_936)),
+                (ext_alu.clone(), rows(259_136)),
                 (poseidon2_wide.clone(), rows(34_816)),
                 (ext2felt.clone(), rows(34_272)),
                 (prefix_sum_checks.clone(), rows(24_576)),
@@ -294,7 +294,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(147_456)),
                 (mem_const.clone(), rows(4_096)),
                 (base_alu.clone(), rows(507_072)),
-                (ext_alu.clone(), rows(647_872)),
+                (ext_alu.clone(), rows(518_272)),
                 (poseidon2_wide.clone(), rows(69_632)),
                 (ext2felt.clone(), rows(68_512)),
                 (prefix_sum_checks.clone(), rows(163_840)),
@@ -305,7 +305,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(294_912)),
                 (mem_const.clone(), rows(8_192)),
                 (base_alu.clone(), rows(1_014_144)),
-                (ext_alu.clone(), rows(1_295_744)),
+                (ext_alu.clone(), rows(1_036_544)),
                 (poseidon2_wide.clone(), rows(139_264)),
                 (ext2felt.clone(), rows(137_024)),
                 (prefix_sum_checks.clone(), rows(327_680)),

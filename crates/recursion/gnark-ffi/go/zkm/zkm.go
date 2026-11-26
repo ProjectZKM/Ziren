@@ -91,7 +91,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	vars := make(map[string]frontend.Variable)
 	felts := make(map[string]koalabear.Variable)
 	exts := make(map[string]koalabear.ExtensionVariable)
-	ext5s := make(map[string]koalabear.Ext5Variable)
 
 	// Iterate through the witnesses and range check them, if necessary.
 	for i := 0; i < len(circuit.Felts); i++ {
@@ -102,7 +101,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 	}
 	for i := 0; i < len(circuit.Exts); i++ {
-		for j := 0; j < 4; j++ {
+		for j := 0; j < koalabear.D; j++ {
 			if os.Getenv("GROTH16") != "1" {
 				fieldAPI.RangeChecker.Check(circuit.Exts[i].Value[j].Value, 31)
 			} else {
@@ -192,13 +191,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "SelectE":
 			exts[cs.Args[0][0]] = fieldAPI.SelectE(vars[cs.Args[1][0]], exts[cs.Args[2][0]], exts[cs.Args[3][0]])
 		case "Ext2Felt":
-			out := fieldAPI.Ext2Felt(exts[cs.Args[4][0]])
-			for i := 0; i < 4; i++ {
-				felts[cs.Args[i][0]] = out[i]
-			}
-		case "Ext2Felt5":
-			out := fieldAPI.Ext5ToFelt(ext5s[cs.Args[5][0]])
-			for i := 0; i < 5; i++ {
+			out := fieldAPI.Ext2Felt(exts[cs.Args[koalabear.D][0]])
+			for i := 0; i < koalabear.D; i++ {
 				felts[cs.Args[i][0]] = out[i]
 			}
 		case "AssertEqV":
@@ -218,10 +212,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			api.Println(f.Value)
 		case "PrintE":
 			e := fieldAPI.ReduceE(exts[cs.Args[0][0]])
-			api.Println(e.Value[0].Value)
-			api.Println(e.Value[1].Value)
-			api.Println(e.Value[2].Value)
-			api.Println(e.Value[3].Value)
+			for i := 0; i < koalabear.D; i++ {
+				api.Println(e.Value[i].Value)
+			}
 		case "WitnessV":
 			i, err := strconv.Atoi(cs.Args[1][0])
 			if err != nil {
@@ -250,9 +243,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			element := vars[cs.Args[0][0]]
 			api.AssertIsEqual(circuit.VkRoot, element)
 		case "CircuitFelts2Ext":
-			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
-		case "CircuitFelts2Ext5":
-			ext5s[cs.Args[0][0]] = koalabear.Felts2Ext5(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]], felts[cs.Args[5][0]])
+			var coefficients [koalabear.D]koalabear.Variable
+			for i := 0; i < koalabear.D; i++ {
+				coefficients[i] = felts[cs.Args[i+1][0]]
+			}
+			exts[cs.Args[0][0]] = koalabear.Felts2Ext(coefficients)
 		case "CircuitFelt2Var":
 			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
 		case "CircuitVar2FieldOrderLimbs":

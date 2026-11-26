@@ -231,7 +231,7 @@ mod tests {
 
     fn rand_ef(rng: &mut impl Rng) -> EF {
         EF::from_basis_coefficients_iter(
-            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            (0..zkm_recursion_core::D).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
         )
         .unwrap()
     }

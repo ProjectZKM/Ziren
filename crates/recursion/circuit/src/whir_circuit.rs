@@ -145,7 +145,7 @@ where
                             }
                         } else {
                             use p3_field::BasedVectorSpace;
-                            const D: usize = 4;
+                            const D: usize = zkm_recursion_core::D;
                             assert_eq!(l.values.len(), 1, "whir ef leaf is one matrix");
                             let ef_values = l.values[0]
                                 .as_chunks::<D>()
@@ -839,7 +839,7 @@ mod tests {
             .map(|_| {
                 use p3_field::BasedVectorSpace;
                 <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                    (0..4).map(|_| rand_kb(&mut rng)),
+                    (0..zkm_recursion_core::D).map(|_| rand_kb(&mut rng)),
                 )
                 .unwrap()
             })

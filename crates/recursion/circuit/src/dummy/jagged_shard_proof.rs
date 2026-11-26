@@ -595,7 +595,7 @@ fn dummy_stacked_whir_proof(
 
     type F = InnerVal;
     type EF = InnerChallenge;
-    const D: usize = 4;
+    const D: usize = zkm_recursion_core::D;
 
     let config = zkm_pcs::whir::jagged::whir_config_for_profile(profile, log_stacking);
     let rounds = &config.round_parameters;
@@ -692,11 +692,11 @@ fn log2_ceil_usize(n: usize) -> usize {
 mod tests {
     use super::*;
 
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     /// `log2_ceil_usize` matches the canonical ceil-log2 semantics
     /// across the n=0,1,2,3,4,5,8,1024 spectrum.

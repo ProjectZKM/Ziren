@@ -70,10 +70,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
                 | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
                     output_addrs_mults.iter().collect()
                 }
-                Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                    output_addrs_mults,
-                    input_addr: _,
-                }) => output_addrs_mults.iter().collect(),
+                Instruction::HintExt2Felts(instr) => instr.output_addrs_mults.iter().collect(),
                 _ => vec![],
             })
             .collect::<Vec<_>>();

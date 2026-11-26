@@ -33,8 +33,12 @@ type Variable struct {
 	UpperBound *big.Int
 }
 
+// D is the degree of the extension field over KoalaBear.
+const D = 5
+
+// ExtensionVariable is an element of F_p[X]/(X^5 + X^2 - 1), low coefficient first.
 type ExtensionVariable struct {
-	Value [4]Variable
+	Value [D]Variable
 }
 
 type Chip struct {
@@ -82,23 +86,23 @@ func NewF(value string) Variable {
 }
 
 func NewE(value []string) ExtensionVariable {
-	a := NewF(value[0])
-	b := NewF(value[1])
-	c := NewF(value[2])
-	d := NewF(value[3])
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = NewF(value[i])
+	}
+	return out
 }
 
 func NewEConst(value []string) ExtensionVariable {
-	a := NewFConst(value[0])
-	b := NewFConst(value[1])
-	c := NewFConst(value[2])
-	d := NewFConst(value[3])
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = NewFConst(value[i])
+	}
+	return out
 }
 
-func Felts2Ext(a, b, c, d Variable) ExtensionVariable {
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+func Felts2Ext(felts [D]Variable) ExtensionVariable {
+	return ExtensionVariable{Value: felts}
 }
 
 func (c *Chip) AddF(a, b Variable, forceReduce ...bool) Variable {
@@ -189,10 +193,9 @@ func (c *Chip) AssertNotEqualF(a, b Variable) {
 }
 
 func (c *Chip) AssertIsEqualE(a, b ExtensionVariable) {
-	c.AssertIsEqualF(a.Value[0], b.Value[0])
-	c.AssertIsEqualF(a.Value[1], b.Value[1])
-	c.AssertIsEqualF(a.Value[2], b.Value[2])
-	c.AssertIsEqualF(a.Value[3], b.Value[3])
+	for i := 0; i < D; i++ {
+		c.AssertIsEqualF(a.Value[i], b.Value[i])
+	}
 }
 
 // AssertNotEqualE holds when a - b has an inverse, which InvE constrains.
@@ -214,104 +217,104 @@ func (c *Chip) SelectF(cond frontend.Variable, a, b Variable) Variable {
 }
 
 func (c *Chip) SelectE(cond frontend.Variable, a, b ExtensionVariable) ExtensionVariable {
-	return ExtensionVariable{
-		Value: [4]Variable{
-			c.SelectF(cond, a.Value[0], b.Value[0]),
-			c.SelectF(cond, a.Value[1], b.Value[1]),
-			c.SelectF(cond, a.Value[2], b.Value[2]),
-			c.SelectF(cond, a.Value[3], b.Value[3]),
-		},
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = c.SelectF(cond, a.Value[i], b.Value[i])
 	}
+	return out
 }
 
 func (c *Chip) AddEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.AddF(a.Value[0], b)
-	return ExtensionVariable{Value: [4]Variable{v1, a.Value[1], a.Value[2], a.Value[3]}}
+	out := a
+	out.Value[0] = c.AddF(a.Value[0], b)
+	return out
 }
 
 func (c *Chip) AddE(a, b ExtensionVariable) ExtensionVariable {
-	v1 := c.AddF(a.Value[0], b.Value[0])
-	v2 := c.AddF(a.Value[1], b.Value[1])
-	v3 := c.AddF(a.Value[2], b.Value[2])
-	v4 := c.AddF(a.Value[3], b.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = c.AddF(a.Value[i], b.Value[i])
+	}
+	return out
 }
 
 func (c *Chip) SubE(a, b ExtensionVariable) ExtensionVariable {
-	v1 := c.SubF(a.Value[0], b.Value[0])
-	v2 := c.SubF(a.Value[1], b.Value[1])
-	v3 := c.SubF(a.Value[2], b.Value[2])
-	v4 := c.SubF(a.Value[3], b.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = c.SubF(a.Value[i], b.Value[i])
+	}
+	return out
 }
 
 func (c *Chip) SubEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.SubF(a.Value[0], b)
-	return ExtensionVariable{Value: [4]Variable{v1, a.Value[1], a.Value[2], a.Value[3]}}
+	out := a
+	out.Value[0] = c.SubF(a.Value[0], b)
+	return out
 }
 
+// MulE multiplies two extension elements modulo X^5 + X^2 - 1.
+//
+// With c the product of the two polynomials, the identities X^5 = 1 - X^2,
+// X^6 = X - X^3, X^7 = X^2 - X^4 and X^8 = X^3 + X^2 - 1 fold c[5..8] into
+// the low coefficients.
 func (c *Chip) MulE(a, b ExtensionVariable) ExtensionVariable {
-	v2 := [4]Variable{
-		Zero(),
-		Zero(),
-		Zero(),
-		Zero(),
+	var p [2*D - 1]Variable
+	for i := range p {
+		p[i] = Zero()
 	}
-
-	for i := 0; i < 4; i++ {
-		for j := 0; j < 4; j++ {
-			if i+j >= 4 {
-				v2[i+j-4] = c.AddF(v2[i+j-4], c.MulFConst(c.MulF(a.Value[i], b.Value[j], false), 3, false), false)
-			} else {
-				v2[i+j] = c.AddF(v2[i+j], c.MulF(a.Value[i], b.Value[j], false), false)
-			}
+	for i := 0; i < D; i++ {
+		for j := 0; j < D; j++ {
+			p[i+j] = c.AddF(p[i+j], c.MulF(a.Value[i], b.Value[j], false), false)
 		}
 	}
-	v2[0] = c.reduceFast(v2[0])
-	v2[1] = c.reduceFast(v2[1])
-	v2[2] = c.reduceFast(v2[2])
-	v2[3] = c.reduceFast(v2[3])
-	return ExtensionVariable{Value: v2}
+
+	var r [D]Variable
+	r[0] = c.SubF(c.AddF(p[0], p[5], false), p[8])
+	r[1] = c.AddF(p[1], p[6], false)
+	r[2] = c.AddF(c.AddF(c.SubF(p[2], p[5]), p[7], false), p[8], false)
+	r[3] = c.AddF(c.SubF(p[3], p[6]), p[8], false)
+	r[4] = c.SubF(p[4], p[7])
+	for i := 0; i < D; i++ {
+		r[i] = c.reduceFast(r[i])
+	}
+	return ExtensionVariable{Value: r}
 }
 
 func (c *Chip) MulEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.MulF(a.Value[0], b)
-	v2 := c.MulF(a.Value[1], b)
-	v3 := c.MulF(a.Value[2], b)
-	v4 := c.MulF(a.Value[3], b)
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = c.MulF(a.Value[i], b)
+	}
+	return out
 }
 
 func (c *Chip) InvE(in ExtensionVariable) ExtensionVariable {
-	result, err := c.api.Compiler().NewHint(InvEHint, 4, in.Value[0].Value, in.Value[1].Value, in.Value[2].Value, in.Value[3].Value)
+	inputs := make([]frontend.Variable, D)
+	for i := 0; i < D; i++ {
+		inputs[i] = in.Value[i].Value
+	}
+	result, err := c.api.Compiler().NewHint(InvEHint, D, inputs...)
 	if err != nil {
 		panic(err)
 	}
 
-	xinv := Variable{Value: result[0], UpperBound: new(big.Int).SetUint64(2147483648)}
-	yinv := Variable{Value: result[1], UpperBound: new(big.Int).SetUint64(2147483648)}
-	zinv := Variable{Value: result[2], UpperBound: new(big.Int).SetUint64(2147483648)}
-	linv := Variable{Value: result[3], UpperBound: new(big.Int).SetUint64(2147483648)}
-	if os.Getenv("GROTH16") != "1" {
-		c.RangeChecker.Check(result[0], 31)
-		c.RangeChecker.Check(result[1], 31)
-		c.RangeChecker.Check(result[2], 31)
-		c.RangeChecker.Check(result[3], 31)
-	} else {
-		c.api.ToBinary(result[0], 31)
-		c.api.ToBinary(result[1], 31)
-		c.api.ToBinary(result[2], 31)
-		c.api.ToBinary(result[3], 31)
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = Variable{Value: result[i], UpperBound: new(big.Int).SetUint64(2147483648)}
+		if os.Getenv("GROTH16") != "1" {
+			c.RangeChecker.Check(result[i], 31)
+		} else {
+			c.api.ToBinary(result[i], 31)
+		}
 	}
-	out := ExtensionVariable{Value: [4]Variable{xinv, yinv, zinv, linv}}
 
 	product := c.MulE(in, out)
-	c.AssertIsEqualE(product, NewEConst([]string{"1", "0", "0", "0"}))
+	c.AssertIsEqualE(product, NewEConst([]string{"1", "0", "0", "0", "0"}))
 
 	return out
 }
 
-func (c *Chip) Ext2Felt(in ExtensionVariable) [4]Variable {
+func (c *Chip) Ext2Felt(in ExtensionVariable) [D]Variable {
 	return in.Value
 }
 
@@ -326,11 +329,11 @@ func (c *Chip) DivEF(a ExtensionVariable, b Variable) ExtensionVariable {
 }
 
 func (c *Chip) NegE(a ExtensionVariable) ExtensionVariable {
-	v1 := c.negF(a.Value[0])
-	v2 := c.negF(a.Value[1])
-	v3 := c.negF(a.Value[2])
-	v4 := c.negF(a.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < D; i++ {
+		out.Value[i] = c.negF(a.Value[i])
+	}
+	return out
 }
 
 func (c *Chip) ToBinary(in Variable) []frontend.Variable {
@@ -487,7 +490,7 @@ func ReduceHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 }
 
 func (p *Chip) ReduceE(x ExtensionVariable) ExtensionVariable {
-	for i := 0; i < 4; i++ {
+	for i := 0; i < D; i++ {
 		x.Value[i] = p.ReduceSlow(x.Value[i])
 	}
 	return x
@@ -525,17 +528,13 @@ func SplitLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 }
 
 func InvEHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
-	a := C.uint(new(big.Int).Mod(inputs[0], modulus).Uint64())
-	b := C.uint(new(big.Int).Mod(inputs[1], modulus).Uint64())
-	c := C.uint(new(big.Int).Mod(inputs[2], modulus).Uint64())
-	d := C.uint(new(big.Int).Mod(inputs[3], modulus).Uint64())
-	ainv := C.koalabearextinv(a, b, c, d, 0)
-	binv := C.koalabearextinv(a, b, c, d, 1)
-	cinv := C.koalabearextinv(a, b, c, d, 2)
-	dinv := C.koalabearextinv(a, b, c, d, 3)
-	results[0].SetUint64(uint64(ainv))
-	results[1].SetUint64(uint64(binv))
-	results[2].SetUint64(uint64(cinv))
-	results[3].SetUint64(uint64(dinv))
+	var in [D]C.uint
+	for i := 0; i < D; i++ {
+		in[i] = C.uint(new(big.Int).Mod(inputs[i], modulus).Uint64())
+	}
+	for i := 0; i < D; i++ {
+		inv := C.koalabearextinv(in[0], in[1], in[2], in[3], in[4], C.uint(i))
+		results[i].SetUint64(uint64(inv))
+	}
 	return nil
 }

@@ -101,7 +101,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     /// Numerical test: evaluating a trace at a multilinear point
     /// against a hand-computed reference.
@@ -216,7 +216,7 @@ mod eval_trace_columns_reference_tests {
     use p3_field::PrimeCharacteristicRing;
 
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     /// The pre-lever form, kept verbatim as the bit-identity oracle: embed
     /// each base felt into the extension, multiply with the FULL quartic

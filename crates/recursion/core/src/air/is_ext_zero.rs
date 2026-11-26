@@ -7,13 +7,13 @@
 use crate::air::Block;
 use p3_air::AirBuilder;
 use p3_field::{
-    extension::{BinomialExtensionField, BinomiallyExtendable},
+    extension::{QuinticTrinomialExtendable, QuinticTrinomialExtensionField},
     Field, PrimeCharacteristicRing,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{BinomialExtension, ZKMAirBuilder};
+use zkm_pcs::air::{QuinticExtension, ZKMAirBuilder};
 
-use crate::air::extension::BinomialExtensionUtils;
+use crate::air::extension::QuinticExtensionUtils;
 
 use crate::runtime::D;
 
@@ -28,12 +28,12 @@ pub struct IsExtZeroOperation<T> {
     pub result: T,
 }
 
-impl<F: Field + BinomiallyExtendable<D>> IsExtZeroOperation<F> {
+impl<F: Field + QuinticTrinomialExtendable> IsExtZeroOperation<F> {
     pub fn populate(&mut self, a: Block<F>) -> F {
-        let a = BinomialExtensionField::<F, D>::from_block(a);
+        let a = QuinticTrinomialExtensionField::<F>::from_block(a);
 
         let (inverse, result) = if a.is_zero() {
-            (BinomialExtensionField::ZERO, F::ONE)
+            (QuinticTrinomialExtensionField::ZERO, F::ONE)
         } else {
             (a.inverse(), F::ZERO)
         };
@@ -42,7 +42,7 @@ impl<F: Field + BinomiallyExtendable<D>> IsExtZeroOperation<F> {
         self.result = result;
 
         let prod = inverse * a;
-        debug_assert!(prod == BinomialExtensionField::<F, D>::ONE || prod.is_zero());
+        debug_assert!(prod == QuinticTrinomialExtensionField::<F>::ONE || prod.is_zero());
 
         result
     }
@@ -51,19 +51,19 @@ impl<F: Field + BinomiallyExtendable<D>> IsExtZeroOperation<F> {
 impl<F: Field> IsExtZeroOperation<F> {
     pub fn eval<AB: ZKMAirBuilder>(
         builder: &mut AB,
-        a: BinomialExtension<AB::Expr>,
+        a: QuinticExtension<AB::Expr>,
         cols: IsExtZeroOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
         builder.assert_bool(is_real.clone());
         builder.when(is_real.clone()).assert_bool(cols.result);
 
-        let one_ext = BinomialExtension::<AB::Expr>::from_base(AB::Expr::ONE);
+        let one_ext = QuinticExtension::<AB::Expr>::from_base(AB::Expr::ONE);
 
         let inverse = cols.inverse.as_extension::<AB>();
 
         let is_zero = one_ext.clone() - inverse * a.clone();
-        let result_ext = BinomialExtension::<AB::Expr>::from_base(cols.result.into());
+        let result_ext = QuinticExtension::<AB::Expr>::from_base(cols.result.into());
 
         for (eq_z, res) in is_zero.into_iter().zip(result_ext.0) {
             builder.when(is_real.clone()).assert_eq(eq_z, res);

@@ -166,12 +166,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     #[test]
     fn eq_mle_table_correct_on_boolean_cube() {

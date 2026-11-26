@@ -1,20 +1,20 @@
 use p3_field::{
-    extension::{BinomialExtensionField, BinomiallyExtendable},
+    extension::{QuinticTrinomialExtendable, QuinticTrinomialExtensionField},
     BasedVectorSpace, Field,
 };
-use zkm_pcs::air::BinomialExtension;
+use zkm_pcs::air::QuinticExtension;
 
 use super::Block;
 
 use crate::runtime::D;
 
-pub trait BinomialExtensionUtils<T> {
+pub trait QuinticExtensionUtils<T> {
     fn from_block(block: Block<T>) -> Self;
 
     fn as_block(&self) -> Block<T>;
 }
 
-impl<T: Clone> BinomialExtensionUtils<T> for BinomialExtension<T> {
+impl<T: Clone> QuinticExtensionUtils<T> for QuinticExtension<T> {
     fn from_block(block: Block<T>) -> Self {
         Self(block.0)
     }
@@ -24,9 +24,9 @@ impl<T: Clone> BinomialExtensionUtils<T> for BinomialExtension<T> {
     }
 }
 
-impl<AF> BinomialExtensionUtils<AF> for BinomialExtensionField<AF, D>
+impl<AF> QuinticExtensionUtils<AF> for QuinticTrinomialExtensionField<AF>
 where
-    AF: Field + BinomiallyExtendable<D>,
+    AF: Field + QuinticTrinomialExtendable,
 {
     fn from_block(block: Block<AF>) -> Self {
         Self::from_basis_coefficients_slice(&block.0).unwrap()

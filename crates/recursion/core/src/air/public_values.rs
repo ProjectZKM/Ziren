@@ -14,7 +14,7 @@ use zkm_pcs::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
 /// The number of base-field elements of an extension-field global sum.
-pub const GLOBAL_SUM_NUM_ELTS: usize = 4;
+pub const GLOBAL_SUM_NUM_ELTS: usize = crate::D;
 
 pub const CHALLENGER_STATE_NUM_ELTS: usize = size_of::<ChallengerPublicValues<u8>>();
 

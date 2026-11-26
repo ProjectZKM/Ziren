@@ -89,8 +89,8 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
         | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
             incr(&mut counts.mem_var_events, output_addrs_mults.len())
         }
-        Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr: _ }) => {
-            incr(&mut counts.mem_var_events, output_addrs_mults.len())
+        Instruction::HintExt2Felts(instr) => {
+            incr(&mut counts.mem_var_events, instr.output_addrs_mults.len())
         }
         Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
         Instruction::PrefixSumChecks(instr) => {
@@ -272,7 +272,7 @@ mod tests {
     fn dummy_mem() -> Instruction<KoalaBear> {
         Instruction::Mem(MemInstr {
             addrs: MemIo { inner: Address(k(0)) },
-            vals: MemIo { inner: Block([k(0); 4]) },
+            vals: MemIo { inner: Block([k(0); crate::D]) },
             mult: KoalaBear::ONE,
             kind: MemAccessKind::Write,
         })

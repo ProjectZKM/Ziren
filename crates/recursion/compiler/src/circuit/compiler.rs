@@ -419,10 +419,10 @@ where
     }
 
     fn ext2felts(&mut self, felts: [impl Reg<C>; D], ext: impl Reg<C>) -> Instruction<C::F> {
-        Instruction::HintExt2Felts(HintExt2FeltsInstr {
+        Instruction::HintExt2Felts(Box::new(HintExt2FeltsInstr {
             output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
             input_addr: ext.read_ghost(self),
-        })
+        }))
     }
 
     fn ext2felts_constrained(
@@ -430,10 +430,10 @@ where
         felts: [impl Reg<C>; D],
         ext: impl Reg<C>,
     ) -> Instruction<C::F> {
-        Instruction::Ext2Felts(HintExt2FeltsInstr {
+        Instruction::Ext2Felts(Box::new(HintExt2FeltsInstr {
             output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
             input_addr: ext.read(self),
-        })
+        }))
     }
 
     fn hint(&mut self, output: &[impl Reg<C>]) -> Instruction<C::F> {
@@ -673,11 +673,9 @@ where
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
-                    Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                        output_addrs_mults, ..
-                    })
-                    | Instruction::Ext2Felts(HintExt2FeltsInstr { output_addrs_mults, .. }) => {
-                        output_addrs_mults
+                    Instruction::HintExt2Felts(instr) | Instruction::Ext2Felts(instr) => {
+                        instr
+                            .output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
@@ -1033,8 +1031,8 @@ mod tests {
         std::iter::from_fn(move || Some(F::from_u64(rng.gen::<u64>())))
     }
 
-    /// Generate random [F; 4] arrays using rand 0.8 compatible approach.
-    fn rand_felt4_iter(seed: u64) -> impl Iterator<Item = [F; 4]> {
+    /// Generate random ext coefficient arrays using rand 0.8 compatible approach.
+    fn rand_felt4_iter(seed: u64) -> impl Iterator<Item = [F; D]> {
         let mut rng = StdRng::seed_from_u64(seed);
         std::iter::from_fn(move || Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))))
     }

@@ -1,20 +1,24 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use p3_field::{
-    extension::{BinomialExtensionField, BinomiallyExtendable},
+    extension::{QuinticTrinomialExtendable, QuinticTrinomialExtensionField},
     BasedVectorSpace, Field, PrimeCharacteristicRing,
 };
 use zkm_derive::AlignedBorrow;
 
-const D: usize = 4;
+/// The degree of the challenge field over the base field.
+pub const EXTENSION_DEGREE: usize = 5;
 
-/// A binomial extension element represented over a generic type `T`.
+const D: usize = EXTENSION_DEGREE;
+
+/// An element of the challenge field, the extension of the base field by a
+/// root of `X^5 + X^2 - 1`, with its coefficients in a generic type `T`.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(C)]
-pub struct BinomialExtension<T>(pub [T; D]);
+pub struct QuinticExtension<T>(pub [T; D]);
 
-impl<T> BinomialExtension<T> {
-    /// Creates a new binomial extension element from a base element.
+impl<T> QuinticExtension<T> {
+    /// Creates an extension element from a base element.
     pub fn from_base(b: T) -> Self
     where
         T: PrimeCharacteristicRing,
@@ -29,14 +33,14 @@ impl<T> BinomialExtension<T> {
         &self.0
     }
 
-    /// Creates a new binomial extension element from a binomial extension element.
+    /// Converts the coefficients of an extension element.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn from<S: Into<T> + Clone>(from: BinomialExtension<S>) -> Self {
-        BinomialExtension(core::array::from_fn(|i| from.0[i].clone().into()))
+    pub fn from<S: Into<T> + Clone>(from: QuinticExtension<S>) -> Self {
+        QuinticExtension(core::array::from_fn(|i| from.0[i].clone().into()))
     }
 }
 
-impl<T: Add<Output = T> + Clone> Add for BinomialExtension<T> {
+impl<T: Add<Output = T> + Clone> Add for QuinticExtension<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -44,7 +48,7 @@ impl<T: Add<Output = T> + Clone> Add for BinomialExtension<T> {
     }
 }
 
-impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
+impl<T: Sub<Output = T> + Clone> Sub for QuinticExtension<T> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -52,50 +56,54 @@ impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
     }
 }
 
-impl<T: Add<Output = T> + Mul<Output = T> + PrimeCharacteristicRing> Mul for BinomialExtension<T> {
+impl<T: PrimeCharacteristicRing> Mul for QuinticExtension<T> {
     type Output = Self;
 
+    /// The product modulo `X^5 + X^2 - 1`: with `c` the product of the two
+    /// polynomials, `X^5 = 1 - X^2`, `X^6 = X - X^3`, `X^7 = X^2 - X^4` and
+    /// `X^8 = X^3 + X^2 - 1` fold `c_5..c_8` into the low coefficients.
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::ZERO; D];
-        let w = T::from_u32(3);
-
+        let mut c: [T; 2 * D - 1] = core::array::from_fn(|_| T::ZERO);
         for i in 0..D {
             for j in 0..D {
-                if i + j >= D {
-                    result[i + j - D] = result[i + j - D].clone()
-                        + w.clone() * self.0[i].clone() * rhs.0[j].clone();
-                } else {
-                    result[i + j] = result[i + j].clone() + self.0[i].clone() * rhs.0[j].clone();
-                }
+                c[i + j] = c[i + j].clone() + self.0[i].clone() * rhs.0[j].clone();
             }
         }
-
-        Self(result)
+        let [c0, c1, c2, c3, c4, c5, c6, c7, c8] = c;
+        Self([
+            c0 + c5.clone() - c8.clone(),
+            c1 + c6.clone(),
+            c2 - c5 + c7.clone() + c8.clone(),
+            c3 - c6 + c8,
+            c4 - c7,
+        ])
     }
 }
 
-impl<F> Div for BinomialExtension<F>
+impl<F> Div for QuinticExtension<F>
 where
-    F: BinomiallyExtendable<D>,
+    F: QuinticTrinomialExtendable,
 {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        let p3_ef_lhs = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
-        let p3_ef_rhs = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| rhs.0[i]);
+        let p3_ef_lhs =
+            QuinticTrinomialExtensionField::<F>::from_basis_coefficients_fn(|i| self.0[i]);
+        let p3_ef_rhs =
+            QuinticTrinomialExtensionField::<F>::from_basis_coefficients_fn(|i| rhs.0[i]);
         let p3_ef_result = p3_ef_lhs / p3_ef_rhs;
         Self(p3_ef_result.as_basis_coefficients_slice().try_into().unwrap())
     }
 }
 
-impl<F> BinomialExtension<F>
+impl<F> QuinticExtension<F>
 where
-    F: BinomiallyExtendable<4>,
+    F: QuinticTrinomialExtendable,
 {
     /// Returns the multiplicative inverse of the element.
     #[must_use]
     pub fn inverse(&self) -> Self {
-        let p3_ef = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
+        let p3_ef = QuinticTrinomialExtensionField::<F>::from_basis_coefficients_fn(|i| self.0[i]);
         let p3_ef_inverse = p3_ef.inverse();
         Self(p3_ef_inverse.as_basis_coefficients_slice().try_into().unwrap())
     }
@@ -103,13 +111,13 @@ where
     /// Returns the multiplicative inverse of the element, if it exists.
     #[must_use]
     pub fn try_inverse(&self) -> Option<Self> {
-        let p3_ef = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
+        let p3_ef = QuinticTrinomialExtensionField::<F>::from_basis_coefficients_fn(|i| self.0[i]);
         let p3_ef_inverse = p3_ef.try_inverse()?;
         Some(Self(p3_ef_inverse.as_basis_coefficients_slice().try_into().unwrap()))
     }
 }
 
-impl<T: PrimeCharacteristicRing + Copy> Neg for BinomialExtension<T> {
+impl<T: PrimeCharacteristicRing + Copy> Neg for QuinticExtension<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -117,26 +125,26 @@ impl<T: PrimeCharacteristicRing + Copy> Neg for BinomialExtension<T> {
     }
 }
 
-impl<AF> From<BinomialExtensionField<AF, D>> for BinomialExtension<AF>
+impl<AF> From<QuinticTrinomialExtensionField<AF>> for QuinticExtension<AF>
 where
-    AF: BinomiallyExtendable<D> + Copy,
+    AF: QuinticTrinomialExtendable + Copy,
 {
-    fn from(value: BinomialExtensionField<AF, D>) -> Self {
+    fn from(value: QuinticTrinomialExtensionField<AF>) -> Self {
         let arr: [AF; D] = value.as_basis_coefficients_slice().try_into().unwrap();
         Self(arr)
     }
 }
 
-impl<AF> From<BinomialExtension<AF>> for BinomialExtensionField<AF, D>
+impl<AF> From<QuinticExtension<AF>> for QuinticTrinomialExtensionField<AF>
 where
-    AF: BinomiallyExtendable<D> + Copy,
+    AF: QuinticTrinomialExtendable + Copy,
 {
-    fn from(value: BinomialExtension<AF>) -> Self {
-        BinomialExtensionField::from_basis_coefficients_fn(|i| value.0[i])
+    fn from(value: QuinticExtension<AF>) -> Self {
+        QuinticTrinomialExtensionField::from_basis_coefficients_fn(|i| value.0[i])
     }
 }
 
-impl<T> IntoIterator for BinomialExtension<T> {
+impl<T> IntoIterator for QuinticExtension<T> {
     type Item = T;
     type IntoIter = core::array::IntoIter<T, D>;
 

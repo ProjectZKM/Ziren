@@ -64,7 +64,7 @@ pub struct ShardOpenedValues<EF> {
 /// The maximum number of elements that can be stored in the public values vec.  Both Ziren and
 /// recursive proofs need to pad their public values vec to this length.  This is required since the
 /// recursion verification program expects the public values vec to be fixed length.
-pub const PROOF_MAX_NUM_PVS: usize = 247;
+pub const PROOF_MAX_NUM_PVS: usize = 248;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -222,7 +222,7 @@ mod tests {
 
     type SC = KoalaBearPoseidon2;
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     /// The layout `ShardProof` had while `jagged_shard_proof` was optional.
     /// Field order and types match it exactly, so serializing this is

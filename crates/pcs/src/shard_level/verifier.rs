@@ -2201,7 +2201,7 @@ mod tests {
     fn full_geq_host_zero_threshold_is_one() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let threshold = vec![EF::ZERO; 4];
         let eval_point = vec![EF::from_u32(3), EF::from_u32(7), EF::from_u32(11), EF::from_u32(13)];
@@ -2216,7 +2216,7 @@ mod tests {
     fn full_geq_host_equal_boolean_threshold_is_one() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let point = vec![EF::ONE, EF::ZERO, EF::ONE];
         let result = full_geq_host(&point, &point);
@@ -2231,7 +2231,7 @@ mod tests {
     fn full_geq_host_boolean_strict_greater() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let threshold = vec![EF::ZERO, EF::ZERO];
         let eval_point = vec![EF::ONE, EF::ZERO];
@@ -2246,7 +2246,7 @@ mod tests {
     fn degree_stub_host_is_zero_filled_with_extra_bit() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         for max_log in [0usize, 1, 5, 22] {
             let v: Vec<EF> = degree_stub_host(max_log);
@@ -2260,7 +2260,7 @@ mod tests {
     fn eq_eval_host_indicator() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let a = vec![EF::from_u32(3), EF::from_u32(5)];
         let b = vec![EF::from_u32(3), EF::from_u32(5)];
@@ -2278,7 +2278,7 @@ mod tests {
     fn evaluate_mle_host_endpoints() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let evals: Vec<EF> = (10..14).map(EF::from_u32).collect();
 
@@ -2300,7 +2300,7 @@ mod tests {
     fn eval_coeffs_host_horner_correctness() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let coeffs: Vec<EF> = vec![EF::from_u32(3), EF::from_u32(5), EF::from_u32(7)];
 
@@ -2316,7 +2316,7 @@ mod tests {
 
     fn rand_ef(rng: &mut impl Rng) -> EF {
         EF::from_basis_coefficients_iter(
-            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
         )
         .unwrap()
     }

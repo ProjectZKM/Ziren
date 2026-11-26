@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use p3_challenger::DuplexChallenger;
-use p3_field::{extension::BinomialExtensionField, Field};
+use p3_field::{extension::QuinticTrinomialExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
@@ -11,7 +11,7 @@ pub const DIGEST_SIZE: usize = 8;
 
 /// A configuration for inner recursion.
 pub type InnerVal = KoalaBear;
-pub type InnerChallenge = BinomialExtensionField<InnerVal, 4>;
+pub type InnerChallenge = QuinticTrinomialExtensionField<InnerVal>;
 pub type InnerPerm = Poseidon2KoalaBear<16>;
 pub type InnerHash = PaddingFreeSponge<InnerPerm, 16, 8, DIGEST_SIZE>;
 pub type InnerCompress = TruncatedPermutation<InnerPerm, 2, 8, 16>;
@@ -37,7 +37,7 @@ pub mod koala_bear_poseidon2 {
     use p3_challenger::DuplexChallenger;
     use p3_commit::ExtensionMmcs;
     use p3_dft::Radix2DitParallel;
-    use p3_field::{extension::BinomialExtensionField, Field, PrimeCharacteristicRing};
+    use p3_field::{extension::QuinticTrinomialExtensionField, Field, PrimeCharacteristicRing};
     use p3_fri::{FriParameters, TwoAdicFriPcs};
     use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
     use p3_merkle_tree::MerkleTreeMmcs;
@@ -49,7 +49,7 @@ pub mod koala_bear_poseidon2 {
     use crate::{Com, StarkGenericConfig, ZeroCommitment, DIGEST_SIZE};
 
     pub type Val = KoalaBear;
-    pub type Challenge = BinomialExtensionField<Val, 4>;
+    pub type Challenge = QuinticTrinomialExtensionField<Val>;
 
     pub type Perm = Poseidon2KoalaBear<16>;
     pub type MyHash = PaddingFreeSponge<Perm, 16, 8, DIGEST_SIZE>;

@@ -761,7 +761,8 @@ mod closed_form_weight_equivalence {
     fn rand_ef(rng: &mut StdRng) -> InnerChallenge {
         use p3_field::BasedVectorSpace;
         <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-            (0..4).map(|_| InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)),
+            (0..crate::air::EXTENSION_DEGREE)
+                .map(|_| InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)),
         )
         .unwrap()
     }

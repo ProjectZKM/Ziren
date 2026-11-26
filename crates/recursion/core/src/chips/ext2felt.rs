@@ -90,7 +90,7 @@ impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
             .par_iter()
             .copied()
             .filter_map(|instruction| match instruction {
-                Instruction::Ext2Felts(instr) => Some(instr),
+                Instruction::Ext2Felts(instr) => Some(instr.as_ref()),
                 _ => None,
             })
             .collect::<Vec<_>>();
