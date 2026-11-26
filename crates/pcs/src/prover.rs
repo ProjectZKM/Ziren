@@ -680,6 +680,12 @@ where
                 .iter()
                 .map(|proof| self.machine().global_round_binding(proof))
                 .collect::<Vec<_>>();
+            self.machine().check_global_lookup_count(rounds.iter().flatten()).map_err(
+                |reason| {
+                    tracing::error!("{reason}");
+                    CpuProverError
+                },
+            )?;
             let committed = rounds
                 .iter()
                 .zip(tables)

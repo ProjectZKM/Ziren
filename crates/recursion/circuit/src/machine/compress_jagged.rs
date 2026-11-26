@@ -153,6 +153,7 @@ pub fn verify_compress_jagged<C, SC, A>(
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
     let mut _global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
         array::from_fn(|_| builder.eval(C::F::ZERO));
+    let mut _global_lookup_units: Felt<C::F> = builder.eval(C::F::ZERO);
 
     let _verify_pubvals: Vec<Vec<Felt<C::F>>> = vks_and_proofs
         .into_iter()
@@ -634,6 +635,11 @@ pub fn verify_compress_jagged<C, SC, A>(
         for (sum, current) in _global_sum.iter_mut().zip_eq(_current_public_values.global_sum) {
             *sum = builder.eval(*sum + current);
         }
+        _global_lookup_units = crate::global_challenge::add_global_lookup_units(
+            builder,
+            _global_lookup_units,
+            _current_public_values.global_lookup_units,
+        );
     }
 
     _compress_public_values.zkm_vk_digest = _zkm_vk_digest;
@@ -647,6 +653,7 @@ pub fn verify_compress_jagged<C, SC, A>(
     _compress_public_values.committed_value_digest = _committed_value_digest;
     _compress_public_values.global_chain_end = _global_chain;
     _compress_public_values.global_sum = _global_sum;
+    _compress_public_values.global_lookup_units = _global_lookup_units;
     _compress_public_values.is_complete = is_complete;
     _compress_public_values.contains_execution_shard = _contains_execution_shard;
     _compress_public_values.exit_code = _exit_code;

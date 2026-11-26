@@ -72,11 +72,6 @@ pub fn build_global_round_program<A>(
 where
     A: MachineAir<KoalaBear>,
 {
-    assert!(
-        <KoalaBearPoseidon2 as zkm_pcs::WhirRing>::WHIR_PROFILE.unique_decoding(),
-        "a global proof reopens its shard's global round, which binds one table only under a \
-         unique-decoding schedule",
-    );
     let builder_span = tracing::debug_span!("build global round program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);

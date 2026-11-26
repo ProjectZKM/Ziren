@@ -87,6 +87,16 @@ impl<F: Field, A> Chip<F, A> {
             .chain(self.deferred_sends.iter())
             .chain(self.deferred_receives.iter())
     }
+
+    /// The most global lookups one row of the chip adds to either direction:
+    /// the larger of its global sends and its global receives.
+    pub fn global_lookups_per_row(&self) -> usize {
+        let global = |own: &[Lookup<F>], deferred: &[Lookup<F>]| {
+            own.iter().filter(|lookup| lookup.is_global()).count() + deferred.len()
+        };
+        global(&self.sends, &self.deferred_sends)
+            .max(global(&self.receives, &self.deferred_receives))
+    }
 }
 
 impl<F: Field, A: MachineAir<F>> Chip<F, A> {

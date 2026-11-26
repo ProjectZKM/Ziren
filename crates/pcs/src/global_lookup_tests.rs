@@ -447,3 +447,57 @@ fn a_shard_without_a_global_round_needs_no_global_proof() {
     verify_with_deferred_global_lookups(&vk, &extra)
         .expect_err("more global proofs than global rounds");
 }
+
+#[test]
+fn the_verifier_bounds_the_global_lookup_count() {
+    use crate::logup_gkr::{max_global_lookup_units, GLOBAL_LOOKUP_UNIT_BITS};
+
+    let machine = deferring_machine();
+    let (proof, _) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 5])]);
+    let small = machine
+        .global_round_binding(&proof.shard_proofs[0])
+        .expect("the sender's shard commits a global round");
+    let rows: usize = small.chips.iter().map(|(_, height)| height).sum();
+    assert_eq!(machine.global_lookup_count(&small), rows as u64, "one global lookup a row");
+    machine.check_global_lookup_count([&small]).expect("a few lookups");
+
+    let round_of = |lookups: u64| {
+        let mut round = small.clone();
+        for (_, height) in round.chips.iter_mut() {
+            *height = 0;
+        }
+        round.chips[0].1 = lookups as usize;
+        round
+    };
+    let max = max_global_lookup_units::<F>();
+    let characteristic = u64::from(<F as p3_field::PrimeField32>::ORDER_U32);
+    let largest = round_of(((max - 1) << GLOBAL_LOOKUP_UNIT_BITS) + 1);
+    machine.check_global_lookup_count([&largest]).expect("a round that counts every unit");
+    machine
+        .check_global_lookup_count([&largest, &small])
+        .expect_err("two rounds that count one unit too many");
+    machine
+        .check_global_lookup_count([&round_of(characteristic)])
+        .expect_err("as many lookups as the field's characteristic");
+    machine
+        .check_global_lookup_count([
+            &round_of(characteristic / 2 + 1),
+            &round_of(characteristic / 2),
+        ])
+        .expect_err("two rounds that reach the characteristic together");
+}
+
+#[test]
+fn shard_proofs_alone_do_not_close_a_deferred_bus() {
+    let machine = deferring_machine();
+    let (proof, vk) =
+        prove_with_deferred_global_lookups(&[sender(&[3, 5, 7]), receiver(&[7, 3, 6])]);
+    machine
+        .verify_shard_proofs(&vk, &proof, &mut machine.config().challenger())
+        .expect("each shard proof verifies on its own");
+    assert!(machine
+        .verify_with_global(&vk, &proof, &mut machine.config().challenger(), None)
+        .is_err());
+    verify_with_deferred_global_lookups(&vk, &proof).expect_err("the bus is unbalanced");
+}

@@ -422,6 +422,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
     deferred_public_values.global_h_star = array::from_fn(|_| builder.eval(C::F::ZERO));
     deferred_public_values.global_pow_witness = builder.eval(C::F::ZERO);
     deferred_public_values.global_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
+    deferred_public_values.global_lookup_units = builder.eval(C::F::ZERO);
     deferred_public_values.vk_root = vk_root;
     deferred_public_values.digest =
         recursion_public_values_digest::<C, SC>(builder, deferred_public_values);

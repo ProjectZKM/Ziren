@@ -17,6 +17,42 @@ use crate::{
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
+/// [`zkm_pcs::logup_gkr::global_lookup_units`] of a global round with
+/// `lookups` lookups, a number below `2^lookup_bits`.
+pub fn global_lookup_units_variable<C: CircuitConfig<F = KoalaBear>>(
+    builder: &mut Builder<C>,
+    lookups: Felt<C::F>,
+    lookup_bits: usize,
+) -> Felt<C::F> {
+    assert!(lookup_bits < 31, "the lookups of a global round fit the field");
+    let bits = C::num2bits(builder, lookups, lookup_bits);
+    let whole_units =
+        C::bits2num(builder, bits.into_iter().skip(zkm_pcs::logup_gkr::GLOBAL_LOOKUP_UNIT_BITS));
+    builder.eval(whole_units + C::F::ONE)
+}
+
+/// Adds the global lookup units `part` to `count` and asserts that the sum
+/// is within [`zkm_pcs::logup_gkr::max_global_lookup_units`]. Both must
+/// already be within it, so the field adds them without wrapping.
+pub fn add_global_lookup_units<C: CircuitConfig<F = KoalaBear>>(
+    builder: &mut Builder<C>,
+    count: Felt<C::F>,
+    part: Felt<C::F>,
+) -> Felt<C::F> {
+    use p3_field::PrimeField32;
+    let max = zkm_pcs::logup_gkr::max_global_lookup_units::<KoalaBear>();
+    let bits = (u64::BITS - max.leading_zeros()) as usize;
+    assert!(
+        2 * max + (1 << bits) < u64::from(KoalaBear::ORDER_U32),
+        "the slack below the bound cannot wrap into its own range",
+    );
+    let sum: Felt<C::F> = builder.eval(count + part);
+    let max: Felt<C::F> = builder.constant(C::F::from_u64(max));
+    let slack: Felt<C::F> = builder.eval(max - sum);
+    C::num2bits(builder, slack, bits);
+    sum
+}
+
 /// A shard's global challenge: the chain end `h_star` it is derived from, the
 /// proof-of-work witness, `α_g`, and the `β_g` table (the eq table of the β
 /// seed).

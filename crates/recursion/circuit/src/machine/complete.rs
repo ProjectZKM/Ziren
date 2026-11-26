@@ -12,7 +12,10 @@ use zkm_recursion_core::air::RecursionPublicValues;
 /// starts, and that is the digest the global challenge was derived from: the global proofs
 /// unwind the chain from there to its origin and the shards wind it back, so both went over the
 /// same global rounds. A proof without a global proof carries no challenge, a zero
-/// proof-of-work witness, and its chain stands still. The global sums must cancel.
+/// proof-of-work witness, and its chain stands still. The global sums must cancel. They cancel
+/// only for lookups that match: every program that commits the count of the global lookups keeps
+/// it within `zkm_pcs::logup_gkr::max_global_lookup_units`, too few lookups for a sum to vanish
+/// by wrapping around the field's characteristic.
 pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
     builder: &mut Builder<C>,
     public_values: &RecursionPublicValues<Felt<C::F>>,

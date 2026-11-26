@@ -37,7 +37,8 @@ use zkm_recursion_core::{
 use super::core_jagged::{verify_shard_tuple, ShardProofTuple};
 use crate::{
     global_challenge::{
-        global_chain_step_variable, GlobalChallengeVariable, GlobalRoundBindingVariable,
+        add_global_lookup_units, global_chain_step_variable, global_lookup_units_variable,
+        GlobalChallengeVariable, GlobalRoundBindingVariable,
     },
     machine::recursion_public_values_digest,
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
@@ -79,7 +80,10 @@ pub struct ZKMGlobalRoundWitnessVariable<
 /// Verifies the global proofs of consecutive global rounds of `machine` under
 /// the challenge derived from `global_h_star`, and commits public values that
 /// step the global hash chain backwards over the rounds the proofs open and
-/// carry the sum of their lookups.
+/// carry the sum of their lookups and a count of them. A round counts each
+/// table's height times the lookups of a row, in the direction with more;
+/// the core chips constrain a global lookup's multiplicity to a bit, so no
+/// direction of the round holds more lookups than that.
 ///
 /// Every other coordinate stands at the start of the execution — shard one,
 /// the key's first program counter, no address initialized or finalized — so
@@ -111,6 +115,11 @@ pub fn verify_global_round_jagged<C, SC, A>(
         machine.defers_global_lookups(),
         "a global proof needs a machine that defers global lookups"
     );
+    assert!(
+        <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE.unique_decoding(),
+        "a global proof reopens its shard's global round, which binds one table only under a \
+         unique-decoding schedule",
+    );
     let jagged_vk =
         crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(builder, &vk);
 
@@ -124,9 +133,21 @@ pub fn verify_global_round_jagged<C, SC, A>(
     );
     assert!(!proofs.is_empty(), "a global-round program opens at least one round");
     let views = machine.global_views(0);
+    let lookups_per_row: std::collections::BTreeMap<String, usize> =
+        views.iter().map(|view| (view.name(), view.global_lookups_per_row())).collect();
+    let round_lookups_bound =
+        (lookups_per_row.values().sum::<usize>() as u64) << (max_log_row_count + 1);
+    let round_lookup_bits = (u64::BITS - round_lookups_bound.leading_zeros()) as usize;
+    assert!(
+        round_lookup_bits < 31
+            && zkm_pcs::logup_gkr::global_lookup_units(1 << round_lookup_bits)
+                <= zkm_pcs::logup_gkr::max_global_lookup_units::<InnerVal>(),
+        "one global round stays within the bound on a proof's global lookups",
+    );
     let mut chain = global_chain_end;
     let mut global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
         core::array::from_fn(|_| builder.eval(C::F::ZERO));
+    let mut global_lookup_units: Felt<C::F> = builder.eval(C::F::ZERO);
     for proof in proofs {
         let shard = verify_shard_tuple::<C, SC, GlobalView<A>>(
             builder,
@@ -157,6 +178,14 @@ pub fn verify_global_round_jagged<C, SC, A>(
         for (sum, part) in global_sum.iter_mut().zip(shard.global_sum) {
             *sum = builder.eval(*sum + part);
         }
+        let round_lookups: zkm_recursion_compiler::ir::SymbolicFelt<C::F> = shard
+            .chip_heights
+            .iter()
+            .map(|(view, height)| *height * C::F::from_usize(lookups_per_row[view]))
+            .sum();
+        let round_lookups: Felt<C::F> = builder.eval(round_lookups);
+        let round_units = global_lookup_units_variable(builder, round_lookups, round_lookup_bits);
+        global_lookup_units = add_global_lookup_units(builder, global_lookup_units, round_units);
     }
     let global_chain_start = chain;
 
@@ -176,6 +205,7 @@ pub fn verify_global_round_jagged<C, SC, A>(
     public_values.global_h_star = global_h_star;
     public_values.global_pow_witness = global_pow_witness;
     public_values.global_sum = global_sum;
+    public_values.global_lookup_units = global_lookup_units;
     public_values.vk_root = vk_root;
     public_values.digest = recursion_public_values_digest::<C, SC>(builder, public_values);
 

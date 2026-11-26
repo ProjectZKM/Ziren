@@ -129,6 +129,11 @@ pub struct RecursionPublicValues<T> {
     /// extension-field element.
     pub global_sum: [T; GLOBAL_SUM_NUM_ELTS],
 
+    /// The global lookups the covered global proofs sum, counted in units that bound the lookups
+    /// of either direction ([`zkm_pcs::logup_gkr::global_lookup_units`]). Every program that
+    /// commits the count keeps it within [`zkm_pcs::logup_gkr::max_global_lookup_units`].
+    pub global_lookup_units: T,
+
     /// Whether the proof completely proves the program execution.
     pub is_complete: T,
 

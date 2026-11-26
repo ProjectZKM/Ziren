@@ -127,6 +127,12 @@ pub fn verify_core_jagged<C, SC, A>(
         vk_root,
         global_chain_start,
     } = input;
+    assert!(
+        !machine.defers_global_lookups()
+            || <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE.unique_decoding(),
+        "a global proof reopens the shard's global round, which binds one table only under a \
+         unique-decoding schedule",
+    );
     let jagged_vk = crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
         builder, &vk_legacy,
     );

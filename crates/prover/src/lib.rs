@@ -3876,14 +3876,27 @@ pub mod tests {
         };
 
         let mut after = h_star;
+        let mut units = 0u64;
         for input in inputs.iter() {
             let public_values = run(input).expect("the honest global proof is rejected");
             assert_eq!(public_values.global_chain_start, after, "the chain step differs");
             assert_eq!(public_values.global_chain_end, input.global_chain_end);
             assert_eq!(public_values.global_h_star, h_star);
             after = input.global_chain_end;
+            units += u64::from(public_values.global_lookup_units.as_canonical_u32());
         }
         assert_eq!(after, chain[0], "the global proofs do not unwind the chain to its origin");
+        let machine = prover.core_prover.machine();
+        let host_units: u64 = core
+            .proof
+            .0
+            .iter()
+            .filter_map(|shard| machine.global_round_binding(shard))
+            .map(|round| {
+                zkm_pcs::logup_gkr::global_lookup_units(machine.global_lookup_count(&round))
+            })
+            .sum();
+        assert_eq!(units, host_units, "the leaves count other global lookups than the host");
 
         let mut forged = inputs[0].clone();
         forged.global_h_star[0] += KoalaBear::ONE;

@@ -39,6 +39,8 @@ pub enum ZKMCoreProverError {
     TracesGenerationError,
     #[error("dependencies generation error")]
     DependenciesGenerationError,
+    #[error("the execution has too many cross-shard lookups: {0}")]
+    TooManyGlobalLookups(String),
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -149,6 +151,10 @@ where
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
         .collect::<Vec<_>>();
+    prover
+        .machine()
+        .check_global_lookup_count(rounds.iter().flatten())
+        .map_err(ZKMCoreProverError::TooManyGlobalLookups)?;
     let committed = rounds
         .iter()
         .zip(tables)

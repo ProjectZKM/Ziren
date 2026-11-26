@@ -145,6 +145,30 @@ where
     core::array::from_fn(|_| challenger.sample())
 }
 
+/// `log2` of the global lookups one unit of a proof's count stands for.
+///
+/// The global sums cancel when each message is sent as often as it is
+/// received modulo the field's characteristic `p`. That is equality only
+/// while neither number can reach `p`, so the verifiers count the global
+/// lookups of each direction, sends and receives, and reject a proof that
+/// may hold `p` of them. They count in units, so that the count stays far
+/// below `p` and adds without wrapping: a round of `n` lookups counts
+/// [`global_lookup_units`]`(n)`, more than `n / 2^GLOBAL_LOOKUP_UNIT_BITS`,
+/// and a proof counts at most [`max_global_lookup_units`].
+pub const GLOBAL_LOOKUP_UNIT_BITS: usize = 10;
+
+/// The units a global round of at most `lookups` lookups in either
+/// direction adds to its proof's count.
+pub const fn global_lookup_units(lookups: u64) -> u64 {
+    (lookups >> GLOBAL_LOOKUP_UNIT_BITS) + 1
+}
+
+/// The most units the global rounds of one proof may count: rounds within
+/// it hold fewer lookups in either direction than the characteristic of `F`.
+pub const fn max_global_lookup_units<F: p3_field::PrimeField32>() -> u64 {
+    (F::ORDER_U32 as u64 - 1) >> GLOBAL_LOOKUP_UNIT_BITS
+}
+
 /// What a shard's global round binds ahead of the global challenge: the
 /// round's commitment, and the names and heights of its chips in name order.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
