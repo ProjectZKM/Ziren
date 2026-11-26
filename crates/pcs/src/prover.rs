@@ -291,16 +291,15 @@ where
     })
 }
 
-/// Adds every chip of `cluster_widths` that `traces` lacks, and that `keep`
-/// admits, as a height-0 trace at its width.
+/// Adds every chip of `cluster_widths` that `traces` lacks as a height-0
+/// trace at its width.
 pub fn pad_to_cluster<F: p3_field::Field>(
     traces: &mut crate::Traces<F>,
     cluster_widths: &std::collections::BTreeMap<String, usize>,
-    keep: impl Fn(&str) -> bool,
 ) {
     let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
         .max_log_row_count as u32;
-    for (name, width) in cluster_widths.iter().filter(|(name, _)| keep(name)) {
+    for (name, width) in cluster_widths.iter() {
         let w = (*width).max(1);
         traces
             .named_traces
@@ -360,17 +359,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
-
-    /// The global round [`Self::commit`] commits for `record` under the
-    /// same `cluster_widths`, from the traces of the shard's global-round
-    /// chips alone; `None` for a shard without one. A proof's first pass
-    /// takes it for every shard to fix the global challenge before any shard
-    /// is proven.
-    fn global_round_binding(
-        &self,
-        record: &A::Record,
-        cluster_widths: Option<&std::collections::BTreeMap<String, usize>>,
-    ) -> Result<Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, A::Error>;
 
     /// The SHRINK-stage jagged shard proof for `record`, for a backend whose
     /// `open()` does not produce one.
@@ -530,7 +518,7 @@ where
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
         if let Some(cluster_widths) = cluster_widths {
-            pad_to_cluster(&mut named_traces, &cluster_widths, |_| true);
+            pad_to_cluster(&mut named_traces, &cluster_widths);
         }
 
         let chip_ordering: hashbrown::HashMap<String, usize> =
@@ -564,26 +552,6 @@ where
             public_values: record.public_values(),
             global_challenge: None,
         }
-    }
-
-    fn global_round_binding(
-        &self,
-        record: &A::Record,
-        cluster_widths: Option<&std::collections::BTreeMap<String, usize>>,
-    ) -> Result<Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, A::Error> {
-        let Some(set) = self.machine().global_round() else {
-            return Ok(None);
-        };
-        let chips = self
-            .machine()
-            .shard_chips(record)
-            .filter(|chip| set.contains(chip.name().as_str()))
-            .collect::<Vec<_>>();
-        let mut traces = chip_traces(&chips, record)?;
-        if let Some(cluster_widths) = cluster_widths {
-            pad_to_cluster(&mut traces, cluster_widths, |name| set.contains(name));
-        }
-        Ok(crate::shard_level::prover::bind_global_round::<SC>(&traces, Some(set)))
     }
 
     /// Prove the program for the given shard and given a commitment to the main data.
@@ -716,18 +684,18 @@ where
             };
             return Ok(MachineProof { shard_proofs, global_proofs });
         }
-        let rounds = records
-            .par_iter()
-            .map(|record| self.global_round_binding(record, None))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| CpuProverError)?;
-        let global = self.machine().global_challenge(challenger, rounds.iter().map(Option::as_ref));
+        if self.machine().has_global_lookups() {
+            tracing::error!(
+                "a chip keeps a global lookup in its shard proof: build the machine \
+                 with_deferred_global_lookups"
+            );
+            return Err(CpuProverError);
+        }
 
         let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
             records
                 .into_par_iter()
-                .zip(rounds.into_par_iter())
-                .map(|(record, round)| {
+                .map(|record| {
                     let t0 = std::time::Instant::now();
                     let named_traces = self.generate_traces(&record).map_err(|e| {
                         tracing::error!("generate traces error: {:?}", e);
@@ -736,18 +704,12 @@ where
                     let trace_gen_ms = t0.elapsed().as_millis();
 
                     let t1 = std::time::Instant::now();
-                    let mut shard_data = self.commit(&record, named_traces, None);
-                    shard_data.global_challenge.clone_from(&global);
+                    let shard_data = self.commit(&record, named_traces, None);
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
                     let proof = self.open(pk, shard_data, &mut challenger.clone())?;
                     let open_ms = t2.elapsed().as_millis();
-                    assert_eq!(
-                        self.machine().global_round_binding(&proof),
-                        round,
-                        "the shard's global round differs between the two passes"
-                    );
 
                     tracing::info!(
                         ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",

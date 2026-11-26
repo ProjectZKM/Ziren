@@ -433,8 +433,9 @@ impl<SC: StarkGenericConfig> Debug for PartStarkVerifyingKey<SC> {
 }
 
 impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
-    /// Whether some chip of the machine has a global-scope lookup, whose
-    /// fraction uses the cross-shard [`crate::logup_gkr::GlobalChallenge`].
+    /// Whether some chip keeps a global lookup among the lookups of its shard
+    /// proof. Such a machine cannot be proved: global lookups are proved in
+    /// global proofs ([`Self::with_deferred_global_lookups`]).
     pub fn has_global_lookups(&self) -> bool {
         self.chips
             .iter()
@@ -929,9 +930,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// observed: its start `h_0`, then its value after each shard. The last
     /// entry is the `h_star` [`Self::global_challenge`] derives from.
     ///
-    /// On a machine that defers its global lookups a shard without a global
-    /// round leaves the chain where it is, so the chain is the one over the
-    /// rounds alone: what the global proofs reopen.
+    /// A shard without a global round leaves the chain where it is, so the
+    /// chain is the one over the rounds alone: what the global proofs reopen.
     pub fn global_chain<'a>(
         &self,
         vk_challenger: &SC::Challenger,
@@ -961,10 +961,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         h: &[Val<SC>; 8],
         round: Option<&crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
     ) -> [Val<SC>; 8] {
-        if round.is_none() && self.defers_global_lookups() {
-            *h
-        } else {
-            crate::logup_gkr::global_chain_step(self.config.challenger(), h, round)
+        match round {
+            Some(round) => {
+                crate::logup_gkr::global_chain_step(self.config.challenger(), h, Some(round))
+            }
+            None => *h,
         }
     }
 
@@ -1175,13 +1176,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         Ok(())
     }
 
-    /// Verify that a proof is complete and valid given a verifying key and a claimed digest.
+    /// Verify that a proof is complete and valid given a verifying key.
     ///
-    /// A machine with global-scope lookups verifies under the challenge
-    /// [`Self::verify_global_challenge`] accepts for the global rounds and
-    /// proof-of-work witness of the proof's shards, in proof order; see
-    /// [`Self::verify_with_global`].
-    #[allow(clippy::match_bool)]
+    /// A machine with global lookups defers them to global proofs
+    /// ([`Self::with_deferred_global_lookups`]): its shard proofs are
+    /// verified one by one, and the global proofs under the challenge
+    /// [`Self::verify_global_challenge`] accepts for the shards' global
+    /// rounds.
     pub fn verify(
         &self,
         vk: &StarkVerifyingKey<SC>,
@@ -1212,24 +1213,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         if self.defers_global_lookups() {
             return self.verify_deferred_global_lookups(vk, proof, challenger);
         }
-        let global = {
-            let mut vk_challenger = challenger.clone();
-            vk.observe_into(&mut vk_challenger);
-            let rounds = proof
-                .shard_proofs
-                .iter()
-                .map(|shard| self.global_round_binding(shard))
-                .collect::<Vec<_>>();
-            self.check_global_lookup_count(rounds.iter().flatten())
-                .map_err(MachineVerificationError::InvalidGlobalChallenge)?;
-            self.verify_global_challenge(
-                &vk_challenger,
-                rounds.iter().map(Option::as_ref),
-                proof.shard_proofs.iter().map(|shard| shard.jagged_shard_proof.global_pow_witness),
-            )
-            .map_err(MachineVerificationError::InvalidGlobalChallenge)?
-        };
-        self.verify_with_global(vk, proof, challenger, global.as_ref())
+        self.verify_shard_proofs(vk, proof, challenger)
     }
 
     /// Verifies a proof of a machine that defers its global lookups (see
@@ -1293,7 +1277,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let rounds =
             proof.shard_proofs.iter().map(|shard| self.global_round_binding(shard)).collect_vec();
 
-        self.verify_shards(vk, proof, challenger, None)?;
+        self.verify_shard_proofs(vk, proof, challenger)?;
 
         let committed = rounds.iter().flatten().collect_vec();
         self.check_global_lookup_count(committed.iter().copied()).map_err(invalid)?;
@@ -1392,56 +1376,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         .map_err(MachineVerificationError::InvalidGlobalProof)
     }
 
-    /// Verify that a proof is complete and valid given a verifying key, under
-    /// the cross-shard challenge `global` of the machine's global-scope
-    /// lookups (`None` on a machine without them): every shard proof
-    /// verifies, and their global sums add to zero.
+    /// Verifies every shard proof of `proof` and nothing else.
     ///
-    /// A machine that defers its global lookups is rejected: its shard
-    /// proofs close no cross-shard lookup. [`Self::verify`] checks its whole
-    /// proof and [`Self::verify_shard_proofs`] its shard proofs alone.
-    pub fn verify_with_global(
-        &self,
-        vk: &StarkVerifyingKey<SC>,
-        proof: &MachineProof<SC>,
-        challenger: &mut SC::Challenger,
-        global: Option<
-            &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
-        >,
-    ) -> Result<(), MachineVerificationError<SC>>
-    where
-        SC::Challenger: Clone + Sync,
-        SC: Sync,
-        Com<SC>: Sync,
-        ShardProof<SC>: Sync,
-        A: Sync
-            + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-            + for<'b> Air<
-                crate::shard_level::constraint_folder::ShardConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    <SC as StarkGenericConfig>::Challenge,
-                    <SC as StarkGenericConfig>::Challenge,
-                >,
-            >,
-        SC: crate::WhirRing,
-        SC::Challenger: 'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
-    {
-        if self.defers_global_lookups() {
-            return Err(MachineVerificationError::InvalidGlobalChallenge(
-                "the machine defers its global lookups, which its shard proofs do not close".into(),
-            ));
-        }
-        self.verify_shards(vk, proof, challenger, global)
-    }
-
-    /// Verifies the shard proofs of a machine that defers its global lookups
-    /// and nothing else: no cross-shard lookup is checked, so this accepts
-    /// shards that disagree about memory or syscalls. Only [`Self::verify`]
-    /// verifies a proof.
+    /// For a machine that defers its global lookups this leaves every
+    /// cross-shard lookup unchecked: shards that disagree about memory or
+    /// syscalls pass. Only [`Self::verify`] verifies such a machine's proof.
+    #[instrument("verify", level = "info", skip_all)]
     pub fn verify_shard_proofs(
         &self,
         vk: &StarkVerifyingKey<SC>,
@@ -1469,72 +1409,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
     {
-        if !self.defers_global_lookups() {
+        if self.has_global_lookups() {
             return Err(MachineVerificationError::InvalidGlobalChallenge(
-                "the machine's shard proofs close its global lookups: verify the whole proof"
+                "a chip keeps a global lookup in its shard proof: global lookups are proved in \
+                 global proofs, on a machine built with_deferred_global_lookups"
                     .into(),
             ));
-        }
-        self.verify_shards(vk, proof, challenger, None)
-    }
-
-    /// Verifies every shard proof under `global` and, with a challenge, that
-    /// the shards' global sums add to zero.
-    #[instrument("verify", level = "info", skip_all)]
-    #[allow(clippy::match_bool)]
-    fn verify_shards(
-        &self,
-        vk: &StarkVerifyingKey<SC>,
-        proof: &MachineProof<SC>,
-        challenger: &mut SC::Challenger,
-        global: Option<
-            &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
-        >,
-    ) -> Result<(), MachineVerificationError<SC>>
-    where
-        SC::Challenger: Clone + Sync,
-        SC: Sync,
-        Com<SC>: Sync,
-        ShardProof<SC>: Sync,
-        A: Sync
-            + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-            + for<'b> Air<
-                crate::shard_level::constraint_folder::ShardConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    <SC as StarkGenericConfig>::Challenge,
-                    <SC as StarkGenericConfig>::Challenge,
-                >,
-            >,
-        SC: crate::WhirRing,
-        SC::Challenger: 'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
-    {
-        match (self.has_global_lookups(), global) {
-            (false, Some(_)) => {
-                return Err(MachineVerificationError::InvalidGlobalChallenge(
-                    "the machine has no global lookups".into(),
-                ))
-            }
-            (true, None) => {
-                return Err(MachineVerificationError::InvalidGlobalChallenge(
-                    "the machine has global lookups but no challenge was given".into(),
-                ))
-            }
-            (true, Some(g)) => {
-                if g.betas.len() != 1usize << self.global_beta_seed_dim() {
-                    return Err(MachineVerificationError::InvalidGlobalChallenge(format!(
-                        "a β table of {} entries, the machine's global lookups need {}",
-                        g.betas.len(),
-                        1usize << self.global_beta_seed_dim(),
-                    )));
-                }
-                self.check_global_round()
-                    .map_err(MachineVerificationError::InvalidGlobalChallenge)?;
-            }
-            (false, None) => {}
         }
 
         vk.observe_into(challenger);
@@ -1580,7 +1460,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         self.recursion_pins(),
                         has_pv_buses,
                         self.global_round(),
-                        global,
+                        None,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })
@@ -1609,26 +1489,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             }
             match outcomes.iter().position(Option::is_none) {
                 Some(i) => Err(verify_one(i, &proof.shard_proofs[i])),
-                None => Ok(outcomes.into_iter().flatten().collect::<Vec<_>>()),
+                None => Ok(()),
             }
         });
 
-        let global_sums = match failed_shard {
-            Ok(sums) => sums,
-            Err(result) => {
-                result?;
-                unreachable!("a shard that failed once fails again on the same proof");
-            }
-        };
-
-        if global.is_some() {
-            let total: <SC as StarkGenericConfig>::Challenge = global_sums.into_iter().sum();
-            if !total.is_zero() {
-                tracing::error!("global LogUp sum: {:?}", total);
-                return Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0));
-            }
+        if let Err(result) = failed_shard {
+            result?;
+            unreachable!("a shard that failed once fails again on the same proof");
         }
-
         Ok(())
     }
 }
