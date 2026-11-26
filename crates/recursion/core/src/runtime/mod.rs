@@ -63,7 +63,11 @@ pub const DIGEST_SIZE: usize = 8;
 
 pub const NUM_BITS: usize = 31;
 
-pub const D: usize = zkm_pcs::air::EXTENSION_DEGREE;
+/// The degree of the challenge field over the base field. A literal, as the
+/// generated C++ header takes its value from here.
+pub const D: usize = 5;
+
+const _: () = assert!(D == zkm_pcs::air::EXTENSION_DEGREE);
 
 /// Per-walker mutable state for the parallel SeqBlock executor. Each parallel
 /// sub-walker allocates its own `WalkerState` on the stack so the walker
