@@ -524,23 +524,23 @@ impl SizeTunedParams {
     /// The wrap schedule's defaults, before environment overrides.
     ///
     /// The wrap's verifier is the gnark circuit, whose size is set by the
-    /// queries, and its prover grinds over the BN254 challenger, whose
-    /// permutation costs far more than the KoalaBear one.  The compress
-    /// schedule's multiplicity buys its few queries with folding grinds the
-    /// BN254 challenger cannot afford, so the wrap keeps its shape (first rate
-    /// `2^-3`, folds `[2, 6, 6]`) at a smaller list, and each folding step
-    /// grinds only what its own error needs, the error growing with the fifth
-    /// power of the multiplicity.  `m = 3` is the least multiplicity whose
-    /// circuit stays inside the `2^25` constraints of the Groth16 setup: one
-    /// below it, the circuit crosses into a `2^26` domain, which doubles the
-    /// prover's FFTs and outweighs the grinding the smaller list saves.  The
-    /// batching grind closes the batch of the wrap's pinned geometry, 24
-    /// stripes, at that list size.
+    /// queries and by what each query opens, and its prover grinds over the
+    /// BN254 challenger, whose permutation costs far more than the KoalaBear
+    /// one.  The compress schedule's rate buys its few queries with a
+    /// codeword the wrap's prover would hash over BN254, so the wrap keeps
+    /// the first rate `2^-3` and each folding step grinds only what its own
+    /// error needs.  The later rounds fold 4 variables: a query then opens 16
+    /// elements where a fold of 6 opens 64, and the circuit hashes and folds
+    /// a quarter as much for it.  At 128 bits the Groth16 circuit has 29.3M
+    /// constraints with these folds and 34.3M with folds of 6, which is past
+    /// the `2^25` of the Groth16 setup: a `2^26` domain doubles the prover's
+    /// FFTs.  The batching grind closes the batch of the wrap's pinned
+    /// geometry, 24 stripes, at the list size of multiplicity 3.
     pub const fn wrap_defaults() -> Self {
         Self {
             log_inv_rate: 3,
             round0_folding: 2,
-            later_folding: 6,
+            later_folding: 4,
             johnson_m: 3,
             query_pow: 24,
             fold_pow: None,
@@ -1026,12 +1026,12 @@ mod tests {
             DEFAULT_PER_COMPONENT_TARGET_BITS,
         );
         let queries: Vec<usize> = cfg.round_parameters.iter().map(|rp| rp.num_queries).collect();
-        assert_eq!((queries, cfg.final_queries), (vec![82, 38, 25], 25));
+        assert_eq!((queries, cfg.final_queries), (vec![82, 38, 25, 19], 19));
         let folds: Vec<Vec<usize>> =
             cfg.round_parameters.iter().map(|rp| rp.pow_bits.clone()).collect();
         assert_eq!(
             folds,
-            vec![vec![10, 9], vec![15, 14, 13, 12, 11, 10], vec![17, 16, 15, 14, 13, 12],]
+            vec![vec![10, 9], vec![15, 14, 13, 12], vec![19, 18, 17, 16], vec![22, 21, 20, 19],]
         );
         assert_eq!(cfg.batch_pow_bits, 24);
     }
