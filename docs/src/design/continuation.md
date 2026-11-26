@@ -29,7 +29,7 @@ No register file or memory image is passed between shards. Registers are memory 
 ## Key constraints
 
 - **Shard validity.** Each shard proof verifies against the program's verifying key.
-- **Initial state.** The first shard starts at `pc_start` from the verifying key, its global hash chain starts at the value derived from the verifying key, and it sends the initial memory image from the key's preprocessed `MemoryProgram` table.
+- **Initial state.** The first shard starts at `pc_start` from the verifying key, its global hash chain starts at the value derived from the verifying key, and it sends the initial memory image, which its `MemoryImage` chip copies from the key's preprocessed `MemoryProgram` table.
 - **Transitions.** Each shard's `start_pc` equals the previous shard's `next_pc`. Shard boundaries are sequential (`start_next_pc = start_pc + 4`, `next_next_pc = next_pc + 4`), so no pending branch target crosses them. Shard numbers increase by one, and the initialized and finalized address ranges of consecutive shards join.
 - **Completion.** The last shard ends with `next_pc = 0` and exit code 0. The global hash chain ends at the value the global challenge was derived from, and the shards' global sums add to zero, so every memory value handed from one shard to another was consumed exactly once.
 
