@@ -940,17 +940,32 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     where
         Val<SC>: 'a,
     {
-        let mut chain = vec![crate::logup_gkr::global_digest(vk_challenger.clone())];
+        let mut chain = vec![self.global_chain_start(vk_challenger)];
         for round in rounds {
             let h = chain.last().expect("the chain holds at least its start");
-            let next = if round.is_none() && self.defers_global() {
-                *h
-            } else {
-                crate::logup_gkr::global_chain_step(self.config.challenger(), h, round)
-            };
-            chain.push(next);
+            chain.push(self.global_chain_next(h, round));
         }
         chain
+    }
+
+    /// The global hash chain before the first shard.
+    pub fn global_chain_start(&self, vk_challenger: &SC::Challenger) -> [Val<SC>; 8] {
+        crate::logup_gkr::global_digest(vk_challenger.clone())
+    }
+
+    /// The global hash chain after a shard whose global round is `round`,
+    /// from its value `h` before the shard. A prover that learns the rounds
+    /// one at a time builds the chain of [`Self::global_chain`] with this.
+    pub fn global_chain_next(
+        &self,
+        h: &[Val<SC>; 8],
+        round: Option<&crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+    ) -> [Val<SC>; 8] {
+        if round.is_none() && self.defers_global() {
+            *h
+        } else {
+            crate::logup_gkr::global_chain_step(self.config.challenger(), h, round)
+        }
     }
 
     /// The global round `proof` commits, as the hash chain absorbs it: its

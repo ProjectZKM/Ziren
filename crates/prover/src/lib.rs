@@ -1692,19 +1692,32 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .zip(global_proofs)
             .rev()
             .map(|(global_chain_end, proof)| {
-                zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
-                    vk: vk.clone(),
-                    proof: (*proof.jagged_shard_proof).clone(),
-                    vk_root: self.recursion_vk_root,
-                    global_chain_end,
-                    global_h_star,
-                    global_pow_witness: proof
-                        .jagged_shard_proof
-                        .global_pow_witness
-                        .unwrap_or(KoalaBear::ZERO),
-                }
+                self.get_recursion_global_input(vk, proof, global_chain_end, global_h_star)
             })
             .collect()
+    }
+
+    /// The global-round input of one global proof: `global_chain_end` is the
+    /// global hash chain's value before the round the proof opens and
+    /// `global_h_star` the chain's end.
+    pub fn get_recursion_global_input(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        global_proof: &ShardProof<CoreSC>,
+        global_chain_end: [KoalaBear; DIGEST_SIZE],
+        global_h_star: [KoalaBear; DIGEST_SIZE],
+    ) -> zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC> {
+        zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
+            vk: vk.clone(),
+            proof: (*global_proof.jagged_shard_proof).clone(),
+            vk_root: self.recursion_vk_root,
+            global_chain_end,
+            global_h_star,
+            global_pow_witness: global_proof
+                .jagged_shard_proof
+                .global_pow_witness
+                .unwrap_or(KoalaBear::ZERO),
+        }
     }
 
     /// Constructs `ZKMDeferredWitnessValues` from each batch, taking
@@ -1820,13 +1833,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )?;
 
         let num_first_layer_inputs = first_layer_inputs.len();
-        let mut chain = crate::compress_tree::ShardChain::new();
+        let mut chain =
+            crate::compress_tree::ShardChain::with_global_rounds(proof.proof.1.len() as u64);
         let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
             first_layer_inputs
                 .into_iter()
                 .map(|input| {
                     let range = match &input {
                         ZKMCircuitWitness::DeferredJagged(_) => chain.deferred(),
+                        ZKMCircuitWitness::GlobalJagged(_) => chain.global_round(),
                         _ => chain.core(),
                     };
                     (range, input)

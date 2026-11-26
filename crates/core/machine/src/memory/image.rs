@@ -13,7 +13,10 @@ use zkm_pcs::{
     LookupKind, Word,
 };
 
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_power_of_two, pad_rows_fixed},
+    CoreChipError,
+};
 
 /// The number of memory image columns.
 pub const NUM_MEMORY_IMAGE_COLS: usize = size_of::<MemoryImageCols<u8>>();
@@ -88,6 +91,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryImageChip {
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_MEMORY_IMAGE_COLS))
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        Some(next_power_of_two(
+            input.program.image.len(),
+            None,
+            <MemoryImageChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

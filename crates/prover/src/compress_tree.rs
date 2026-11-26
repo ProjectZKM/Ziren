@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, VecDeque};
 /// chain and the tree can merge neighbours without caring what kind they are:
 ///
 /// ```text
+///   global       advances `global_round`
 ///   precompile   (shard 1, nothing else)   <- degenerate: start == end
 ///   deferred     advances `deferred_proof`
 ///   core         advances `shard`
@@ -43,6 +44,13 @@ use std::collections::{BTreeMap, VecDeque};
 /// to agree with it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShardBoundary {
+    /// Where the global proofs stand, counted down to
+    /// [`Self::GLOBAL_ROUNDS_UNWOUND`]: that value less the global rounds
+    /// still to open. The global proofs come before the first shard and open
+    /// the rounds last to first, and the number of rounds is known only when
+    /// the last shard is cut, so the count runs towards a fixed end instead
+    /// of from a fixed start.
+    pub global_round: u64,
     /// The core shard index: the time coordinate of the range.
     pub shard: u64,
     /// MemoryInit address reached.
@@ -59,7 +67,23 @@ impl ShardBoundary {
     /// Shard numbering starts at 1, so a precompile range `[initial, initial]`
     /// is degenerate but still ordered ahead of every core shard.
     pub fn initial() -> Self {
-        Self { shard: 1, init_addr: 0, finalize_addr: 0, deferred_proof: 0 }
+        Self {
+            global_round: Self::GLOBAL_ROUNDS_UNWOUND,
+            shard: 1,
+            init_addr: 0,
+            finalize_addr: 0,
+            deferred_proof: 0,
+        }
+    }
+
+    /// [`Self::global_round`] once every global proof is behind.
+    pub const GLOBAL_ROUNDS_UNWOUND: u64 = u64::MAX;
+
+    /// The boundary the global proofs of rounds `0..rounds` end at, with
+    /// those rounds still to open: where the proof of round `rounds - 1`
+    /// starts and, with no round, the first shard.
+    pub fn before_global_rounds(rounds: u64) -> Self {
+        Self { global_round: Self::GLOBAL_ROUNDS_UNWOUND - rounds, ..Self::initial() }
     }
 
     /// The boundary after `shard`, with the other coordinates carried over.
@@ -84,6 +108,15 @@ impl ShardRange {
     /// One core shard's span.
     pub fn core(shard: u64) -> Self {
         Self::new(ShardBoundary::at_shard(shard), ShardBoundary::at_shard(shard + 1))
+    }
+
+    /// The span of the global proof of the global round `round`, counted in
+    /// shard order.
+    pub fn global_round(round: u64) -> Self {
+        Self::new(
+            ShardBoundary::before_global_rounds(round + 1),
+            ShardBoundary::before_global_rounds(round),
+        )
     }
 
     /// The span every precompile shard shares — degenerate, and first in the
@@ -117,7 +150,7 @@ impl ShardRange {
 /// The resulting order is:
 ///
 /// ```text
-///   precompile | deferred | core | memory
+///   global | precompile | deferred | core | memory
 /// ```
 ///
 /// Precompiles come first because their range is DEGENERATE — every one of them
@@ -126,6 +159,7 @@ impl ShardRange {
 /// proof could sit forever with no neighbour.
 #[derive(Debug)]
 pub struct ShardChain {
+    start: ShardBoundary,
     cursor: ShardBoundary,
 }
 
@@ -137,7 +171,24 @@ impl Default for ShardChain {
 
 impl ShardChain {
     pub fn new() -> Self {
-        Self { cursor: ShardBoundary::initial() }
+        Self::with_global_rounds(0)
+    }
+
+    /// A chain that starts with the global proofs of `rounds` global rounds.
+    pub fn with_global_rounds(rounds: u64) -> Self {
+        let start = ShardBoundary::before_global_rounds(rounds);
+        Self { start, cursor: start }
+    }
+
+    /// One global proof: the next round down.
+    pub fn global_round(&mut self) -> ShardRange {
+        let start = self.cursor;
+        debug_assert!(
+            start.global_round < ShardBoundary::GLOBAL_ROUNDS_UNWOUND,
+            "the chain holds more global proofs than global rounds"
+        );
+        self.cursor.global_round += 1;
+        ShardRange::new(start, self.cursor)
     }
 
     /// Where the chain currently stands.
@@ -185,7 +236,7 @@ impl ShardChain {
 
     /// The span the whole chain covers — what the root proof must attest to.
     pub fn full_range(&self) -> ShardRange {
-        ShardRange::new(ShardBoundary::initial(), self.cursor)
+        ShardRange::new(self.start, self.cursor)
     }
 }
 
