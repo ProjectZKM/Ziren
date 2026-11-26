@@ -98,7 +98,7 @@ Compiling a round-by-round knowledge sound protocol with Fiat--Shamir costs a fa
 \subsection{Zero knowledge}
 \label{sec:zk}
 
-The proofs above are succinct but not hiding: opened values, sumcheck messages and queried codeword entries are functions of the trace. An optional \emph{terminal proof} adds zero knowledge: one hiding proof after the recursion root, whose statement is the program's key digest, the committed-values digest, a zero exit code and the recursion root, and whose witness is the root proof. Its shard shape is fixed by the verifier it proves, so the dimensions it carries do not depend on the execution.
+The proofs above are succinct but not hiding: opened values, sumcheck messages and queried codeword entries are functions of the trace. An optional \emph{terminal proof} adds zero knowledge: one hiding proof after the recursion root, whose statement is the program's key digest, the committed-values digest, a zero exit code and the recursion root, and whose witness is the root proof. Its shard shape is fixed by the verifier it proves, so the dimensions it carries do not depend on the execution. The construction and its budgets are stated for the schedules that preceded the 128-bit ones, over the degree-four extension of \KB{}; the terminal proof has not been solved for 128 bits.
 
 \paragraph{Construction.} The terminal proof is the shard protocol of Section~\ref{sec:argument} with four additions, each a committed source of randomness drawn before the challenge it meets.
 \begin{enumerate}
