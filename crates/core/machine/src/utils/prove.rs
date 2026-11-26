@@ -305,10 +305,12 @@ where
 }
 
 /// Replays the program from `checkpoint` and cuts it into shard records.
-/// `prepare_shard` runs in the trace workers; `consume_shard` takes the
-/// prepared value in the prover worker. Their shared type keeps a shard from
-/// reaching the prover without its traces. Results preserve shard order
-/// across both stages.
+/// `prepare_shard` runs on each record in the trace workers; `consume_shard`
+/// runs in the prover worker on the record and the value `prepare_shard`
+/// returned for it. The type parameter `T` guarantees only that: the
+/// consuming stage receives the result prepared for its own shard. That
+/// result is the shard's traces in [`prove_with_context`] and `()` in
+/// [`shard_records`]. Results preserve shard order across both stages.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn run_shard_pipeline<
