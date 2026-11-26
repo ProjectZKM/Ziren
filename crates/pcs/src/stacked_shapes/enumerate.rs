@@ -81,6 +81,7 @@ fn core_base_chips() -> &'static [&'static str] {
         "MiscInstrs",
         "SyscallInstrs",
         "SyscallCore",
+        "SyscallPrecompile",
     ]
 }
 
@@ -162,7 +163,8 @@ pub fn build_mips_machine_shape() -> MachineShape {
     let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
     let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize"]);
     let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit"]);
-    let precompile_base = extend_cluster(&preprocessed, &["MemoryLocal", "SyscallPrecompile"]);
+    let precompile_base =
+        extend_cluster(&preprocessed, &["MemoryLocal", "SyscallCore", "SyscallPrecompile"]);
 
     let mut clusters: Vec<BTreeSet<String>> =
         vec![core_base.clone(), memory.clone(), memory_min, memory_finalize_only, memory_init_only];
