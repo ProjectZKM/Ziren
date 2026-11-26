@@ -15,20 +15,20 @@
 
 The layout is applied separately to every input-commitment round of Section~\ref{sec:pcs-stacking}, and one batched \WHIR{} opening authenticates all input rounds against their respective roots. Within each input round's Merkle tree, a leaf of the first oracle holds one coset row from every stripe under that root, $S_r \times 2^{k_0}$ field elements. The first folding factor $k_0$ is therefore small: leaf width multiplies every first-round query, and re-hashing those leaves is the recursion verifier's dominant cost. Later rounds query a single folded polynomial and fold more variables at a time.
 
-Table~\ref{tab:whir-schedule} gives the two schedules; \S\ref{sec:perf-proofsize} describes how a schedule controls proof size. Each recommitment lowers the rate by three powers of two. The core schedule is tuned for prover time: at log stacking height 21 its three folds consume 15 variables, the remaining six-variable polynomial being sent in the clear after its final query phase, and it spends grinding only on the query phases and on the batching and \LogUp{} challenges, not on folding challenges. The compress schedule, under which the root of the recursion tree proves, is tuned for the size of the published proof: it starts at the lowest rate the two-adicity of \KB{} admits at this stacking height, counts queries under the Johnson bound, folds two variables first so that a first-round query opens half the leaf, and grinds every folding and batching challenge, which the list size of the Johnson-bound analysis requires.
+Table~\ref{tab:whir-schedule} gives the two schedules; \S\ref{sec:perf-proofsize} describes how a schedule controls proof size. Both are solved so that every component of the opening has at least 128 bits (\S\ref{sec:iopp-soundness}), and each recommitment lowers the rate by three powers of two. The core schedule is tuned for prover time: it starts at rate $2^{-1}$, and at log stacking height 21 its three folds consume 15 variables, the remaining six-variable polynomial being sent in the clear after its final query phase. It counts the queries on its first oracle, the stripe trees, in the unique-decoding regime, on which the global challenge relies (\S\ref{sec:global-security}) and under which the folds of the first round need no grinding; the oracles it commits later are counted under the Johnson bound with multiplicity $m = 3$, and each of their folding challenges grinds what its own error needs, 4 to 11 bits. The compress schedule, under which the root of the recursion tree proves, is tuned for the size of the published proof: it starts at the lowest rate the two-adicity of \KB{} admits at this stacking height, counts every oracle under the Johnson bound, folds two variables first so that a first-round query opens half the leaf, and grinds every folding and batching challenge, which the list size of the Johnson-bound analysis requires.
 
 \begin{table}[t]
 \centering
 \small
-\caption{The core and compress Jagged--\WHIR{} schedules. Analysis is the regime queries are counted in. Queries are per committed round, followed by the final query phase. OOD entries count samples after committed folds; the fold grind applies to every folding challenge. The stripe bound covers both ordered input-commitment rounds.}
+\caption{The core and compress Jagged--\WHIR{} schedules. Analysis is the regime queries are counted in. Queries are per committed round, followed by the final query phase. OOD entries count samples after committed folds; the fold grind is the range over the folding challenges of the rounds that grind them, each ground what its own error needs. The stripe bound covers both ordered input-commitment rounds.}
 \label{tab:whir-schedule}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lccccccccccc}
 \toprule
 Profile & first rate & analysis & folds & queries & OOD & query grind & fold grind & batch grind & \LogUp{} grind & stripe bound & final variables \\
 \midrule
-core & $2^{-2}$ & unique decoding & $[3,6,6]$ & $[124,88]$, 85 & $[2,2]$ & 22 bits & 0 & 14 bits & 22 bits & 544 & 6 \\
-compress & $2^{-3}$ & Johnson, $m=6$ & $[2,6,6]$ & $[58,28]$, 19 & $[2,2]$ & 26 bits & 27 bits & 27 bits & 22 bits & 64 & 7 \\
+core & $2^{-1}$ & unique decoding, then Johnson, $m=3$ & $[3,6,6]$ & $[256,60]$, 33 & $[2,2]$ & 22 bits & 4--11 bits & 14 bits & 22 bits & 544 & 6 \\
+compress & $2^{-5}$ & Johnson, $m=3$ & $[2,4,4,4]$ & $[45,28,20]$, 16 & $[2,2,2]$ & 26 bits & 14--27 bits & 27 bits & 22 bits & 32 & 7 \\
 \bottomrule
 \end{tabular}}
 \end{table}
