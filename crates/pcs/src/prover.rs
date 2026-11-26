@@ -1,4 +1,3 @@
-use crate::septic_digest::SepticDigest;
 use core::fmt::Display;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, time::Instant};
@@ -147,6 +146,16 @@ where
     /// the driver CONSUMES it (digest observed, precompute opened); `None` =>
     /// the commit is built inside the prove pass (identical value).
     pub commit_data: Option<RetainedJaggedCommit<SC>>,
+    /// The machine's global-round chip set ([`crate::StarkMachine::global_round`]):
+    /// the shard's chips named in it commit in a main round of their own,
+    /// ahead of the rest. `None` = a single main round.
+    pub global_round: Option<&'a std::collections::BTreeSet<String>>,
+    /// The cross-shard challenge the shard's global-scope lookups use;
+    /// its digest `h_star` opens the transcript. `None` when the shard has
+    /// no global lookups.
+    pub global_challenge: Option<
+        &'a crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    >,
 }
 
 /// What `commit()` retains for the shard prove — the jagged hash-bind digest
@@ -170,6 +179,25 @@ where
     /// the prove read the same cells.  `None` on device provers (their
     /// traces are device-resident).
     pub main_store: Option<crate::traces::Traces<Val<SC>>>,
+    /// The global round's commitment, when the shard commits one: it is
+    /// built over the shard's global-round chips alone, before the main round
+    /// above, which then holds every other chip.
+    pub global: Option<RetainedRound<SC>>,
+}
+
+/// One committed main round: the hash-bound digest the prologue observes and
+/// the precomputed commit the jagged open consumes.
+pub struct RetainedRound<SC>
+where
+    SC: StarkGenericConfig + crate::WhirRing,
+{
+    /// The hash-bound digest of the round.
+    pub commitment: [Val<SC>; 8],
+    /// The precomputed WHIR commit of the round.
+    pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::WhirMmcs>,
+    /// GPU-only: the round's device dense, as in
+    /// [`RetainedJaggedCommit::device_dense_q`]; `None` on the CPU prover.
+    pub device_dense_q: Option<Box<dyn core::any::Any + Send + Sync>>,
 }
 
 /// The polynomial-commitment component of a shard prover.
@@ -214,6 +242,72 @@ where
     type Error = CpuProverError;
 }
 
+/// The traces of `chips` for `record`, each wrapped at the shard cube.
+pub fn chip_traces<F, A>(
+    chips: &[&crate::Chip<F, A>],
+    record: &A::Record,
+) -> Result<crate::Traces<F>, A::Error>
+where
+    F: PrimeField32,
+    A: MachineAir<F>,
+{
+    let parent_span = tracing::debug_span!("generate traces for shard");
+    let traces = parent_span.in_scope(|| {
+        chips
+            .par_iter()
+            .map(|chip| {
+                let chip_name = chip.name();
+                let begin = Instant::now();
+                let trace = match chip.generate_trace(record, &mut A::Record::default()) {
+                    Ok(trace) => trace,
+                    Err(e) => {
+                        tracing::error!(
+                            parent: &parent_span,
+                            "failed to generate trace for chip {} in {:?}: {:?}",
+                            chip_name,
+                            begin.elapsed(),
+                            e
+                        );
+                        return Err(e);
+                    }
+                };
+                tracing::debug!(
+                    parent: &parent_span,
+                    "generated trace for chip {} in {:?}",
+                    chip_name,
+                    begin.elapsed()
+                );
+                Ok((chip_name, trace))
+            })
+            .collect::<Result<Vec<_>, A::Error>>()
+    })?;
+    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
+        .max_log_row_count as u32;
+    Ok(crate::Traces {
+        named_traces: traces
+            .into_iter()
+            .map(|(name, mat)| (name, into_padded(mat, cube, None)))
+            .collect(),
+    })
+}
+
+/// Adds every chip of `cluster_widths` that `traces` lacks as a height-0
+/// trace at its width.
+pub fn pad_to_cluster<F: p3_field::Field>(
+    traces: &mut crate::Traces<F>,
+    cluster_widths: &std::collections::BTreeMap<String, usize>,
+) {
+    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
+        .max_log_row_count as u32;
+    for (name, width) in cluster_widths.iter() {
+        let w = (*width).max(1);
+        traces
+            .named_traces
+            .entry(name.clone())
+            .or_insert_with(|| into_padded(RowMajorMatrix::new(Vec::<F>::new(), w), cube, None));
+    }
+}
+
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     'static + Send + Sync
@@ -245,45 +339,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     #[allow(clippy::type_complexity)]
     fn generate_traces(&self, record: &A::Record) -> Result<crate::Traces<Val<SC>>, A::Error> {
         let shard_chips = self.machine().shard_chips(record).collect::<Vec<_>>();
-
-        let parent_span = tracing::debug_span!("generate traces for shard");
-        let traces = parent_span.in_scope(|| {
-            shard_chips
-                .par_iter()
-                .map(|chip| {
-                    let chip_name = chip.name();
-                    let begin = Instant::now();
-                    let trace = match chip.generate_trace(record, &mut A::Record::default()) {
-                        Ok(trace) => trace,
-                        Err(e) => {
-                            tracing::error!(
-                                parent: &parent_span,
-                                "failed to generate trace for chip {} in {:?}: {:?}",
-                                chip_name,
-                                begin.elapsed(),
-                                e
-                            );
-                            return Err(e);
-                        }
-                    };
-                    tracing::debug!(
-                        parent: &parent_span,
-                        "generated trace for chip {} in {:?}",
-                        chip_name,
-                        begin.elapsed()
-                    );
-                    Ok((chip_name, trace))
-                })
-                .collect::<Result<Vec<_>, A::Error>>()
-        })?;
-        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count as u32;
-        Ok(crate::Traces {
-            named_traces: traces
-                .into_iter()
-                .map(|(name, mat)| (name, into_padded(mat, cube, None)))
-                .collect(),
-        })
+        chip_traces(&shard_chips, record)
     }
 
     /// Commit to a shard's main traces.
@@ -337,6 +393,28 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>>;
 
+    /// The traces of the global round `data` commits, under their chip
+    /// names, for a machine that defers its global lookups: what
+    /// [`Self::prove_global_round`] takes once the cross-shard challenge is
+    /// known. `None` for a shard without a global round.
+    fn global_round_tables(
+        &self,
+        data: &PcsMainTraceData<SC, Self::Pcs>,
+    ) -> Option<crate::Traces<Val<SC>>>;
+
+    /// Proves the sum of the global lookups of a shard that committed the
+    /// global round `round` over `tables` ([`Self::global_round_tables`]),
+    /// under the cross-shard challenge `global`. `vk_challenger` is the
+    /// machine's challenger after the verifying key.
+    fn prove_global_round(
+        &self,
+        pk: &Self::DeviceProvingKey,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        tables: crate::Traces<Val<SC>>,
+        global: &crate::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>,
+        vk_challenger: &SC::Challenger,
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>>;
+
     /// Generate a proof for the given records.
     fn prove(
         &self,
@@ -356,9 +434,6 @@ pub trait MachineProvingKey<SC: StarkGenericConfig>: Send + Sync {
 
     /// The start pc.
     fn pc_start(&self) -> Val<SC>;
-
-    /// The initial global cumulative sum.
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>>;
 
     /// Observe itself in the challenger.
     fn observe_into(&self, challenger: &mut Challenger<SC>);
@@ -442,15 +517,8 @@ where
         mut named_traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
-        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
-            for (name, width) in cluster_widths.iter() {
-                let w = (*width).max(1);
-                named_traces.entry(name.clone()).or_insert_with(|| {
-                    into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube, None)
-                });
-            }
+            pad_to_cluster(&mut named_traces, &cluster_widths);
         }
 
         let chip_ordering: hashbrown::HashMap<String, usize> =
@@ -459,15 +527,18 @@ where
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                let (main_commitment, precomputed) = crate::shard_level::prover::commit_traces::<SC>(
-                    &named_traces,
-                    record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
-                );
+                let (global, main_commitment, precomputed) =
+                    crate::shard_level::prover::commit_trace_rounds::<SC>(
+                        &named_traces,
+                        self.machine().global_round(),
+                        record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
+                    );
                 Some(RetainedJaggedCommit {
                     main_commitment,
                     precomputed,
                     device_dense_q: None,
                     main_store: Some(named_traces),
+                    global,
                 })
             } else {
                 None
@@ -479,6 +550,7 @@ where
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
+            global_challenge: None,
         }
     }
 
@@ -507,9 +579,31 @@ where
             data.public_values.clone(),
             &jagged_challenger_snapshot,
             data.main_data,
+            self.machine().global_round(),
+            data.global_challenge.as_ref(),
         );
 
         Ok(ShardProof::<SC> { public_values: data.public_values, jagged_shard_proof })
+    }
+
+    fn global_round_tables(
+        &self,
+        data: &PcsMainTraceData<SC, Self::Pcs>,
+    ) -> Option<crate::Traces<Val<SC>>> {
+        let store = data.main_data.as_ref()?.main_store.as_ref()?;
+        crate::shard_level::prover::split_global_round(store, self.machine().global_round())
+            .map(|(tables, _)| tables)
+    }
+
+    fn prove_global_round(
+        &self,
+        pk: &StarkProvingKey<SC>,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        tables: crate::Traces<Val<SC>>,
+        global: &crate::logup_gkr::GlobalChallenge<Val<SC>, SC::Challenge>,
+        vk_challenger: &SC::Challenger,
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>> {
+        Ok(prove_global_round(self.machine(), pk, round, tables, global, vk_challenger))
     }
 
     /// Prove the execution record is valid.
@@ -532,6 +626,71 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
+        if self.machine().defers_global_lookups() {
+            let proved = tracing::info_span!("prove_shards").in_scope(|| {
+                records
+                    .into_par_iter()
+                    .map(|record| {
+                        let named_traces = self.generate_traces(&record).map_err(|e| {
+                            tracing::error!("generate traces error: {:?}", e);
+                            CpuProverError
+                        })?;
+                        let shard_data = self.commit(&record, named_traces, None);
+                        let tables = self.global_round_tables(&shard_data);
+                        let proof = self.open(pk, shard_data, &mut challenger.clone())?;
+                        Ok((proof, tables))
+                    })
+                    .collect::<Result<Vec<_>, ShardPcsError<SC, Self::Pcs>>>()
+            })?;
+            let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+
+            let rounds = shard_proofs
+                .iter()
+                .map(|proof| self.machine().global_round_binding(proof))
+                .collect::<Vec<_>>();
+            self.machine().check_global_lookup_count(rounds.iter().flatten()).map_err(
+                |reason| {
+                    tracing::error!("{reason}");
+                    CpuProverError
+                },
+            )?;
+            let committed = rounds
+                .iter()
+                .zip(tables)
+                .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+                .collect::<Vec<_>>();
+            let global_proofs = if committed.is_empty() {
+                Vec::new()
+            } else {
+                let global = self
+                    .machine()
+                    .global_challenge(challenger, rounds.iter().map(Option::as_ref))
+                    .expect("a machine that defers global lookups has them");
+                tracing::info_span!("prove_global_rounds").in_scope(|| {
+                    committed
+                        .into_par_iter()
+                        .map(|(round, tables)| {
+                            prove_global_round(
+                                self.machine(),
+                                pk,
+                                round,
+                                tables,
+                                &global,
+                                challenger,
+                            )
+                        })
+                        .collect()
+                })
+            };
+            return Ok(MachineProof { shard_proofs, global_proofs });
+        }
+        if self.machine().has_global_lookups() {
+            tracing::error!(
+                "a chip keeps a global lookup in its shard proof: build the machine \
+                 with_deferred_global_lookups"
+            );
+            return Err(CpuProverError);
+        }
 
         let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
             records
@@ -549,7 +708,7 @@ where
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
-                    let proof = self.open(pk, shard_data, &mut challenger.clone());
+                    let proof = self.open(pk, shard_data, &mut challenger.clone())?;
                     let open_ms = t2.elapsed().as_millis();
 
                     tracing::info!(
@@ -560,13 +719,81 @@ where
                         trace_gen_ms + commit_ms + open_ms
                     );
 
-                    proof
+                    Ok(proof)
                 })
                 .collect::<Result<Vec<_>, _>>()
         })?;
 
-        Ok(MachineProof { shard_proofs })
+        Ok(MachineProof::from_shards(shard_proofs))
     }
+}
+
+/// Proves the sum of the global lookups of a shard, from the global round
+/// `round` the shard committed over `tables`, its global-round chips' traces
+/// under their chip names, and under the cross-shard challenge `global`.
+/// `vk_challenger` is the machine's challenger after the verifying key.
+///
+/// The proof is a shard proof of the round's chips seen as
+/// [`crate::air::GlobalView`]s. It commits `tables` again, which reproduces
+/// the shard's commitment.
+///
+/// # Panics
+/// When the ring's schedule is not a unique-decoding one (see
+/// [`crate::whir::jagged::WhirProfile::unique_decoding`]), or `tables` do not
+/// commit to `round`.
+pub fn prove_global_round<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    pk: &StarkProvingKey<SC>,
+    round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+    tables: crate::traces::Traces<Val<SC>>,
+    global: &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    vk_challenger: &SC::Challenger,
+) -> ShardProof<SC>
+where
+    SC: StarkGenericConfig + WhirRing,
+    A: MachineAir<Val<SC>>,
+    SC::Challenger: p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
+{
+    assert!(
+        <SC as WhirRing>::WHIR_PROFILE.unique_decoding(),
+        "a global proof reopens a shard's global round, which binds one table only under a \
+         unique-decoding schedule",
+    );
+    let chips = machine.global_view_chips(round, 0).expect("the round of a shard of this machine");
+    let views = crate::traces::Traces {
+        named_traces: tables
+            .named_traces
+            .into_iter()
+            .map(|(name, table)| (crate::air::GlobalView::<A>::name_in_slot(0, &name), table))
+            .collect(),
+    };
+    let pin = crate::shard_level::prover::global_round_pin(&views);
+    let (main_commitment, precomputed) =
+        crate::shard_level::prover::commit_traces::<SC>(&views, pin);
+    assert_eq!(
+        main_commitment, round.commitment,
+        "the tables of a global proof do not commit to its shard's global round",
+    );
+    let retained = RetainedJaggedCommit {
+        main_commitment,
+        precomputed,
+        device_dense_q: None,
+        main_store: Some(views),
+        global: None,
+    };
+    let jagged_shard_proof = prove_shard_with_data_boxed::<SC, crate::air::GlobalView<A>>(
+        &chips.iter().collect::<Vec<_>>(),
+        pk.preprocessed_mles(),
+        <SC as WhirRing>::prep_open_data(pk.preprocessed_data()),
+        &pk.chip_ordering,
+        pin,
+        Vec::new(),
+        vk_challenger,
+        Some(retained),
+        None,
+        Some(global),
+    );
+    ShardProof { public_values: Vec::new(), jagged_shard_proof }
 }
 
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>
@@ -583,17 +810,10 @@ where
         self.pc_start
     }
 
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
-        self.initial_global_cumulative_sum
-    }
-
     fn observe_into(&self, challenger: &mut Challenger<SC>) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
-        let zero = Val::<SC>::ZERO;
-        challenger.observe(zero);
+        challenger.observe(Val::<SC>::ZERO);
     }
 }
 
@@ -613,7 +833,9 @@ impl Error for CpuProverError {}
 /// precomputed commitment, opened as the first round of every shard proof,
 /// and the main round's area pin (the program's class). `commit_data` is the
 /// main-round commitment `commit` retained, together with the name-keyed
-/// traces it was built over.
+/// traces it was built over, `global_round` the machine's global-round chip
+/// set, and `global_challenge` the cross-shard challenge of the shard's
+/// global-scope lookups.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
@@ -626,6 +848,10 @@ fn prove_shard_with_data_boxed<SC, A>(
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     commit_data: Option<RetainedJaggedCommit<SC>>,
+    global_round: Option<&std::collections::BTreeSet<String>>,
+    global_challenge: Option<
+        &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
+    >,
 ) -> Box<
     crate::shard_level::shard_proof::JaggedShardProof<
         Val<SC>,
@@ -695,6 +921,8 @@ where
             main_traces: main_traces_named,
             public_values,
             commit_data,
+            global_round,
+            global_challenge,
         },
         &mut shard_challenger,
     );

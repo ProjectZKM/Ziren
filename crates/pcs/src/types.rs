@@ -7,7 +7,6 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::{Challenge, StarkGenericConfig, Val};
-use crate::septic_digest::SepticDigest;
 use crate::shape::OrderedShape;
 
 pub type QuotientOpenedValues<T> = Vec<T>;
@@ -31,6 +30,10 @@ pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
+    /// The cross-shard challenge the shard's global-scope lookups use.
+    /// `commit()` leaves it `None`; a caller proving shards with global
+    /// lookups sets it before `open()`.
+    pub global_challenge: Option<crate::logup_gkr::GlobalChallenge<SC::Val, SC::Challenge>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,28 +45,26 @@ pub struct AirOpenedValues<T> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
-#[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-#[allow(clippy::type_complexity)]
-pub struct ChipOpenedValues<F, EF> {
+#[serde(bound(serialize = "EF: Serialize"))]
+#[serde(bound(deserialize = "EF: Deserialize<'de>"))]
+pub struct ChipOpenedValues<EF> {
     pub preprocessed: AirOpenedValues<EF>,
     pub main: AirOpenedValues<EF>,
     pub permutation: AirOpenedValues<EF>,
     pub quotient: Vec<Vec<EF>>,
-    pub global_cumulative_sum: SepticDigest<F>,
     pub local_cumulative_sum: EF,
     pub log_degree: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShardOpenedValues<F, EF> {
-    pub chips: Vec<ChipOpenedValues<F, EF>>,
+pub struct ShardOpenedValues<EF> {
+    pub chips: Vec<ChipOpenedValues<EF>>,
 }
 
 /// The maximum number of elements that can be stored in the public values vec.  Both Ziren and
 /// recursive proofs need to pad their public values vec to this length.  This is required since the
 /// recursion verification program expects the public values vec to be fixed length.
-pub const PROOF_MAX_NUM_PVS: usize = 231;
+pub const PROOF_MAX_NUM_PVS: usize = 247;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -124,12 +125,6 @@ pub const EXECUTION_CHIP_NAMES: &[&str] = &[
 ];
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
-    /// Sum of the per-chip global cumulative sums, read from the
-    /// transcript-bound `chip_cumulative_sums` of the jagged shard proof.
-    pub fn global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
-        self.jagged_shard_proof.chip_cumulative_sums.values().map(|s| s.global).sum()
-    }
-
     /// Whether this shard proof carries any INSTRUCTION chip — the
     /// execution-shard signal.  There is no Cpu chip any more (every
     /// instruction chip owns its frame), so "is this an execution shard"
@@ -153,6 +148,17 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
 #[serde(bound = "")]
 pub struct MachineProof<SC: StarkGenericConfig> {
     pub shard_proofs: Vec<ShardProof<SC>>,
+    /// The global proofs of a machine that defers its global lookups, one per
+    /// shard that commits a global round, in shard order; empty otherwise.
+    #[serde(default)]
+    pub global_proofs: Vec<ShardProof<SC>>,
+}
+
+impl<SC: StarkGenericConfig> MachineProof<SC> {
+    /// A proof of shards alone.
+    pub const fn from_shards(shard_proofs: Vec<ShardProof<SC>>) -> Self {
+        Self { shard_proofs, global_proofs: Vec::new() }
+    }
 }
 
 impl<SC: StarkGenericConfig> Debug for MachineProof<SC> {

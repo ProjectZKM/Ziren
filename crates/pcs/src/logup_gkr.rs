@@ -30,6 +30,16 @@ pub fn gkr_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_LOGUP_GRINDING_BITS", 22)
 }
 
+/// Proof-of-work grinding difficulty (in bits) of the cross-shard global
+/// challenge: the prover grinds for a witness that, absorbed after `h_star`,
+/// makes the challenger emit this many leading zero bits before `(α_g, β_g)`
+/// is sampled. The challenge is drawn once per execution and fingerprints every
+/// global lookup of every shard, so its error grows with the execution's global
+/// lookups rather than one shard's.
+pub fn global_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_GLOBAL_GRINDING_BITS", 22)
+}
+
 use p3_challenger::GrindingChallenger;
 
 /// `F == JaggedVal` at every instantiation, checked rather than assumed.
@@ -87,6 +97,211 @@ where
     challenger.check_witness(bits, from_f(witness))
 }
 
+/// The cross-shard LogUp challenge: the `(α_g, β_g)` every shard of one
+/// execution uses for its global-scope lookups
+/// ([`crate::air::LookupScope::Global`]), in place of its own `(α, β)`.
+///
+/// It is derived from a single digest `h_star` that binds every shard's
+/// global-round commitment, so it is fixed before any shard proof starts and
+/// is the same in every shard. Each shard's transcript absorbs `h_star` first,
+/// which ties the proof to the statement whose global lookups it closes.
+/// `betas` is the eq-table of the β seed, sized by the machine's widest
+/// global lookup ([`crate::StarkMachine::global_beta_seed_dim`]), so the
+/// fingerprint of a global message is the same in every shard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalChallenge<F, EF> {
+    /// The digest the challenge is derived from.
+    pub h_star: [F; 8],
+    /// `α_g`.
+    pub alpha: EF,
+    /// `β_g`: `betas[0]` weights the lookup kind, `betas[k + 1]` the
+    /// message's `k`-th value.
+    pub betas: alloc::vec::Vec<EF>,
+    /// The proof-of-work witness absorbed after `h_star`
+    /// ([`global_grinding_bits`]).
+    pub pow_witness: F,
+}
+
+/// Separates the global challenge's derivation from every other use of a
+/// fresh challenger.
+pub const GLOBAL_CHALLENGE_DOMAIN: u32 = 0x4742_4c47;
+
+/// Separates the global digest from every other use of the verifying key's
+/// transcript.
+pub const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
+
+/// Separates a step of the global hash chain from every other use of a fresh
+/// challenger.
+pub const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
+
+/// The start `h_0` of the global hash chain, sampled from `challenger`: the
+/// machine's challenger after it has observed the verifying key.
+pub fn global_digest<F, C>(mut challenger: C) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_DIGEST_DOMAIN));
+    core::array::from_fn(|_| challenger.sample())
+}
+
+/// `log2` of the global lookups one unit of a proof's count stands for.
+///
+/// The global sums cancel when each message is sent as often as it is
+/// received modulo the field's characteristic `p`. That is equality only
+/// while neither number can reach `p`, so the verifiers count the global
+/// lookups of each direction, sends and receives, and reject a proof that
+/// may hold `p` of them. They count in units, so that the count stays far
+/// below `p` and adds without wrapping: a round of `n` lookups counts
+/// [`global_lookup_units`]`(n)`, more than `n / 2^GLOBAL_LOOKUP_UNIT_BITS`,
+/// and a proof counts at most [`max_global_lookup_units`].
+pub const GLOBAL_LOOKUP_UNIT_BITS: usize = 10;
+
+/// The units a global round of at most `lookups` lookups in either
+/// direction adds to its proof's count.
+pub const fn global_lookup_units(lookups: u64) -> u64 {
+    (lookups >> GLOBAL_LOOKUP_UNIT_BITS) + 1
+}
+
+/// The most units the global rounds of one proof may count: rounds within
+/// it hold fewer lookups in either direction than the characteristic of `F`.
+pub const fn max_global_lookup_units<F: p3_field::PrimeField32>() -> u64 {
+    (F::ORDER_U32 as u64 - 1) >> GLOBAL_LOOKUP_UNIT_BITS
+}
+
+/// What a shard's global round binds ahead of the global challenge: the
+/// round's commitment, and the names and heights of its chips in name order.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(bound(serialize = "F: serde::Serialize", deserialize = "F: serde::Deserialize<'de>"))]
+pub struct GlobalRoundBinding<F> {
+    /// The round's commitment `C_global`.
+    pub commitment: [F; 8],
+    /// `(name, height)` of every chip the round commits.
+    pub chips: alloc::vec::Vec<(alloc::string::String, usize)>,
+}
+
+/// One step of the global hash chain: `h_prev` extended by a shard's global
+/// round, `None` for a shard without one. `challenger` must be a fresh
+/// challenger of the machine's configuration.
+pub fn global_chain_step<F, C>(
+    mut challenger: C,
+    h_prev: &[F; 8],
+    round: Option<&GlobalRoundBinding<F>>,
+) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_CHAIN_DOMAIN));
+    challenger.observe_slice(h_prev);
+    match round {
+        None => challenger.observe(F::ZERO),
+        Some(round) => {
+            challenger.observe(F::ONE);
+            challenger.observe_slice(&round.commitment);
+            challenger.observe(F::from_u64(round.chips.len() as u64));
+            for (name, height) in &round.chips {
+                challenger.observe(F::from_u64(*height as u64));
+                challenger.observe(F::from_u64(name.len() as u64));
+                for byte in name.bytes() {
+                    challenger.observe(F::from_u64(u64::from(byte)));
+                }
+            }
+        }
+    }
+    core::array::from_fn(|_| challenger.sample())
+}
+
+impl<F, EF> GlobalChallenge<F, EF>
+where
+    F: p3_field::Field + 'static,
+    EF: p3_field::ExtensionField<F> + Send + Sync,
+{
+    /// Prover side: absorbs the domain and `h_star` on `challenger`, which
+    /// must be a fresh challenger of the machine's configuration, grinds the
+    /// proof-of-work witness and samples the challenge. The witness is never
+    /// zero: a recursion proof that holds no global proof carries zero there.
+    pub fn grind<C>(mut challenger: C, h_star: [F; 8], beta_seed_dim: usize) -> Self
+    where
+        C: p3_challenger::FieldChallenger<F>
+            + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + Clone
+            + Sync
+            + 'static,
+    {
+        Self::absorb(&mut challenger, &h_star);
+        let absorbed = challenger.clone();
+        let mut pow_witness: F = gkr_grind(&mut challenger, global_grinding_bits());
+        if pow_witness.is_zero() {
+            loop {
+                pow_witness += F::ONE;
+                challenger = absorbed.clone();
+                if gkr_check_witness(&mut challenger, global_grinding_bits(), pow_witness) {
+                    break;
+                }
+            }
+        }
+        Self::sample(challenger, h_star, beta_seed_dim, pow_witness)
+    }
+
+    /// Verifier side: the challenge of `h_star` and `pow_witness`, or `None`
+    /// when the witness is zero or fails the proof of work. `challenger` must
+    /// be a fresh challenger of the machine's configuration.
+    pub fn derive<C>(
+        mut challenger: C,
+        h_star: [F; 8],
+        pow_witness: F,
+        beta_seed_dim: usize,
+    ) -> Option<Self>
+    where
+        C: p3_challenger::FieldChallenger<F>
+            + GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + 'static,
+    {
+        if pow_witness.is_zero() {
+            return None;
+        }
+        Self::absorb(&mut challenger, &h_star);
+        gkr_check_witness(&mut challenger, global_grinding_bits(), pow_witness)
+            .then(|| Self::sample(challenger, h_star, beta_seed_dim, pow_witness))
+    }
+
+    fn absorb<C: p3_challenger::FieldChallenger<F>>(challenger: &mut C, h_star: &[F; 8]) {
+        challenger.observe(F::from_u32(GLOBAL_CHALLENGE_DOMAIN));
+        challenger.observe_slice(h_star);
+    }
+
+    fn sample<C: p3_challenger::FieldChallenger<F>>(
+        mut challenger: C,
+        h_star: [F; 8],
+        beta_seed_dim: usize,
+        pow_witness: F,
+    ) -> Self {
+        let alpha: EF = challenger.sample_algebra_element::<EF>();
+        let seed: alloc::vec::Vec<EF> =
+            (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<EF>()).collect();
+        let betas = if seed.is_empty() {
+            alloc::vec![EF::ONE]
+        } else {
+            crate::zerocheck_prover::eq_mle_table::<EF>(&seed)
+        };
+        Self { h_star, alpha, betas, pow_witness }
+    }
+
+    /// The `(α, β)` pair a lookup of `scope` uses: this challenge for
+    /// a global lookup, `local` otherwise.
+    pub fn select<'a>(
+        global: Option<&'a Self>,
+        scope: crate::air::LookupScope,
+        local: (EF, &'a [EF]),
+    ) -> Option<(EF, &'a [EF])> {
+        match scope {
+            crate::air::LookupScope::Global => global.map(|g| (g.alpha, g.betas.as_slice())),
+            crate::air::LookupScope::Local => Some(local),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +318,43 @@ mod tests {
         ch.observe(JaggedVal::from_u32(0xA11CE));
         ch.observe(JaggedVal::from_u32(0xB0B));
         ch
+    }
+
+    /// A chain step binds the previous digest, whether the shard has a global
+    /// round, the round's commitment, and every chip's name and height.
+    #[test]
+    fn global_chain_step_binds_the_round() {
+        let fresh = || JaggedChallenger::new(zkm_primitives::poseidon2_init());
+        let h0 = [JaggedVal::from_u32(1); 8];
+        let round = GlobalRoundBinding {
+            commitment: [JaggedVal::from_u32(7); 8],
+            chips: alloc::vec![("MemoryLocal".into(), 32), ("SyscallCore".into(), 4)],
+        };
+        let base = global_chain_step(fresh(), &h0, Some(&round));
+        assert_eq!(global_chain_step(fresh(), &h0, Some(&round)), base);
+
+        let mut altered = alloc::vec![global_chain_step(fresh(), &h0, None)];
+        let mut h1 = h0;
+        h1[5] = JaggedVal::from_u32(2);
+        altered.push(global_chain_step(fresh(), &h1, Some(&round)));
+        let mut r = round.clone();
+        r.commitment[3] = JaggedVal::from_u32(8);
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips[0].1 = 33;
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips[1].0 = "SyscallPrecompile".into();
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let mut r = round.clone();
+        r.chips.pop();
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        let r = GlobalRoundBinding { chips: alloc::vec::Vec::new(), ..round.clone() };
+        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+
+        for (i, h) in altered.iter().enumerate() {
+            assert_ne!(*h, base, "alteration {i} left the chain step unchanged");
+        }
     }
 
     /// The grinding witness is what makes the LogUp-GKR transcript cost work to

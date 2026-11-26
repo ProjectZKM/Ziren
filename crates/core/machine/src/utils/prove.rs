@@ -1,6 +1,5 @@
 use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
-use std::thread::ScopedJoinHandle;
 use std::{
     io,
     sync::{mpsc::sync_channel, Arc, Mutex},
@@ -40,6 +39,8 @@ pub enum ZKMCoreProverError {
     TracesGenerationError,
     #[error("dependencies generation error")]
     DependenciesGenerationError,
+    #[error("the execution has too many cross-shard lookups: {0}")]
+    TooManyGlobalLookups(String),
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -76,6 +77,141 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
+    let proving_start = Instant::now();
+
+    let (checkpoint, public_values_stream) = execute_to_checkpoint(&program, stdin, opts, context)?;
+
+    let mut challenger = prover.machine().config().challenger();
+    pk.observe_into(&mut challenger);
+
+    #[cfg(feature = "debug")]
+    let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
+    #[cfg(feature = "debug")]
+    let all_records_tx = Some(all_records_tx);
+    #[cfg(not(feature = "debug"))]
+    let all_records_tx = None;
+
+    let prepare_traces = |record: &ExecutionRecord| {
+        prover.generate_traces(record).map_err(|e| {
+            tracing::error!("Trace generation error: {:?}", e);
+            ZKMCoreProverError::TracesGenerationError
+        })
+    };
+    let prove_shard = |record, traces, cluster_widths| {
+        Ok(prove_shard_and_keep_global_round::<SC, P>(
+            prover,
+            pk,
+            &challenger,
+            record,
+            traces,
+            cluster_widths,
+        ))
+    };
+    let (proved, report_aggregate) = tracing::debug_span!("prove shards").in_scope(|| {
+        run_shard_pipeline::<SC, P, _, _>(
+            prover,
+            &program,
+            opts,
+            checkpoint,
+            &prepare_traces,
+            &prove_shard,
+            all_records_tx,
+        )
+    })?;
+
+    tracing::info!(
+        "execution report (totals): total_cycles={}, total_syscall_cycles={}, touched_memory_addresses={}",
+        report_aggregate.total_instruction_count(),
+        report_aggregate.total_syscall_count(),
+        report_aggregate.touched_memory_addresses,
+    );
+
+    tracing::info!("execution report (opcode counts):");
+    let (width, lines) = sorted_table_lines(report_aggregate.opcode_counts.as_ref());
+    for (label, count) in lines {
+        if *count > 0 {
+            tracing::info!("  {}", format_table_line(&width, &label, count));
+        } else {
+            tracing::debug!("  {}", format_table_line(&width, &label, count));
+        }
+    }
+
+    tracing::info!("execution report (syscall counts):");
+    let (width, lines) = sorted_table_lines(report_aggregate.syscall_counts.as_ref());
+    for (label, count) in lines {
+        if *count > 0 {
+            tracing::info!("  {}", format_table_line(&width, &label, count));
+        } else {
+            tracing::debug!("  {}", format_table_line(&width, &label, count));
+        }
+    }
+
+    let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    let rounds = shard_proofs
+        .iter()
+        .map(|proof| prover.machine().global_round_binding(proof))
+        .collect::<Vec<_>>();
+    prover
+        .machine()
+        .check_global_lookup_count(rounds.iter().flatten())
+        .map_err(ZKMCoreProverError::TooManyGlobalLookups)?;
+    let committed = rounds
+        .iter()
+        .zip(tables)
+        .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+        .collect::<Vec<_>>();
+    let global_proofs = tracing::debug_span!("prove global rounds").in_scope(|| {
+        let Some(global) = prover
+            .machine()
+            .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+            .filter(|_| !committed.is_empty())
+        else {
+            return Vec::new();
+        };
+        committed
+            .into_iter()
+            .map(|(round, tables)| {
+                prover.prove_global_round(pk, round, tables, &global, &challenger).unwrap()
+            })
+            .collect()
+    });
+
+    let proof = MachineProof::<SC> { shard_proofs, global_proofs };
+    let cycles = report_aggregate.total_instruction_count();
+
+    let proving_time = proving_start.elapsed().as_secs_f64();
+    tracing::info!(
+        "summary: cycles={}, e2e={}s, khz={:.2}, proofSize={}",
+        cycles,
+        proving_time,
+        (cycles as f64 / (proving_time * 1000.0) as f64),
+        bincode::serialize(&proof).unwrap().len(),
+    );
+
+    #[cfg(feature = "debug")]
+    {
+        let all_records = all_records_rx.iter().flatten().collect::<Vec<_>>();
+        let mut challenger = prover.machine().config().challenger();
+        let pk_host = prover.pk_to_host(pk);
+        prover.machine().debug_constraints(&pk_host, all_records, &mut challenger);
+    }
+
+    Ok((proof, public_values_stream, cycles))
+}
+
+/// The state [`run_shard_pipeline`] starts tracing from: its index, the
+/// executor state, and whether it runs to the end of the program, with the
+/// program's cycle count.
+type Checkpoint = (usize, ExecutionState, bool, u64);
+
+/// Executes `program` on `stdin` once, returning the checkpoint
+/// [`run_shard_pipeline`] traces from and the public values stream.
+fn execute_to_checkpoint(
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    context: ZKMContext,
+) -> Result<(Checkpoint, Vec<u8>), ZKMCoreProverError> {
     let mut runtime = Executor::with_context(program.clone(), opts, context);
 
     runtime.write_vecs(&stdin.buffer);
@@ -84,59 +220,154 @@ where
         runtime.write_proof(proof, vk);
     }
 
-    #[cfg(feature = "debug")]
-    let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
+    tracing::debug_span!("checkpoint generator").in_scope(|| {
+        let initial_state = runtime.state.clone();
+        let chunk = runtime
+            .run_fast_capture_whole_program_chunk()
+            .map_err(ZKMCoreProverError::ExecutionError)?;
+        let global_clk = runtime.state.global_clk;
+        tracing::debug!(
+            target = "checkpoint_pin",
+            "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
+            chunk.clk_start,
+            chunk.clk_end,
+            chunk.mem_reads.len(),
+            global_clk,
+        );
+        let public_values_stream = std::mem::take(&mut runtime.state.public_values_stream);
+        Ok(((0, initial_state, true, global_clk), public_values_stream))
+    })
+}
 
-    let proving_start = Instant::now();
+/// The records of the shards [`prove_with_context`] proves for `program` on
+/// `stdin`, in shard order, as its shard pipeline traces them: with their
+/// dependencies generated, ready for a prover to commit.
+pub fn shard_records<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
+    prover: &P,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+) -> Result<Vec<ExecutionRecord>, ZKMCoreProverError>
+where
+    SC::Val: PrimeField32,
+    SC::Challenger: 'static + Clone + Send,
+    OpeningProof<SC>: Send,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
+    let (checkpoint, _) = execute_to_checkpoint(program, stdin, opts, ZKMContext::default())?;
+    let (records_tx, records_rx) = std::sync::mpsc::channel();
+    run_shard_pipeline::<SC, P, _, _>(
+        prover,
+        program,
+        opts,
+        checkpoint,
+        &|_| Ok(()),
+        &|_, (), _| Ok(()),
+        Some(records_tx),
+    )?;
+    Ok(records_rx.into_iter().flatten().collect())
+}
+
+/// Proves one shard on its own, and keeps the tables of its global round for
+/// the global proof made once every shard has committed.
+fn prove_shard_and_keep_global_round<
+    SC: StarkGenericConfig,
+    P: MachineProver<SC, MipsAir<SC::Val>>,
+>(
+    prover: &P,
+    pk: &P::DeviceProvingKey,
+    challenger: &SC::Challenger,
+    record: ExecutionRecord,
+    main_traces: zkm_pcs::Traces<Val<SC>>,
+    cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+) -> (zkm_pcs::ShardProof<SC>, Option<zkm_pcs::Traces<Val<SC>>>)
+where
+    SC::Val: PrimeField32,
+{
+    let t_commit = std::time::Instant::now();
+    let main_data = prover.commit(&record, main_traces, cluster_widths);
+    let tables = prover.global_round_tables(&main_data);
+    let commit_ms = t_commit.elapsed().as_millis();
+
+    let opening_span = tracing::debug_span!("opening").entered();
+    let t_open = std::time::Instant::now();
+    let proof = prover.open(pk, main_data, &mut challenger.clone()).unwrap();
+    let open_ms = t_open.elapsed().as_millis();
+    opening_span.exit();
+
+    tracing::info!(
+        "PCS timing: commit={}ms open={}ms total={}ms",
+        commit_ms,
+        open_ms,
+        commit_ms + open_ms
+    );
+
+    rayon::spawn(move || {
+        drop(record);
+    });
+
+    (proof, tables)
+}
+
+/// Replays the program from `checkpoint` and cuts it into shard records.
+/// `prepare_shard` runs on each record in the trace workers; `consume_shard`
+/// runs in the prover worker on the record and the value `prepare_shard`
+/// returned for it. The type parameter `T` guarantees only that: the
+/// consuming stage receives the result prepared for its own shard. That
+/// result is the shard's traces in [`prove_with_context`] and `()` in
+/// [`shard_records`]. Results preserve shard order across both stages.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn run_shard_pipeline<
+    SC: StarkGenericConfig,
+    P: MachineProver<SC, MipsAir<SC::Val>>,
+    T: Send,
+    R: Send,
+>(
+    prover: &P,
+    program: &Program,
+    opts: ZKMCoreOpts,
+    checkpoint: Checkpoint,
+    prepare_shard: &(impl Fn(&ExecutionRecord) -> Result<T, ZKMCoreProverError> + Sync),
+    consume_shard: &(impl Fn(
+        ExecutionRecord,
+        T,
+        Option<std::collections::BTreeMap<String, usize>>,
+    ) -> Result<R, ZKMCoreProverError>
+          + Sync),
+    all_records_tx: Option<std::sync::mpsc::Sender<Vec<ExecutionRecord>>>,
+) -> Result<(Vec<R>, ExecutionReport), ZKMCoreProverError>
+where
+    SC::Val: PrimeField32,
+    SC::Challenger: 'static + Clone + Send,
+    OpeningProof<SC>: Send,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
     let span = tracing::Span::current().clone();
     std::thread::scope(move |s| {
         let _span = span.enter();
 
-        let checkpoint_generator_span = tracing::Span::current().clone();
-        let (checkpoints_tx, checkpoints_rx) =
-            sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
-        let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
-            s.spawn(move || {
-                let _span = checkpoint_generator_span.enter();
-                tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    let initial_state = runtime.state.clone();
-                    let chunk = runtime
-                        .run_fast_capture_whole_program_chunk()
-                        .map_err(ZKMCoreProverError::ExecutionError)?;
-                    let global_clk = runtime.state.global_clk;
-                    tracing::debug!(
-                        target = "checkpoint_pin",
-                        "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
-                        chunk.clk_start,
-                        chunk.clk_end,
-                        chunk.mem_reads.len(),
-                        global_clk,
-                    );
-                    checkpoints_tx.send((0, initial_state, true, global_clk)).unwrap();
-                    Ok(runtime.state.public_values_stream)
-                })
-            });
-
-        let mut challenger = prover.machine().config().challenger();
-        pk.observe_into(&mut challenger);
-
-        let p2_record_gen_sync = Arc::new(TurnBasedSync::new());
-        let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
-        let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
-        let (p2_records_and_traces_tx, p2_records_and_traces_rx) =
-            sync_channel::<(Vec<ExecutionRecord>, Vec<zkm_pcs::Traces<Val<SC>>>)>(
-                opts.records_and_traces_channel_capacity,
-            );
-        let p2_records_and_traces_tx = Arc::new(Mutex::new(p2_records_and_traces_tx));
+        let record_gen_sync = Arc::new(TurnBasedSync::new());
+        let trace_gen_sync = Arc::new(TurnBasedSync::new());
+        let (prepared_records_tx, prepared_records_rx) =
+            sync_channel::<Vec<(ExecutionRecord, T)>>(opts.records_and_traces_channel_capacity);
+        let prepared_records_tx = Arc::new(Mutex::new(prepared_records_tx));
 
         let report_aggregate = Arc::new(Mutex::new(ExecutionReport::default()));
+        let (checkpoints_tx, checkpoints_rx) =
+            sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
+        checkpoints_tx.send(checkpoint).unwrap();
+        drop(checkpoints_tx);
+        let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
         let state = Arc::new(Mutex::new(PublicValues::<u32, u32>::default().reset()));
         let deferred = Arc::new(Mutex::new(ExecutionRecord::new(program.clone().into())));
-        let mut p2_record_and_trace_gen_handles = Vec::new();
+        let mut record_and_trace_gen_handles = Vec::new();
         for _ in 0..opts.trace_gen_workers {
-            let record_gen_sync = Arc::clone(&p2_record_gen_sync);
-            let trace_gen_sync = Arc::clone(&p2_trace_gen_sync);
-            let records_and_traces_tx = Arc::clone(&p2_records_and_traces_tx);
+            let record_gen_sync = Arc::clone(&record_gen_sync);
+            let trace_gen_sync = Arc::clone(&trace_gen_sync);
+            let prepared_records_tx = Arc::clone(&prepared_records_tx);
             let checkpoints_rx = Arc::clone(&checkpoints_rx);
 
             let report_aggregate = Arc::clone(&report_aggregate);
@@ -146,12 +377,11 @@ where
 
             let span = tracing::Span::current().clone();
 
-            #[cfg(feature = "debug")]
             let all_records_tx = all_records_tx.clone();
 
             let handle = s.spawn(move || {
                 let _span = span.enter();
-                tracing::debug_span!("phase 2 trace generation").in_scope(|| {
+                tracing::debug_span!("trace generation").in_scope(|| {
                     while let Ok((index, execution_state, done, num_cycles)) = {
                         let receiver = checkpoints_rx.lock().unwrap();
                         receiver.recv()
@@ -248,46 +478,24 @@ where
 
                                 record_gen_sync.advance_turn();
 
-                                #[cfg(feature = "debug")]
-                                all_records_tx.send(records.clone()).unwrap();
-
-                                let main_traces_results: Vec<Result<_, _>> =
-                                    tracing::debug_span!("generate main traces", index).in_scope(
-                                        || {
-                                            records
-                                                .par_iter()
-                                                .map(|record| prover.generate_traces(record))
-                                                .collect()
-                                        },
-                                    );
-                                let (successes, errors): (Vec<_>, Vec<_>) =
-                                    main_traces_results.into_iter().partition(Result::is_ok);
-                                let main_traces =
-                                    successes.into_iter().map(Result::unwrap).collect();
-                                if !errors.is_empty() {
-                                    tracing::error!("Failed to generate {} traces", errors.len());
-                                    for error in errors {
-                                        if let Err(e) = error {
-                                            tracing::error!("Trace generation error: {:?}", e);
-                                            return Err(ZKMCoreProverError::TracesGenerationError);
-                                        }
-                                    }
+                                if let Some(tx) = &all_records_tx {
+                                    tx.send(records.clone()).unwrap();
                                 }
+
+                                let prepared = tracing::debug_span!("prepare shards", index)
+                                    .in_scope(|| {
+                                        records
+                                            .par_iter()
+                                            .map(prepare_shard)
+                                            .collect::<Result<Vec<_>, _>>()
+                                    })?;
 
                                 trace_gen_sync.wait_for_turn(index);
 
-                                let chunked_records = chunk_vec(records, opts.shard_batch_size);
-                                let chunked_main_traces =
-                                    chunk_vec(main_traces, opts.shard_batch_size);
-                                chunked_records.into_iter().zip(chunked_main_traces).for_each(
-                                    |(records, main_traces)| {
-                                        records_and_traces_tx
-                                            .lock()
-                                            .unwrap()
-                                            .send((records, main_traces))
-                                            .unwrap();
-                                    },
-                                );
+                                let prepared_records = records.into_iter().zip(prepared).collect();
+                                for batch in chunk_vec(prepared_records, opts.shard_batch_size) {
+                                    prepared_records_tx.lock().unwrap().send(batch).unwrap();
+                                }
 
                                 trace_gen_sync.advance_turn();
                                 Ok(())
@@ -303,119 +511,45 @@ where
                     Ok(())
                 })
             });
-            p2_record_and_trace_gen_handles.push(handle);
+            record_and_trace_gen_handles.push(handle);
         }
-        drop(p2_records_and_traces_tx);
-        #[cfg(feature = "debug")]
+        drop(prepared_records_tx);
         drop(all_records_tx);
 
         let shard_clusters = ShardClusters::<SC::Val>::new();
 
-        let p2_prover_span = tracing::Span::current().clone();
-        let p2_prover_handle = s.spawn(move || {
-            let _span = p2_prover_span.enter();
-            let mut shard_proofs = Vec::new();
-            tracing::debug_span!("phase 2 prover").in_scope(|| {
-                for (records, traces) in p2_records_and_traces_rx.into_iter() {
+        let prover_span = tracing::Span::current().clone();
+        let prover_handle = s.spawn(move || {
+            let _span = prover_span.enter();
+            let mut outputs = Vec::new();
+            tracing::debug_span!("shard prover").in_scope(|| {
+                for batch in prepared_records_rx.into_iter() {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
-                        let proofs = records
+                        let results = batch
                             .into_par_iter()
-                            .zip(traces.into_par_iter())
-                            .map(|(record, main_traces)| {
+                            .map(|(record, prepared)| {
                                 let _span = span.enter();
 
                                 let cluster_widths = shard_clusters.cluster_widths(&record);
 
-                                let t_commit = std::time::Instant::now();
-                                let main_data = prover.commit(&record, main_traces, cluster_widths);
-                                let commit_ms = t_commit.elapsed().as_millis();
-
-                                let opening_span = tracing::debug_span!("opening").entered();
-                                let t_open = std::time::Instant::now();
-                                let proof =
-                                    prover.open(pk, main_data, &mut challenger.clone()).unwrap();
-                                let open_ms = t_open.elapsed().as_millis();
-                                opening_span.exit();
-
-                                tracing::info!(
-                                    "PCS timing: commit={}ms open={}ms total={}ms",
-                                    commit_ms,
-                                    open_ms,
-                                    commit_ms + open_ms
-                                );
-
-                                rayon::spawn(move || {
-                                    drop(record);
-                                });
-
-                                proof
+                                consume_shard(record, prepared, cluster_widths)
                             })
                             .collect::<Vec<_>>();
-                        shard_proofs.extend(proofs);
+                        outputs.extend(results);
                     });
                 }
             });
-            shard_proofs
+            outputs.into_iter().collect::<Result<Vec<_>, ZKMCoreProverError>>()
         });
 
-        let public_values_stream = checkpoint_generator_handle.join().unwrap()?;
-
-        for handle in p2_record_and_trace_gen_handles {
+        for handle in record_and_trace_gen_handles {
             handle.join().unwrap()?;
         }
 
-        let shard_proofs = p2_prover_handle.join().unwrap();
-
-        let report_aggregate = report_aggregate.lock().unwrap();
-        tracing::info!(
-            "execution report (totals): total_cycles={}, total_syscall_cycles={}, touched_memory_addresses={}",
-            report_aggregate.total_instruction_count(),
-            report_aggregate.total_syscall_count(),
-            report_aggregate.touched_memory_addresses,
-        );
-
-        tracing::info!("execution report (opcode counts):");
-        let (width, lines) = sorted_table_lines(report_aggregate.opcode_counts.as_ref());
-        for (label, count) in lines {
-            if *count > 0 {
-                tracing::info!("  {}", format_table_line(&width, &label, count));
-            } else {
-                tracing::debug!("  {}", format_table_line(&width, &label, count));
-            }
-        }
-
-        tracing::info!("execution report (syscall counts):");
-        let (width, lines) = sorted_table_lines(report_aggregate.syscall_counts.as_ref());
-        for (label, count) in lines {
-            if *count > 0 {
-                tracing::info!("  {}", format_table_line(&width, &label, count));
-            } else {
-                tracing::debug!("  {}", format_table_line(&width, &label, count));
-            }
-        }
-
-        let proof = MachineProof::<SC> { shard_proofs };
-        let cycles = report_aggregate.total_instruction_count();
-
-        let proving_time = proving_start.elapsed().as_secs_f64();
-        tracing::info!(
-            "summary: cycles={}, e2e={}s, khz={:.2}, proofSize={}",
-            cycles,
-            proving_time,
-            (cycles as f64 / (proving_time * 1000.0) as f64),
-            bincode::serialize(&proof).unwrap().len(),
-        );
-
-        #[cfg(feature = "debug")]
-        {
-            let all_records = all_records_rx.iter().flatten().collect::<Vec<_>>();
-            let mut challenger = prover.machine().config().challenger();
-            let pk_host = prover.pk_to_host(pk);
-            prover.machine().debug_constraints(&pk_host, all_records, &mut challenger);
-        }
-
-        Ok((proof, public_values_stream, cycles))
+        let outputs = prover_handle.join().unwrap()?;
+        let report = std::mem::take(&mut *report_aggregate.lock().unwrap());
+        Ok((outputs, report))
     })
 }
 

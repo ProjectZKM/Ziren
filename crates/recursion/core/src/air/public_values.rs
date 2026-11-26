@@ -9,9 +9,12 @@ use std::{
 };
 use zkm_core_machine::utils::indices_arr;
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
+use zkm_pcs::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
+
+/// The number of base-field elements of an extension-field global sum.
+pub const GLOBAL_SUM_NUM_ELTS: usize = 4;
 
 pub const CHALLENGER_STATE_NUM_ELTS: usize = size_of::<ChallengerPublicValues<u8>>();
 
@@ -109,9 +112,27 @@ pub struct RecursionPublicValues<T> {
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
 
-    /// Current cumulative sum of lookup bus. Note that for recursive proofs for core proofs, this
-    /// contains the global cumulative sum.  
-    pub global_cumulative_sum: SepticDigest<T>,
+    /// The global hash chain's value before the first shard this proof covers.
+    pub global_chain_start: [T; DIGEST_SIZE],
+
+    /// The global hash chain's value after the last shard this proof covers.
+    pub global_chain_end: [T; DIGEST_SIZE],
+
+    /// The digest the global challenge of the covered shards is derived from: the end of the
+    /// chain over every shard of the execution.
+    pub global_h_star: [T; DIGEST_SIZE],
+
+    /// The proof-of-work witness of the global challenge of the covered shards.
+    pub global_pow_witness: T,
+
+    /// The sum of the covered shards' global lookup fractions, as the basis coefficients of an
+    /// extension-field element.
+    pub global_sum: [T; GLOBAL_SUM_NUM_ELTS],
+
+    /// The global lookups the covered global proofs sum, counted in units that bound the lookups
+    /// of either direction ([`zkm_pcs::logup_gkr::global_lookup_units`]). Every program that
+    /// commits the count keeps it within [`zkm_pcs::logup_gkr::max_global_lookup_units`].
+    pub global_lookup_units: T,
 
     /// Whether the proof completely proves the program execution.
     pub is_complete: T,

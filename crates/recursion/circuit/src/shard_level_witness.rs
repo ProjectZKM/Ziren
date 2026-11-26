@@ -6,44 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use zkm_pcs::septic_curve::SepticCurve;
-use zkm_pcs::septic_digest::SepticDigest;
-use zkm_pcs::septic_extension::SepticExtension;
-use zkm_pcs::shard_level::shard_proof::ChipCumulativeSums;
 use zkm_pcs::shard_level::types as st;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use crate::witness::{WitnessWriter, Witnessable};
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
-
-// Per-chip cumulative sums
-
-impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-{
-    type WitnessVariable = ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let local = self.local.read(builder);
-        let global_x = self.global.0.x.0.read(builder);
-        let global_y = self.global.0.y.0.read(builder);
-        ChipCumulativeSums {
-            local,
-            global: SepticDigest(SepticCurve {
-                x: SepticExtension(global_x),
-                y: SepticExtension(global_y),
-            }),
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.local.write(witness);
-        self.global.0.x.0.write(witness);
-        self.global.0.y.0.write(witness);
-    }
-}
 
 // Univariate + sumcheck types
 
@@ -220,7 +188,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     //
     // `commit_root` is the RAW WHIR commit cap root (the value the WHIR
     // opening binds against), witnessed from
-    // `JaggedShardProof::jagged_original_commitment`.  `modified_commitment`
+    // `JaggedShardProof::main_original_commitment`.  `modified_commitment`
     // is the hash-bound digest `compress([raw_root, hash(counts)])` observed
     // in the FS prologue — the already-witnessed `main_commitment`, carried so
     // the lift can populate the in-circuit `commitments` the hash-bind assert
@@ -298,24 +266,31 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // variable-reconstruction step downstream can match the variant
 // directly (Bundle → bundle lift; Bytes → bytes lift; Empty →
 // placeholder).
-/// The preprocessed opening round's witnessed inputs.
-///
-/// Its chips and their WIDTHS come from the machine, so the only things a
-/// height-agnostic circuit cannot reconstruct are the RAW WHIR root (the
-/// key holds the hash-bound digest) and the heights.  All three are read at a
-/// fixed stream position, and the per-round hash-bind pins them.
-pub struct PreprocessedRoundWitness<C: CircuitConfig> {
-    /// The round's RAW WHIR cap root, which the WHIR open binds
+/// Commitments and heights witnessed for a shard's opening rounds.
+/// Chip names and widths come from the machine; these values bind the
+/// preprocessed and optional global rounds and every round's padding.
+pub struct ShardRoundsWitness<C: CircuitConfig> {
+    /// The preprocessed round's RAW WHIR cap root, which the WHIR open binds
     /// against.  `compress([this, hash(counts)])` must equal the key's
     /// preprocessed commitment.
-    pub raw_commit: [Felt<C::F>; 8],
+    pub preprocessed_raw_commit: [Felt<C::F>; 8],
     /// One height per preprocessed chip, in the machine's chip-name order.
-    pub row_counts: Vec<Felt<C::F>>,
+    pub preprocessed_row_counts: Vec<Felt<C::F>>,
     /// Each opening round's stacking-padding column heights, in round order.
     /// A round's gap is split into columns no taller than the row cube, so a
     /// recursion round (whose committed area is PINNED far above its real
     /// cells) carries many where a core round carries one.
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
+    /// The global round's raw root and hash-bound commitment, when the
+    /// shard commits one.
+    pub global: Option<RoundCommitments<C::F>>,
+}
+
+/// The two commitments to one round, in witness-stream order.
+#[derive(Clone, Copy)]
+pub struct RoundCommitments<F> {
+    pub raw: [Felt<F>; 8],
+    pub hash_bound: [Felt<F>; 8],
 }
 
 impl<C> Witnessable<C>
@@ -332,15 +307,15 @@ where
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
         LiftedEvalProof<C>,
-        crate::chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-        PreprocessedRoundWitness<C>,
+        crate::chip_opened_values::JaggedShardOpenedValues<Ext<C::F, C::EF>>,
+        ShardRoundsWitness<C>,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.main_commitment[i].read(builder));
-        let jagged_original_commitment_arr: [Felt<C::F>; 8] =
-            core::array::from_fn(|i| self.jagged_original_commitment[i].read(builder));
+        let main_original_commitment_arr: [Felt<C::F>; 8] =
+            core::array::from_fn(|i| self.main_original_commitment[i].read(builder));
         let preprocessed_commit_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.preprocessed_original_commitment[i].read(builder));
         let preprocessed_row_counts: Vec<Felt<C::F>> =
@@ -350,10 +325,18 @@ where
             .iter()
             .map(|round| round.iter().map(|f| f.read(builder)).collect())
             .collect();
-        let preprocessed_round = PreprocessedRoundWitness::<C> {
-            raw_commit: preprocessed_commit_arr,
-            row_counts: preprocessed_row_counts,
+        let global =
+            self.global_original_commitment.zip(self.global_commitment).map(|(raw, commitment)| {
+                RoundCommitments {
+                    raw: core::array::from_fn(|i| raw[i].read(builder)),
+                    hash_bound: core::array::from_fn(|i| commitment[i].read(builder)),
+                }
+            });
+        let rounds_witness = ShardRoundsWitness::<C> {
+            preprocessed_raw_commit: preprocessed_commit_arr,
+            preprocessed_row_counts,
             padding_heights: padding_row_heights,
+            global,
         };
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
@@ -388,7 +371,7 @@ where
                             sumcheck,
                             jagged_eval,
                             expected_eval,
-                            commit_root: jagged_original_commitment_arr,
+                            commit_root: main_original_commitment_arr,
                             modified_commitment: main_commitment_arr,
                         }
                     }
@@ -402,7 +385,7 @@ where
             zerocheck_proof,
             evaluation_proof,
             opened_values,
-            preprocessed_round,
+            rounds_witness,
         )
     }
 
@@ -410,7 +393,7 @@ where
         for f in self.main_commitment.iter() {
             f.write(witness);
         }
-        for f in self.jagged_original_commitment.iter() {
+        for f in self.main_original_commitment.iter() {
             f.write(witness);
         }
         for f in self.preprocessed_original_commitment.iter() {
@@ -421,6 +404,12 @@ where
         }
         for round in self.padding_row_heights.iter() {
             for f in round.iter() {
+                f.write(witness);
+            }
+        }
+        if let Some((raw, commitment)) = self.global_original_commitment.zip(self.global_commitment)
+        {
+            for f in raw.iter().chain(commitment.iter()) {
                 f.write(witness);
             }
         }
@@ -457,8 +446,8 @@ where
 /// is irrelevant to the felt-witness stream since `Ext` reads are
 /// length-prefixed by the `Vec<_>` Witnessable.
 fn opened_values_from_host(
-    opened: &zkm_pcs::ShardOpenedValues<InnerVal, InnerChallenge>,
-) -> crate::chip_opened_values::JaggedShardOpenedValues<InnerVal, InnerChallenge> {
+    opened: &zkm_pcs::ShardOpenedValues<InnerChallenge>,
+) -> crate::chip_opened_values::JaggedShardOpenedValues<InnerChallenge> {
     use p3_field::PrimeCharacteristicRing;
     let chips = opened
         .chips
@@ -470,7 +459,6 @@ fn opened_values_from_host(
             main: crate::chip_opened_values::JaggedAirOpenedValues { local: c.main.local.clone() },
             degree: c.quotient.first().cloned().unwrap_or_else(|| vec![InnerChallenge::ZERO]),
             local_cumulative_sum: c.local_cumulative_sum,
-            global_cumulative_sum: c.global_cumulative_sum,
         })
         .collect();
     crate::chip_opened_values::JaggedShardOpenedValues { chips }

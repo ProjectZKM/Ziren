@@ -25,6 +25,7 @@ pub mod constraint_folder;
 pub mod domain;
 pub mod dummy;
 pub mod fri;
+pub mod global_challenge;
 pub mod hash;
 pub mod jagged_circuit;
 pub mod jagged_eval;

@@ -10,6 +10,8 @@ mod config;
 mod debug;
 pub mod device_byte_lookups;
 pub mod folder;
+#[cfg(test)]
+mod global_lookup_tests;
 pub mod jagged;
 pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;
@@ -28,9 +30,6 @@ pub mod profile;
 mod proof;
 mod prover;
 mod record;
-pub mod septic_curve;
-pub mod septic_digest;
-pub mod septic_extension;
 pub mod shape;
 pub mod shard_level;
 pub mod stacked_shapes;

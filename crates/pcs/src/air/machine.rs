@@ -6,11 +6,9 @@ use p3_air::{
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 
-use crate::{septic_digest::SepticDigest, MachineRecord, PicusInfo, PROOF_MAX_NUM_PVS};
+use crate::{MachineRecord, PicusInfo, PROOF_MAX_NUM_PVS};
 
 pub use zkm_derive::MachineAir;
-
-use super::LookupScope;
 
 /// Capture a machine AIR's constraints using the shared public-values buffer layout.
 ///
@@ -33,7 +31,6 @@ where
         |builder| air.eval(builder),
     )
 }
-
 /// An AIR that is part of a multi table AIR arithmetization.
 pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     /// The execution record containing events for producing the air trace.
@@ -87,11 +84,6 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
         None
     }
 
-    /// Specifies whether it's trace should be part of either the global or local commit.
-    fn commit_scope(&self) -> LookupScope {
-        LookupScope::Local
-    }
-
     /// Returns information about Picus annotations on AIR columns.
     ///
     /// This includes:
@@ -124,9 +116,6 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
 pub trait MachineProgram<F>: Send + Sync {
     /// Gets the starting program counter.
     fn pc_start(&self) -> F;
-
-    /// Gets the initial global cumulative sum.
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F>;
 
     /// The area pins this program's proofs commit under, when the program
     /// carries them (a recursion program's shape names its pin class); `None`

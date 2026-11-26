@@ -95,7 +95,7 @@ pub(crate) fn verify_stark_compressed_proof(
     }
 
     let mut challenger = compress_machine.config().challenger();
-    let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
+    let machine_proof = MachineProof::from_shards(vec![proof.clone()]);
     compress_machine.verify(compress_vk, &machine_proof, &mut challenger)?;
 
     Ok(())

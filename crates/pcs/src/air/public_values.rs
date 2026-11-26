@@ -4,8 +4,6 @@ use std::borrow::{Borrow, BorrowMut};
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 
-use crate::septic_curve::SepticCurve;
-use crate::septic_digest::SepticDigest;
 use crate::{Word, PROOF_MAX_NUM_PVS};
 
 /// The number of non padded elements in the Ziren proofs public values vec.
@@ -58,7 +56,7 @@ pub struct PublicValues<W, T> {
 
     // Boundary-anchor fields, emitted by the public-values AIR
     // (`eval_public_values`) as the endpoints of the control-bus
-    // interactions (State / GlobalAccumulation / MemoryGlobalInit/Finalize)
+    // interactions (State / MemoryGlobalInit/Finalize)
     // that chain rows locally instead of via `when_transition`.
     /// Initial CPU timestamp (clk) for this shard — the `State`-bus
     /// initial endpoint (`send_state`).
@@ -83,16 +81,8 @@ pub struct PublicValues<W, T> {
     /// Number of global-memory-finalize rows —
     /// `MemoryGlobalFinalizeControl` chain length endpoint.
     pub global_finalize_count: T,
-    /// Number of global interactions — `GlobalAccumulation` chain
-    /// length endpoint.
-    pub global_count: T,
-    /// The shard's global cumulative sum — the `GlobalAccumulation`
-    /// final digest endpoint.  Replaces the verifier's per-chip
-    /// last-row digest sum (machine.rs).
-    pub global_cumulative_sum: SepticDigest<T>,
-
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
-    pub empty: [T; 6],
+    pub empty: [T; 21],
 }
 
 impl PublicValues<u32, u32> {
@@ -215,8 +205,6 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             next_next_pc,
             global_init_count,
             global_finalize_count,
-            global_count,
-            global_cumulative_sum,
             ..
         } = value;
 
@@ -242,9 +230,6 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
         let next_next_pc = F::from_u32(next_next_pc);
         let global_init_count = F::from_u32(global_init_count);
         let global_finalize_count = F::from_u32(global_finalize_count);
-        let global_count = F::from_u32(global_count);
-        let global_cumulative_sum =
-            SepticDigest(SepticCurve::convert(global_cumulative_sum.0, F::from_u32));
 
         Self {
             committed_value_digest,
@@ -264,9 +249,7 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             next_next_pc,
             global_init_count,
             global_finalize_count,
-            global_count,
-            global_cumulative_sum,
-            empty: [F::ZERO; 6],
+            empty: [F::ZERO; 21],
         }
     }
 }

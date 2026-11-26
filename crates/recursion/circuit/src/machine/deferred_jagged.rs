@@ -23,8 +23,6 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
-use zkm_pcs::septic_curve::SepticCurve;
-use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
     shard_level::shard_proof::JaggedShardProof, InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
@@ -64,6 +62,9 @@ pub struct ZKMDeferredWitnessValues<
     pub end_execution_shard: SC::Val,
     pub init_addr_bits: [SC::Val; 32],
     pub finalize_addr_bits: [SC::Val; 32],
+    /// The global hash chain's value where the deferred proofs sit in the
+    /// shard sequence; they pass it through unchanged.
+    pub global_chain: [SC::Val; DIGEST_SIZE],
     pub is_complete: bool,
 }
 
@@ -72,7 +73,7 @@ pub struct ZKMDeferredWitnessVariable<
     SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     /// Per input: the child vk and its shard-proof pieces; the last tuple
-    /// entry is the preprocessed opening round's witnessed inputs.
+    /// entry holds the shard's opening-round witnesses.
     pub vks_and_proofs: Vec<(
         VerifyingKeyVariable<C, SC>,
         (
@@ -87,22 +88,9 @@ pub struct ZKMDeferredWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
-    /// per-input per-chip log heights (mirrors
-    /// `chip_cumulative_sums_per_input`).
-    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
@@ -113,6 +101,7 @@ pub struct ZKMDeferredWitnessVariable<
     pub end_execution_shard: Felt<C::F>,
     pub init_addr_bits: [Felt<C::F>; 32],
     pub finalize_addr_bits: [Felt<C::F>; 32],
+    pub global_chain: [Felt<C::F>; DIGEST_SIZE],
     pub is_complete: Felt<C::F>,
 }
 
@@ -148,8 +137,6 @@ pub fn verify_deferred_jagged<C, SC, A>(
 {
     let ZKMDeferredWitnessVariable {
         vks_and_proofs,
-        chip_cumulative_sums_per_input,
-        chip_heights_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
         zkm_vk_digest,
@@ -160,6 +147,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
         end_execution_shard,
         init_addr_bits,
         finalize_addr_bits,
+        global_chain,
         is_complete,
     } = input;
 
@@ -177,7 +165,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
     let mut reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         start_reconstruct_deferred_digest;
 
-    for (_deferred_i, (vk_legacy, proof_tuple)) in vks_and_proofs.into_iter().enumerate() {
+    for (vk_legacy, proof_tuple) in vks_and_proofs.into_iter() {
         let jagged_vk = crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
             builder, &vk_legacy,
         );
@@ -188,7 +176,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
             zerocheck_proof,
             evaluation_proof,
             proof_opened_values,
-            preprocessed_round,
+            rounds_witness,
         ) = proof_tuple;
 
         let chip_names: Vec<String> =
@@ -241,7 +229,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
         };
 
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
-            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
             hs.extend(
                 crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                     builder,
@@ -258,7 +246,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
             if prep_widths.is_empty() {
                 Vec::new()
             } else {
-                vec![(preprocessed_round.raw_commit, jagged_vk_pre.preprocessed_commit)]
+                vec![(rounds_witness.preprocessed_raw_commit, jagged_vk_pre.preprocessed_commit)]
             };
 
         use crate::shard_level_witness::LiftedEvalProof;
@@ -287,7 +275,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
                     *commit_root,
                     *modified_commitment,
                     &preceding_commitments,
-                    &preprocessed_round.padding_heights,
+                    &rounds_witness.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
@@ -299,10 +287,6 @@ pub fn verify_deferred_jagged<C, SC, A>(
                 unreachable!("deferred path never carries an OUTER (gnark) bundle")
             }
         };
-        let empty_heights_deferred = std::collections::BTreeMap::<String, usize>::new();
-        let chip_heights_for_input =
-            chip_heights_per_input.get(_deferred_i).unwrap_or(&empty_heights_deferred);
-        let _ = chip_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
@@ -320,24 +304,14 @@ pub fn verify_deferred_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
                 whir_evaluation_proof_var,
                 chip_height_bits,
             );
-        let empty_cumsums_deferred = std::collections::BTreeMap::new();
-        let cumsums_for_input =
-            chip_cumulative_sums_per_input.get(_deferred_i).unwrap_or(&empty_cumsums_deferred);
-        let empty_heights_deferred = std::collections::BTreeMap::new();
-        let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-            builder,
-            proof_opened_values,
-            &chip_names,
-            &empty_heights_deferred,
-            cumsums_for_input,
-            max_log_row_count,
-        );
+        let opened_values = proof_opened_values;
         let eval_public_values_fn = super::compress_jagged::noop_eval_public_values_fn::<C>();
         let jagged_evaluator_fn = super::compress_jagged::real_jagged_evaluator_fn::<
             C,
@@ -345,7 +319,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
         >(builder, {
             let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
             let witness_pads: usize =
-                preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+                rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
             let (total_cols, packing_pads) = pack_info;
             zkm_pcs::jagged_pcs::jagged_column_count(
                 total_cols,
@@ -398,6 +372,8 @@ pub fn verify_deferred_jagged<C, SC, A>(
             machine.num_pv_elts(),
             eval_public_values_fn,
             jagged_evaluator_fn,
+            None,
+            &vec![false; shard_chips.len()],
         );
 
         let current_public_values: &RecursionPublicValues<Felt<C::F>> =
@@ -441,10 +417,12 @@ pub fn verify_deferred_jagged<C, SC, A>(
     builder.assert_felt_eq(is_complete, C::F::ZERO);
     deferred_public_values.is_complete = builder.eval(C::F::ZERO);
     deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
-    deferred_public_values.global_cumulative_sum =
-        SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
-            builder.eval(value)
-        }));
+    deferred_public_values.global_chain_start = global_chain;
+    deferred_public_values.global_chain_end = global_chain;
+    deferred_public_values.global_h_star = array::from_fn(|_| builder.eval(C::F::ZERO));
+    deferred_public_values.global_pow_witness = builder.eval(C::F::ZERO);
+    deferred_public_values.global_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
+    deferred_public_values.global_lookup_units = builder.eval(C::F::ZERO);
     deferred_public_values.vk_root = vk_root;
     deferred_public_values.digest =
         recursion_public_values_digest::<C, SC>(builder, deferred_public_values);
@@ -499,6 +477,7 @@ impl ZKMDeferredWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2C
             end_execution_shard: p3_koala_bear::KoalaBear::ZERO,
             init_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
             finalize_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
+            global_chain: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
         }
     }
 }

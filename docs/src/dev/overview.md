@@ -49,7 +49,7 @@ Within the prover, Ziren processes the execution trace in several stages, ultima
    - Cross-chip communication: a chip sends the facts it cannot check itself (for example a byte range or a memory access) to the chip that checks them.
    - Memory consistency: the value a memory read returns is the value last written to that address.
 
-   Within a shard both are proved with the [LogUp](../design/lookup-arguments.md) argument, evaluated with the GKR protocol (LogUp-GKR). Across shards, memory is reconciled with a [multiset hash](../design/memory-checking.md) on an elliptic curve over a degree-7 extension of the KoalaBear field.
+   Within a shard both are proved with the [LogUp](../design/lookup-arguments.md) argument, evaluated with the GKR protocol (LogUp-GKR). Across shards, memory is reconciled with a [global challenge](../design/memory-checking.md#global-challenge): one LogUp challenge for the whole execution, drawn from a hash chain over every shard's committed global rows.
 
 4. **Core Proof**
    The core proof is the list of shard proofs. Each shard proof commits to all of the shard's chip tables as one jagged multilinear polynomial and opens it with the WHIR polynomial commitment scheme.

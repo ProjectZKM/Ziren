@@ -2,10 +2,9 @@
 
 #include "prelude.hpp"
 #include "utils.hpp"
-#include "kb31_septic_extension_t.hpp"
 
 namespace zkm_core_machine_sys::memory_local {
-    template<class F, class EF7>
+    template<class F>
     __ZKM_HOSTDEV__ void event_to_row(const MemoryLocalEvent* event, SingleMemoryLocal<F>* cols) {
         cols->addr = F::from_canonical_u32(event->addr);
         

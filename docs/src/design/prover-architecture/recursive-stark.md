@@ -8,9 +8,8 @@ This page follows one execution through the proving pipeline and names the code 
 
 - `ZKMProver::get_program(elf)` loads the ELF into a `Program`: the instruction image, `pc_start` and the initial memory image.
 - `ZKMProver::setup(elf)` builds the proving and verifying keys. The verifying key holds:
-  - the commitment to the preprocessed traces (the program table, the byte and range tables);
+  - the commitment to the preprocessed traces (the program table, the byte and range tables, and the `MemoryProgram` table of the initial memory image);
   - `pc_start`;
-  - `initial_global_cumulative_sum`, the global digest of the initial memory image;
   - the chip layout.
 
   Its digest (`zkm_vk_digest`) identifies the program in every later proof.

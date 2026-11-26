@@ -6,15 +6,10 @@ use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
 
-use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::MachineProgram;
-use zkm_pcs::septic_curve::{SepticCurve, SepticCurveComplete};
-use zkm_pcs::septic_digest::SepticDigest;
-use zkm_pcs::septic_extension::SepticExtension;
-use zkm_pcs::LookupKind;
 
 use crate::{Instruction, Register};
 
@@ -376,36 +371,6 @@ pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
 impl<F: PrimeField32> MachineProgram<F> for Program {
     fn pc_start(&self) -> F {
         F::from_u32(self.pc_start)
-    }
-
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        let image = self.image.iter();
-        #[cfg(not(target_os = "zkvm"))]
-        let image = image.par_bridge();
-        let mut digests: Vec<SepticCurveComplete<F>> = image
-            .map(|(&addr, &word)| {
-                let values = [
-                    (LookupKind::Memory as u32) << 16,
-                    0,
-                    addr,
-                    word & 255,
-                    (word >> 8) & 255,
-                    (word >> 16) & 255,
-                    (word >> 24) & 255,
-                ];
-                let x_start =
-                    SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(values[i]));
-                let (point, _) = SepticCurve::<F>::lift_x(x_start);
-                SepticCurveComplete::Affine(point.neg())
-            })
-            .collect();
-        digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
-        SepticDigest(
-            digests
-                .into_par_iter()
-                .par_fold_reduce(|| SepticCurveComplete::Infinity, |a, b| a + b, |a, b| a + b)
-                .point(),
-        )
     }
 }
 

@@ -14,9 +14,9 @@ A tuple \\( (v_1, \dots, v_k) \\) on bus \\( b \\) is compressed to a single fie
 
 \\[ f = \alpha + \beta_0 \cdot b + \sum_{j=1}^{k} \beta_j \cdot v_j. \\]
 
-Each interaction contributes the fraction \\( m / f \\), with \\( m \\) the row's multiplicity expression for a send and \\( -m \\) for a receive. The multiplicity is a column expression, typically `is_real` or a selector, and is zero on padding rows. The argument holds when the sum of all fractions over all rows of all chips in the shard is zero. The exception is buses that the shard's public values close (`State`, `GlobalAccumulation` and the two global-memory control buses), where the sum must equal the fractions of the boundary tuples the verifier computes from the public values.
+Each interaction contributes the fraction \\( m / f \\), with \\( m \\) the row's multiplicity expression for a send and \\( -m \\) for a receive. The multiplicity is a column expression, typically `is_real` or a selector, and is zero on padding rows. The argument holds when the sum of all fractions over all rows of all chips in the shard is zero. The exception is buses that the shard's public values close (`State` and the two global-memory control buses), where the sum must equal the fractions of the boundary tuples the verifier computes from the public values.
 
-The challenges are drawn from the degree-4 extension of KoalaBear after the prover has committed to all traces.
+The challenges are drawn from the degree-4 extension of KoalaBear after the prover has committed to all traces. Global lookups, whose two sides may lie in different shards, are fingerprinted with the execution's global challenge \\( (\alpha_g, \beta_g) \\) instead, and their fractions sum to a per-shard value \\( S \\) rather than zero; the recursion checks that the shards' sums add to zero (see [Memory Consistency Checking](./memory-checking.md#global-challenge)).
 
 ## Proving the sum with GKR
 

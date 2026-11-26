@@ -85,28 +85,9 @@ pub struct ZKMCompressWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums (witnessed
-    /// from each input's `JaggedShardProof.chip_cumulative_sums`).
-    /// Same length and order as `vks_and_proofs`.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
-    /// per-input per-chip log heights (sourced from each input's
-    /// `JaggedShardProof.chip_heights`).  Same length and order
-    /// as `vks_and_proofs`.  Threaded into
-    /// `chip_height_bits_from_heights` at the lift site so the
-    /// recursion verifier observes the real Horner-recomposed felt
-    /// rather than the zero placeholder.
-    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — the in-circuit cousin of
     /// [`ZKMCompressWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -141,13 +122,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     use std::borrow::BorrowMut;
-    let ZKMCompressWitnessVariable {
-        vks_and_proofs,
-        chip_cumulative_sums_per_input,
-        chip_heights_per_input,
-        vk_merkle_data,
-        is_complete,
-    } = input;
+    let ZKMCompressWitnessVariable { vks_and_proofs, vk_merkle_data, is_complete } = input;
 
     let vk_root = vk_merkle_data.root;
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
@@ -171,12 +146,14 @@ pub fn verify_compress_jagged<C, SC, A>(
         array::from_fn(|_| builder.uninit());
     let mut _reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         array::from_fn(|_| builder.uninit());
-    let mut _global_cumulative_sums: Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>> =
-        Vec::new();
+    let mut _global_chain: [Felt<C::F>; DIGEST_SIZE] = array::from_fn(|_| builder.uninit());
     let mut _init_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     let mut _finalize_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     use p3_field::PrimeCharacteristicRing;
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
+    let mut _global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
+        array::from_fn(|_| builder.eval(C::F::ZERO));
+    let mut _global_lookup_units: Felt<C::F> = builder.eval(C::F::ZERO);
 
     let _verify_pubvals: Vec<Vec<Felt<C::F>>> = vks_and_proofs
         .into_iter()
@@ -189,7 +166,7 @@ pub fn verify_compress_jagged<C, SC, A>(
             zerocheck_proof,
             evaluation_proof,
             proof_opened_values,
-            preprocessed_round,
+            rounds_witness,
         ) = proof_tuple;
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
@@ -234,7 +211,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         };
 
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
-            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
             hs.extend(
                 crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                     builder,
@@ -254,7 +231,7 @@ pub fn verify_compress_jagged<C, SC, A>(
             if prep_widths_pre.is_empty() {
                 Vec::new()
             } else {
-                vec![(preprocessed_round.raw_commit, jagged_vk_pre.preprocessed_commit)]
+                vec![(rounds_witness.preprocessed_raw_commit, jagged_vk_pre.preprocessed_commit)]
             };
 
         use crate::shard_level_witness::LiftedEvalProof;
@@ -279,7 +256,7 @@ pub fn verify_compress_jagged<C, SC, A>(
                     *commit_root,
                     *modified_commitment,
                     &preceding_commitments,
-                    &preprocessed_round.padding_heights,
+                    &rounds_witness.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
@@ -291,11 +268,6 @@ pub fn verify_compress_jagged<C, SC, A>(
             }
         };
 
-        let empty_log_heights_compress = std::collections::BTreeMap::<String, usize>::new();
-        let chip_heights_for_input = chip_heights_per_input
-            .get(_i)
-            .unwrap_or(&empty_log_heights_compress);
-        let _ = chip_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
@@ -334,6 +306,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
+                None,
                 public_values,
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -351,23 +324,10 @@ pub fn verify_compress_jagged<C, SC, A>(
         let _jagged_evaluator_fn = real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
             builder,
             _column_counts_by_round.iter().flatten().sum::<usize>()
-                + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                + rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
         );
 
-        let empty_cumsums_compress = std::collections::BTreeMap::new();
-        let cumsums_for_input = chip_cumulative_sums_per_input
-            .get(_i)
-            .unwrap_or(&empty_cumsums_compress);
-        let empty_log_heights_compress = std::collections::BTreeMap::new();
-        let _opened_values =
-            crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-                builder,
-                proof_opened_values,
-                &chip_names,
-                &empty_log_heights_compress,
-                cumsums_for_input,
-                max_log_row_count,
-            );
+        let _opened_values = proof_opened_values;
 
         let mut _challenger = machine.config().challenger_variable(builder);
 
@@ -412,6 +372,8 @@ pub fn verify_compress_jagged<C, SC, A>(
             machine.num_pv_elts(),
             _eval_public_values_fn,
             _jagged_evaluator_fn,
+            None,
+            &vec![false; _shard_chips.len()],
         );
 
         _pubvals_for_aggregate
@@ -448,6 +410,11 @@ pub fn verify_compress_jagged<C, SC, A>(
             {
                 *digest = first_digest;
             }
+
+            _compress_public_values.global_chain_start = _current_public_values.global_chain_start;
+            _global_chain = _current_public_values.global_chain_start;
+            _compress_public_values.global_h_star = _current_public_values.global_h_star;
+            _compress_public_values.global_pow_witness = _current_public_values.global_pow_witness;
 
             _compress_public_values.start_pc = _current_public_values.start_pc;
             _pc = _current_public_values.start_pc;
@@ -510,6 +477,28 @@ pub fn verify_compress_jagged<C, SC, A>(
 
         builder.assert_felt_eq(_pc, _current_public_values.start_pc);
         builder.assert_felt_eq(_shard, _current_public_values.start_shard);
+
+        for (chain, current) in
+            _global_chain.iter().zip_eq(_current_public_values.global_chain_start.iter())
+        {
+            builder.assert_felt_eq(*chain, *current);
+        }
+        builder.assert_felt_eq(
+            _current_public_values.global_pow_witness
+                * (_current_public_values.global_pow_witness
+                    - _compress_public_values.global_pow_witness),
+            C::F::ZERO,
+        );
+        for (h_star, current) in _compress_public_values
+            .global_h_star
+            .iter()
+            .zip_eq(_current_public_values.global_h_star.iter())
+        {
+            builder.assert_felt_eq(
+                _current_public_values.global_pow_witness * (*h_star - *current),
+                C::F::ZERO,
+            );
+        }
 
         C::range_check_felt(
             builder,
@@ -642,10 +631,16 @@ pub fn verify_compress_jagged<C, SC, A>(
             *bit = *next_bit;
         }
 
-        _global_cumulative_sums.push(_current_public_values.global_cumulative_sum);
+        _global_chain = _current_public_values.global_chain_end;
+        for (sum, current) in _global_sum.iter_mut().zip_eq(_current_public_values.global_sum) {
+            *sum = builder.eval(*sum + current);
+        }
+        _global_lookup_units = crate::global_challenge::add_global_lookup_units(
+            builder,
+            _global_lookup_units,
+            _current_public_values.global_lookup_units,
+        );
     }
-    use zkm_recursion_compiler::circuit::CircuitV2Builder;
-    let _global_cumulative_sum = builder.sum_digest_v2(_global_cumulative_sums);
 
     _compress_public_values.zkm_vk_digest = _zkm_vk_digest;
     _compress_public_values.next_pc = _pc;
@@ -656,7 +651,9 @@ pub fn verify_compress_jagged<C, SC, A>(
     _compress_public_values.end_reconstruct_deferred_digest = _reconstruct_deferred_digest;
     _compress_public_values.deferred_proofs_digest = _deferred_proofs_digest;
     _compress_public_values.committed_value_digest = _committed_value_digest;
-    _compress_public_values.global_cumulative_sum = _global_cumulative_sum;
+    _compress_public_values.global_chain_end = _global_chain;
+    _compress_public_values.global_sum = _global_sum;
+    _compress_public_values.global_lookup_units = _global_lookup_units;
     _compress_public_values.is_complete = is_complete;
     _compress_public_values.contains_execution_shard = _contains_execution_shard;
     _compress_public_values.exit_code = _exit_code;

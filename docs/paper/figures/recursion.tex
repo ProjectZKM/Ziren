@@ -42,18 +42,18 @@
 
 % ---- what the compose node checks on its children
 \node[cond, anchor=west] at (6.15,1.25)
-  {first-shard leaf: $\mathsf{entry}=\mathsf{start}(\mathsf{vk})$,\\starting cursors zero};
+  {first-shard leaf: $\mathsf{entry}=\mathsf{start}(\mathsf{vk})$,\\starting cursors zero, chain starts at $g_0(\mathsf{vk})$};
 \draw[a, zirenslate!55] (6.05,1.25) -- (6.05,0.64) -- (l0 |- 0,0.64) -- (l0.south);
 
 \node[cond, anchor=west] at (6.15,2.6)
   {children's keys in the allowlist;\\
    shards consecutive, $\mathsf{exit}_i=\mathsf{entry}_{i+1}$,\\
-   cursors tile, $D=\sum_i D_i$; $\mathsf{vk}$, $h$,\\
+   cursors tile, chains meet, $S=\sum_i S_i$; $\mathsf{vk}$, $h$,\\
    the exit code and $\mathsf{root}$ agree};
 \draw[a, zirenslate!55] (6.05,2.6) -- (c.east);
 
 \node[cond, anchor=west] at (6.15,3.95)
-  {starts at shard $1$, exit pc $0$,\\$D=O$, exit code $0$};
+  {starts at shard $1$, exit pc $0$,\\chain ends at $g^\star$, $S=0$, exit code $0$};
 \draw[a, zirenslate!55] (6.05,3.95) -- (r.east);
 
 % ---- the tuple every node carries

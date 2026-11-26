@@ -236,6 +236,39 @@ impl RecursionPins {
     }
 }
 
+/// The stacking blocks a small global round commits, whatever it holds.
+pub const GLOBAL_ROUND_PIN_BLOCKS: usize = 8;
+
+/// The area pin of a global round of `total_values` cells, in a row cube of
+/// `cube` rows: a round that fits [`GLOBAL_ROUND_PIN_BLOCKS`] stacking blocks
+/// commits exactly that many, with a fixed padding-column count, and a larger
+/// round commits its natural area (`None`).
+///
+/// A shard commits its global round under this pin and the shard's global
+/// proof commits the same tables under it again, so the two commitments are
+/// equal. Pinning the small rounds gives their global proofs one geometry, so
+/// the global proofs of consecutive shards are verified by one program.
+pub fn global_round_pin(
+    total_values: usize,
+    log_stacking_height: usize,
+    cube: usize,
+) -> Option<AreaPin> {
+    let area = GLOBAL_ROUND_PIN_BLOCKS << log_stacking_height;
+    (total_values > 0 && total_values <= area)
+        .then(|| AreaPin { area, pad_columns: area.div_ceil(cube).max(1) })
+}
+
+/// The cells a global round of `total_values` cells commits: its pin's area
+/// (see [`global_round_pin`]), or its natural area past the pin.
+pub fn global_round_dense_len(
+    total_values: usize,
+    log_stacking_height: usize,
+    cube: usize,
+) -> usize {
+    global_round_pin(total_values, log_stacking_height, cube)
+        .map_or_else(|| committed_dense_len(total_values, log_stacking_height), |pin| pin.area)
+}
+
 pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
     if total_values == 0 {
         return 0;

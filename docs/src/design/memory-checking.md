@@ -31,75 +31,27 @@ The `Memory` bus balances when the sends equal the receives, which is condition 
 
 ## Across shards
 
-The first and last tuple of each address in a shard must also match the neighbouring shards. These tuples go on the `Global` bus:
+The first and last tuple of each address in a shard must also match the neighbouring shards. These tuples are *global* lookups: lookups whose two sides may lie in different shards.
 
-- `MemoryLocal` *receives* the address's initial tuple and *sends* its final tuple.
+- `MemoryLocal` *receives* the address's initial tuple and *sends* its final tuple, on the local `Memory` bus and again as global lookups.
 - `MemoryGlobalInit` sends the initial value of each address outside the program image, at timestamp `(0, 0)`.
 - `MemoryGlobalFinal` receives the final value of each touched address.
-- The initial values of the program image are not rows. Their contribution is precomputed at setup as the verifying key's `initial_global_cumulative_sum`.
+- `MemoryProgram` is a preprocessed table of the program image, part of the verifying key. Every shard includes it; its multiplicity is 1 on the image's rows in the first shard and 0 in every other shard, so the first shard sends every image word to `MemoryImage` over a lookup inside the shard.
+- `MemoryImage` is the first shard's copy of the image in main columns: it receives each word from `MemoryProgram` and sends its initial value as a global lookup. A global lookup reads committed main columns only, which is why the preprocessed table does not send it itself.
 
-Because shards are proved independently, the lookup argument, which only balances within one shard, cannot match these messages. Instead each message is hashed to a point on an elliptic curve, the `Global` chip adds up the shard's points, and the shard's sum is a public value. The recursion adds the sums of all shards and the verifying key's initial sum, and the root checks that the total is the neutral digest. A matching send and receive map to opposite points and cancel. The same mechanism carries syscalls from an execution shard to the precompile shard that proves them.
+The same mechanism carries syscalls from an execution shard to the precompile shard that proves them (`SyscallCore` and `SyscallPrecompile`).
 
-## Multiset hashing
+## Global challenge
 
-A multiset hash maps a multiset to a short value such that it is infeasible to find two different multisets with the same hash, and such that the hash can be updated one element at a time in any order. Ziren maps each element to a point on an elliptic curve and hashes a multiset to the sum of its points.
+Within a shard, LogUp balances a bus with challenges \\( (\alpha, \beta) \\) drawn after the shard's trace is committed. A global lookup cannot be balanced that way, since its other side is in another shard, proved with other challenges. Ziren instead proves every shard's global lookups, outside the shard's proof, under one challenge pair \\( (\alpha_g, \beta_g) \\) for the whole execution, drawn only after every shard has committed the rows that carry global lookups.
 
-To map a message \\( m = (m_0, \dots, m_6) \\) to a point, Ziren follows [Constraint-Friendly Map-to-Elliptic-Curve-Group Relations and Their Applications](https://eprint.iacr.org/2025/1503) and uses the message directly as the \\( x \\)-coordinate, without hashing it first:
+1. **Global round.** The chips with global lookups (`MemoryLocal`, `MemoryGlobalInit`, `MemoryGlobalFinal`, `SyscallCore`, `SyscallPrecompile` and `MemoryImage`) are committed in a round of their own, between the preprocessed round and the main round.
+2. **Hash chain.** The chain starts at \\( g_0 \\), sampled from a challenger that has observed the verifying key. Shard \\( i \\) extends it, \\( g_i = H(g_{i-1}, C_i, \mathit{shape}_i) \\), with its global round's commitment \\( C_i \\) and the name and height of each chip in the round; a shard without a global round leaves it unchanged, so only a shard with a global round needs a global proof. The chain's end is \\( g^\star \\).
+3. **Challenge.** The prover grinds a proof-of-work witness \\( w \\) that, observed after \\( g^\star \\), makes the challenger emit 22 zero bits (`ZIREN_GLOBAL_GRINDING_BITS`). \\( (\alpha_g, \beta_g) \\) is then sampled from \\( g^\star \\) and \\( w \\) alone, and every global proof is verified with the same \\( w \\). \\( \beta_g \\) is the eq table of a seed of dimension \\( d \\), the log of the widest global message (its values plus the lookup kind), so a message is fingerprinted alike in every shard.
+4. **Shard proof.** A shard proof does not wait for the challenge. It commits the shard's global round, proves the shard's other lookups under the shard's own \\( (\alpha, \beta) \\), and leaves the global lookups out of its LogUp-GKR circuit.
+5. **Global proof.** Once \\( g^\star \\) is known, every shard with a global round gets a global proof: a proof over the tables of that round in which each chip keeps its global lookups and has no constraints. It commits the tables again as its only round, and that commitment must equal \\( C_i \\). Its transcript observes \\( g^\star \\) first, its LogUp-GKR circuit evaluates the lookups under \\( (\alpha_g, \beta_g) \\), and it outputs the sum \\( S_i \\) of the shard's global fractions. A global round of at most 8 stacking blocks is committed at a fixed area, so the global proofs of most shards have one shape.
+6. **Recursion.** A shard's leaf computes one chain step over the shard's global round and publishes the chain before and after it; the first shard's leaf checks that its chain starts at \\( g_0 \\) of the verifying key. A global leaf verifies the global proofs of up to 8 consecutive rounds of one shape: it checks the proof of work, steps the chain over the commitments the proofs open, and publishes the chain after and before those rounds, \\( g^\star \\), \\( w \\), the sum of the \\( S_i \\) and the count of the rounds' lookups. In the compress tree the global leaves come before the shards, the latest round first, so the chain runs from \\( g^\star \\) back to \\( g_0 \\) through the global leaves and forward again to \\( g^\star \\) through the shards. Compress nodes check that their children's chains meet, take \\( g^\star \\) and \\( w \\) from the global leaves (a shard's leaf carries neither), and add the sums. The root checks that the chain starts and ends at \\( g^\star \\) and that \\( \sum_i S_i = 0 \\). The chain is a hash chain, so the rounds the global proofs open are exactly the rounds the shards committed.
 
-- \\( x_0 = m_0 + 2^{16} \cdot kind \\), where \\( m_0 \\) is range-checked to 16 bits and \\( kind \\) names the bus the message came from;
-- \\( x_i = m_i \\) for \\( 1 \le i \le 5 \\);
-- \\( x_6 = 256 \cdot m_6 + t \\), where \\( m_6 \\) is a byte and \\( t \\) is an 8-bit tweak.
+A matching send and receive give opposite fractions and cancel. Because \\( g^\star \\) binds every global row of every shard before \\( (\alpha_g, \beta_g) \\) is drawn, an unbalanced set of global lookups sums to zero only with probability about \\( (d + 1) N_g / |\mathbb{F}_{p^4}| \\), where \\( N_g \\) is the number of global lookups in the execution; the 22 bits of grinding count against that term as the lookup argument's grinding does. This requires fewer than \\( p \\) sends and fewer than \\( p \\) receives, so that the count of one message cannot wrap around the field's characteristic. The verifiers enforce it. A global round holds at most \\( m = \sum_c h_c \max(s_c, r_c) \\) lookups either way, for chips of height \\( h_c \\) with \\( s_c \\) global sends and \\( r_c \\) global receives a row (every multiplicity is a bit). A global leaf counts each round it opens as \\( \lfloor m / 2^{10} \rfloor + 1 \\) units, compress nodes add the units, and every program rejects more than \\( (p - 1) / 2^{10} \\) of them; the host verifier makes the same count. An execution is therefore limited to about \\( 2^{31} \\) cross-shard lookups in either direction. Both verifiers also reject a proof whose output fractions have a zero denominator; the recursion programs assert this before dividing, since the recursion machine accepts any quotient of zero by zero.
 
-The prover tries tweaks \\( t = 0, 1, \dots \\) until \\( x \\) is on the curve. For the square root \\( y \\), the top coefficient \\( y_6 \\) fixes the sign. A received message must have \\( 1 \le y_6 \le 63 \cdot 2^{24} \\), and a sent message \\( 2^{30} + 1 \le y_6 \le p - 1 \\). The two ranges are disjoint and mirror each other under \\( y \mapsto -y \\), so a send and the matching receive give opposite points. Each row sets exactly one of `is_send` and `is_receive`.
-
-The `Global` chip adds the points in a chain on the `GlobalAccumulation` bus using the chord formula. It witnesses \\( (x_2 - x_1)^{-1} \\) at each step so that doubling and adding an inverse are not provable. Sums start at a fixed point derived from \\( \sqrt{2} \\), and that point is the neutral digest.
-
-The parameters are:
-
-- base field KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\);
-- extension \\( \mathbb{F}_{p^7} = \mathbb{F}_p[z]/(z^7 + 2z - 8) \\);
-- curve \\( y^2 = x^3 + 3z \cdot x - 3 \\).
-
-## Elliptic curve selection over the KoalaBear extension field
-
-**Objective**
-
-Find an elliptic curve over the degree-7 extension of KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\), with more than 100 bits of security against known attacks and cheap arithmetic.
-
-**Code location**
-
-The search is in [septic-curve-over-koalabear](https://github.com/ProjectZKM/septic-curve-over-koalabear), a fork of [Cheetah](https://github.com/toposware/cheetah), which finds a curve over a sextic extension of the Goldilocks prime \\( 2^{64} - 2^{32} + 1 \\).
-
-**Construction**
-
-- Step 1: sparse irreducible polynomial.
-  - Requirements: few nonzero coefficients, small coefficients, irreducible over the base field.
-  - Implementation (`septic_search.sage`): `poly = find_sparse_irreducible_poly(Fpx, extension_degree, use_root=True)`.
-  - Result: \\( z^7 + 2z - 8 \\).
-
-- Step 2: candidate curves.
-  - Form \\( y^2 = x^3 + ax + b \\) with small coefficients.
-  - Search in `septic_search.sage`:
-    ```
-    for i in range(wid, 1000000000, processes):
-        coeff_a = 3 * a  # Fixed coefficient scaling
-        coeff_b = i - 3
-        E = EllipticCurve(extension, [coeff_a, coeff_b])
-    ```
-  - Result: \\( a = 3z \\), \\( b = -3 \\), with \\( z \\) the generator of the extension.
-
-- Step 3: security checks.
-  - Pollard rho: the largest prime factor of the group order has more than 210 bits.
-    ```
-    prime_order = list(ecm.factor(n))[-1]
-    assert prime_order.nbits() > 210
-    ```
-  - Embedding degree:
-    ```
-    embedding_degree = calculate_embedding_degree(E)
-    assert embedding_degree.nbits() > EMBEDDING_DEGREE_SECURITY
-    ```
-  - The same two checks for the quadratic twist.
-
-- Step 4: complex discriminant.
-  With \\( n \\) the order of the curve, \\( D = (p^7 + 1 - n)^2 - 4p^7 \\) must be a large negative integer (absolute value above 100 bits) whose square-free part exceeds 100 bits. Run `sage verify.sage` to check.
+The prover makes one pass over the execution: it proves each shard as soon as the shard is executed, and proves the global proofs after the last shard has committed its global round. The price is one more small proof for each shard with a global round.

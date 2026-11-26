@@ -18,7 +18,6 @@
 //! program builder) walk identical felt counts:
 //!
 //!   * `chip_heights` — one entry per chip in the input shape (raw heights)
-//!   * `chip_cumulative_sums` — one entry per chip in the input shape
 //!   * `logup_gkr_proof.logup_evaluations.chip_openings` — one entry
 //!     per chip, sized to chip widths
 //!   * `zerocheck_proof` has the univariate-skip shape: one skip message,

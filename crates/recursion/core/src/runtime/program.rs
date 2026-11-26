@@ -3,7 +3,6 @@ use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use shape::RecursionShape;
 use zkm_pcs::air::{MachineAir, MachineProgram};
-use zkm_pcs::septic_digest::SepticDigest;
 
 use crate::machine::RecursionAirEventCount;
 use crate::runtime::RawProgram;
@@ -154,10 +153,6 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                     see(&i.input_addr);
                     i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
                 }
-                Instruction::HintAddCurve(i) => {
-                    i.output_x_addrs_mults.iter().for_each(|(a, _)| see(a));
-                    i.output_y_addrs_mults.iter().for_each(|(a, _)| see(a));
-                }
                 Instruction::Print(i) => see(&i.addr),
                 Instruction::HintExt2Felts(i) | Instruction::Ext2Felts(i) => {
                     see(&i.input_addr);
@@ -189,10 +184,6 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn pc_start(&self) -> F {
         F::ZERO
-    }
-
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        SepticDigest::<F>::zero()
     }
 
     fn area_pins(&self) -> Option<zkm_pcs::jagged::RecursionPins> {

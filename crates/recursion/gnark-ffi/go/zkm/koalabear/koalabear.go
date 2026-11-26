@@ -195,6 +195,11 @@ func (c *Chip) AssertIsEqualE(a, b ExtensionVariable) {
 	c.AssertIsEqualF(a.Value[3], b.Value[3])
 }
 
+// AssertNotEqualE holds when a - b has an inverse, which InvE constrains.
+func (c *Chip) AssertNotEqualE(a, b ExtensionVariable) {
+	c.InvE(c.SubE(a, b))
+}
+
 func (c *Chip) SelectF(cond frontend.Variable, a, b Variable) Variable {
 	var UpperBound *big.Int
 	if a.UpperBound.Cmp(b.UpperBound) == -1 {

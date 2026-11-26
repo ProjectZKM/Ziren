@@ -209,6 +209,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			fieldAPI.AssertNotEqualF(felts[cs.Args[0][0]], felts[cs.Args[1][0]])
 		case "AssertEqE":
 			fieldAPI.AssertIsEqualE(exts[cs.Args[0][0]], exts[cs.Args[1][0]])
+		case "AssertNeE":
+			fieldAPI.AssertNotEqualE(exts[cs.Args[0][0]], exts[cs.Args[1][0]])
 		case "PrintV":
 			api.Println(vars[cs.Args[0][0]])
 		case "PrintF":

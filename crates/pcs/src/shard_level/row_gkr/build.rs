@@ -30,6 +30,7 @@ use crate::Chip;
 ///   device-resident chip is a `dummy`
 /// - `alpha`, `betas`: post-commit challenges (`betas[0]` covers the
 ///   `argument_index` slot, `betas[1..]` per-column values)
+/// - `global`: the cross-shard `(α_g, β_g)` for the global-scope lookups
 /// - `num_row_variables`: log₂ of the padded row count
 ///
 /// **Panics** when `num_row_variables < 2`: the first layer reduces it
@@ -41,6 +42,7 @@ pub fn build_gkr_circuit<F, EF, A>(
     shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
+    global: Option<(EF, &[EF])>,
     num_row_variables: usize,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
@@ -60,6 +62,7 @@ where
         shared_trace_mles,
         alpha,
         betas,
+        global,
         num_row_variables,
     );
 

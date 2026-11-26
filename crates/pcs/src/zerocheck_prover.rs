@@ -9,10 +9,9 @@
 //!   variable `r[0]` first and must supply its point in that same order.
 //!   `Σ_b eq(r, b) = 1` for every `r`.
 //!
-//! * [`eval_constraints_on_hypercube_with_cumsums`] — the batched AIR
-//!   constraint polynomial evaluated at every row of the Boolean hypercube,
-//!   which is the `C(-)` table the zerocheck claim `Σ_b eq(r, b)·C(b) = 0`
-//!   is taken over.
+//! * [`eval_constraints_on_hypercube`] — the batched AIR constraint
+//!   polynomial evaluated at every row of the Boolean hypercube, the host
+//!   reference that device constraint evaluators are checked against.
 //!
 //! The zerocheck prover/verifier themselves live in [`crate::shard_level`].
 
@@ -27,7 +26,6 @@ use p3_matrix::Matrix;
 use crate::air::MachineAir;
 use crate::chip::Chip;
 use crate::folder::{PairWindow, VerifierConstraintFolder};
-use crate::septic_digest::SepticDigest;
 use crate::{Challenge, StarkGenericConfig, Val};
 
 /// Dense evaluation table of the equality MLE over `r ∈ EF^m`:
@@ -90,14 +88,12 @@ fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r
     table
 }
 
-/// Evaluate the batched AIR constraint polynomial at every row of the
-/// Boolean hypercube with real per-chip `local_cumulative_sum` +
-/// `global_cumulative_sum`.  The recursion verifier's
-/// `build_opened_values_from_chip_openings_with_cumsums` must pass
-/// MATCHING values (from `JaggedShardProof.chip_cumulative_sums`) or
-/// the zerocheck sumcheck balance will not close.
+/// Evaluates the batched AIR constraint polynomial of `chip` at every row of
+/// the Boolean hypercube of `num_vars` variables, with `local_cumulative_sum`
+/// as the chip's local cumulative sum. Row `i`'s next row is row `i + 1`,
+/// wrapping to row 0.
 #[allow(clippy::too_many_arguments)]
-pub fn eval_constraints_on_hypercube_with_cumsums<SC, A>(
+pub fn eval_constraints_on_hypercube<SC, A>(
     chip: &Chip<Val<SC>, A>,
     num_vars: usize,
     main: &RowMajorMatrix<Val<SC>>,
@@ -105,7 +101,6 @@ pub fn eval_constraints_on_hypercube_with_cumsums<SC, A>(
     public_values: &[Val<SC>],
     alpha: Challenge<SC>,
     local_cumulative_sum: Challenge<SC>,
-    global_cumulative_sum: SepticDigest<Val<SC>>,
 ) -> Vec<Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -123,73 +118,56 @@ where
         main.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
     let preproc_ext: Vec<Challenge<SC>> =
         preprocessed.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
-
-    let wrap_main: Vec<Challenge<SC>> = {
-        let mut v = Vec::with_capacity(main_ext.len());
-        v.extend_from_slice(&main_ext[main_width..]);
-        v.extend_from_slice(&main_ext[..main_width]);
+    let rotate = |values: &[Challenge<SC>], width: usize| -> Vec<Challenge<SC>> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let mut v = Vec::with_capacity(values.len());
+        v.extend_from_slice(&values[width..]);
+        v.extend_from_slice(&values[..width]);
         v
     };
-    let wrap_preproc: Vec<Challenge<SC>> = if preproc_width == 0 {
-        Vec::new()
-    } else {
-        let mut v = Vec::with_capacity(preproc_ext.len());
-        v.extend_from_slice(&preproc_ext[preproc_width..]);
-        v.extend_from_slice(&preproc_ext[..preproc_width]);
-        v
-    };
+    let next_main = rotate(&main_ext, main_width);
+    let next_preproc = rotate(&preproc_ext, preproc_width);
 
-    let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();
-    let zero_challenge: Challenge<SC> = local_cumulative_sum;
-    let global_sum: SepticDigest<Val<SC>> = global_cumulative_sum;
-
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let main_local = &main_ext[i * main_width..(i + 1) * main_width];
-        let main_next = &wrap_main[i * main_width..(i + 1) * main_width];
-        let main_view = PairWindow { local: main_local, next: main_next };
-
-        let preproc_window = if preproc_width == 0 {
-            PairWindow { local: &[], next: &[] }
-        } else {
-            let local = &preproc_ext[i * preproc_width..(i + 1) * preproc_width];
-            let next = &wrap_preproc[i * preproc_width..(i + 1) * preproc_width];
-            PairWindow { local, next }
-        };
-
-        let empty_view = PairWindow { local: &empty_perm_ext[..], next: &empty_perm_ext[..] };
-
-        let is_first = if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
-        let is_last = if i == n - 1 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
-        let is_transition = if i == n - 1 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
-
-        let mut folder = VerifierConstraintFolder::<SC> {
-            preprocessed: preproc_window,
-            main: main_view,
-            perm: empty_view,
-            perm_challenges: &[],
-            local_cumulative_sum: &zero_challenge,
-            global_cumulative_sum: &global_sum,
-            is_first_row: is_first,
-            is_last_row: is_last,
-            is_transition,
-            alpha,
-            accumulator: Challenge::<SC>::ZERO,
-            public_values,
-            _marker: PhantomData,
-        };
-
-        chip.eval(&mut folder);
-        out.push(folder.accumulator);
-    }
-
-    out
+    (0..n)
+        .map(|i| {
+            let preprocessed = if preproc_width == 0 {
+                PairWindow { local: &[][..], next: &[][..] }
+            } else {
+                let row = i * preproc_width..(i + 1) * preproc_width;
+                PairWindow { local: &preproc_ext[row.clone()], next: &next_preproc[row] }
+            };
+            let row = i * main_width..(i + 1) * main_width;
+            let mut folder = VerifierConstraintFolder::<SC> {
+                preprocessed,
+                main: PairWindow { local: &main_ext[row.clone()], next: &next_main[row] },
+                perm: PairWindow { local: &[], next: &[] },
+                perm_challenges: &[],
+                local_cumulative_sum: &local_cumulative_sum,
+                is_first_row: if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO },
+                is_last_row: if i == n - 1 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO },
+                is_transition: if i == n - 1 {
+                    Challenge::<SC>::ZERO
+                } else {
+                    Challenge::<SC>::ONE
+                },
+                alpha,
+                accumulator: Challenge::<SC>::ZERO,
+                public_values,
+                _marker: PhantomData,
+            };
+            chip.eval(&mut folder);
+            folder.accumulator
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;

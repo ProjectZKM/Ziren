@@ -65,21 +65,10 @@ pub struct ZKMWrapWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            crate::shard_level_witness::PreprocessedRoundWitness<C>,
+            crate::shard_level_witness::ShardRoundsWitness<C>,
         ),
     )>,
-    /// per-input per-chip cumulative sums.
-    pub chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
-    /// per-input per-chip log heights (mirrors
-    /// `chip_cumulative_sums_per_input`).
+    /// per-input per-chip log heights.
     pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — in-circuit cousin of
     /// [`ZKMWrapWitnessValues::vk_merkle_data`].
@@ -109,12 +98,7 @@ pub fn verify_wrap_jagged<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
-    let ZKMWrapWitnessVariable {
-        vks_and_proofs,
-        chip_cumulative_sums_per_input,
-        chip_heights_per_input,
-        vk_merkle_data,
-    } = input;
+    let ZKMWrapWitnessVariable { vks_and_proofs, chip_heights_per_input, vk_merkle_data } = input;
 
     let vk_root = vk_merkle_data.root;
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
@@ -125,7 +109,6 @@ pub fn verify_wrap_jagged<C, SC, A>(
         builder,
         vk_legacy,
         proof_tuple,
-        chip_cumulative_sums_per_input,
         chip_heights_per_input,
         machine,
         max_log_row_count,
@@ -155,17 +138,8 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
         crate::chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-        crate::shard_level_witness::PreprocessedRoundWitness<C>,
+        crate::shard_level_witness::ShardRoundsWitness<C>,
     ),
-    chip_cumulative_sums_per_input: Vec<
-        std::collections::BTreeMap<
-            String,
-            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-                Felt<C::F>,
-                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
-            >,
-        >,
-    >,
     chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
@@ -188,7 +162,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         zerocheck_proof,
         evaluation_proof,
         proof_opened_values,
-        preprocessed_round,
+        rounds_witness,
     ) = proof_tuple;
 
     let chip_names: Vec<String> =
@@ -232,11 +206,11 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = if prep_widths.is_empty() {
         Vec::new()
     } else {
-        vec![(preprocessed_round.raw_commit, jagged_vk.preprocessed_commit)]
+        vec![(rounds_witness.preprocessed_raw_commit, jagged_vk.preprocessed_commit)]
     };
 
     let chip_height_felts_pre: Vec<Felt<C::F>> = {
-        let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+        let mut hs: Vec<Felt<C::F>> = rounds_witness.preprocessed_row_counts.clone();
         hs.extend(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
             builder,
             &chip_names,
@@ -267,7 +241,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
             *commit_root,
             *modified_commitment,
             &preceding_commitments,
-            &preprocessed_round.padding_heights,
+            &rounds_witness.padding_heights,
             max_log_row_count,
             &column_counts_by_round,
             None,
@@ -326,27 +300,19 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     >::insertion_points_from_column_counts(&column_counts_by_round);
     let whir_pv = crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
         main_commit,
+        None,
         public_values_raw.clone(),
         &logup_gkr_proof,
         &zerocheck_proof,
         whir_evaluation_proof_var,
         chip_height_bits,
     );
-    let empty_cumsums_wrap = std::collections::BTreeMap::new();
-    let cumsums_for_input = chip_cumulative_sums_per_input.first().unwrap_or(&empty_cumsums_wrap);
-    let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-        builder,
-        proof_opened_values,
-        &chip_names,
-        chip_heights_for_input,
-        cumsums_for_input,
-        max_log_row_count,
-    );
+    let opened_values = proof_opened_values;
     let eval_public_values_fn = super::compress_jagged::noop_eval_public_values_fn::<C>();
     let wrap_real_num_cols: usize = {
         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
         let witness_pads: usize =
-            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+            rounds_witness.padding_heights.iter().map(|p| p.len()).sum::<usize>();
         match outer_pack_info {
             Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                 total_cols,
@@ -405,6 +371,8 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         machine.num_pv_elts(),
         eval_public_values_fn,
         jagged_evaluator_fn,
+        None,
+        &vec![false; shard_chips.len()],
     );
 
     let public_values: &RootPublicValues<Felt<C::F>> = public_values_raw.as_slice().borrow();

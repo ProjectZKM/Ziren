@@ -83,6 +83,7 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
         ("whir.batch_grinding_bits", crate::whir::jagged::whir_batch_grinding_bits() as u64),
         ("logup_gkr.grinding_bits", crate::logup_gkr::gkr_grinding_bits() as u64),
+        ("logup_gkr.global_grinding_bits", crate::logup_gkr::global_grinding_bits() as u64),
         // Added when these became overridable: a deployment that lowers one of
         // them must move the digest, or the override would change the transcript
         // without any consumer noticing.
@@ -102,7 +103,14 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         ("whir.claims_before_batching_point", 1),
         // rev 1: the shard prologue absorbs public values, the main commitment, the
         //        chip count, then each chip's raw height and name.
-        ("shard.prologue_order", 1),
+        // rev 2: a shard with global lookups absorbs the global challenge's
+        //        digest first, and a shard with a global round absorbs that
+        //        round's commitment between the public values and the main
+        //        commitment.
+        ("shard.prologue_order", 2),
+        // rev 1: the verifying key absorbs its commitment, the start pc and a
+        //        zero; it no longer carries an initial global digest.
+        ("vk.observation", 1),
         // rev 1: a round's commitment is `compress([raw_root, hash(counts)])` over
         //        the ring's own hasher, so the digest states the geometry.
         ("jagged.geometry_hash_bind", 1),
@@ -312,7 +320,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "5d87a7341fd94e3c5387812b649cacb112dbb4b867fc44d6496fef870aaf8794",
+            "643a39733ea14a39629cf0634a0944443c49593431d424335ede0dcd3340d3a9",
             "the transcript profile changed -- see this test's documentation",
         );
     }

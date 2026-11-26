@@ -235,7 +235,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let mut challenger = self.core_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
+        let machine_proof =
+            MachineProof { shard_proofs: proof.0.to_vec(), global_proofs: proof.1.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
 
         Ok(())
@@ -249,7 +250,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<(), MachineVerificationError<CompressedSC>> {
         let ZKMReduceProof { vk: compress_vk, proof } = proof;
         let mut challenger = self.root_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
+        let machine_proof = MachineProof::from_shards(vec![proof.clone()]);
         self.root_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
@@ -289,7 +290,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<ShrinkSC>> {
         let mut challenger = self.shrink_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
+        let machine_proof = MachineProof::from_shards(vec![proof.proof.clone()]);
         self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RecursionPublicValues<_> =
@@ -329,7 +330,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<OuterSC>> {
         let mut challenger = self.wrap_prover.machine().config().challenger();
-        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
+        let machine_proof = MachineProof::from_shards(vec![proof.proof.clone()]);
 
         let wrap_vk = self.wrap_vk.get().expect("Wrap verifier key not set");
         self.wrap_prover.machine().verify(wrap_vk, &machine_proof, &mut challenger)?;

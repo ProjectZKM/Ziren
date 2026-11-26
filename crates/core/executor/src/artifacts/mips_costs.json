@@ -57,7 +57,8 @@
   "MemoryGlobalFinalize": 152,
   "Bitwise": 34,
   "MemoryLocal": 72,
-  "Global": 57,
+  "MemoryProgram": 9,
+  "MemoryImage": 6,
   "MemoryBump": 14,
   "Byte": 22,
   "Bls12381AddAssign": 2533

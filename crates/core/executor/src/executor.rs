@@ -2292,9 +2292,6 @@ impl<'a> Executor<'a> {
             clk = self.state.clk;
             pc = self.state.pc;
 
-            if charged && crate::syscall_is_sent(self.register(Register::V0)) {
-                self.split_acct.add_sent_syscall();
-            }
             self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
             next_pc = precompile_next_pc;
             next_next_pc = precompile_next_pc + 4;

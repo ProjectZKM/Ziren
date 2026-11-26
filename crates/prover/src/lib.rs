@@ -138,7 +138,7 @@ pub type WrapKeys<C> = (
     StarkVerifyingKey<OuterSC>,
 );
 
-/// Fixed height of the allowed-vk Merkle tree (capacity 2^14 = 16,384 vks).
+/// Fixed height of the allowed-vk Merkle tree (capacity 2^19 = 524,288 vks).
 ///
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
@@ -162,9 +162,10 @@ pub type WrapKeys<C> = (
 /// keys production has been seen to produce, and it GROWS with traffic rather
 /// than being a fixed census. A height that cannot hold them is not "a smaller
 /// map" — it is a map that rejects real proofs, which is what 2^11 (2048) did.
-/// 2^14 also leaves room because the height is baked into every compose
-/// program, so raising it is itself a vk-changing event. Pay for the headroom
-/// once.
+/// The enumerated normalize classes (one per chip cluster and preprocessed,
+/// global and main round bucket) number about 393k, so the tree holds 2^19.
+/// The height is baked into every compose program, so raising it is itself a
+/// vk-changing event.
 ///
 /// `tests::enumeration_size_probe` asserts the enumerated tail fits; it cannot
 /// bound the collected half, which is why the headroom is deliberate.
@@ -178,15 +179,9 @@ pub use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 /// the keys the map is missing.  Merge the result into
 /// `crates/prover/vk_map.bin` with the `merge_vk_maps` bin.
 ///
-/// WHY the map was ever short (Sep 2026): the normalize key is a function of
-/// `(chip set, prep blocks, main blocks, prep pad columns, main pad columns)`,
-/// but `generate` keyed only on the first three and emitted ONE representative
-/// per class.  `shape_at_class` packs its fillers up to the class ceiling, so
-/// that representative always landed on the FEWEST pad columns; a real shard
-/// that only just crossed into the class commits more of them, which is a
-/// different program and so a different vk.  MEASURED by
-/// `tests::normalize_vk_padding_column_probe`: one chip set, `main_blocks=8`,
-/// 1 pad column vs 2 -> the vks differ.  The pad counts are in the key now.
+/// Normalize keys depend on the chip set and the geometry of every committed
+/// round, including padding columns. `tests::normalize_vk_round_geometry_probe`
+/// compares those quantities under the current machine layout.
 ///
 /// Collection should therefore be a DIAGNOSTIC, not a dependency: a key that
 /// shows up here and is not in an enumerated map is a coverage bug in
@@ -248,6 +243,59 @@ const CORE_CACHE_SIZE: usize = 5;
 /// (`(N-1)/(k-1)` total) and amortizes per-shard fixed overhead
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 3;
+
+/// The most global rounds one global-round program opens: the global proofs
+/// of up to that many consecutive rounds of one shape share a program, and a
+/// proof of it.
+pub const GLOBAL_ROUNDS_PER_PROGRAM: usize = 8;
+
+/// The weight of the global rounds one global-round program opens, at most,
+/// unless it opens a single round. A round weighs the stacking blocks it
+/// commits plus [`GLOBAL_ROUND_FIXED_BLOCKS`].
+///
+/// The program has to fit a recursion pin class
+/// (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`), and it grows with the rows its
+/// queries open: every first-round query of a global proof opens one row of
+/// each block of the round. Measured on mainnet blocks, a round of 8 blocks
+/// costs the program 9,080 hash rows and one of 232 blocks 60,664, so 230 rows
+/// a block and 32 blocks' worth besides; the largest class holds about 200,000
+/// hash rows, 870 in this weight, and the bound leaves a third of it free.
+pub const GLOBAL_BLOCKS_PER_PROGRAM: usize = 576;
+
+/// What a global round weighs besides its blocks: the part of verifying its
+/// global proof that does not grow with the round.
+pub const GLOBAL_ROUND_FIXED_BLOCKS: usize = 32;
+
+/// Cuts consecutive global rounds into the groups that one global-round
+/// program each opens, in order. `rounds` holds the shape and the stacking
+/// blocks of each round. A group holds rounds of one shape, at most
+/// `max_rounds` of them, and weighs at most [`GLOBAL_BLOCKS_PER_PROGRAM`]
+/// unless it is a single round.
+pub fn global_round_groups<S: PartialEq>(
+    rounds: &[(S, usize)],
+    max_rounds: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut weight = 0;
+    for (round, (shape, blocks)) in rounds.iter().enumerate() {
+        let round_weight = blocks + GLOBAL_ROUND_FIXED_BLOCKS;
+        match groups.last_mut() {
+            Some(group)
+                if group.len() < max_rounds
+                    && rounds[group.start].0 == *shape
+                    && weight + round_weight <= GLOBAL_BLOCKS_PER_PROGRAM =>
+            {
+                group.end += 1;
+                weight += round_weight;
+            }
+            _ => {
+                groups.push(round..round + 1);
+                weight = round_weight;
+            }
+        }
+    }
+    groups
+}
 
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
@@ -334,11 +382,24 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// **Key**: [`ZKMCoreWitnessValues::shape_key`].
     pub normalize_programs_cache: Mutex<RecursionProgramCache>,
 
+    /// Per-shape cache for the global-round programs. A block uses a few of
+    /// them, each for many nodes, so they are kept apart from the normalize
+    /// programs, whose shapes would push them out between two uses.
+    ///
+    /// **Key**: `ZKMGlobalRoundWitnessValues::shape_key`.
+    pub global_programs_cache: Mutex<RecursionProgramCache>,
+
     /// Built-but-unsnapped Normalize / Compose programs, so a band can be
     /// chosen for a node AFTER its program exists — which is what deciding a
     /// band by SIBLING agreement requires.
     pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
     pub compose_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
+
+    /// The band of every compose shape asked for so far, by the key of its
+    /// unsnapped program. A band is a function of the program, so whoever
+    /// only places nodes in the tree needs the program once per shape, even
+    /// when a block has more shapes than the unsnapped cache holds.
+    pub compose_bands: Mutex<BTreeMap<u64, Option<usize>>>,
 
     /// Per-shape cache for the Compose recursion program — every
     /// interior node of the recursion tree.
@@ -729,8 +790,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             wrap_keys_cache: Mutex::new(None),
             wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_cache: Mutex::new(RecursionProgramCache::default()),
+            global_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
+            compose_bands: Mutex::new(BTreeMap::new()),
             compose_programs_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_cache: Mutex::new(RecursionPkCache::default()),
             recursion_pk_cache_ready: std::sync::Condvar::new(),
@@ -1034,7 +1097,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Self::check_for_high_cycles(cycles);
         let public_values = ZKMPublicValues::from(&public_values_stream);
         Ok(ZKMCoreProof {
-            proof: ZKMCoreProofData(proof.shard_proofs),
+            proof: ZKMCoreProofData(proof.shard_proofs, proof.global_proofs),
             stdin: stdin.clone(),
             public_values,
             cycles,
@@ -1187,6 +1250,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
+    /// The program that verifies the global proofs of `input`, cached by
+    /// their number and shapes.
+    pub fn global_round_program(
+        &self,
+        input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        self.cached_program(
+            &self.global_programs_cache,
+            self.band_keyed(input.shape_key(), None),
+            "global",
+            || {
+                let program =
+                    Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
+                        self.core_prover.machine(),
+                        input,
+                        Self::pcs_max_log_row_count(),
+                    ));
+                self.snapped(&program, None, "normalize")
+            },
+        )
+    }
+
     /// The band this normalize program would choose for itself.
     pub fn normalize_band_for(&self, input: &ZKMCoreWitnessValues<CoreSC>) -> Option<usize> {
         let program = self.normalize_program_unsnapped(input);
@@ -1195,8 +1280,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// The band this compose program would choose for itself.
     pub fn compose_band_for(&self, input: &ZKMCompressWitnessValues<InnerSC>) -> Option<usize> {
+        let key = self.verification_keyed(input.shape_key());
+        if let Some(band) = self.compose_bands.lock().unwrap().get(&key) {
+            return *band;
+        }
         let program = self.compose_program_unsnapped(input);
-        self.band_of(&program)
+        let band = self.band_of(&program);
+        self.compose_bands.lock().unwrap().insert(key, band);
+        band
     }
 
     fn band_of(&self, program: &RecursionProgram<KoalaBear>) -> Option<usize> {
@@ -1573,9 +1664,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
+    /// The global hash chain over `shard_proofs` under the core key `vk`:
+    /// its start, then its value after each shard, the last being the `h_star`
+    /// every shard's global challenge is derived from.
+    pub fn global_chain(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+    ) -> Vec<[KoalaBear; DIGEST_SIZE]> {
+        let machine = self.core_prover.machine();
+        let mut challenger = machine.config().challenger();
+        vk.observe_into(&mut challenger);
+        let rounds: Vec<_> =
+            shard_proofs.iter().map(|sp| machine.global_round_binding(sp)).collect();
+        machine.global_chain(&challenger, rounds.iter().map(Option::as_ref))
+    }
+
     /// Wrap each batch of `ShardProof`s into a
     /// `ZKMCoreWitnessValues`, taking the `JaggedShardProof` each
-    /// one carries.
+    /// one carries, with the global hash chain's value before the shard and
+    /// its end over `shard_proofs`.
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1583,6 +1691,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
+        let chain = self.global_chain(vk, shard_proofs);
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -1593,26 +1702,127 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                  got a batch of {} shards",
                 batch.len()
             );
-            let jagged_proofs =
-                batch.iter().map(|sp| (*sp.jagged_shard_proof).clone()).collect::<Vec<_>>();
-            core_inputs.push(ZKMCoreWitnessValues {
-                vk: vk.clone(),
-                shard_proofs: jagged_proofs,
+            core_inputs.push(self.get_recursion_core_input(
+                vk,
+                &batch[0],
+                batch_idx == 0,
                 is_complete,
-                is_first_shard: batch_idx == 0,
-                vk_root: self.recursion_vk_root,
-            });
+                chain[batch_idx],
+            ));
         }
 
         core_inputs
     }
 
+    /// The normalize input of one core shard proof: `global_chain_start` is
+    /// the global hash chain's value before the shard, [`Self::global_chain`]'s
+    /// entry at the shard's index. It depends on the shards before this one
+    /// only, so a shard can be normalized as soon as it is proven.
+    pub fn get_recursion_core_input(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proof: &ShardProof<CoreSC>,
+        is_first_shard: bool,
+        is_complete: bool,
+        global_chain_start: [KoalaBear; DIGEST_SIZE],
+    ) -> ZKMCoreWitnessValues<CoreSC> {
+        ZKMCoreWitnessValues {
+            vk: vk.clone(),
+            shard_proofs: vec![(*shard_proof.jagged_shard_proof).clone()],
+            is_complete,
+            is_first_shard,
+            vk_root: self.recursion_vk_root,
+            global_chain_start,
+        }
+    }
+
+    /// The inputs of the global-round programs of a core proof, in the order
+    /// the compress tree takes them: before the shards, last rounds first, so
+    /// that each one starts the global hash chain where the one before it
+    /// ends. `shard_proofs[i]`'s round is opened by the `global_proofs` entry
+    /// at its position among the shards that commit one, and one program
+    /// opens the consecutive rounds of one group of [`global_round_groups`].
+    pub fn get_recursion_global_round_inputs(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+        global_proofs: &[ShardProof<CoreSC>],
+    ) -> Vec<zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>> {
+        let chain = self.global_chain(vk, shard_proofs);
+        let global_h_star = *chain.last().expect("the chain holds at least its start");
+        let machine = self.core_prover.machine();
+        let before_round = shard_proofs
+            .iter()
+            .enumerate()
+            .filter(|(_, proof)| machine.global_round_binding(proof).is_some())
+            .map(|(i, _)| chain[i])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            before_round.len(),
+            global_proofs.len(),
+            "a core proof holds one global proof for each shard with a global round"
+        );
+        let blocks = shard_proofs
+            .iter()
+            .filter_map(|proof| machine.global_round_binding(proof))
+            .map(|round| machine.global_round_blocks(&round));
+        let rounds = global_proofs
+            .iter()
+            .zip(blocks)
+            .map(|(proof, blocks)| {
+                let shape = zkm_recursion_circuit::machine::global_proof_shape_key(
+                    &proof.jagged_shard_proof,
+                );
+                (shape, blocks)
+            })
+            .collect::<Vec<_>>();
+        global_round_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM)
+            .into_iter()
+            .rev()
+            .map(|group| {
+                self.get_recursion_global_round_input(
+                    vk,
+                    &global_proofs[group.clone()],
+                    before_round[group.start],
+                    global_h_star,
+                )
+            })
+            .collect()
+    }
+
+    /// The global-round input of the global proofs of consecutive rounds, the
+    /// earliest first: `global_chain_end` is the global hash chain's value
+    /// before the first of those rounds and `global_h_star` the chain's end.
+    pub fn get_recursion_global_round_input(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        global_proofs: &[ShardProof<CoreSC>],
+        global_chain_end: [KoalaBear; DIGEST_SIZE],
+        global_h_star: [KoalaBear; DIGEST_SIZE],
+    ) -> zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC> {
+        let first = global_proofs.first().expect("a global-round program opens at least one round");
+        zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
+            vk: vk.clone(),
+            proofs: global_proofs.iter().map(|proof| (*proof.jagged_shard_proof).clone()).collect(),
+            vk_root: self.recursion_vk_root,
+            global_chain_end,
+            global_h_star,
+            global_pow_witness: first
+                .jagged_shard_proof
+                .global_pow_witness
+                .unwrap_or(KoalaBear::ZERO),
+        }
+    }
+
     /// Constructs `ZKMDeferredWitnessValues` from each batch, taking
-    /// the `JaggedShardProof` each input proof carries.
+    /// the `JaggedShardProof` each input proof carries. The deferred proofs
+    /// follow the last shard, so they pass through `global_chain`, the global
+    /// hash chain's end.
     pub fn get_recursion_deferred_inputs<'a>(
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
+        global_chain: [KoalaBear; DIGEST_SIZE],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMDeferredWitnessValues<CompressedSC>>, VkNotAllowed> {
@@ -1642,6 +1852,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 finalize_addr_bits: last_proof_pv.last_finalize_addr_bits,
                 committed_value_digest: last_proof_pv.committed_value_digest,
                 deferred_proofs_digest: last_proof_pv.deferred_proofs_digest,
+                global_chain,
             });
             deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
         }
@@ -1664,18 +1875,32 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &'a self,
         vk: &'a ZKMVerifyingKey,
         shard_proofs: &[ShardProof<CoreSC>],
+        global_proofs: &[ShardProof<CoreSC>],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
         let mut inputs = Vec::new();
+
+        let global_inputs =
+            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs);
+        inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
         let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, false);
         tracing::debug!("emitting {} CoreJagged witness(es)", jagged_inputs.len());
         inputs.extend(jagged_inputs.into_iter().map(ZKMCircuitWitness::CoreJagged));
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        let jagged_deferred =
-            self.get_recursion_deferred_inputs(&vk.vk, last_proof_pv, deferred_proofs, batch_size)?;
+        let global_h_star = *self
+            .global_chain(&vk.vk, shard_proofs)
+            .last()
+            .expect("the chain holds at least its start");
+        let jagged_deferred = self.get_recursion_deferred_inputs(
+            &vk.vk,
+            last_proof_pv,
+            global_h_star,
+            deferred_proofs,
+            batch_size,
+        )?;
         inputs.extend(jagged_deferred.into_iter().map(ZKMCircuitWitness::DeferredJagged));
         Ok(inputs)
     }
@@ -1697,18 +1922,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let first_layer_inputs = self.get_first_layer_inputs(
             vk,
             shard_proofs,
+            &proof.proof.1,
             &deferred_proofs,
             first_layer_batch_size,
         )?;
 
         let num_first_layer_inputs = first_layer_inputs.len();
-        let mut chain = crate::compress_tree::ShardChain::new();
+        let mut chain =
+            crate::compress_tree::ShardChain::with_global_rounds(proof.proof.1.len() as u64);
         let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
             first_layer_inputs
                 .into_iter()
                 .map(|input| {
                     let range = match &input {
                         ZKMCircuitWitness::DeferredJagged(_) => chain.deferred(),
+                        ZKMCircuitWitness::GlobalJagged(input) => {
+                            chain.global_rounds(input.proofs.len() as u64)
+                        }
                         _ => chain.core(),
                     };
                     (range, input)
@@ -1766,6 +1996,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
                                     (self.recursion_program(&input).0, witness_stream)
+                                }
+                                ZKMCircuitWitness::GlobalJagged(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (self.global_round_program(&input).0, witness_stream)
                                 }
                                 ZKMCircuitWitness::ComposeJagged(input) => {
                                     let mut witness_stream = Vec::new();
@@ -1924,9 +2159,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .machine()
                                     .verify(
                                         &vk,
-                                        &zkm_pcs::MachineProof {
-                                            shard_proofs: vec![proof.clone()],
-                                        },
+                                        &zkm_pcs::MachineProof::from_shards(vec![proof.clone()]),
                                         &mut self.compress_prover.machine().config().challenger(),
                                     )
                                     .unwrap();
@@ -3313,6 +3546,24 @@ pub mod tests {
 
         Ok(())
     }
+
+    /// The rounds of a large block, as `(shape, stacking blocks)`: small
+    /// rounds fill a program by count, a change of shape starts a program, the
+    /// memory shards' rounds of 232 blocks go two to a program (four of them in
+    /// one program fit no pin class), and a round past the whole budget still
+    /// gets a program of its own.
+    #[test]
+    fn global_round_groups_bound_what_a_program_opens() {
+        let mut rounds: Vec<(u8, usize)> = vec![(0, 8)];
+        rounds.extend([(1, 8); 19]);
+        rounds.extend([(2, 232); 5]);
+        rounds.push((3, 1024));
+        rounds.push((3, 1024));
+        let groups = global_round_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM);
+        assert_eq!(groups, vec![0..1, 1..9, 9..17, 17..20, 20..22, 22..24, 24..25, 25..26, 26..27]);
+        assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
+    }
+
     /// The fibonacci test guest reads its `n` from standard input (as
     /// `examples/fibonacci` does), so every caller has to supply one. Ten keeps
     /// the cycle count the tests were tuned against.
@@ -3381,21 +3632,14 @@ pub mod tests {
 
     /// A prover runs the program on an initial memory other than its image
     /// and proves against the image's verifying key: it sets up on the
-    /// altered image, puts the honest image's initial global sum into the
-    /// proving key so the transcript matches the honest key, and moves the
-    /// difference between the two initial sums into the Global chip's
-    /// declared global sum (`chip_cumulative_sums`) of one shard.  Nothing
-    /// constrains the declared sum (the shard prover has no permutation trace,
-    /// so `eval_permutation_constraints` returns before its last-row check),
-    /// so a verifier summing those would cancel the difference.  Returns the
+    /// altered image and replaces the proving key's preprocessed commitment
+    /// with the honest one, so the transcript matches the honest key while
+    /// the preprocessed tables it opens carry the altered image.  Returns the
     /// forged core proof and the honest image's verifying key.
     fn forge_core_proof_over_altered_image(
         prover: &ZKMProver<DefaultProverComponents>,
         opts: ZKMProverOpts,
     ) -> Result<(ZKMCoreProof, ZKMVerifyingKey)> {
-        use zkm_pcs::septic_curve::SepticCurveComplete;
-        use zkm_pcs::septic_digest::SepticDigest;
-
         let elf = test_artifacts::FIBONACCI_ELF;
         let (_, _, program, vk) = prover.setup(elf);
 
@@ -3410,49 +3654,19 @@ pub mod tests {
         altered.image.insert(addr, word ^ 1);
 
         let (altered_pk_d, altered_vk) = prover.core_prover.setup(&altered);
-        let honest_initial = vk.vk.initial_global_cumulative_sum;
-        let altered_initial = altered_vk.initial_global_cumulative_sum;
-        assert_ne!(honest_initial, altered_initial, "the altered word must move the initial sum");
+        assert_ne!(vk.vk.commit, altered_vk.commit, "the altered word must move the commitment");
         let mut pk = prover.core_prover.pk_to_host(&altered_pk_d);
-        pk.initial_global_cumulative_sum = honest_initial;
+        pk.commit = vk.vk.commit.clone();
         let pk_d = prover.core_prover.pk_to_device(&pk);
 
-        let mut core =
+        let core =
             prover.prove_core(&pk_d, altered, &fib_stdin(10), opts, ZKMContext::default())?;
-
-        let shift = |d: SepticDigest<KoalaBear>| {
-            SepticDigest(
-                (SepticCurveComplete::Affine(d.0)
-                    + SepticCurveComplete::Affine(altered_initial.0)
-                    + SepticCurveComplete::Affine(honest_initial.0.neg()))
-                .point(),
-            )
-        };
-        let shard = core
-            .proof
-            .0
-            .iter()
-            .position(|sp| {
-                sp.jagged_shard_proof.chip_cumulative_sums.values().any(|s| !s.global.is_zero())
-            })
-            .expect("a shard with global interactions");
-        for sums in core.proof.0[shard]
-            .jagged_shard_proof
-            .chip_cumulative_sums
-            .values_mut()
-            .filter(|s| !s.global.is_zero())
-        {
-            sums.global = shift(sums.global);
-        }
-        tracing::info!(
-            "altered image word {addr:#x}: {word:#x} -> {:#x}; shifted shard {shard}",
-            word ^ 1
-        );
+        tracing::info!("altered image word {addr:#x}: {word:#x} -> {:#x}", word ^ 1);
         Ok((core, vk))
     }
 
-    /// The leaf sums the shard public values, which the public-values AIR
-    /// binds to the Global chip's digest chain, so the tree over the proof of
+    /// The recursion verifier opens the preprocessed tables against the
+    /// verifying key's commitment, so the tree over the proof of
     /// [`forge_core_proof_over_altered_image`] cannot close.
     ///
     /// `cargo test -r -p zkm-prover compress_rejects_a_proof_over_a_different_initial_memory -- --ignored --nocapture`
@@ -3487,8 +3701,8 @@ pub mod tests {
         Ok(())
     }
 
-    /// The host verifier sums the shard public values rather than the declared
-    /// per-chip sums, so the core machine's verifier rejects the proof of
+    /// The core machine's verifier opens the preprocessed tables against the
+    /// verifying key's commitment, so it rejects the proof of
     /// [`forge_core_proof_over_altered_image`] on its own, without recursion and
     /// without any check outside `StarkMachine::verify`.
     ///
@@ -3497,7 +3711,7 @@ pub mod tests {
     #[serial]
     #[ignore]
     fn core_verify_rejects_a_proof_over_a_different_initial_memory() -> Result<()> {
-        use zkm_pcs::{air::LookupScope, MachineProof, MachineVerificationError};
+        use zkm_pcs::MachineProof;
 
         setup_logger();
         let opts = ZKMProverOpts::default();
@@ -3506,24 +3720,22 @@ pub mod tests {
 
         let machine = prover.core_prover.machine();
         let mut challenger = machine.config().challenger();
-        let machine_proof = MachineProof { shard_proofs: core.proof.0.clone() };
+        let machine_proof = MachineProof {
+            shard_proofs: core.proof.0.clone(),
+            global_proofs: core.proof.1.clone(),
+        };
         let machine_result = machine.verify(&vk.vk, &machine_proof, &mut challenger);
         tracing::info!("StarkMachine::verify: {machine_result:?}");
         assert!(
-            matches!(
-                machine_result,
-                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
-            ),
-            "the core machine verifier must reject a proof over an altered initial memory; got {machine_result:?}"
+            machine_result.is_err(),
+            "the core machine verifier must reject a proof over an altered initial memory"
         );
 
         let prover_result = prover.verify(&core.proof, &vk);
+        tracing::info!("ZKMProver::verify: {prover_result:?}");
         assert!(
-            matches!(
-                prover_result,
-                Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0))
-            ),
-            "ZKMProver::verify must reject a proof over an altered initial memory; got {prover_result:?}"
+            prover_result.is_err(),
+            "ZKMProver::verify must reject a proof over an altered initial memory"
         );
         Ok(())
     }
@@ -3667,7 +3879,7 @@ pub mod tests {
 
         let accepts = |proof: &ZKMCoreProofData| -> bool {
             let input = prover
-                .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, n == 1)
+                .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, false)
                 .into_iter()
                 .next()
                 .unwrap();
@@ -3683,6 +3895,74 @@ pub mod tests {
         };
         assert!(accepts(&core.proof), "the normalize program rejected the honest first shard");
         assert!(!accepts(&entry), "the normalize program accepted a forged start_next_pc");
+        Ok(())
+    }
+
+    /// The program of a global proof steps the global hash chain over the
+    /// round its shard committed, and rejects the proof under a challenge
+    /// derived from another chain end.
+    #[test]
+    #[serial]
+    #[ignore = "proves a core execution; run with --ignored"]
+    fn global_round_program_opens_the_committed_round() -> Result<()> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core = prover.prove_core(
+            &pk_d,
+            program,
+            &fib_stdin(10),
+            ZKMProverOpts::default(),
+            ZKMContext::default(),
+        )?;
+        let chain = prover.global_chain(&vk.vk, &core.proof.0);
+        let h_star = *chain.last().unwrap();
+        let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &core.proof.0, &core.proof.1);
+        assert!(!inputs.is_empty(), "the first shard commits the program image");
+
+        let run = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
+            let (program, _) = prover.global_round_program(input);
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                program,
+                prover.compress_prover.machine().config().perm.clone(),
+            );
+            let mut ws = Vec::new();
+            Witnessable::<InnerConfig>::write(input, &mut ws);
+            runtime.witness_stream = ws.into();
+            match catch_unwind(AssertUnwindSafe(|| runtime.run())) {
+                Ok(Ok(())) => Some(runtime.record.public_values),
+                _ => None,
+            }
+        };
+
+        let mut after = h_star;
+        let mut units = 0u64;
+        for input in inputs.iter() {
+            let public_values = run(input).expect("the honest global proof is rejected");
+            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(public_values.global_chain_end, input.global_chain_end);
+            assert_eq!(public_values.global_h_star, h_star);
+            after = input.global_chain_end;
+            units += u64::from(public_values.global_lookup_units.as_canonical_u32());
+        }
+        assert_eq!(after, chain[0], "the global proofs do not unwind the chain to its origin");
+        let machine = prover.core_prover.machine();
+        let host_units: u64 = core
+            .proof
+            .0
+            .iter()
+            .filter_map(|shard| machine.global_round_binding(shard))
+            .map(|round| {
+                zkm_pcs::logup_gkr::global_lookup_units(machine.global_lookup_count(&round))
+            })
+            .sum();
+        assert_eq!(units, host_units, "the leaves count other global lookups than the host");
+
+        let mut forged = inputs[0].clone();
+        forged.global_h_star[0] += KoalaBear::ONE;
+        assert!(run(&forged).is_none(), "a global proof passed under another chain end");
         Ok(())
     }
 
@@ -3951,6 +4231,7 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
+                global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
             };
             let vk_real_1 = prover
                 .compress_prover
@@ -3984,10 +4265,6 @@ pub mod tests {
                     jagged.opened_values.chips.len().to_string(),
                 ));
                 v.push(("chip_heights".into(), format!("{:?}", jagged.chip_heights)));
-                v.push((
-                    "chip_cumulative_sums".into(),
-                    jagged.chip_cumulative_sums.len().to_string(),
-                ));
                 v.push((
                     "row_counts".into(),
                     format!("{:?}", jagged.row_counts.iter().map(|r| r.len()).collect::<Vec<_>>()),
@@ -4167,6 +4444,7 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
+                global_chain_start: [KoalaBear::ZERO; DIGEST_SIZE],
             };
             let prog_real = prover.recursion_program(&real_witness).0;
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
@@ -4278,290 +4556,84 @@ pub mod tests {
         );
     }
 
-    /// PROBE: which AGGREGATE does the normalize vk key on?
-    ///
-    /// `normalize_vk_height_sensitivity` shows the vk survives moving one
-    /// chip's height but not bumping them all, so it is not the per-chip vector.
-    /// The enumeration dedups on `log_dense` — the power of two ENCLOSING the
-    /// committed length — while the prover's WHIR geometry keys on the
-    /// committed length itself: `dense_len` in whole stacking blocks, and
-    /// `num_stripes = dense_len >> log_stacking`.  Two shapes can share a
-    /// `log_dense` and still differ in block count.  This builds pairs that
-    /// isolate the two candidates.
+    /// Reports how per-chip heights affect each committed round and the normalize VK.
+    /// Shapes in the same class must build identical programs; changes across
+    /// classes are reported without assuming one combined main-round area.
     #[test]
     #[serial]
     #[ignore]
-    fn normalize_vk_aggregate_key_probe() {
-        use zkm_pcs::air::MachineAir;
+    fn normalize_vk_round_geometry_probe() {
+        use crate::shapes::ZKMProofShape;
         use zkm_pcs::shape::OrderedShape;
+
         setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
+        // This diagnostic compares freshly built keys and needs no allowlist.
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
         let machine = prover.core_prover.machine();
-        let widths: std::collections::BTreeMap<String, usize> = machine
-            .chips()
-            .iter()
-            .map(|c| {
-                (
-                    <_ as MachineAir<KoalaBear>>::name(c),
-                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                )
-            })
-            .collect();
-        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let stats = |hs: &[(&str, usize)]| -> (usize, usize, usize, usize) {
-            let total: usize =
-                hs.iter().map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h)).sum();
-            let dense = zkm_pcs::jagged::committed_dense_len(total, log_stack);
-            let blocks = dense >> log_stack;
-            let log_dense =
-                if dense == 0 { 0 } else { dense.next_power_of_two().trailing_zeros() as usize };
-            (total, dense, blocks, log_dense)
-        };
-        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-        let report =
-            |tag: &str, hs: &[(&str, usize)]| -> ([u32; 8], (usize, usize, usize, usize)) {
-                let st = stats(hs);
-                let vk = vk_of(hs);
-                tracing::info!(
-                    "[AGGKEY] {tag}: total={} dense_len={} blocks={} log_dense={} vk={vk:?}",
-                    st.0,
-                    st.1,
-                    st.2,
-                    st.3,
-                );
-                (vk, st)
+        let base: Vec<(String, usize)> = [
+            "AddSub",
+            "Bitwise",
+            "Branch",
+            "Byte",
+            "CloClz",
+            "Cpu",
+            "DivRem",
+            "Jump",
+            "Lt",
+            "LoadNarrow",
+            "LoadWord",
+            "StoreNarrow",
+            "StoreWord",
+            "MemoryUnaligned",
+            "MemoryLocal",
+            "MemoryProgram",
+            "MiscInstrs",
+            "MovCond",
+            "Mul",
+            "Program",
+            "ShiftLeft",
+            "ShiftRight",
+            "SyscallCore",
+            "SyscallInstrs",
+        ]
+        .into_iter()
+        .map(|chip| (chip.to_string(), if chip == "Byte" { 16 } else { 18 }))
+        .collect();
+        let mut variants = vec![("base".to_string(), base.clone())];
+        for name in ["MemoryLocal", "Mul", "Program", "MemoryProgram"] {
+            let mut heights = base.clone();
+            let (_, height) = heights
+                .iter_mut()
+                .find(|(chip, _)| chip == name)
+                .expect("the representative contains the diagnostic chip");
+            *height = height.saturating_sub(1).max(1);
+            variants.push((format!("halve {name}"), heights));
+        }
+
+        let mut programs_by_class = BTreeMap::new();
+        for (label, heights) in variants {
+            let rows: Vec<_> =
+                heights.iter().map(|(name, log_rows)| (name.clone(), 1usize << log_rows)).collect();
+            let class = ZKMProofShape::normalize_class(machine, &rows);
+            let shape = ZKMRecursionShape {
+                proof_shapes: vec![OrderedShape::from_log2_heights(&heights)],
+                is_complete: false,
             };
-
-        let base: &[(&str, usize)] = &[
-            ("AddSub", 13),
-            ("Bitwise", 12),
-            ("Branch", 11),
-            ("Byte", 16),
-            ("CloClz", 10),
-            ("Cpu", 14),
-            ("DivRem", 10),
-            ("Global", 9),
-            ("Jump", 10),
-            ("Lt", 12),
-            ("LoadNarrow", 10),
-            ("LoadWord", 10),
-            ("StoreNarrow", 10),
-            ("StoreWord", 10),
-            ("MemoryUnaligned", 10),
-            ("MemoryLocal", 10),
-            ("MiscInstrs", 1),
-            ("MovCond", 10),
-            ("Mul", 10),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 9),
-            ("ShiftRight", 9),
-            ("SyscallCore", 10),
-            ("SyscallInstrs", 10),
-        ];
-        let (vk_base, st_base) = report("base       ", base);
-
-        let same_blocks: Vec<(&str, usize)> = base
-            .iter()
-            .map(|(n, h)| match *n {
-                "Global" => (*n, 12),
-                "Mul" => (*n, 11),
-                _ => (*n, *h),
-            })
-            .collect();
-        let (vk_sb, st_sb) = report("same-blocks", &same_blocks);
-
-        let same_logdense: Vec<(&str, usize)> =
-            base.iter().map(|(n, h)| if *n == "Cpu" { (*n, 15) } else { (*n, *h) }).collect();
-        let (vk_sl, st_sl) = report("more-blocks", &same_logdense);
-
-        tracing::info!(
-            "[AGGKEY] (a) blocks {}=={} -> vk_eq={}",
-            st_base.2,
-            st_sb.2,
-            vk_base == vk_sb,
-        );
-        tracing::info!(
-            "[AGGKEY] (b) log_dense {}=={} but blocks {} vs {} -> vk_eq={}",
-            st_base.3,
-            st_sl.3,
-            st_base.2,
-            st_sl.2,
-            vk_base == vk_sl,
-        );
-        let prep_moved: Vec<(&str, usize)> =
-            base.iter().map(|(n, h)| if *n == "Program" { (*n, 17) } else { (*n, *h) }).collect();
-        let (vk_pm, st_pm) = report("prep-moved ", &prep_moved);
-        tracing::info!(
-            "[AGGKEY] (c) Program 19->17: blocks {} vs {} -> vk_eq={}",
-            st_base.2,
-            st_pm.2,
-            vk_base == vk_pm,
-        );
-
-        tracing::info!(
-            "[AGGKEY] CONCLUSION: the vk keys on the committed BLOCK COUNT, not log_dense: {}",
-            (vk_base == vk_sb && st_base.2 == st_sb.2)
-                && !(vk_base == vk_sl && st_base.2 != st_sl.2),
-        );
-    }
-
-    /// PROBE: is the STACKING-PAD COLUMN COUNT part of the normalize vk key?
-    ///
-    /// `normalize_vk_aggregate_key_probe` establishes that the key is a
-    /// function of the committed BLOCK COUNTS and not of the per-chip heights.
-    /// `ZKMProofShape::generate` takes that one step further and emits ONE
-    /// representative per `(chip set, prep blocks, main blocks)` — which is
-    /// only sound if nothing ELSE about the commitment reaches the program.
-    ///
-    /// It does.  A round's committed area is its real cells rounded out to
-    /// whole stacking blocks, and `committed_dense_len` rounds past four
-    /// blocks on to a multiple of EIGHT — so the gap between the real cells
-    /// and the committed area runs up to `8 << log_stacking`, and the dummy
-    /// (and the prover) close it with `ceil(gap / 2^max_log_row_count)`
-    /// explicit padding COLUMNS.  Those columns are in the concatenated
-    /// column space the verifier walks, so their COUNT is a program length.
-    ///
-    /// Two shapes can therefore share a class and still commit a different
-    /// number of padding columns.  The enumeration's representative packs its
-    /// fillers greedily up to the class ceiling, so it always lands on the
-    /// FEWEST pads; a real shard that only just crossed into the class lands
-    /// on more.  If the vks differ, the enumerated map is missing those
-    /// shapes by construction — which is what `ZIREN_VK_COLLECT` has been
-    /// papering over.
-    ///
-    /// `cargo test -r -p zkm-prover normalize_vk_padding_column_probe -- --ignored --nocapture`
-    #[test]
-    #[serial]
-    #[ignore]
-    fn normalize_vk_padding_column_probe() {
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::shape::OrderedShape;
-        setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-        let widths: std::collections::BTreeMap<String, usize> = machine
-            .chips()
-            .iter()
-            .map(|c| {
-                (
-                    <_ as MachineAir<KoalaBear>>::name(c),
-                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
-                )
-            })
-            .collect();
-        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let cube = 1usize << ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
-
-        let geometry = |hs: &[(&str, usize)]| -> (usize, usize, usize) {
-            let tv: usize =
-                hs.iter().map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h)).sum();
-            let area = zkm_pcs::jagged::committed_dense_len(tv, log_stack);
-            let gap = area - tv;
-            let pad_cols = gap.div_ceil(cube).max(1);
-            (tv, area >> log_stack, pad_cols)
-        };
-        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            let witness = ZKMCoreWitnessValues::dummy(machine, &shape);
+            let program = prover.build_normalize_program_uncached(&witness);
+            let bytes = bincode::serialize(&*program).expect("serialize normalize program");
+            let vk = prover.compress_prover.setup(&program).1.hash_koalabear();
+            tracing::info!(
+                "{label}: prep_blocks={} global_blocks={} main_blocks={} padding_columns={:?} vk={vk:?}",
+                class.1, class.2, class.3, witness.shard_proofs[0].padding_column_counts,
             );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-
-        let with_filler = |filler_h: usize| -> Vec<(&'static str, usize)> {
-            vec![
-                ("AddSub", 13),
-                ("Bitwise", 12),
-                ("Branch", 11),
-                ("Byte", 16),
-                ("Cpu", 14),
-                ("Global", 9),
-                ("Lt", 12),
-                ("MemoryLocal", filler_h),
-                ("Program", 19),
-                ("Range", 10),
-                ("SyscallCore", 10),
-            ]
-        };
-
-        let mut by_class: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
-        for h in 1..=21 {
-            let hs = with_filler(h);
-            let (tv, blocks, pads) = geometry(&hs);
-            by_class.entry(blocks).or_default().push((h, tv, pads));
+            if let Some(previous) = programs_by_class.insert(class, bytes.clone()) {
+                assert!(
+                    previous == bytes,
+                    "{label}: equal round geometry must produce the same normalize program"
+                );
+            }
         }
-        for (blocks, rows) in &by_class {
-            let pads: BTreeSet<usize> = rows.iter().map(|(_, _, p)| *p).collect();
-            tracing::info!(
-                "[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
-                rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
-                pads
-            );
-        }
-
-        let Some((blocks, a, b)) = by_class.iter().find_map(|(blocks, rows)| {
-            let lo = rows.iter().min_by_key(|(_, _, p)| *p)?;
-            let hi = rows.iter().max_by_key(|(_, _, p)| *p)?;
-            (lo.2 != hi.2).then_some((*blocks, *lo, *hi))
-        }) else {
-            tracing::info!(
-                "[PADCOL] INCONCLUSIVE: no class in the sweep spans two pad-column counts"
-            );
-            return;
-        };
-
-        tracing::info!(
-            "[PADCOL] class main_blocks={blocks}: A filler=2^{} cells={} pads={} | B filler=2^{} cells={} pads={}",
-            a.0, a.1, a.2, b.0, b.1, b.2,
-        );
-        let vk_a = vk_of(&with_filler(a.0));
-        let vk_b = vk_of(&with_filler(b.0));
-        tracing::info!("[PADCOL] vk_A={vk_a:?}");
-        tracing::info!("[PADCOL] vk_B={vk_b:?}");
-        tracing::info!(
-            "[PADCOL] NECESSARY: same (chip set, blocks), pad cols {} vs {} -> vk_eq={}.  \
-             vk_eq=false means the pad-column count belongs in the enumeration key.",
-            a.2,
-            b.2,
-            vk_a == vk_b,
-        );
-
-        let Some((blocks, c, d)) = by_class.iter().find_map(|(blocks, rows)| {
-            let first = rows.first()?;
-            let other = rows.iter().find(|r| r.0 != first.0 && r.2 == first.2)?;
-            Some((*blocks, *first, *other))
-        }) else {
-            tracing::info!(
-                "[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count"
-            );
-            return;
-        };
-        tracing::info!(
-            "[PADCOL] class main_blocks={blocks} pads={}: C filler=2^{} cells={} | D filler=2^{} cells={}",
-            c.2, c.0, c.1, d.0, d.1,
-        );
-        let vk_c = vk_of(&with_filler(c.0));
-        let vk_d = vk_of(&with_filler(d.0));
-        tracing::info!(
-            "[PADCOL] SUFFICIENT: same (chip set, blocks, pad cols), cells {} vs {} -> vk_eq={}.  \
-             vk_eq=true means one representative per class is faithful.",
-            c.1,
-            d.1,
-            vk_c == vk_d,
-        );
     }
 
     /// PROBE: does a RECURSION proving key carry a PREPROCESSED opening round?
@@ -4599,7 +4671,7 @@ pub mod tests {
             "CloClz",
             "Cpu",
             "DivRem",
-            "Global",
+            "MemoryProgram",
             "Jump",
             "Lt",
             "MemoryGlobalFinalize",
@@ -4746,421 +4818,6 @@ pub mod tests {
         tracing::info!(
             "[CSENS] CONCLUSION: a UNIFORM compose child see eq= above — reproduce the natural compose vk"
         );
-    }
-
-    /// Normalize VK height-sensitivity: does the NORMALIZE vk depend on the
-    /// EXACT per-chip canonical heights, or only the (chip-SET[, log_dense])?
-    /// No proving — builds dummy normalize programs from hardcoded shapes and
-    /// compares VKs.  Decides whether the enum can use a coarse cluster-cap
-    /// representative (O(N)) or must reproduce the per-chip clamped heights.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn normalize_vk_height_sensitivity() {
-        use zkm_pcs::shape::OrderedShape;
-        setup_logger();
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-        let vk_of = |inner: &[(&str, usize)]| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &inner.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
-            let d = ZKMCoreWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program(&d).0;
-            use p3_field::PrimeField32;
-            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
-        };
-        let realcanon: &[(&str, usize)] = &[
-            ("AddSub", 13),
-            ("Bitwise", 12),
-            ("Branch", 11),
-            ("Byte", 16),
-            ("CloClz", 10),
-            ("Cpu", 14),
-            ("DivRem", 10),
-            ("Global", 9),
-            ("Jump", 10),
-            ("Lt", 12),
-            ("LoadNarrow", 10),
-            ("LoadWord", 10),
-            ("StoreNarrow", 10),
-            ("StoreWord", 10),
-            ("MemoryUnaligned", 10),
-            ("MemoryLocal", 10),
-            ("MiscInstrs", 1),
-            ("MovCond", 10),
-            ("Mul", 10),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 9),
-            ("ShiftRight", 9),
-            ("SyscallCore", 10),
-            ("SyscallInstrs", 10),
-        ];
-        let misc10: Vec<(&str, usize)> = realcanon
-            .iter()
-            .map(|(n, h)| if *n == "MiscInstrs" { (*n, 10) } else { (*n, *h) })
-            .collect();
-        let allcap: Vec<(&str, usize)> = realcanon
-            .iter()
-            .map(|(n, h)| match *n {
-                "Byte" | "Program" => (*n, *h),
-                _ => (*n, 14),
-            })
-            .collect();
-        let v_real = vk_of(realcanon);
-        let v_misc10 = vk_of(&misc10);
-        let v_allcap = vk_of(&allcap);
-        tracing::info!("[HSENS] realcanon   vk={v_real:?}");
-        tracing::info!("[HSENS] misc1->10   vk={v_misc10:?} eq_real={}", v_misc10 == v_real);
-        tracing::info!("[HSENS] all-core=14 vk={v_allcap:?} eq_real={}", v_allcap == v_real);
-        tracing::info!(
-            "[HSENS] CONCLUSION: normalize vk is {} to per-chip heights",
-            if v_misc10 == v_real && v_allcap == v_real {
-                "INSENSITIVE (chip-SET only)"
-            } else {
-                "SENSITIVE (per-chip heights load-bearing)"
-            }
-        );
-    }
-
-    /// VK-root construction validation: the normalize program is
-    /// (chip_set, log_dense)-determined, so ANY valid memory-cluster shape at
-    /// log_dense=27 must produce fib's vk.  Find a CONSTRUCTIBLE one (area
-    /// concentrated in a byte-lookup-free chip so the VK-setup
-    /// `Σ byte_lookups·2^log_degree ≤ |F|` holds) that hits each log_dense
-    /// band — the recipe generate() will use.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn vkroot_site5_construct() {
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::shape::OrderedShape;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-        use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
-
-        let fib_vk = [
-            1995641422u32,
-            1126409227,
-            1338345684,
-            1611704093,
-            650337242,
-            439362553,
-            2125947076,
-            2022707873,
-        ];
-        let cluster: Vec<&str> = vec![
-            "AddSub",
-            "Bitwise",
-            "Branch",
-            "Byte",
-            "CloClz",
-            "Cpu",
-            "DivRem",
-            "Global",
-            "Jump",
-            "Lt",
-            "MemoryGlobalFinalize",
-            "MemoryGlobalInit",
-            "LoadNarrow",
-            "LoadWord",
-            "StoreNarrow",
-            "StoreWord",
-            "MemoryUnaligned",
-            "MemoryLocal",
-            "MiscInstrs",
-            "MovCond",
-            "Mul",
-            "Program",
-            "ShiftLeft",
-            "ShiftRight",
-            "SyscallCore",
-            "SyscallInstrs",
-        ];
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-
-        for c in machine.chips().iter() {
-            let cname = <_ as MachineAir<KoalaBear>>::name(c);
-            if cluster.contains(&cname.as_str()) {
-                tracing::info!(
-                    "[SITE5] {cname}: num_sent_byte_lookups={}",
-                    c.num_sent_byte_lookups()
-                );
-            }
-        }
-
-        let build = |hs: &[(&str, usize)]| -> ([u32; 8], usize) {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
-            let dummy = ZKMCoreWitnessValues::dummy(machine, &shape);
-            let ld = match &dummy.shard_proofs[0].evaluation_proof {
-                EvaluationProof::Bundle(bd) => bd.packing.log_dense_size,
-                _ => 0,
-            };
-            let prog = prover.recursion_program(&dummy).0;
-            let vk = prover
-                .compress_prover
-                .setup(&prog)
-                .1
-                .hash_koalabear()
-                .map(|x| x.as_canonical_u32());
-            (vk, ld)
-        };
-
-        let fillers = [
-            "Program",
-            "Jump",
-            "SyscallInstrs",
-            "MemoryGlobalInit",
-            "MemoryGlobalFinalize",
-            "MemoryLocal",
-            "MovCond",
-        ];
-        for fh in [4usize, 8, 12, 15, 16, 17, 18, 20] {
-            let mut hs: Vec<(&str, usize)> = cluster.iter().map(|n| (*n, 1usize)).collect();
-            for e in hs.iter_mut() {
-                if e.0 == "Byte" {
-                    e.1 = 16;
-                }
-                if fillers.contains(&e.0) {
-                    e.1 = fh;
-                }
-            }
-            let (vk, ld) = build(&hs);
-            tracing::info!("[SITE5] fillers@{fh}: log_dense={ld} vk_eq_fib={}", vk == fib_vk);
-        }
-    }
-
-    /// The normalize program vk depends only on
-    /// `(chip_set, next_pow2(total_values))`, not on the per-chip height
-    /// distribution (no core run).  Uses fib's shape and the vk captured from
-    /// `test_vk_equality_normalize_fib`; if alternate same-band distributions
-    /// reproduce `vk_real`, then `generate()` need only emit one shape per
-    /// `(cluster, log_dense band)`.
-    #[test]
-    #[serial]
-    #[ignore]
-    fn vkroot_normalize_vk_equivalence_class() {
-        use zkm_pcs::shape::OrderedShape;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-        use zkm_recursion_circuit::machine::ZKMCoreWitnessValues;
-
-        let fib: Vec<(&str, usize)> = vec![
-            ("AddSub", 16),
-            ("Bitwise", 13),
-            ("Branch", 13),
-            ("Byte", 16),
-            ("CloClz", 5),
-            ("Cpu", 17),
-            ("DivRem", 11),
-            ("Global", 18),
-            ("Jump", 11),
-            ("Lt", 15),
-            ("MemoryGlobalFinalize", 17),
-            ("MemoryGlobalInit", 17),
-            ("LoadNarrow", 15),
-            ("LoadWord", 15),
-            ("StoreNarrow", 15),
-            ("StoreWord", 15),
-            ("MemoryUnaligned", 15),
-            ("MemoryLocal", 11),
-            ("MiscInstrs", 11),
-            ("MovCond", 12),
-            ("Mul", 13),
-            ("Program", 19),
-            ("Range", 10),
-            ("ShiftLeft", 13),
-            ("ShiftRight", 11),
-            ("SyscallCore", 11),
-            ("SyscallInstrs", 11),
-        ];
-        let vk_real: [u32; 8] = [
-            1115632139, 1688068798, 1650214975, 1858294344, 1237422514, 2047442675, 305119098,
-            273862066,
-        ];
-
-        let prover = ZKMProver::<DefaultProverComponents>::new();
-        let machine = prover.core_prover.machine();
-
-        let build = |hs: &[(&str, usize)]| -> (
-            [u32; 8],
-            usize,
-            usize,
-            std::sync::Arc<zkm_recursion_core::RecursionProgram<KoalaBear>>,
-        ) {
-            let os = OrderedShape::from_log2_heights(
-                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
-            );
-            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
-            let dummy = ZKMCoreWitnessValues::dummy(machine, &shape);
-            let (tv, ld) = match &dummy.shard_proofs[0].evaluation_proof {
-                EvaluationProof::Bundle(bd) => (bd.packing.total_values, bd.packing.log_dense_size),
-                _ => (0, 0),
-            };
-            let prog = prover.recursion_program(&dummy).0;
-            let vk = prover
-                .compress_prover
-                .setup(&prog)
-                .1
-                .hash_koalabear()
-                .map(|x| x.as_canonical_u32());
-            (vk, tv, ld, prog)
-        };
-
-        let mut alts: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
-        alts.push(("fib_itself", fib.clone()));
-        {
-            let mut a = fib.clone();
-            for e in a.iter_mut() {
-                if e.0 == "Program" {
-                    e.1 = 18;
-                }
-            }
-            alts.push(("program_19to18", a));
-        }
-        {
-            let mut a = fib.clone();
-            for e in a.iter_mut() {
-                match e.0 {
-                    "Global" => e.1 = 16,
-                    "MemoryGlobalFinalize" => e.1 = 16,
-                    "MemoryGlobalInit" => e.1 = 16,
-                    "Cpu" => e.1 = 18,
-                    "Mul" => e.1 = 18,
-                    "DivRem" => e.1 = 18,
-                    _ => {}
-                }
-            }
-            alts.push(("redistribute", a));
-        }
-
-        let mut fib_prog = None;
-        let mut fib_vk: Option<[u32; 8]> = None;
-        for (tag, hs) in &alts {
-            let (vk, tv, ld, prog) = build(hs);
-            tracing::info!(
-                "[EQUIV] {tag}: total_values={tv} log_dense={ld} vk_eq_real={} vk_eq_fib={} vk={vk:?}",
-                vk == vk_real,
-                fib_vk.map(|f| f == vk).unwrap_or(true),
-            );
-            if *tag == "fib_itself" {
-                fib_prog = Some(prog);
-                fib_vk = Some(vk);
-                continue;
-            }
-            assert_eq!(
-                Some(vk),
-                fib_vk,
-                "normalize VK for same chip-set differs across heights \
-                 (tag={tag}): VK is still program-length-dependent — a baked \
-                 height anchor was reintroduced",
-            );
-            if Some(vk) != fib_vk {
-                let fp = fib_prog.as_ref().unwrap();
-                let rb = bincode::serialize(&**fp).unwrap();
-                let db = bincode::serialize(&*prog).unwrap();
-                let first_diff = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
-                let ri: Vec<_> = fp.iter_instructions().collect();
-                let di: Vec<_> = prog.iter_instructions().collect();
-                tracing::info!(
-                    "[EQUIV-DIFF] {tag} vs fib: prog_bytes fib={} alt={} first_byte_diff={:?} | instrs fib={} alt={} (delta={}) total_mem fib={} alt={}",
-                    rb.len(), db.len(), first_diff, ri.len(), di.len(),
-                    ri.len() as i64 - di.len() as i64, fp.total_memory, prog.total_memory,
-                );
-                let n = ri.len().min(di.len());
-                let mut shown = 0;
-                let mut first_idx = None;
-                for k in 0..n {
-                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
-                        if first_idx.is_none() {
-                            first_idx = Some(k);
-                        }
-                        tracing::info!(
-                            "[EQUIV-DIFF] {tag} diff@{k}: fib={:?} | alt={:?}",
-                            ri[k],
-                            di[k]
-                        );
-                        shown += 1;
-                        if shown >= 8 {
-                            break;
-                        }
-                    }
-                }
-                let rtr = &fp.traces;
-                if let Some(fd) = first_idx {
-                    let mut shown_rdr = 0;
-                    for k in fd..ri.len() {
-                        let s = format!("{:?}", ri[k]);
-                        if !(s.contains("kind: Write")
-                            && format!("{:?}", di.get(k)) != format!("{:?}", Some(&ri[k])))
-                        {
-                            continue;
-                        }
-                        if let Some(addr) = s
-                            .split("inner: Address(")
-                            .nth(1)
-                            .and_then(|t| t.split(')').next())
-                            .and_then(|t| t.parse::<usize>().ok())
-                        {
-                            let needle = format!("Address({addr})");
-                            for j in (k + 1)..ri.len() {
-                                let rs = format!("{:?}", ri[j]);
-                                if rs.contains(&needle) && !rs.contains("kind: Write") {
-                                    let frame = rtr
-                                        .get(j)
-                                        .and_then(|t| t.as_ref())
-                                        .map(|bt| {
-                                            let mut b = bt.clone();
-                                            b.resolve();
-                                            let fs = format!("{:?}", b);
-                                            fs.lines()
-                                                .find(|l| {
-                                                    l.contains("recursion/circuit/src")
-                                                        || l.contains("stark/src")
-                                                })
-                                                .unwrap_or("(no circuit frame)")
-                                                .trim()
-                                                .to_string()
-                                        })
-                                        .unwrap_or_else(|| "(reader no trace)".to_string());
-                                    tracing::info!("[EQUIV-RDR] {tag} const@{addr} (write instr{k}) read by instr{j}: {frame} | {:?}", ri[j]);
-                                    let lo = j.saturating_sub(60);
-                                    let hi = (j + 60).min(ri.len());
-                                    for w in lo..hi {
-                                        if let Some(Some(bt)) = rtr.get(w) {
-                                            let mut b = bt.clone();
-                                            b.resolve();
-                                            let fs = format!("{:?}", b);
-                                            if let Some(line) = fs.lines().find(|l| {
-                                                (l.contains("recursion/circuit/src")
-                                                    || l.contains("stark/src"))
-                                                    && !l.contains("shard_proof_variable_lift")
-                                            }) {
-                                                tracing::info!("[EQUIV-NEAR] {tag} @{j} nearest-traced@{w}: {}", line.trim());
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            shown_rdr += 1;
-                            if shown_rdr >= 6 {
-                                break;
-                            }
-                        }
-                    }
-                }
-                tracing::info!(
-                    "[EQUIV-DIFF] {tag}: traces.len()={} (0 = ZKM_DEBUG unset)",
-                    rtr.len()
-                );
-            }
-        }
     }
 
     // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient

@@ -8,7 +8,6 @@
 #include "shift_left_operation.hpp"
 #include "shift_right_operation.hpp"
 #include "utils.hpp"
-#include "kb31_septic_extension_t.hpp"
 #include "memory.hpp"
 
 namespace zkm_core_machine_sys::misc_instrs {

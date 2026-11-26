@@ -45,19 +45,46 @@ where
     let builder_span = tracing::debug_span!("build normalize program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);
-    let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
-        input.shard_proofs.iter().map(|sp| sp.chip_heights.clone()).collect();
     verify_core_jagged::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
         max_log_row_count,
-        &chip_heights_per_shard,
     );
     let operations = builder.into_operations();
     builder_span.exit();
 
     let compiler_span = tracing::debug_span!("compile normalize program").entered();
+    let mut compiler = AsmCompiler::<InnerConfig>::default();
+    let program = compiler.compile(operations);
+    compiler_span.exit();
+    program
+}
+
+/// Build the global-round program: verifies the global proofs of consecutive
+/// global rounds of the core machine and emits [`RecursionPublicValues`] that
+/// step the global hash chain backwards over the rounds they open.
+pub fn build_global_round_program<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+    input: &super::global_jagged::ZKMGlobalRoundWitnessValues<KoalaBearPoseidon2>,
+    max_log_row_count: usize,
+) -> RecursionProgram<KoalaBear>
+where
+    A: MachineAir<KoalaBear>,
+{
+    let builder_span = tracing::debug_span!("build global round program").entered();
+    let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
+    let input_var = input.read(&mut builder);
+    super::global_jagged::verify_global_round_jagged::<InnerConfig, KoalaBearPoseidon2, A>(
+        &mut builder,
+        input_var,
+        machine,
+        max_log_row_count,
+    );
+    let operations = builder.into_operations();
+    builder_span.exit();
+
+    let compiler_span = tracing::debug_span!("compile global round program").entered();
     let mut compiler = AsmCompiler::<InnerConfig>::default();
     let program = compiler.compile(operations);
     compiler_span.exit();
@@ -411,7 +438,7 @@ mod tests {
     }
 
     /// Verifies `ZKMCoreWitnessValues::dummy` produces a
-    /// witness whose per-shard `chip_cumulative_sums` cardinality
+    /// witness whose per-shard `chip_heights` cardinality
     /// matches a real shard's chip count — the shape-stability
     /// invariant for `program_from_shape` whir dispatch.
     #[test]
@@ -430,7 +457,6 @@ mod tests {
         };
         let witness = super::ZKMCoreWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
         assert_eq!(witness.shard_proofs.len(), 1);
-        assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
         assert_eq!(witness.shard_proofs[0].chip_heights.len(), 2);
         assert!(!witness.is_complete);
     }

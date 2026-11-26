@@ -11,7 +11,6 @@ use p3_field::{ExtensionField, Field};
 
 use crate::air::{EmptyMessageBuilder, MachineAir, MultiTableAirBuilder};
 use crate::folder::PairWindow;
-use crate::septic_digest::SepticDigest;
 use crate::types::ChipOpenedValues;
 use crate::Chip;
 
@@ -44,7 +43,6 @@ pub struct ShardConstraintFolder<'a, F: Field, K: Field, EF: ExtensionField<F>> 
     pub public_values: &'a [F],
     /// Threaded from LogUp-GKR output rather than read from the AIR.
     pub local_cumulative_sum: &'a EF,
-    pub global_cumulative_sum: &'a SepticDigest<F>,
     pub _marker: PhantomData<(F, K, EF)>,
 }
 
@@ -149,14 +147,9 @@ where
     EF: ExtensionField<F> + ExtensionField<K>,
 {
     type LocalSum = EF;
-    type GlobalSum = F;
 
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
         self.local_cumulative_sum
-    }
-
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
     }
 }
 
@@ -164,7 +157,7 @@ where
 /// zerocheck point.
 pub fn eval_constraints_shard_host<F, EF, A>(
     chip: &Chip<F, A>,
-    opening: &ChipOpenedValues<F, EF>,
+    opening: &ChipOpenedValues<EF>,
     alpha: EF,
     public_values: &[F],
 ) -> EF
@@ -183,7 +176,6 @@ where
         accumulator: EF::ZERO,
         public_values,
         local_cumulative_sum: &opening.local_cumulative_sum,
-        global_cumulative_sum: &opening.global_cumulative_sum,
         _marker: PhantomData,
     };
     chip.eval(&mut folder);
@@ -195,7 +187,7 @@ where
 /// chip's real-data window.
 pub fn compute_padded_row_adjustment_shard_host<F, EF, A>(
     chip: &Chip<F, A>,
-    opening: &ChipOpenedValues<F, EF>,
+    opening: &ChipOpenedValues<EF>,
     alpha: EF,
     public_values: &[F],
 ) -> EF
@@ -217,7 +209,6 @@ where
         accumulator: EF::ZERO,
         public_values,
         local_cumulative_sum: &opening.local_cumulative_sum,
-        global_cumulative_sum: &opening.global_cumulative_sum,
         _marker: PhantomData,
     };
     chip.eval(&mut folder);
@@ -255,8 +246,6 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
 
-    use crate::septic_curve::SepticCurve;
-    use crate::septic_extension::SepticExtension;
     use crate::{InnerChallenge, InnerVal};
 
     type F = InnerVal;
@@ -268,10 +257,6 @@ mod tests {
         let main: Vec<EF> = vec![];
         let public_values: Vec<F> = vec![];
         let local_sum = EF::ZERO;
-        let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
-            x: SepticExtension::<F>([F::ZERO; 7]),
-            y: SepticExtension::<F>([F::ZERO; 7]),
-        });
 
         let mut folder = ShardConstraintFolder::<F, EF, EF> {
             preprocessed: PairWindow { local: &preproc, next: &preproc },
@@ -280,7 +265,6 @@ mod tests {
             accumulator: EF::from_u64(3),
             public_values: &public_values,
             local_cumulative_sum: &local_sum,
-            global_cumulative_sum: &global_sum,
             _marker: PhantomData,
         };
 
@@ -294,10 +278,6 @@ mod tests {
         let main: Vec<EF> = vec![];
         let public_values: Vec<F> = vec![];
         let local_sum = EF::ZERO;
-        let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
-            x: SepticExtension::<F>([F::ZERO; 7]),
-            y: SepticExtension::<F>([F::ZERO; 7]),
-        });
 
         let alpha = EF::from_u64(7);
         let mut folder = ShardConstraintFolder::<F, EF, EF> {
@@ -307,7 +287,6 @@ mod tests {
             accumulator: EF::ZERO,
             public_values: &public_values,
             local_cumulative_sum: &local_sum,
-            global_cumulative_sum: &global_sum,
             _marker: PhantomData,
         };
 

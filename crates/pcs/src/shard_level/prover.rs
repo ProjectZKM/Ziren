@@ -112,6 +112,100 @@ where
     (main_commitment, precomputed_generic)
 }
 
+/// The shard's chips committed in the global round, as indices into the
+/// name-ordered `chips`: those named in the machine's `global_round`. Empty
+/// when the machine does not split or the shard names none of them, and then
+/// the shard commits a single main round.
+pub fn global_round_indices<F, A: MachineAir<F>>(
+    chips: &[&Chip<F, A>],
+    global_round: Option<&std::collections::BTreeSet<String>>,
+) -> Vec<usize>
+where
+    F: p3_field::Field,
+{
+    super::round_layout::TraceRoundLayout::for_chips(chips, global_round).global_indices().to_vec()
+}
+
+/// Splits a shard's name-keyed main traces into the global round's and the
+/// rest, both still in name order. `None` when the shard names no chip of
+/// `global_round`. The traces are shared, not copied.
+pub fn split_global_round<F: Clone>(
+    main_traces: &crate::traces::Traces<F>,
+    global_round: Option<&std::collections::BTreeSet<String>>,
+) -> Option<(crate::traces::Traces<F>, crate::traces::Traces<F>)> {
+    let set = global_round?;
+    let (global, local): (std::collections::BTreeMap<_, _>, std::collections::BTreeMap<_, _>) =
+        main_traces
+            .iter()
+            .map(|(name, pm)| (name.clone(), pm.clone()))
+            .partition(|(name, _)| set.contains(name.as_str()));
+    if global.is_empty() {
+        return None;
+    }
+    Some((
+        crate::traces::Traces { named_traces: global },
+        crate::traces::Traces { named_traces: local },
+    ))
+}
+
+/// The area pin of the global round over `tables`
+/// (see [`crate::jagged::global_round_pin`]).
+pub fn global_round_pin<F: p3_field::Field>(
+    tables: &crate::traces::Traces<F>,
+) -> Option<crate::jagged::AreaPin> {
+    let cells = tables.values().map(|pm| pm.num_polynomials() * raw_chip_height(pm)).sum();
+    let cube = tables.values().next().map_or(0, |pm| 1usize << pm.num_variables());
+    crate::jagged::global_round_pin(
+        cells,
+        crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        cube,
+    )
+}
+
+/// Commits the shard's main traces: the global round first when the shard has
+/// one (see [`split_global_round`]), then the main round over every other
+/// chip. Returns the global round, if any, and `(C_main, precompute)` of the
+/// main round. `pin` applies to the main round; a machine that splits is never
+/// pinned.
+#[allow(clippy::type_complexity)]
+pub fn commit_trace_rounds<SC>(
+    main_traces: &crate::traces::Traces<Val<SC>>,
+    global_round: Option<&std::collections::BTreeSet<String>>,
+    pin: Option<crate::jagged::AreaPin>,
+) -> (
+    Option<crate::prover::RetainedRound<SC>>,
+    [Val<SC>; 8],
+    crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::WhirRing>::WhirMmcs>,
+)
+where
+    SC: StarkGenericConfig + crate::WhirRing,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static,
+{
+    match split_global_round(main_traces, global_round) {
+        None => {
+            let (commitment, precomputed) = commit_traces::<SC>(main_traces, pin);
+            (None, commitment, precomputed)
+        }
+        Some((global, local)) => {
+            assert!(pin.is_none(), "a shard that commits a global round is never pinned");
+            let (global_commitment, global_precomputed) =
+                commit_traces::<SC>(&global, global_round_pin(&global));
+            let (commitment, precomputed) = commit_traces::<SC>(&local, None);
+            (
+                Some(crate::prover::RetainedRound {
+                    commitment: global_commitment,
+                    precomputed: global_precomputed,
+                    device_dense_q: None,
+                }),
+                commitment,
+                precomputed,
+            )
+        }
+    }
+}
+
 /// Proves one shard from host-resident traces.
 ///
 /// The transcript, in order:
@@ -122,7 +216,7 @@ where
 ///   sample   α, β
 ///   zerocheck at the cube {0,1}^m, λ drawn inside, reducing to z*
 ///   observe  n, (prep_i(z*), main_i(z*))_{i<n}                  name order
-///   jagged open of the preprocessed and main rounds at z*
+///   jagged open of the preprocessed and trace rounds at z*
 /// ```
 ///
 /// with `h_i` the raw row count of chip `i` and `m = max_log_row_count`.
@@ -151,6 +245,8 @@ where
         main_traces,
         public_values,
         commit_data,
+        global_round,
+        global_challenge,
     } = data;
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
     let max_log_row_count =
@@ -179,22 +275,31 @@ where
     );
 
     let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
-    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!("prove shard with data", chips = n_chips).entered();
 
-    let (main_commitment, precomputed_commit) = {
+    let (global_commit, main_commitment, precomputed_commit) = {
         let _span = tracing::info_span!("commit traces").entered();
         match commit_data {
-            Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => commit_traces::<SC>(&main_traces, main_pin),
+            Some(retained) => (retained.global, retained.main_commitment, retained.precomputed),
+            None => commit_trace_rounds::<SC>(&main_traces, global_round, main_pin),
         }
     };
+    let global_indices = global_round_indices(chips, global_round);
+    assert_eq!(
+        global_indices.is_empty(),
+        global_commit.is_none(),
+        "prove_shard_with_data: the retained commit and the machine's global round disagree on \
+         whether the shard commits a global round",
+    );
+    let global_commitment = global_commit.as_ref().map(|g| g.commitment);
 
     {
-        observe_transcript_prologue::<SC, A>(
+        observe_transcript_prologue_with_global::<SC, A>(
             challenger,
+            global_challenge.map(|g| &g.h_star),
             &public_values,
+            global_commitment.as_ref(),
             &main_commitment,
             chips,
             shared_trace_mles,
@@ -209,6 +314,7 @@ where
             max_log_row_count,
             challenger,
             shared_trace_mles,
+            global_challenge,
         )
     };
     tracing::info!(
@@ -254,7 +360,10 @@ where
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
 
-    let prep_chip_infos = &preprocessed_commit_data.packing.chip_infos;
+    let has_preprocessed =
+        chips.iter().any(|chip| p3_air::BaseAir::<Val<SC>>::preprocessed_width(*chip) > 0);
+    let prep_chip_infos: &[_] =
+        if has_preprocessed { &preprocessed_commit_data.packing.chip_infos } else { &[] };
     let mut preprocessed_named: Vec<(String, crate::multilinear::PaddedMle<Val<SC>>)> =
         Vec::with_capacity(prep_chip_infos.len());
     let mut preprocessed_claims: Vec<Vec<Challenge<SC>>> =
@@ -297,7 +406,7 @@ where
     let _t_prove_eval_claims = std::time::Instant::now();
     let evaluation_proof = {
         let _span = tracing::info_span!("prove evaluation claims").entered();
-        crate::shard_level::prover::prove_trusted_evaluations::<SC, A>(
+        prove_trusted_evaluations_with_global::<SC, A>(
             chips,
             &preprocessed_named,
             preprocessed_claims,
@@ -305,6 +414,7 @@ where
             &trace_views,
             &zerocheck_proof.point_and_eval.0,
             challenger,
+            global_commit.map(|g| (global_indices, g.precomputed)),
             precomputed_commit,
             residual_y,
             &[],
@@ -322,20 +432,19 @@ where
     let opened_values =
         build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
-    let chip_cumulative_sums =
-        build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
-
-    assemble_jagged_shard_proof::<SC>(
+    let mut proof = assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
+        global_commitment,
         main_commitment,
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         orientation,
-    )
+    );
+    proof.global_pow_witness = global_challenge.map(|g| g.pow_witness);
+    proof
 }
 
 // Shared NON-DEVICE shard-driver orchestration helpers, `pub` so the
@@ -390,8 +499,43 @@ pub fn observe_transcript_prologue<SC, A>(
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
+    observe_transcript_prologue_with_global::<SC, A>(
+        challenger,
+        None,
+        public_values,
+        None,
+        main_commitment,
+        chips,
+        shared_trace_mles,
+    );
+}
+
+/// [`observe_transcript_prologue`] for a shard that may use the cross-shard
+/// challenge and commit a global round: the challenge's digest `h_star`
+/// opens the transcript, and the global round's digest `C_global` is observed
+/// between the public values and `C_main`, so the order is `[h_star] →
+/// public_values → [C_global] → C_main → num_chips → per-chip {height_felt,
+/// name_len, name_bytes}`.
+pub fn observe_transcript_prologue_with_global<SC, A>(
+    challenger: &mut SC::Challenger,
+    h_star: Option<&[Val<SC>; 8]>,
+    public_values: &[Val<SC>],
+    global_commitment: Option<&[Val<SC>; 8]>,
+    main_commitment: &[Val<SC>; 8],
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+) where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    for &h in h_star.into_iter().flatten() {
+        challenger.observe(h);
+    }
     for &pv in public_values.iter() {
         challenger.observe(pv);
+    }
+    for &c in global_commitment.into_iter().flatten() {
+        challenger.observe(c);
     }
     for &c in main_commitment.iter() {
         challenger.observe(c);
@@ -714,14 +858,14 @@ pub fn build_opened_values<SC, A>(
     mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     chip_heights: &std::collections::BTreeMap<String, usize>,
     max_log_row_count: usize,
-) -> ShardOpenedValues<Val<SC>, Challenge<SC>>
+) -> ShardOpenedValues<Challenge<SC>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
     let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
     name_sorted.sort_by_key(|a| MachineAir::<Val<SC>>::name(**a));
-    let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> = name_sorted
+    let chip_opened: Vec<crate::types::ChipOpenedValues<Challenge<SC>>> = name_sorted
         .iter()
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
@@ -748,7 +892,6 @@ where
                 main: crate::types::AirOpenedValues { local: main_local, next: Vec::new() },
                 permutation: crate::types::AirOpenedValues { local: Vec::new(), next: Vec::new() },
                 quotient: vec![degree_bits],
-                global_cumulative_sum: crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
                 local_cumulative_sum: Challenge::<SC>::ZERO,
                 log_degree,
             }
@@ -757,57 +900,9 @@ where
     ShardOpenedValues { chips: chip_opened }
 }
 
-/// Per-chip (local, global) cumulative sums.  `local` is ZERO
-/// (the whir path doesn't materialize the permutation trace); `global`
-/// reads the RAW per-chip cells at their raw heights (device chips use the
-/// early-captured provider TAIL, `chip_cum_tails`).
-pub fn build_chip_cumulative_sums<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    chip_cum_tails: &[Option<Vec<Val<SC>>>],
-) -> std::collections::BTreeMap<
-    String,
-    crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
->
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    assert_eq!(
-        chips.len(),
-        shared_trace_mles.len(),
-        "build_chip_cumulative_sums: chips/shared_trace_mles must be parallel",
-    );
-    assert_eq!(
-        chips.len(),
-        chip_cum_tails.len(),
-        "build_chip_cumulative_sums: chips/chip_cum_tails must be parallel",
-    );
-    chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .zip(chip_cum_tails.iter())
-        .map(|((chip, pm), tail)| {
-            let name = MachineAir::<Val<SC>>::name(*chip);
-            let global = if let Some(tail14) = tail {
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_tail(
-                    *chip, tail14,
-                )
-            } else {
-                let vals: &[Val<SC>] = pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
-                    *chip, vals,
-                )
-            };
-            let local = Challenge::<SC>::ZERO;
-            (name, crate::shard_level::shard_proof::ChipCumulativeSums { local, global })
-        })
-        .collect()
-}
-
 /// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
-/// WHIR root (`jagged_original_commitment`) from `evaluation_proof`, then
+/// WHIR root (`main_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof<SC>(
@@ -815,18 +910,47 @@ pub fn assemble_jagged_shard_proof<SC>(
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
-    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
-    chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
 {
+    assemble_jagged_shard_proof_with_global::<SC>(
+        public_values,
+        None,
+        main_commitment,
+        logup_gkr_proof,
+        zerocheck_proof,
+        opened_values,
+        chip_heights,
+        evaluation_proof,
+        orientation,
+    )
+}
+
+/// [`assemble_jagged_shard_proof`] for a shard that may commit a global
+/// round. `global_commitment` is that round's hash-bound digest; its raw root
+/// is the bundle's last preceding commitment, the one right before the main
+/// round's.
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_jagged_shard_proof_with_global<SC>(
+    public_values: Vec<Val<SC>>,
+    global_commitment: Option<[Val<SC>; 8]>,
+    main_commitment: [Val<SC>; 8],
+    logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
+    zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
+    opened_values: ShardOpenedValues<Challenge<SC>>,
+    chip_heights: std::collections::BTreeMap<String, usize>,
+    evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
+    orientation: FoldOrientation,
+) -> JaggedShardProof<Val<SC>, Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+{
+    let n_main_preceding = usize::from(global_commitment.is_some());
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
     {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -840,7 +964,7 @@ where
         _ => (Vec::new(), Vec::new()),
     };
 
-    let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
+    let main_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
             let raw_inner = crate::jagged_pcs::whir_commit_digest(&bundle.commit);
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
@@ -851,8 +975,8 @@ where
     let (preprocessed_original_commitment, preprocessed_row_counts): ([Val<SC>; 8], Vec<Val<SC>>) =
         match &evaluation_proof {
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
-                if !bundle.preceding_commits.is_empty()
-                    && bundle.packing.round_counts.len() >= 2 =>
+                if bundle.preceding_commits.len() > n_main_preceding
+                    && bundle.packing.round_counts.len() >= 2 + n_main_preceding =>
             {
                 let raw_inner =
                     crate::jagged_pcs::whir_commit_digest_felts(&bundle.preceding_commits[0]);
@@ -878,20 +1002,38 @@ where
         _ => Vec::new(),
     };
 
+    let global_original_commitment: Option<[Val<SC>; 8]> =
+        match (&evaluation_proof, global_commitment) {
+            (crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle), Some(_)) => {
+                let raw = bundle
+                    .preceding_commits
+                    .last()
+                    .expect("a shard with a global round has its raw root before the main round's");
+                let raw_inner = crate::jagged_pcs::whir_commit_digest_felts(raw);
+                Some(unsafe {
+                    core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
+                })
+            }
+            (_, Some(commitment)) => Some(commitment),
+            (_, None) => None,
+        };
+
     JaggedShardProof {
         public_values,
+        global_commitment,
+        global_original_commitment,
+        global_pow_witness: None,
         main_commitment,
         padding_row_heights,
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
         chip_heights,
-        chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: orientation,
         row_counts,
         padding_column_counts,
-        jagged_original_commitment,
+        main_original_commitment,
         preprocessed_original_commitment,
         preprocessed_row_counts,
     }
@@ -940,6 +1082,60 @@ pub fn prove_trusted_evaluations<SC, A>(
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
+    precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::WhirRing>::WhirMmcs,
+    >,
+    pre_y_per_chip: Vec<Vec<Challenge<SC>>>,
+    heights: &[Option<usize>],
+) -> crate::shard_level::shard_proof::EvaluationProof
+where
+    SC: StarkGenericConfig + crate::WhirRing,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<crate::WhirRingCommitment<SC>>,
+{
+    prove_trusted_evaluations_with_global::<SC, A>(
+        chips,
+        preprocessed_named,
+        preprocessed_claims,
+        preprocessed_commit,
+        main_traces,
+        shared_eval_point,
+        challenger,
+        None,
+        precomputed_commit,
+        pre_y_per_chip,
+        heights,
+    )
+}
+
+/// [`prove_trusted_evaluations`] for a shard that may commit a global
+/// round. `global` names that round's chips, as indices into the name-ordered
+/// `chips`, together with its precomputed commit; the rounds are then opened
+/// in the order `[preprocessed, global, main]`, each trace round over its
+/// own chips in name order, and `precomputed_commit` is the main round over
+/// every chip not in `global`.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn prove_trusted_evaluations_with_global<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
+    preprocessed_claims: Vec<Vec<Challenge<SC>>>,
+    preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::WhirRing>::WhirMmcs,
+    >,
+    main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
+    shared_eval_point: &[Challenge<SC>],
+    challenger: &mut SC::Challenger,
+    global: Option<(
+        Vec<usize>,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::WhirRing>::WhirMmcs,
+        >,
+    )>,
     precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         <SC as crate::WhirRing>::WhirMmcs,
     >,
@@ -1054,7 +1250,54 @@ where
         .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
         .collect();
 
-    let mut rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, _>> = Vec::with_capacity(2);
+    struct TraceRound<MT: p3_commit::Mmcs<InnerVal>> {
+        chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView>,
+        r_row_per_chip: Vec<Vec<InnerChallenge>>,
+        claims: Vec<Vec<InnerChallenge>>,
+        precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<MT>,
+    }
+    let trace_rounds: Vec<TraceRound<<SC as WhirRing>::WhirMmcs>> = match global {
+        None => vec![TraceRound {
+            chip_traces,
+            r_row_per_chip,
+            claims: pre_y_inner,
+            precomputed: precomputed_commit,
+        }],
+        Some((global_indices, global_precomputed)) => {
+            let layout = super::round_layout::TraceRoundLayout::from_global_indices(
+                chips.len(),
+                &global_indices,
+            );
+            let mut claims: Vec<Option<Vec<InnerChallenge>>> =
+                pre_y_inner.into_iter().map(Some).collect();
+            let mut round = |indices: &[usize], precomputed| TraceRound {
+                chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
+                r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
+                claims: indices
+                    .iter()
+                    .map(|&i| claims[i].take().expect("each chip is opened in one round"))
+                    .collect(),
+                precomputed,
+            };
+            let global_round = round(layout.global_indices(), global_precomputed);
+            let main_round = round(layout.main_indices(), precomputed_commit);
+            vec![global_round, main_round]
+        }
+    };
+    for round in trace_rounds.iter() {
+        debug_assert!(
+            round.chip_traces.iter().map(|(name, _)| name).eq(round
+                .precomputed
+                .packing
+                .chip_infos
+                .iter()
+                .map(|info| &info.name)),
+            "prove_trusted_evaluations: a main round opens other chips than it committed",
+        );
+    }
+
+    let mut rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, _>> =
+        Vec::with_capacity(1 + trace_rounds.len());
     if !prep_chip_traces.is_empty() {
         rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
             chip_traces: &prep_chip_traces,
@@ -1063,11 +1306,13 @@ where
             precomputed: preprocessed_commit,
         });
     }
-    rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
-        chip_traces: &chip_traces,
-        r_row_per_chip: &r_row_per_chip,
-        claims: pre_y_inner,
-        precomputed: &precomputed_commit,
-    });
+    for round in trace_rounds.iter() {
+        rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
+            chip_traces: &round.chip_traces,
+            r_row_per_chip: &round.r_row_per_chip,
+            claims: round.claims.clone(),
+            precomputed: &round.precomputed,
+        });
+    }
     <SC as WhirRing>::prove_jagged_open(z_row, rounds, challenger)
 }

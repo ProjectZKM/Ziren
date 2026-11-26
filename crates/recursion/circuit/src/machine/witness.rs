@@ -109,7 +109,6 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let commitment = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
-        let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
         let chip_information = self
             .chip_information
             .iter()
@@ -134,7 +133,6 @@ where
         VerifyingKeyVariable {
             commitment,
             pc_start,
-            initial_global_cumulative_sum,
             chip_information,
             chip_ordering,
             prep_name_width_hash_inputs,
@@ -144,7 +142,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.commit.write(witness);
         self.pc_start.write(witness);
-        self.initial_global_cumulative_sum.write(witness);
         for (name, _ser_domain, dims) in self.chip_information.iter() {
             zkm_primitives::prep_chip_name_digest(name).write(witness);
             InnerVal::from_usize(dims.0).write(witness);
@@ -229,40 +226,62 @@ mod jagged_witness {
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
             let shard_proof_tuples = self.shard_proofs.read(builder);
-            let chip_cumulative_sums_per_shard: Vec<_> = self
-                .shard_proofs
-                .iter()
-                .map(|sp| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
+            let global_chain_start = self.global_chain_start.read(builder);
             ZKMCoreWitnessVariable {
                 vk,
                 shard_proof_tuples,
-                chip_cumulative_sums_per_shard,
                 is_complete,
                 is_first_shard,
                 vk_root,
+                global_chain_start,
             }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
             self.shard_proofs.write(witness);
-            for sp in self.shard_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
+            self.global_chain_start.write(witness);
+        }
+    }
+
+    impl<C> Witnessable<C>
+        for crate::machine::global_jagged::ZKMGlobalRoundWitnessValues<KoalaBearPoseidon2>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable =
+            crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable<C, KoalaBearPoseidon2>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vk = self.vk.read(builder);
+            let proofs = self.proofs.read(builder);
+            let vk_root = self.vk_root.read(builder);
+            let global_chain_end = self.global_chain_end.read(builder);
+            let global_h_star = self.global_h_star.read(builder);
+            let global_pow_witness = self.global_pow_witness.read(builder);
+            crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable {
+                vk,
+                proofs,
+                vk_root,
+                global_chain_end,
+                global_h_star,
+                global_pow_witness,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vk.write(witness);
+            self.proofs.write(witness);
+            self.vk_root.write(witness);
+            self.global_chain_end.write(witness);
+            self.global_h_star.write(witness);
+            self.global_pow_witness.write(witness);
         }
     }
 
@@ -281,36 +300,13 @@ mod jagged_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
-            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-            ZKMCompressWitnessVariable {
-                vks_and_proofs,
-                chip_cumulative_sums_per_input,
-                chip_heights_per_input,
-                vk_merkle_data,
-                is_complete,
-            }
+            ZKMCompressWitnessVariable { vks_and_proofs, vk_merkle_data, is_complete }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
@@ -324,22 +320,8 @@ mod jagged_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
-            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             ZKMDeferredWitnessVariable {
                 vks_and_proofs,
-                chip_cumulative_sums_per_input,
-                chip_heights_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
                 start_reconstruct_deferred_digest: self
                     .start_reconstruct_deferred_digest
@@ -352,17 +334,13 @@ mod jagged_witness {
                 end_execution_shard: self.end_execution_shard.read(builder),
                 init_addr_bits: self.init_addr_bits.read(builder),
                 finalize_addr_bits: self.finalize_addr_bits.read(builder),
+                global_chain: self.global_chain.read(builder),
                 is_complete: InnerVal::from_bool(self.is_complete).read(builder),
             }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
             self.start_reconstruct_deferred_digest.write(witness);
             self.zkm_vk_digest.write(witness);
@@ -373,6 +351,7 @@ mod jagged_witness {
             self.end_execution_shard.write(witness);
             self.init_addr_bits.write(witness);
             self.finalize_addr_bits.write(witness);
+            self.global_chain.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }
@@ -385,34 +364,14 @@ mod jagged_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
-            ZKMWrapWitnessVariable {
-                vks_and_proofs,
-                chip_cumulative_sums_per_input,
-                chip_heights_per_input,
-                vk_merkle_data,
-            }
+            ZKMWrapWitnessVariable { vks_and_proofs, chip_heights_per_input, vk_merkle_data }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
         }
     }
@@ -432,34 +391,14 @@ mod jagged_witness {
 
         fn read(&self, builder: &mut Builder<OuterCfg>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            let chip_cumulative_sums_per_input: Vec<_> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| {
-                    sp.chip_cumulative_sums
-                        .iter()
-                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
-                        .collect::<std::collections::BTreeMap<_, _>>()
-                })
-                .collect();
             let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
                 self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
-            ZKMWrapWitnessVariable {
-                vks_and_proofs,
-                chip_cumulative_sums_per_input,
-                chip_heights_per_input,
-                vk_merkle_data,
-            }
+            ZKMWrapWitnessVariable { vks_and_proofs, chip_heights_per_input, vk_merkle_data }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<OuterCfg>) {
             self.vks_and_proofs.write(witness);
-            for (_, sp) in self.vks_and_proofs.iter() {
-                for sums in sp.chip_cumulative_sums.values() {
-                    sums.write(witness);
-                }
-            }
             self.vk_merkle_data.write(witness);
         }
     }

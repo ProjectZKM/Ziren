@@ -2,6 +2,7 @@
 
 mod builder;
 mod extension;
+mod global_view;
 mod lookup;
 mod machine;
 mod picus_info;
@@ -13,6 +14,7 @@ mod sub_builder;
 
 pub use builder::*;
 pub use extension::*;
+pub use global_view::*;
 pub use lookup::*;
 pub use machine::*;
 pub use picus_info::*;
