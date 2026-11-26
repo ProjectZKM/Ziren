@@ -6,8 +6,6 @@ use zkm_pcs::air::QuinticExtension;
 
 use super::Block;
 
-use crate::runtime::D;
-
 pub trait QuinticExtensionUtils<T> {
     fn from_block(block: Block<T>) -> Self;
 

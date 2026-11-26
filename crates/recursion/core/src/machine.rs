@@ -21,9 +21,9 @@ use crate::{
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
-    instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
+    instruction::{HintBitsInstr, HintInstr},
     shape::RecursionShape,
-    Instruction, RecursionProgram, D,
+    Instruction, RecursionProgram,
 };
 
 #[derive(zkm_derive::MachineAir)]

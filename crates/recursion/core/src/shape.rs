@@ -20,7 +20,7 @@ use crate::{
         select::SelectChip,
     },
     machine::RecursionAir,
-    RecursionProgram, D,
+    RecursionProgram,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

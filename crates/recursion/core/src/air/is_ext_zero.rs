@@ -15,8 +15,6 @@ use zkm_pcs::air::{QuinticExtension, ZKMAirBuilder};
 
 use crate::air::extension::QuinticExtensionUtils;
 
-use crate::runtime::D;
-
 /// A set of columns needed to compute whether the given word is 0.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]

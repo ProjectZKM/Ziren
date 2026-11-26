@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::machine::RecursionAirEventCount;
-use crate::runtime::instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction};
+use crate::runtime::instruction::{HintBitsInstr, HintInstr, Instruction};
 use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 /// An instruction tagged with its event-write offset.

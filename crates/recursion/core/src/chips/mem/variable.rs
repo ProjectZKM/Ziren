@@ -1,5 +1,5 @@
 use core::borrow::Borrow;
-use instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr};
+use instruction::{HintBitsInstr, HintInstr};
 #[cfg(target_os = "zkvm")]
 use itertools::Itertools;
 use p3_air::{Air, BaseAir, WindowAccess};
