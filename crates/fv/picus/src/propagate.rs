@@ -52,7 +52,11 @@
 //!   `result = [a > b]`;
 //! - `divrem_unique`: `b = q · c + r`, `|r| < |c|` and `r` of the sign of `b` fix `q` and `r`
 //!   (`c ≠ 0` is constrained; the chip must also show the one overflow row, `−2³¹ / −1`, forces
-//!   `q = b`, `r = 0`).
+//!   `q = b`, `r = 0`);
+//! - `canonical_limbs`: an address held as two 16-bit limbs with the high limb at most `0x7F00`
+//!   and the low limb zero there (`lo·(1 − t·(0x7F00 − hi)) = 0`) is a function of its field
+//!   value `lo + 2¹⁶·hi`, which is at most `p − 1` as an integer.  The pass reads the pair off
+//!   the constraints, as it does a range-checked word (`canonical_word`); no mark is needed.
 //!
 //! Every field-gadget lemma rests on the gadget's limb range checks (bytes for `result` and
 //! `carry`, `u16` for the witness), which hold on real rows.
@@ -892,6 +896,20 @@ impl Ctx {
             let why: Vec<u32> = why.into_iter().collect();
             tag(&facts, &mut origins, &why);
         }
+        for (limbs, why) in canonical_limb_pairs(&facts, &origins, &ub, &ub_origin) {
+            let ghost = fresh;
+            fresh += 1;
+            let value = Poly::var(limbs[0]).add(&Poly::var(limbs[1]).scale(1 << 16));
+            facts.push(Fact::Zero(Poly::var(ghost).add(&value.scale(P - 1))));
+            facts.push(Fact::Call {
+                outs: limbs.iter().map(|limb| Poly::var(*limb)).collect(),
+                ins: vec![Poly::var(ghost)],
+                lemma: Some("canonical_limbs"),
+                guard: vec![],
+            });
+            let why: Vec<u32> = why.into_iter().collect();
+            tag(&facts, &mut origins, &why);
+        }
         normalize(&mut facts, &origins, &mut ub, &mut ub_origin, &mut fresh);
         (Ctx { origins, ub_origin, facts, ub, outputs, opaque, fresh }, known)
     }
@@ -1082,6 +1100,88 @@ fn canonical_words(
             why.extend(ub_origin.get(&v).cloned().unwrap_or_default());
         }
         out.push(([b0, b1, b2, top], z, why));
+    }
+    out
+}
+
+/// The high limb of the largest address, `(p − 1) / 2¹⁶`.
+const TOP_LIMB: u64 = 0x7F00;
+
+/// The gate of a limb pair, `lo·(1 − t·(0x7F00 − hi)) = 0` up to a constant factor: `(lo, hi, t)`
+/// when `p` is one.
+pub(crate) fn limb_pair_gate(p: &Poly) -> Option<(usize, usize, usize)> {
+    if p.0.len() != 3 {
+        return None;
+    }
+    let (lo, unit) = p.0.iter().find_map(|(m, c)| match m.as_slice() {
+        [(lo, 1)] => Some((*lo, *c)),
+        _ => None,
+    })?;
+    let t = p.0.iter().find_map(|(m, c)| match m.as_slice() {
+        [(a, 1), (b, 1)] if *c == mulm(unit, P - TOP_LIMB) && (*a == lo || *b == lo) => {
+            Some(if *a == lo { *b } else { *a })
+        }
+        _ => None,
+    })?;
+    let hi = p.0.iter().find_map(|(m, c)| {
+        let vars: Vec<usize> = m.iter().map(|(v, _)| *v).collect();
+        let cubic = m.len() == 3 && m.iter().all(|(_, e)| *e == 1);
+        if !cubic || *c != unit || !vars.contains(&lo) || !vars.contains(&t) {
+            return None;
+        }
+        vars.into_iter().find(|v| *v != lo && *v != t)
+    })?;
+    Some((lo, hi, t))
+}
+
+/// A limb pair under the address range check: the limbs `[lo, hi]` and the conjuncts the
+/// check consists of.
+type CanonicalLimbs = ([usize; 2], BTreeSet<u32>);
+
+/// **Canonical limb pairs**: the memory tables hold an address as two limbs with `lo ≤ 2¹⁶ − 1`,
+/// `hi ≤ 2¹⁶ − 1`, `0x7F00 − hi ≤ 2¹⁶ − 1` and the gate `lo·(1 − t·(0x7F00 − hi)) = 0`
+/// ([`limb_pair_gate`]).  The high limb is then at most `0x7F00` and the low limb vanishes
+/// there, so `lo + 2¹⁶·hi` is at most `p − 1` as an integer: a field value has one such pair,
+/// and the limbs are functions of it.  Returns every pair found among `facts`.
+fn canonical_limb_pairs(
+    facts: &[Fact],
+    origins: &[BTreeSet<u32>],
+    ub: &BTreeMap<usize, u64>,
+    ub_origin: &BTreeMap<usize, BTreeSet<u32>>,
+) -> Vec<CanonicalLimbs> {
+    let zero = |i: usize| match &facts[i] {
+        Fact::Zero(p) => Some(p),
+        _ => None,
+    };
+    let limb = |v: usize| ub.get(&v).is_some_and(|b| *b <= 0xffff);
+    let mut out = vec![];
+    for i in 0..facts.len() {
+        let Some((lo, hi, _)) = zero(i).and_then(limb_pair_gate) else { continue };
+        if !limb(lo) || !limb(hi) {
+            continue;
+        }
+        let distance = (0..facts.len()).find_map(|k| {
+            let q = zero(k)?;
+            if q.0.len() != 3
+                || q.0.get(&vec![]) != Some(&TOP_LIMB)
+                || q.0.get(&vec![(hi, 1)]) != Some(&(P - 1))
+            {
+                return None;
+            }
+            q.0.iter().find_map(|(m, c)| match m.as_slice() {
+                [(d, 1)] if *d != hi && *c == P - 1 && limb(*d) => Some((k, *d)),
+                _ => None,
+            })
+        });
+        let Some((k, d)) = distance else { continue };
+        let mut why: BTreeSet<u32> = BTreeSet::new();
+        for f in [i, k] {
+            why.extend(origins.get(f).cloned().unwrap_or_default());
+        }
+        for v in [lo, hi, d] {
+            why.extend(ub_origin.get(&v).cloned().unwrap_or_default());
+        }
+        out.push(([lo, hi], why));
     }
     out
 }

@@ -34,7 +34,9 @@ use std::{
 
 use crate::{
     pcl::{PicusCall, PicusConstraint, PicusExpr, PicusModule, PicusProgram},
-    propagate::{to_poly, DerivEnd, Derivation, Poly, Rule, ASSUMED_ORIGIN, INPUT_ORIGIN, P},
+    propagate::{
+        limb_pair_gate, to_poly, DerivEnd, Derivation, Poly, Rule, ASSUMED_ORIGIN, INPUT_ORIGIN, P,
+    },
 };
 
 /// Derivations of the modules the analyser determined, by module name: `write_module` replays
@@ -730,6 +732,25 @@ impl Replay<'_> {
         let i = pairs.iter().position(|&(a, b)| a == v && b == v)?;
         let last = if i + 1 == pairs.len() { "" } else { ".1" };
         Some((vec!["hg".to_string()], format!("exact (hg{}{last}).symm", ".2".repeat(i))))
+    }
+
+    /// A limb `v` of a pair under the address range check (`propagate::limb_pair_gate`): the
+    /// pairs of the two witnesses have one field value, so `picus_canonical_limbs` equates
+    /// their limbs.  Returns the hypotheses `hyps` of the step and the tactic, which falls back
+    /// to `tactic`.
+    fn limb_pair_step(
+        &self,
+        v: usize,
+        hyps: &[String],
+        tactic: &str,
+    ) -> Option<(Vec<String>, String)> {
+        let gated = self.m.constraints.iter().any(|c| match c {
+            PicusConstraint::Eq(e) => to_poly(e)
+                .and_then(|p| limb_pair_gate(&p))
+                .is_some_and(|(lo, hi, _)| v == lo || v == hi),
+            _ => false,
+        });
+        gated.then(|| (hyps.to_vec(), format!("first | picus_canonical_limbs | ({tactic})")))
     }
 
     /// The `GtColsBytes` result through `gt_bytes_det`, found by the shapes of its conjuncts
@@ -1517,7 +1538,8 @@ impl Replay<'_> {
                     .then(|| self.gadget_projection_step(v))
                     .flatten()
                     .or_else(|| self.gt_bytes_step(v))
-                    .or_else(|| self.range_flag_step(v, support)),
+                    .or_else(|| self.range_flag_step(v, support))
+                    .or_else(|| self.limb_pair_step(v, &hyps, &tactic)),
                 Rule::OneHot if onehot_open => self
                     .onehot2_positional(v, false)
                     .or_else(|| self.onehot_gate2(v))
@@ -2674,6 +2696,7 @@ hand-maintained `ZirenDet/Lib.lean`.
         "LeadingOne",
         "DivRem",
         "CanonicalWord",
+        "CanonicalLimbs",
         "FieldOp",
         "Pratt",
         "Primes",

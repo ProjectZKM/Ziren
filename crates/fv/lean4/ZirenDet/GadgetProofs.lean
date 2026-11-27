@@ -1,6 +1,7 @@
 import ZirenDet.LeadingOne
 import ZirenDet.DivRem
 import ZirenDet.CanonicalWord
+import ZirenDet.CanonicalLimbs
 import ZirenDet.FieldOp
 import ZirenDet.Primes
 import ZirenDet.Edwards
