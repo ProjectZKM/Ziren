@@ -134,6 +134,19 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
     ]
 }
 
+/// The table only the first shard of an execution holds, its memory image.
+/// No cluster names it: a shard's cluster is the smallest that holds its
+/// other chips, and the first shard commits the image beside the cluster.
+pub const FIRST_SHARD_CHIP: &str = "MemoryImage";
+
+/// Whether `cluster` is the cluster of an execution shard, one that runs
+/// instructions: it names every chip of the core base. The first shard of an
+/// execution is one of these.
+#[must_use]
+pub fn is_execution_cluster(cluster: &BTreeSet<String>) -> bool {
+    core_base_chips().iter().all(|name| cluster.contains(*name))
+}
+
 fn set_from(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|s| s.to_string()).collect()
 }

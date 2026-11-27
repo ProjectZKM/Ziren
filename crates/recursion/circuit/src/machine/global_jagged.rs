@@ -447,6 +447,35 @@ impl<SC: zkm_pcs::StarkGenericConfig> ZKMGlobalRoundWitnessValues<SC> {
         self.proofs.iter().map(|proof| proof.preceding_rounds.len() + 1).sum()
     }
 
+    /// The shape of the input's proof, read from the proof: the chips of its
+    /// table slots, the stacking blocks its rounds commit and the number of
+    /// its rounds. `None` unless the input holds one proof whose rounds all
+    /// have the chips and the blocks of the first, as the rounds a prover
+    /// groups do (`StarkMachine::global_lane_proof_groups`).
+    pub fn shape(&self) -> Option<ZKMGlobalRoundShape> {
+        let [proof] = self.proofs.as_slice() else {
+            return None;
+        };
+        let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
+            &proof.evaluation_proof
+        else {
+            return None;
+        };
+        let rounds = proof.preceding_rounds.len() + 1;
+        let mut slots = vec![std::collections::BTreeSet::new(); rounds];
+        for view in proof.chip_heights.keys() {
+            let (slot, chip) = GlobalView::<()>::slot_and_chip(view)?;
+            slots.get_mut(slot)?.insert(chip.to_string());
+        }
+        let blocks = bundle.whir_proof.batch_evaluations.iter().map(Vec::len).collect::<Vec<_>>();
+        let shape =
+            ZKMGlobalRoundShape { chips: slots.first()?.clone(), blocks: *blocks.first()?, rounds };
+        (blocks.len() == rounds
+            && blocks.iter().all(|blocks| *blocks == shape.blocks)
+            && slots.iter().all(|chips| *chips == shape.chips))
+        .then_some(shape)
+    }
+
     /// The key of the program that verifies this input: the number of
     /// proofs and the shape of each, which holds the number of its table
     /// slots and the chips of each.

@@ -1893,8 +1893,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// A leaf is never the root of the compress tree: an execution of one
     /// shard closes through a compose of arity one, whose key the allowlist
     /// enumerates with every other arity.  The leaf keys are therefore
-    /// exactly the open normalize classes, one per `(cluster, preprocessed
-    /// bucket, main bucket)`, and no leaf is snapped to the root geometry.
+    /// exactly the open normalize classes, one per `(chip set, preprocessed
+    /// bucket, global class, main bucket)`, and the global-round shapes, and
+    /// no leaf is snapped to the root geometry.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -4271,6 +4272,170 @@ pub mod tests {
             Ok(Ok(())) => Some(runtime.record.public_values),
             _ => None,
         }
+    }
+
+    /// Every recursion program real proofs go through is one the vk map is
+    /// built from, with no vk map at hand: fibonacci and keccak through
+    /// compress, fibonacci on through shrink, and an execution cut into many
+    /// shards whose global rounds share global proofs.
+    ///
+    /// Each shard and each global proof has an enumerated shape
+    /// (`ZKMProofShape::generate_all`), and a second prover, building the
+    /// shape's program as the map's builders do, builds the program the
+    /// proof's leaf ran. The compress stage then proves no program but those
+    /// leaves' and the enumerated compose programs, and the keys of the root
+    /// and of the shrink proof are keys of enumerated programs.
+    #[test]
+    #[serial]
+    #[ignore = "proves three executions through compress; run with --ignored"]
+    fn real_proofs_use_enumerated_programs() -> Result<()> {
+        use crate::shapes::{ZKMCompressProgramShape, ZKMProofShape};
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
+        let builder = ZKMProver::<DefaultProverComponents>::uninitialized_with(Some(false));
+        let machine = prover.core_prover.machine();
+        let config = prover.compress_shape_config.as_ref().expect("the recursion shape config");
+        let enumerated = ZKMProofShape::generate_all(config, REDUCE_BATCH_SIZE, machine)
+            .collect::<BTreeSet<_>>();
+        let program_of = |prover: &ZKMProver<DefaultProverComponents>, shape: &ZKMProofShape| {
+            prover.program_from_shape(
+                ZKMCompressProgramShape::from_proof_shape(shape.clone(), VK_MERKLE_TREE_HEIGHT),
+                None,
+            )
+        };
+        let key_of = |program: &RecursionProgram<KoalaBear>| {
+            ZKMProver::<DefaultProverComponents>::recursion_pk_cache_key(program)
+        };
+        let normalize = enumerated
+            .iter()
+            .filter_map(|shape| match shape {
+                ZKMProofShape::Normalize(rows) => {
+                    Some((ZKMProofShape::normalize_class(machine, &rows.inner), shape))
+                }
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut allowed = enumerated
+            .iter()
+            .filter(|shape| matches!(shape, ZKMProofShape::Compress(_)))
+            .map(|shape| key_of(&program_of(&prover, shape)))
+            .collect::<BTreeSet<_>>();
+        let roots = enumerated
+            .iter()
+            .filter(|shape| matches!(shape, ZKMProofShape::CompressRoot(_)))
+            .map(|shape| prover.root_prover.setup(&program_of(&prover, shape)).1.hash_koalabear())
+            .collect::<BTreeSet<_>>();
+        let shrinks = enumerated
+            .iter()
+            .filter(|shape| matches!(shape, ZKMProofShape::Shrink(_)))
+            .map(|shape| {
+                prover.shrink_prover.setup(&program_of(&builder, shape)).1.hash_koalabear()
+            })
+            .collect::<BTreeSet<_>>();
+
+        let mut short_shards = ZKMProverOpts::default();
+        short_shards.core_opts.shard_size = 1 << 10;
+        let runs = [
+            (test_artifacts::FIBONACCI_ELF, fib_stdin(10), ZKMProverOpts::default(), true),
+            (
+                test_artifacts::KECCAK_SPONGE_ELF,
+                ZKMStdin::default(),
+                ZKMProverOpts::default(),
+                false,
+            ),
+            (test_artifacts::FIBONACCI_ELF, fib_stdin(1000), short_shards, false),
+        ];
+        let mut placeholders = BTreeMap::new();
+        let mut leaves = BTreeSet::new();
+        let mut chip_sets = BTreeSet::new();
+        let mut most_rounds = 0;
+        for (elf, stdin, opts, shrink) in runs {
+            let (_, pk_d, program, vk) = prover.setup(elf);
+            let core = prover.prove_core(&pk_d, program, &stdin, opts, ZKMContext::default())?;
+            let inputs =
+                prover.get_first_layer_inputs(&vk, &core.proof.0, &core.proof.1, &[], 1)?;
+            let mut run_leaves = BTreeSet::new();
+            for input in inputs.iter() {
+                let (shape, used) = match input {
+                    ZKMCircuitWitness::CoreJagged(input) => {
+                        let rows = input.shard_proofs[0]
+                            .chip_heights
+                            .iter()
+                            .map(|(name, rows)| (name.clone(), *rows))
+                            .collect::<Vec<_>>();
+                        let class = ZKMProofShape::normalize_class(machine, &rows);
+                        let shape = normalize
+                            .get(&class)
+                            .unwrap_or_else(|| panic!("no normalize shape of the class {class:?}"));
+                        chip_sets.insert(class.0);
+                        ((*shape).clone(), prover.recursion_program(input).1)
+                    }
+                    ZKMCircuitWitness::GlobalJagged(input) => {
+                        let shape = input.shape().expect("a global proof of rounds of one shape");
+                        most_rounds = shape.rounds.max(most_rounds);
+                        let shape = ZKMProofShape::GlobalRound(shape);
+                        assert!(enumerated.contains(&shape), "{shape:?} is not enumerated");
+                        (shape, prover.global_round_program(input).1)
+                    }
+                    _ => panic!("a proof without deferred proofs has core and global leaves"),
+                };
+                let placeholder = *placeholders
+                    .entry(shape.clone())
+                    .or_insert_with(|| key_of(&program_of(&builder, &shape)));
+                assert_eq!(
+                    placeholder, used,
+                    "the program built from {shape:?} is not the one the proof's leaf runs"
+                );
+                run_leaves.insert(used);
+            }
+            leaves.extend(run_leaves.iter().copied());
+            allowed.extend(run_leaves.iter().copied());
+
+            let compressed = prover.compress(&vk, core, vec![], opts)?;
+            prover.verify_compressed(&compressed, &vk)?;
+            let proved = prover
+                .recursion_pks_cache
+                .lock()
+                .unwrap()
+                .entries
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            assert!(run_leaves.is_subset(&proved), "the compress stage ran other leaf programs");
+            assert!(
+                proved.difference(&leaves).next().is_some(),
+                "the compress stage proved no compose program"
+            );
+            assert!(
+                proved.is_subset(&allowed),
+                "the compress stage proved a program outside the enumeration"
+            );
+            assert!(
+                roots.contains(&compressed.vk.hash_koalabear()),
+                "the root's key is not the key of an enumerated root program"
+            );
+            if shrink {
+                let shrunk = prover.shrink(compressed, opts)?;
+                assert!(
+                    shrinks.contains(&shrunk.vk.hash_koalabear()),
+                    "the shrink proof's key is not the key of the enumerated shrink program"
+                );
+            }
+        }
+
+        let holds = |names: &[&str], lacks: &[&str]| {
+            chip_sets.iter().any(|chips| {
+                names.iter().all(|name| chips.contains(*name))
+                    && !lacks.iter().any(|name| chips.contains(*name))
+            })
+        };
+        assert!(holds(&["MemoryImage", "MemoryGlobalInit"], &[]), "no execution of one shard");
+        assert!(holds(&["MemoryImage"], &["MemoryGlobalInit"]), "no first shard of several");
+        assert!(holds(&["AddSub"], &["MemoryImage"]), "no later execution shard");
+        assert!(holds(&["KeccakSponge"], &["AddSub"]), "no precompile shard");
+        assert!(holds(&["MemoryGlobalInit"], &["MemoryLocal"]), "no memory shard");
+        assert!(most_rounds > 1, "no global proof of several rounds");
+        Ok(())
     }
 
     /// The largest global proof the grouping makes of each family of
