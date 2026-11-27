@@ -8,10 +8,10 @@ use std::collections::BTreeSet;
 
 use crate::air::{AirLookup, BaseAirBuilder, LookupScope, MachineAir, MachineProgram};
 use crate::koala_bear_poseidon2::KoalaBearPoseidon2;
-use crate::logup_gkr::{global_grinding_bits, GlobalChallenge};
+use crate::logup_gkr::{global_grinding_bits, GlobalChallenge, GlobalRoundBinding};
 use crate::{
-    Chip, CpuProver, LookupKind, MachineProof, MachineProver, MachineRecord, StarkGenericConfig,
-    StarkMachine, StarkVerifyingKey, Val,
+    Chip, CpuProver, LookupKind, MachineProof, MachineProver, MachineRecord, ShardProof,
+    StarkGenericConfig, StarkMachine, StarkProvingKey, StarkVerifyingKey, Traces, Val,
 };
 
 type SC = KoalaBearPoseidon2;
@@ -285,7 +285,7 @@ fn every_global_round_needs_its_global_proof() {
     let mut swapped = proof.clone();
     swapped.global_proofs.swap(0, 1);
     verify_with_deferred_global_lookups(&vk, &swapped)
-        .expect_err("global proofs out of shard order");
+        .expect("global proofs open the shards' rounds in any order");
 
     let mut repeated = proof;
     repeated.global_proofs[1] = repeated.global_proofs[0].clone();
@@ -404,4 +404,236 @@ fn shard_proofs_alone_do_not_close_a_deferred_bus() {
         .verify_shard_proofs(&vk, &proof, &mut machine.config().challenger())
         .expect("each shard proof verifies on its own");
     verify_with_deferred_global_lookups(&vk, &proof).expect_err("the bus is unbalanced");
+}
+
+/// Shards proved one by one, with what a prover holds to open their global
+/// rounds: every shard's round and its tables, the challenge the rounds fix,
+/// and the challenger after the verifying key.
+struct CommittedShards {
+    prover: CpuProver<SC, BusAir>,
+    pk: StarkProvingKey<SC>,
+    vk: StarkVerifyingKey<SC>,
+    shard_proofs: Vec<ShardProof<SC>>,
+    rounds: Vec<GlobalRoundBinding<F>>,
+    tables: Vec<Traces<F>>,
+    global: GlobalChallenge<F, <SC as StarkGenericConfig>::Challenge>,
+    vk_challenger: <SC as StarkGenericConfig>::Challenger,
+}
+
+impl CommittedShards {
+    /// Proves `records`, each as its own shard with a global round.
+    fn prove(records: &[BusRecord]) -> Self {
+        let prover = CpuProver::new(deferring_machine());
+        let (pk, vk) = prover.setup(&BusProgram);
+        let mut vk_challenger = prover.machine().config().challenger();
+        pk.observe_into(&mut vk_challenger);
+        let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
+            .iter()
+            .map(|record| {
+                let traces = prover.generate_traces(record).unwrap();
+                let data = prover.commit(record, traces, None);
+                let tables = prover.global_round_tables(&data).expect("a global round");
+                (prover.open(&pk, data, &mut vk_challenger.clone()).unwrap(), tables)
+            })
+            .unzip();
+        let rounds: Vec<_> = shard_proofs
+            .iter()
+            .map(|proof| prover.machine().global_round_binding(proof).expect("a global round"))
+            .collect();
+        let global = prover
+            .machine()
+            .global_challenge(&vk_challenger, rounds.iter().map(Some))
+            .expect("the bus machine has global lookups");
+        Self { prover, pk, vk, shard_proofs, rounds, tables, global, vk_challenger }
+    }
+
+    /// One global proof that opens the rounds of the shards `group`, in that
+    /// order.
+    fn global_proof(&self, group: &[usize]) -> ShardProof<SC> {
+        let opened: Vec<_> =
+            group.iter().map(|&i| (&self.rounds[i], self.tables[i].clone())).collect();
+        crate::prover::prove_global_rounds(
+            self.prover.machine(),
+            &self.pk,
+            &opened,
+            &self.global,
+            &self.vk_challenger,
+        )
+    }
+
+    /// The machine proof whose global proofs open the rounds of `groups`.
+    fn proof(&self, groups: &[&[usize]]) -> MachineProof<SC> {
+        MachineProof {
+            shard_proofs: self.shard_proofs.clone(),
+            global_proofs: groups.iter().map(|group| self.global_proof(group)).collect(),
+        }
+    }
+
+    fn verify(&self, proof: &MachineProof<SC>) -> Result<(), String> {
+        verify_with_deferred_global_lookups(&self.vk, proof)
+    }
+
+    /// The verdict on `proof` as the global proof of the rounds of the shards
+    /// `group`, in that order.
+    fn verify_global_proof(&self, group: &[usize], proof: &ShardProof<SC>) -> Result<(), String> {
+        let rounds: Vec<_> = group.iter().map(|&i| &self.rounds[i]).collect();
+        self.prover
+            .machine()
+            .verify_global_proof(&self.vk, &self.vk_challenger, &rounds, proof, &self.global)
+            .map(|_| ())
+            .map_err(|e| format!("{e:?}"))
+    }
+}
+
+/// Five shards that close the bus together. The rounds of shards 1 and 3
+/// hold the same chip at the same height; no other two rounds share a shape.
+fn five_shards() -> Vec<BusRecord> {
+    vec![
+        sender(&[3, 5, 7, 11]),
+        receiver(&[7, 3]),
+        BusRecord { sends: vec![1, 2, 4], recvs: vec![4, 1, 2] },
+        receiver(&[5, 11]),
+        BusRecord { sends: vec![9], recvs: vec![9] },
+    ]
+}
+
+#[test]
+fn one_global_proof_opens_several_rounds() {
+    let shards = CommittedShards::prove(&five_shards());
+    let proof = shards.proof(&[&[0, 1, 2], &[3, 4]]);
+    let slots: Vec<_> = proof
+        .global_proofs
+        .iter()
+        .map(|p| p.jagged_shard_proof.preceding_rounds.len() + 1)
+        .collect();
+    assert_eq!(slots, [3, 2], "each global proof commits one round a slot");
+    shards.verify(&proof).expect("grouped global proofs close a balanced bus");
+
+    let all = shards.proof(&[&[0, 1, 2, 3, 4]]);
+    shards.verify(&all).expect("one global proof opens every round");
+
+    let mut unbalanced = five_shards();
+    unbalanced[3].recvs[1] = 12;
+    let shards = CommittedShards::prove(&unbalanced);
+    let error = shards
+        .verify(&shards.proof(&[&[0, 1, 2], &[3, 4]]))
+        .expect_err("grouped global proofs must not close an unbalanced bus");
+    assert!(error.contains("sum"), "{error}");
+}
+
+#[test]
+fn global_proofs_open_the_rounds_in_any_order_and_grouping() {
+    let shards = CommittedShards::prove(&five_shards());
+    let groupings: [&[&[usize]]; 3] =
+        [&[&[4, 1], &[2], &[0, 3]], &[&[3, 2, 1, 0], &[4]], &[&[2], &[4], &[0], &[3], &[1]]];
+    for groups in groupings {
+        shards.verify(&shards.proof(groups)).unwrap_or_else(|e| panic!("{groups:?}: {e}"));
+    }
+}
+
+#[test]
+fn a_global_proof_opens_its_rounds_in_slot_order() {
+    let shards = CommittedShards::prove(&five_shards());
+    let proof = shards.global_proof(&[0, 2, 1]);
+    shards.verify_global_proof(&[0, 2, 1], &proof).expect("the rounds in the proof's slot order");
+    shards
+        .verify_global_proof(&[2, 0, 1], &proof)
+        .expect_err("the preceding rounds in another order");
+    shards.verify_global_proof(&[0, 1, 2], &proof).expect_err("the main round in another slot");
+    shards.verify_global_proof(&[0, 2], &proof).expect_err("fewer rounds than slots");
+    shards.verify_global_proof(&[0, 2, 1, 3], &proof).expect_err("more rounds than slots");
+
+    let same_shape = shards.global_proof(&[1, 3]);
+    shards.verify_global_proof(&[1, 3], &same_shape).expect("the rounds in slot order");
+    shards
+        .verify_global_proof(&[3, 1], &same_shape)
+        .expect_err("two rounds of one shape in each other's slot");
+
+    let mut swapped = shards.proof(&[&[1, 3], &[0, 2, 4]]);
+    let slots = &mut swapped.global_proofs[0].jagged_shard_proof;
+    core::mem::swap(&mut slots.preceding_rounds[0].commitment, &mut slots.main_commitment);
+    core::mem::swap(
+        &mut slots.preceding_rounds[0].original_commitment,
+        &mut slots.main_original_commitment,
+    );
+    shards.verify(&swapped).expect_err("a global proof with the commitments of two slots swapped");
+}
+
+#[test]
+fn every_global_round_is_opened_exactly_once() {
+    let shards = CommittedShards::prove(&five_shards());
+
+    let error = shards
+        .verify(&shards.proof(&[&[0, 1, 2], &[2, 4]]))
+        .expect_err("a round opened twice and another not at all");
+    assert!(error.contains("another global proof opens"), "{error}");
+
+    let error = shards
+        .verify(&shards.proof(&[&[0, 1, 2], &[2, 3, 4]]))
+        .expect_err("a round opened by two global proofs");
+    assert!(error.contains("another global proof opens"), "{error}");
+
+    let error = shards
+        .verify(&shards.proof(&[&[0, 1, 1], &[2, 3, 4]]))
+        .expect_err("a round opened in two slots of one global proof");
+    assert!(error.contains("another global proof opens"), "{error}");
+
+    let error = shards
+        .verify(&shards.proof(&[&[0, 1], &[2, 3]]))
+        .expect_err("a round no global proof opens");
+    assert!(error.contains("opened by no global proof"), "{error}");
+}
+
+#[test]
+fn a_preceding_round_of_a_global_proof_is_the_one_its_shard_committed() {
+    let shards = CommittedShards::prove(&five_shards());
+    let honest = shards.proof(&[&[1, 2], &[3, 0, 4]]);
+    shards.verify(&honest).expect("the honest grouping verifies");
+
+    let other = *shards.shard_proofs[3].jagged_shard_proof.global_round().unwrap();
+    assert_eq!(shards.rounds[1].chips, shards.rounds[3].chips, "two rounds of one shape");
+    let mut replaced = honest.clone();
+    replaced.global_proofs[0].jagged_shard_proof.preceding_rounds[0] = other;
+    shards
+        .verify_global_proof(&[3, 2], &replaced.global_proofs[0])
+        .expect_err("a proof of one shard's tables under another shard's commitment");
+    shards
+        .verify_global_proof(&[1, 2], &replaced.global_proofs[0])
+        .expect_err("a preceding commitment other than the bound round's");
+    shards.verify(&replaced).expect_err("a preceding round replaced by another shard's");
+
+    let mut observed_only = honest.clone();
+    observed_only.global_proofs[0].jagged_shard_proof.preceding_rounds[0].commitment =
+        other.commitment;
+    shards.verify(&observed_only).expect_err("a preceding round's observed commitment replaced");
+
+    let mut height = honest;
+    let heights = &mut height.global_proofs[0].jagged_shard_proof.chip_heights;
+    *heights.get_mut("00.BusReceiver").unwrap() += 1;
+    shards.verify(&height).expect_err("a preceding round's table at another height");
+}
+
+#[test]
+fn global_rounds_share_a_proof_within_the_area_limit() {
+    let machine = deferring_machine();
+    let round_of = |height| GlobalRoundBinding {
+        commitment: [F::ZERO; 8],
+        chips: vec![("BusSender".to_string(), height)],
+    };
+    let small = &round_of(1);
+    let large = round_of(1 << 28);
+    let block = 1usize << crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+    let limit = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+    let area = |round| machine.global_round_blocks(round) * block;
+    assert!(area(&large) < limit && 2 * area(&large) >= limit);
+    assert!(area(&large) + 2 * area(small) < limit);
+
+    let groups = |rounds: &[&GlobalRoundBinding<F>], per_proof| {
+        machine.global_proof_groups(rounds.iter().copied(), per_proof)
+    };
+    assert_eq!(groups(&[small; 7], 3), [0..3, 3..6, 6..7]);
+    assert_eq!(groups(&[small; 3], 1), [0..1, 1..2, 2..3]);
+    assert_eq!(groups(&[&large, &large, small, small, small], 3), [0..1, 1..4, 4..5]);
+    assert_eq!(groups(&[small, &large, &large, small], 8), [0..2, 2..4]);
+    assert_eq!(groups(&[small; 20], usize::MAX), [0..8, 8..16, 16..20]);
 }

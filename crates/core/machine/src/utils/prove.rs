@@ -168,10 +168,15 @@ where
         else {
             return Vec::new();
         };
-        committed
+        prover
+            .machine()
+            .global_proof_groups(
+                committed.iter().map(|(round, _)| *round),
+                zkm_pcs::global_rounds_per_proof(),
+            )
             .into_iter()
-            .map(|(round, tables)| {
-                prover.prove_global_round(pk, round, tables, &global, &challenger).unwrap()
+            .map(|group| {
+                prover.prove_global_rounds(pk, &committed[group], &global, &challenger).unwrap()
             })
             .collect()
     });

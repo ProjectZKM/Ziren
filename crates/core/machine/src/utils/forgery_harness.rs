@@ -871,6 +871,21 @@ fn prove_tampered(
     tamper: impl FnOnce(&mut [RawTraces]),
     challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
 ) -> MachineProof<SC> {
+    prove_tampered_grouped(prover, program, stdin, opts, tamper, challenge, 1)
+}
+
+/// [`prove_tampered`] with each global proof opening up to `rounds_per_proof`
+/// consecutive global rounds; `challenge` is asked for the shard of the first
+/// round a global proof opens.
+fn prove_tampered_grouped(
+    prover: &CpuProver<SC, MipsAir<Val>>,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    tamper: impl FnOnce(&mut [RawTraces]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+    rounds_per_proof: usize,
+) -> MachineProof<SC> {
     use zkm_pcs::air::MachineAir;
 
     let (pk, _) = prover.setup(program);
@@ -926,15 +941,19 @@ fn prove_tampered(
         .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
         .expect("the core machine has global lookups");
 
-    let global_proofs = rounds
+    let (shards, committed): (Vec<_>, Vec<_>) = rounds
         .iter()
         .zip(tables)
         .enumerate()
-        .filter_map(|(i, (round, tables))| Some((i, round.as_ref()?, tables?)))
-        .map(|(i, round, tables)| {
-            prover
-                .prove_global_round(&pk, round, tables, &challenge(i, &global), &challenger)
-                .unwrap()
+        .filter_map(|(i, (round, tables))| Some((i, (round.as_ref()?, tables?))))
+        .unzip();
+    let global_proofs = prover
+        .machine()
+        .global_proof_groups(committed.iter().map(|(round, _)| *round), rounds_per_proof)
+        .into_iter()
+        .map(|group| {
+            let global = challenge(shards[group.start], &global);
+            prover.prove_global_rounds(&pk, &committed[group], &global, &challenger).unwrap()
         })
         .collect();
     MachineProof { shard_proofs, global_proofs }
@@ -989,6 +1008,93 @@ fn verify_tampered(
         reject_tag(&res)
     );
     res
+}
+
+/// The honest verifier's verdict on `fibonacci_program` cut into several
+/// shards, each global proof opening up to `rounds_per_proof` consecutive
+/// global rounds under the challenge `challenge` picks for the shard of its
+/// first round. Checks that a global proof opens as many rounds as the shards
+/// allow.
+fn verify_grouped(
+    label: &str,
+    rounds_per_proof: usize,
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+) -> Result<(), MachineVerificationError<SC>> {
+    let program = fibonacci_program();
+    let proof = prove_tampered_grouped(
+        &honest_prover(),
+        &program,
+        &fib_stdin(),
+        multi_shard_opts(),
+        |_| {},
+        challenge,
+        rounds_per_proof,
+    );
+    let committed =
+        proof.shard_proofs.iter().filter(|p| p.jagged_shard_proof.global_round().is_some()).count();
+    let most_rounds = proof
+        .global_proofs
+        .iter()
+        .map(|p| p.jagged_shard_proof.preceding_rounds.len() + 1)
+        .max()
+        .unwrap_or(0);
+    assert!(
+        most_rounds >= 3 && most_rounds == rounds_per_proof.min(committed),
+        "[{label}] {committed} global rounds, at most {most_rounds} in one global proof",
+    );
+    let (machine, vk) = honest_vk(&program);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!(
+        "[global][{label}] shards={} global proofs={} verify = {}",
+        proof.shard_proofs.len(),
+        proof.global_proofs.len(),
+        reject_tag(&res)
+    );
+    res
+}
+
+/// Global proofs that each open several shards' global rounds close the
+/// global bus of an honest multi-shard execution.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn grouped_global_proofs_verify() {
+    setup_logger();
+    for rounds_per_proof in [3, zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF] {
+        let res = verify_grouped("grouped", rounds_per_proof, same_challenge);
+        assert!(
+            res.is_ok(),
+            "global proofs of {rounds_per_proof} rounds must verify: {}",
+            reject_tag(&res)
+        );
+    }
+}
+
+/// Every global proof but the first opens its shards' global rounds under a
+/// challenge derived from a digest other than the chain's `h_star`.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn grouped_global_proof_under_another_h_star_rejected() {
+    setup_logger();
+    let machine = MipsAir::machine(KoalaBearPoseidon2::new());
+    let res = verify_grouped("grouped, mixed h_star", 3, |i, global| {
+        if i == 0 {
+            return global.clone();
+        }
+        let mut h_star = global.h_star;
+        h_star[0] += Val::ONE;
+        let mut forged = zkm_pcs::logup_gkr::GlobalChallenge::grind(
+            machine.config().challenger(),
+            h_star,
+            machine.global_beta_seed_dim(),
+        );
+        forged.pow_witness = global.pow_witness;
+        forged
+    });
+    assert!(
+        matches!(res, Err(MachineVerificationError::InvalidGlobalProof(_))),
+        "a global proof of several rounds under another h_star must be rejected: {}",
+        reject_tag(&res)
+    );
 }
 
 /// Mutable views of every row of `trace`.

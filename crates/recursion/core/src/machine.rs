@@ -406,7 +406,7 @@ pub mod tests {
         assert!(split_proof
             .shard_proofs
             .iter()
-            .all(|p| p.jagged_shard_proof.global_commitment.is_some()));
+            .all(|p| p.jagged_shard_proof.global_round().is_some()));
 
         let machine = unsplit_machine();
         let (pk, unsplit_vk) = machine.setup(&program);
@@ -435,14 +435,14 @@ pub mod tests {
         };
         assert!(
             tampered(&|p| {
-                p.jagged_shard_proof.global_commitment.as_mut().unwrap()[0] += F::ONE;
+                p.jagged_shard_proof.preceding_rounds[0].commitment[0] += F::ONE;
             })
             .is_err(),
             "a global commitment the opening does not re-derive must be rejected"
         );
         assert!(
             tampered(&|p| {
-                p.jagged_shard_proof.global_original_commitment.as_mut().unwrap()[0] += F::ONE;
+                p.jagged_shard_proof.preceding_rounds[0].original_commitment[0] += F::ONE;
             })
             .is_err(),
             "a raw global root other than the opening's must be rejected"
@@ -450,9 +450,7 @@ pub mod tests {
         assert!(
             tampered(&|p| {
                 let jp = &mut p.jagged_shard_proof;
-                let global = jp.global_commitment.unwrap();
-                jp.global_commitment = Some(jp.main_commitment);
-                jp.main_commitment = global;
+                core::mem::swap(&mut jp.preceding_rounds[0].commitment, &mut jp.main_commitment);
             })
             .is_err(),
             "swapped global and main commitments must be rejected"

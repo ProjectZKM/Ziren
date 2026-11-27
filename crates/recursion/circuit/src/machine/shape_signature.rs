@@ -45,7 +45,7 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     for round in sp.padding_row_heights.iter() {
         round.len().hash(h);
     }
-    sp.global_commitment.is_some().hash(h);
+    sp.global_round().is_some().hash(h);
     sp.public_values.len().hash(h);
 
     let lgkr = &sp.logup_gkr_proof;

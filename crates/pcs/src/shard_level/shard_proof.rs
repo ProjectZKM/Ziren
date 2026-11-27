@@ -135,22 +135,28 @@ pub struct JaggedShardProof<F, EF> {
     /// per-round hash-bind pins it.
     #[serde(default)]
     pub padding_row_heights: Vec<Vec<F>>,
-    /// The global round's **HASH-BOUND** digest, when the shard commits
-    /// one: the transcript observes it right before [`Self::main_commitment`],
-    /// which then commits every chip outside that round.  `None` on a shard
-    /// with a single main round.
+    /// The trace rounds committed before the main round, in the order the
+    /// transcript observes them, right before [`Self::main_commitment`], which
+    /// then commits every chip outside those rounds.  A shard has at most one,
+    /// its global round ([`Self::global_round`]); a global proof has one for
+    /// each round it opens but the last, which is its main round.
     #[serde(default)]
-    pub global_commitment: Option<[F; 8]>,
-    /// The global round's **RAW** WHIR cap root, the role
-    /// [`Self::main_original_commitment`] plays for the main round.  `Some`
-    /// exactly when [`Self::global_commitment`] is.
-    #[serde(default)]
-    pub global_original_commitment: Option<[F; 8]>,
+    pub preceding_rounds: Vec<TraceRoundCommitment<F>>,
     /// The proof-of-work witness of the global challenge the shard's global
     /// lookups are proved under; the same in every shard of a proof. `None`
     /// on a machine without global lookups.
     #[serde(default)]
     pub global_pow_witness: Option<F>,
+}
+
+/// The commitment of one trace round committed before the main round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRoundCommitment<F> {
+    /// The round's **HASH-BOUND** digest, the value the transcript observes.
+    pub commitment: [F; 8],
+    /// The round's **RAW** WHIR cap root, the role
+    /// [`JaggedShardProof::main_original_commitment`] plays for the main round.
+    pub original_commitment: [F; 8],
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
@@ -186,9 +192,18 @@ where
             preprocessed_original_commitment: [F::ZERO; 8],
             preprocessed_row_counts: Vec::new(),
             padding_row_heights: Vec::new(),
-            global_commitment: None,
-            global_original_commitment: None,
+            preceding_rounds: Vec::new(),
             global_pow_witness: None,
+        }
+    }
+
+    /// The global round of a shard: its only trace round before the main
+    /// round.  `None` on a shard with a single main round, and on a proof with
+    /// several preceding rounds, which is not a shard's.
+    pub fn global_round(&self) -> Option<&TraceRoundCommitment<F>> {
+        match self.preceding_rounds.as_slice() {
+            [round] => Some(round),
+            _ => None,
         }
     }
 }

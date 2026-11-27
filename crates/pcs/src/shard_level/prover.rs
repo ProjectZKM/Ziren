@@ -133,19 +133,35 @@ pub fn split_global_round<F: Clone>(
     main_traces: &crate::traces::Traces<F>,
     global_round: Option<&std::collections::BTreeSet<String>>,
 ) -> Option<(crate::traces::Traces<F>, crate::traces::Traces<F>)> {
-    let set = global_round?;
-    let (global, local): (std::collections::BTreeMap<_, _>, std::collections::BTreeMap<_, _>) =
-        main_traces
-            .iter()
-            .map(|(name, pm)| (name.clone(), pm.clone()))
-            .partition(|(name, _)| set.contains(name.as_str()));
-    if global.is_empty() {
-        return None;
+    let (mut preceding, local) = split_trace_rounds(main_traces, global_round.as_slice());
+    preceding.pop().map(|global| (global, local))
+}
+
+/// Splits a shard's name-keyed main traces into the trace rounds before the
+/// main round and the rest, all still in name order: round `r` holds the
+/// tables named in `rounds[r]`, the first set that names a table taking it,
+/// and a round that names no table is left out. The traces are shared, not
+/// copied.
+pub fn split_trace_rounds<F: Clone>(
+    main_traces: &crate::traces::Traces<F>,
+    rounds: &[&std::collections::BTreeSet<String>],
+) -> (Vec<crate::traces::Traces<F>>, crate::traces::Traces<F>) {
+    let mut preceding = vec![std::collections::BTreeMap::new(); rounds.len()];
+    let mut local = std::collections::BTreeMap::new();
+    for (name, pm) in main_traces.iter() {
+        match rounds.iter().position(|set| set.contains(name.as_str())) {
+            Some(r) => preceding[r].insert(name.clone(), pm.clone()),
+            None => local.insert(name.clone(), pm.clone()),
+        };
     }
-    Some((
-        crate::traces::Traces { named_traces: global },
+    (
+        preceding
+            .into_iter()
+            .filter(|round| !round.is_empty())
+            .map(|named_traces| crate::traces::Traces { named_traces })
+            .collect(),
         crate::traces::Traces { named_traces: local },
-    ))
+    )
 }
 
 /// The area pin of the global round over `tables`
@@ -162,18 +178,19 @@ pub fn global_round_pin<F: p3_field::Field>(
     )
 }
 
-/// Commits the shard's main traces: the global round first when the shard has
-/// one (see [`split_global_round`]), then the main round over every other
-/// chip. Returns the global round, if any, and `(C_main, precompute)` of the
-/// main round. `pin` applies to the main round; a machine that splits is never
+/// Commits the shard's main traces: first each trace round before the main
+/// round that names a table (see [`split_trace_rounds`]), under its
+/// [`global_round_pin`], then the main round over every other chip. Returns
+/// the preceding rounds, in order, and `(C_main, precompute)` of the main
+/// round. `pin` applies to the main round; a machine that splits is never
 /// pinned.
 #[allow(clippy::type_complexity)]
 pub fn commit_trace_rounds<SC>(
     main_traces: &crate::traces::Traces<Val<SC>>,
-    global_round: Option<&std::collections::BTreeSet<String>>,
+    preceding_rounds: &[&std::collections::BTreeSet<String>],
     pin: Option<crate::jagged::AreaPin>,
 ) -> (
-    Option<crate::prover::RetainedRound<SC>>,
+    Vec<crate::prover::RetainedRound<SC>>,
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::WhirRing>::WhirMmcs>,
 )
@@ -183,27 +200,21 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
 {
-    match split_global_round(main_traces, global_round) {
-        None => {
-            let (commitment, precomputed) = commit_traces::<SC>(main_traces, pin);
-            (None, commitment, precomputed)
-        }
-        Some((global, local)) => {
-            assert!(pin.is_none(), "a shard that commits a global round is never pinned");
-            let (global_commitment, global_precomputed) =
-                commit_traces::<SC>(&global, global_round_pin(&global));
-            let (commitment, precomputed) = commit_traces::<SC>(&local, None);
-            (
-                Some(crate::prover::RetainedRound {
-                    commitment: global_commitment,
-                    precomputed: global_precomputed,
-                    device_dense_q: None,
-                }),
-                commitment,
-                precomputed,
-            )
-        }
+    let (preceding, local) = split_trace_rounds(main_traces, preceding_rounds);
+    if preceding.is_empty() {
+        let (commitment, precomputed) = commit_traces::<SC>(main_traces, pin);
+        return (Vec::new(), commitment, precomputed);
     }
+    assert!(pin.is_none(), "a shard that commits a global round is never pinned");
+    let preceding = preceding
+        .iter()
+        .map(|round| {
+            let (commitment, precomputed) = commit_traces::<SC>(round, global_round_pin(round));
+            crate::prover::RetainedRound { commitment, precomputed, device_dense_q: None }
+        })
+        .collect();
+    let (commitment, precomputed) = commit_traces::<SC>(&local, None);
+    (preceding, commitment, precomputed)
 }
 
 /// Proves one shard from host-resident traces.
@@ -211,7 +222,7 @@ where
 /// The transcript, in order:
 ///
 /// ```text
-///   observe  pv, C_main, n, (h_i, |name_i|, name_i)_{i<n}      prologue
+///   observe  [h*], pv, (C_r)_r, C_main, n, (h_i, |name_i|, name_i)_{i<n}   prologue
 ///   LogUp-GKR, ending in the openings g_i(ζ)
 ///   sample   α, β
 ///   zerocheck at the cube {0,1}^m, λ drawn inside, reducing to z*
@@ -219,7 +230,8 @@ where
 ///   jagged open of the preprocessed and trace rounds at z*
 /// ```
 ///
-/// with `h_i` the raw row count of chip `i` and `m = max_log_row_count`.
+/// with `h_i` the raw row count of chip `i`, `m = max_log_row_count` and `C_r`
+/// the commitments of the trace rounds before the main round, in order.
 /// Everything the shard contributes arrives on `data`. A device prover runs
 /// the same sequence over resident traces and must emit the same bytes.
 #[allow(clippy::too_many_arguments)]
@@ -245,7 +257,7 @@ where
         main_traces,
         public_values,
         commit_data,
-        global_round,
+        preceding_rounds,
         global_challenge,
     } = data;
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
@@ -278,28 +290,29 @@ where
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!("prove shard with data", chips = n_chips).entered();
 
-    let (global_commit, main_commitment, precomputed_commit) = {
+    let (preceding_commits, main_commitment, precomputed_commit) = {
         let _span = tracing::info_span!("commit traces").entered();
         match commit_data {
-            Some(retained) => (retained.global, retained.main_commitment, retained.precomputed),
-            None => commit_trace_rounds::<SC>(&main_traces, global_round, main_pin),
+            Some(retained) => (retained.preceding, retained.main_commitment, retained.precomputed),
+            None => commit_trace_rounds::<SC>(&main_traces, preceding_rounds, main_pin),
         }
     };
-    let global_indices = global_round_indices(chips, global_round);
+    let layout = super::round_layout::TraceRoundLayout::for_rounds(chips, preceding_rounds);
     assert_eq!(
-        global_indices.is_empty(),
-        global_commit.is_none(),
-        "prove_shard_with_data: the retained commit and the machine's global round disagree on \
-         whether the shard commits a global round",
+        layout.preceding().len(),
+        preceding_commits.len(),
+        "prove_shard_with_data: the retained commit and the machine's trace rounds disagree on \
+         the rounds the shard commits before its main round",
     );
-    let global_commitment = global_commit.as_ref().map(|g| g.commitment);
+    let round_commitments: Vec<[Val<SC>; 8]> =
+        preceding_commits.iter().map(|round| round.commitment).collect();
 
     {
         observe_transcript_prologue_with_global::<SC, A>(
             challenger,
             global_challenge.map(|g| &g.h_star),
             &public_values,
-            global_commitment.as_ref(),
+            &round_commitments,
             &main_commitment,
             chips,
             shared_trace_mles,
@@ -414,7 +427,12 @@ where
             &trace_views,
             &zerocheck_proof.point_and_eval.0,
             challenger,
-            global_commit.map(|g| (global_indices, g.precomputed)),
+            layout
+                .preceding()
+                .iter()
+                .cloned()
+                .zip(preceding_commits.into_iter().map(|round| round.precomputed))
+                .collect(),
             precomputed_commit,
             residual_y,
             &[],
@@ -434,7 +452,7 @@ where
 
     let mut proof = assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
-        global_commitment,
+        round_commitments,
         main_commitment,
         logup_gkr_proof,
         zerocheck_proof,
@@ -503,7 +521,7 @@ pub fn observe_transcript_prologue<SC, A>(
         challenger,
         None,
         public_values,
-        None,
+        &[],
         main_commitment,
         chips,
         shared_trace_mles,
@@ -511,16 +529,17 @@ pub fn observe_transcript_prologue<SC, A>(
 }
 
 /// [`observe_transcript_prologue`] for a shard that may use the cross-shard
-/// challenge and commit a global round: the challenge's digest `h_star`
-/// opens the transcript, and the global round's digest `C_global` is observed
-/// between the public values and `C_main`, so the order is `[h_star] →
-/// public_values → [C_global] → C_main → num_chips → per-chip {height_felt,
-/// name_len, name_bytes}`.
+/// challenge and commit trace rounds before its main round: the challenge's
+/// digest `h_star` opens the transcript, and the digests `round_commitments`
+/// of those rounds are observed, in round order, between the public values
+/// and `C_main`, so the order is `[h_star] → public_values → (C_r)_r → C_main
+/// → num_chips → per-chip {height_felt, name_len, name_bytes}`. A shard has at
+/// most one such round, its global round.
 pub fn observe_transcript_prologue_with_global<SC, A>(
     challenger: &mut SC::Challenger,
     h_star: Option<&[Val<SC>; 8]>,
     public_values: &[Val<SC>],
-    global_commitment: Option<&[Val<SC>; 8]>,
+    round_commitments: &[[Val<SC>; 8]],
     main_commitment: &[Val<SC>; 8],
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -534,7 +553,7 @@ pub fn observe_transcript_prologue_with_global<SC, A>(
     for &pv in public_values.iter() {
         challenger.observe(pv);
     }
-    for &c in global_commitment.into_iter().flatten() {
+    for &c in round_commitments.iter().flatten() {
         challenger.observe(c);
     }
     for &c in main_commitment.iter() {
@@ -920,7 +939,7 @@ where
 {
     assemble_jagged_shard_proof_with_global::<SC>(
         public_values,
-        None,
+        Vec::new(),
         main_commitment,
         logup_gkr_proof,
         zerocheck_proof,
@@ -931,14 +950,14 @@ where
     )
 }
 
-/// [`assemble_jagged_shard_proof`] for a shard that may commit a global
-/// round. `global_commitment` is that round's hash-bound digest; its raw root
-/// is the bundle's last preceding commitment, the one right before the main
-/// round's.
+/// [`assemble_jagged_shard_proof`] for a shard that may commit trace rounds
+/// before its main round. `round_commitments` are those rounds' hash-bound
+/// digests, in order; their raw roots are the bundle's last preceding
+/// commitments, the ones right before the main round's.
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_jagged_shard_proof_with_global<SC>(
     public_values: Vec<Val<SC>>,
-    global_commitment: Option<[Val<SC>; 8]>,
+    round_commitments: Vec<[Val<SC>; 8]>,
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
@@ -950,7 +969,7 @@ pub fn assemble_jagged_shard_proof_with_global<SC>(
 where
     SC: StarkGenericConfig,
 {
-    let n_main_preceding = usize::from(global_commitment.is_some());
+    let n_main_preceding = round_commitments.len();
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
     {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -1002,26 +1021,42 @@ where
         _ => Vec::new(),
     };
 
-    let global_original_commitment: Option<[Val<SC>; 8]> =
-        match (&evaluation_proof, global_commitment) {
-            (crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle), Some(_)) => {
-                let raw = bundle
+    let preceding_rounds: Vec<super::shard_proof::TraceRoundCommitment<Val<SC>>> =
+        match &evaluation_proof {
+            crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+                let first = bundle
                     .preceding_commits
-                    .last()
-                    .expect("a shard with a global round has its raw root before the main round's");
-                let raw_inner = crate::jagged_pcs::whir_commit_digest_felts(raw);
-                Some(unsafe {
-                    core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
-                })
+                    .len()
+                    .checked_sub(n_main_preceding)
+                    .expect("every trace round before the main round has its raw root");
+                round_commitments
+                    .iter()
+                    .zip(bundle.preceding_commits[first..].iter())
+                    .map(|(&commitment, raw)| {
+                        let raw_inner = crate::jagged_pcs::whir_commit_digest_felts(raw);
+                        super::shard_proof::TraceRoundCommitment {
+                            commitment,
+                            original_commitment: unsafe {
+                                core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(
+                                    &raw_inner,
+                                )
+                            },
+                        }
+                    })
+                    .collect()
             }
-            (_, Some(commitment)) => Some(commitment),
-            (_, None) => None,
+            _ => round_commitments
+                .iter()
+                .map(|&commitment| super::shard_proof::TraceRoundCommitment {
+                    commitment,
+                    original_commitment: commitment,
+                })
+                .collect(),
         };
 
     JaggedShardProof {
         public_values,
-        global_commitment,
-        global_original_commitment,
+        preceding_rounds,
         global_pow_witness: None,
         main_commitment,
         padding_row_heights,
@@ -1106,19 +1141,19 @@ where
         main_traces,
         shared_eval_point,
         challenger,
-        None,
+        Vec::new(),
         precomputed_commit,
         pre_y_per_chip,
         heights,
     )
 }
 
-/// [`prove_trusted_evaluations`] for a shard that may commit a global
-/// round. `global` names that round's chips, as indices into the name-ordered
-/// `chips`, together with its precomputed commit; the rounds are then opened
-/// in the order `[preprocessed, global, main]`, each trace round over its
-/// own chips in name order, and `precomputed_commit` is the main round over
-/// every chip not in `global`.
+/// [`prove_trusted_evaluations`] for a shard that may commit trace rounds
+/// before its main round. `preceding` names each such round's chips, as
+/// indices into the name-ordered `chips`, together with its precomputed
+/// commit; the rounds are then opened in the order `[preprocessed,
+/// preceding.., main]`, each trace round over its own chips in name order, and
+/// `precomputed_commit` is the main round over every chip in none of them.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn prove_trusted_evaluations_with_global<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1130,7 +1165,7 @@ pub fn prove_trusted_evaluations_with_global<SC, A>(
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
-    global: Option<(
+    preceding: Vec<(
         Vec<usize>,
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::WhirRing>::WhirMmcs,
@@ -1256,33 +1291,41 @@ where
         claims: Vec<Vec<InnerChallenge>>,
         precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<MT>,
     }
-    let trace_rounds: Vec<TraceRound<<SC as WhirRing>::WhirMmcs>> = match global {
-        None => vec![TraceRound {
+    let trace_rounds: Vec<TraceRound<<SC as WhirRing>::WhirMmcs>> = if preceding.is_empty() {
+        vec![TraceRound {
             chip_traces,
             r_row_per_chip,
             claims: pre_y_inner,
             precomputed: precomputed_commit,
-        }],
-        Some((global_indices, global_precomputed)) => {
-            let layout = super::round_layout::TraceRoundLayout::from_global_indices(
-                chips.len(),
-                &global_indices,
-            );
-            let mut claims: Vec<Option<Vec<InnerChallenge>>> =
-                pre_y_inner.into_iter().map(Some).collect();
-            let mut round = |indices: &[usize], precomputed| TraceRound {
-                chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
-                r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
-                claims: indices
-                    .iter()
-                    .map(|&i| claims[i].take().expect("each chip is opened in one round"))
-                    .collect(),
-                precomputed,
-            };
-            let global_round = round(layout.global_indices(), global_precomputed);
-            let main_round = round(layout.main_indices(), precomputed_commit);
-            vec![global_round, main_round]
-        }
+        }]
+    } else {
+        let (indices, precomputed): (Vec<_>, Vec<_>) = preceding.into_iter().unzip();
+        let layout =
+            super::round_layout::TraceRoundLayout::from_round_indices(chips.len(), indices);
+        assert_eq!(
+            layout.preceding().len(),
+            precomputed.len(),
+            "prove_trusted_evaluations: a trace round before the main round names no chip",
+        );
+        let mut claims: Vec<Option<Vec<InnerChallenge>>> =
+            pre_y_inner.into_iter().map(Some).collect();
+        let mut round = |indices: &[usize], precomputed| TraceRound {
+            chip_traces: indices.iter().map(|&i| chip_traces[i].clone()).collect(),
+            r_row_per_chip: indices.iter().map(|&i| r_row_per_chip[i].clone()).collect(),
+            claims: indices
+                .iter()
+                .map(|&i| claims[i].take().expect("each chip is opened in one round"))
+                .collect(),
+            precomputed,
+        };
+        let mut rounds: Vec<_> = layout
+            .preceding()
+            .iter()
+            .zip(precomputed)
+            .map(|(indices, precomputed)| round(indices.as_slice(), precomputed))
+            .collect();
+        rounds.push(round(layout.main_indices(), precomputed_commit));
+        rounds
     };
     for round in trace_rounds.iter() {
         debug_assert!(

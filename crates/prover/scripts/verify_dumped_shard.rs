@@ -61,7 +61,7 @@ fn main() {
             &proof,
             machine.recursion_pins(),
             machine.has_public_value_buses(),
-            machine.global_round(),
+            machine.global_round().as_slice(),
             None,
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());

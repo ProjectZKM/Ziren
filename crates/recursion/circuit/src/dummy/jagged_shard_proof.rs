@@ -345,8 +345,13 @@ where
         row_counts,
         padding_column_counts,
         main_original_commitment: std::array::from_fn(|_| F::ZERO),
-        global_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
-        global_original_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
+        preceding_rounds: has_global_round
+            .then(|| zkm_pcs::shard_level::shard_proof::TraceRoundCommitment {
+                commitment: std::array::from_fn(|_| F::ZERO),
+                original_commitment: std::array::from_fn(|_| F::ZERO),
+            })
+            .into_iter()
+            .collect(),
         global_pow_witness: None,
     }
 }

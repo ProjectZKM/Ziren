@@ -180,6 +180,10 @@ pub struct GlobalRoundBinding<F> {
     pub chips: alloc::vec::Vec<(alloc::string::String, usize)>,
 }
 
+/// The most global rounds one global proof opens: each in a table slot of its
+/// own, committed as one of the proof's trace rounds.
+pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 8;
+
 /// One step of the global hash chain: `h_prev` extended by a shard's global
 /// round, `None` for a shard without one. `challenger` must be a fresh
 /// challenger of the machine's configuration.

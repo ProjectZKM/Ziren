@@ -25,9 +25,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     ///   shard's chip subset or the key.
     /// * `pinned`: the machine's pins (`StarkMachine::recursion_pins`); `Some`
     ///   means the rounds are pinned.
-    /// * `global_round`: the machine's global-round chip set
-    ///   (`StarkMachine::global_round`); a shard naming any of its chips commits
-    ///   them in a main round of their own.
+    /// * `preceding_rounds`: the chip sets of the trace rounds before the main
+    ///   round, in order; the chips the proof names of a set commit in a round
+    ///   of their own.  A shard's is the machine's global-round chip set
+    ///   (`StarkMachine::global_round`), a global proof's its table slots but
+    ///   the last.
     /// * `global_challenge`: the cross-shard challenge of the global-scope
     ///   lookups; `None` on a machine without them.
     ///
@@ -43,7 +45,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         proof: &ShardProof<SC>,
         pinned: Option<crate::jagged::RecursionPins>,
         machine_has_pv_buses: bool,
-        global_round: Option<&std::collections::BTreeSet<String>>,
+        preceding_rounds: &[&std::collections::BTreeSet<String>],
         global_challenge: Option<
             &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
         >,
@@ -85,7 +87,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 num_pv_elts,
                 pinned,
                 machine_has_pv_buses,
-                global_round,
+                preceding_rounds,
                 global_challenge,
             )
             .map_err(|e| VerificationError::JaggedShardVerifier(format!("{e}")))

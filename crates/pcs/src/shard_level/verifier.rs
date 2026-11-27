@@ -166,12 +166,14 @@ impl JaggedShardVerifier {
     /// name order. `pinned` says whether the machine pins its rounds
     /// (`StarkMachine::recursion_pins`): on a pinned machine the preprocessed
     /// round's area and padding split are those of the proof's pin class, read
-    /// off its padding layout and checked against the rows. `global_round` is
-    /// the machine's global-round chip set (`StarkMachine::global_round`): a
-    /// shard naming any of its chips commits them in a main round of their
-    /// own, observed as `C_global` before `C_main`. `global_challenge` is the
-    /// cross-shard challenge of the global-scope lookups; its digest
-    /// `h_star` opens the transcript.
+    /// off its padding layout and checked against the rows. `preceding_rounds`
+    /// are the chip sets of the trace rounds before the main round, in order:
+    /// a proof naming any chip of a set commits those chips in a round of
+    /// their own, whose commitment is observed, in round order, before
+    /// `C_main`. A shard's only such set is the machine's global-round chip
+    /// set (`StarkMachine::global_round`); a global proof's are its table
+    /// slots but the last. `global_challenge` is the cross-shard challenge of
+    /// the global-scope lookups; its digest `h_star` opens the transcript.
     ///
     /// Returns the shard's global sum `S`: the sum of the fractions of its
     /// global-scope lookups under `global_challenge`, read off the GKR
@@ -192,7 +194,7 @@ impl JaggedShardVerifier {
         num_pv_elts: usize,
         pinned: Option<crate::jagged::RecursionPins>,
         machine_has_pv_buses: bool,
-        global_round: Option<&std::collections::BTreeSet<String>>,
+        preceding_rounds: &[&std::collections::BTreeSet<String>],
         global_challenge: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
     ) -> Result<Challenge<SC>, JaggedShardVerifyError>
     where
@@ -241,16 +243,13 @@ impl JaggedShardVerifier {
             }
         }
 
-        let layout = super::round_layout::TraceRoundLayout::for_chips(chips, global_round);
-        let has_global = layout.has_global();
-        if proof.global_commitment.is_some() != has_global
-            || proof.global_original_commitment.is_some() != has_global
-        {
+        let layout = super::round_layout::TraceRoundLayout::for_rounds(chips, preceding_rounds);
+        if proof.preceding_rounds.len() != layout.preceding().len() {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                "the shard's chips {} a global round, but the proof carries {} commitment \
-                 for one",
-                if has_global { "commit" } else { "do not commit" },
-                if proof.global_commitment.is_some() { "a" } else { "no" },
+                "the shard's chips commit {} trace round(s) before the main round, but the \
+                 proof carries {} commitment(s) for them",
+                layout.preceding().len(),
+                proof.preceding_rounds.len(),
             )));
         }
 
@@ -260,7 +259,7 @@ impl JaggedShardVerifier {
         for &pv in proof.public_values.iter() {
             challenger.observe(pv);
         }
-        for &c in proof.global_commitment.iter().flatten() {
+        for &c in proof.preceding_rounds.iter().flat_map(|round| round.commitment.iter()) {
             challenger.observe(c);
         }
         for &c in proof.main_commitment.iter() {
@@ -393,13 +392,15 @@ impl JaggedShardVerifier {
                     ));
                 }
 
-                if let (Some(observed_global), Some(claimed_raw)) =
-                    (proof.global_commitment.as_ref(), proof.global_original_commitment.as_ref())
-                {
+                let n_preceding = proof.preceding_rounds.len();
+                for (r, round) in proof.preceding_rounds.iter().enumerate() {
+                    let (observed_global, claimed_raw) =
+                        (&round.commitment, &round.original_commitment);
                     let rounds = &bundle.packing.round_counts;
+                    let raws = &bundle.preceding_commits;
                     let (Some(global_round_counts), Some(raw_global)) = (
-                        rounds.len().checked_sub(2).and_then(|i| rounds.get(i)),
-                        bundle.preceding_commits.last(),
+                        rounds.len().checked_sub(n_preceding + 1).and_then(|i| rounds.get(i + r)),
+                        raws.len().checked_sub(n_preceding).and_then(|i| raws.get(i + r)),
                     ) else {
                         return Err(JaggedShardVerifyError::JaggedPcs(
                             "global round: the opening carries no round before the main round"
@@ -489,7 +490,8 @@ impl JaggedShardVerifier {
 /// * `observed_chip_heights` — the h_i the prologue observed, before any
 ///   challenge of this phase: the canonical main-round row counts, against
 ///   which the jagged geometry is checked.
-/// * `layout` — the global- and main-round chip indices, in opening order.
+/// * `layout` — the chip indices of the trace rounds before the main round
+///   and of the main round, in opening order.
 /// * `claimed_prep_pad_columns` — `Some(n)` on a pinned machine, where the
 ///   number of preprocessed padding columns names the proof's pin class;
 ///   `None` for natural rounds.
@@ -874,14 +876,15 @@ where
     use p3_air::BaseAir;
 
     let has_global = layout.has_global();
-    let expected_rounds = usize::from(n_prep > 0) + usize::from(has_global) + 1;
+    let n_preceding = layout.preceding().len();
+    let expected_rounds = usize::from(n_prep > 0) + n_preceding + 1;
     if combined_packing.round_counts.len() != expected_rounds {
         return Err(JaggedShardVerifyError::JaggedPcs(format!(
             "inner bundle describes {} round(s); the machine commits {expected_rounds} \
-             ({} preprocessed chip(s), {} global round, plus the main round)",
+             ({} preprocessed chip(s), {n_preceding} trace round(s) before the main round, \
+             plus the main round)",
             combined_packing.round_counts.len(),
             n_prep,
-            if has_global { "a" } else { "no" },
         )));
     }
     if bundle.preceding_commits.len() + 1 != expected_rounds {
@@ -912,10 +915,10 @@ where
             .collect()
     };
     let first_main_round = usize::from(n_prep > 0);
-    if has_global {
+    for (r, indices) in layout.preceding().iter().enumerate() {
         crate::jagged_pcs::check_round_geometry(
-            &combined_packing.round_counts[first_main_round],
-            &expected_for(layout.global_indices()),
+            &combined_packing.round_counts[first_main_round + r],
+            &expected_for(indices),
             "inner global round",
         )
         .map_err(JaggedShardVerifyError::JaggedPcs)?;
@@ -938,9 +941,10 @@ where
             .copied()
             .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(chip))
     };
-    if has_global {
+    let mut preceding_ends: Vec<usize> = Vec::with_capacity(n_preceding);
+    for indices in layout.preceding() {
         let mut global_cells = 0usize;
-        for &i in layout.global_indices() {
+        for &i in indices {
             let chip = chips[i];
             let h = observed_height(chip);
             let column_count = column_count_at(chip_infos.len(), chip);
@@ -974,6 +978,7 @@ where
                 );
             }
         }
+        preceding_ends.push(chip_infos.len());
     }
     let n_global_end = chip_infos.len();
     for &i in layout.main_indices() {
@@ -1178,17 +1183,19 @@ where
         }
         alloc::vec![(raw.clone(), area)]
     };
-    if has_global {
-        let global_cells: usize = chip_infos[n_prep_infos..n_global_end]
+    let mut round_start = n_prep_infos;
+    for (r, &round_end) in preceding_ends.iter().enumerate() {
+        let global_cells: usize = chip_infos[round_start..round_end]
             .iter()
             .map(|i| i.row_count.saturating_mul(i.column_count))
             .sum();
         let area = global_cells.div_ceil(1usize << log_stack) << log_stack;
         let raw = bundle
             .preceding_commits
-            .get(first_main_round)
+            .get(first_main_round + r)
             .expect("the preceding round count was checked above");
         preceding_rounds.push((raw.clone(), area));
+        round_start = round_end;
     }
 
     if !crate::jagged_pcs::jagged::verify_jagged_no_observe_with_profile(

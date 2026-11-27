@@ -978,7 +978,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     ) -> Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>> {
         let set = self.global_round()?;
         let shard = &proof.jagged_shard_proof;
-        let commitment = shard.global_commitment?;
+        let commitment = shard.global_round()?.commitment;
         let chips = shard
             .chip_heights
             .iter()
@@ -1013,6 +1013,75 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .sum();
         crate::jagged::global_round_dense_len(cells, log_stack, cube) >> log_stack
+    }
+
+    /// Groups consecutive global rounds into global proofs of at most
+    /// `per_proof` rounds: the ranges of `rounds` each proof opens, in order.
+    /// The rounds of one group commit fewer cells together than the area a
+    /// verifier accepts in the trace rounds of one proof, so a round too
+    /// large to share is opened alone.
+    pub fn global_proof_groups<'a>(
+        &self,
+        rounds: impl IntoIterator<Item = &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        per_proof: usize,
+    ) -> Vec<core::ops::Range<usize>>
+    where
+        Val<SC>: 'a,
+    {
+        let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let max_area = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+        let per_proof = per_proof.min(crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
+        let mut groups: Vec<core::ops::Range<usize>> = Vec::new();
+        let mut area = 0usize;
+        for (i, round) in rounds.into_iter().enumerate() {
+            let cells = self.global_round_blocks(round) << log_stack;
+            match groups.last_mut() {
+                Some(group) if group.len() < per_proof && area.saturating_add(cells) < max_area => {
+                    group.end = i + 1;
+                    area += cells;
+                }
+                _ => {
+                    groups.push(i..i + 1);
+                    area = cells;
+                }
+            }
+        }
+        groups
+    }
+
+    /// The global rounds the global proof `proof` opens, read off its table
+    /// slots: slot `s` gives the commitment of the proof's trace round `s`,
+    /// the last one its main round, and the heights of the chips whose views
+    /// the proof names in that slot.
+    pub fn global_proof_rounds(
+        &self,
+        proof: &ShardProof<SC>,
+    ) -> Result<Vec<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, String> {
+        let shard = &proof.jagged_shard_proof;
+        let slots = shard.preceding_rounds.len() + 1;
+        let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        if slots > max {
+            return Err(format!("a global proof opens {slots} rounds, a verifier accepts {max}"));
+        }
+        let mut rounds = shard
+            .preceding_rounds
+            .iter()
+            .map(|round| round.commitment)
+            .chain([shard.main_commitment])
+            .map(|commitment| crate::logup_gkr::GlobalRoundBinding {
+                commitment,
+                chips: Vec::new(),
+            })
+            .collect_vec();
+        for (view, &height) in shard.chip_heights.iter() {
+            let (slot, chip) = crate::air::GlobalView::<A>::slot_and_chip(view)
+                .filter(|(slot, _)| *slot < slots)
+                .ok_or_else(|| {
+                    format!("{view} names no table slot of a global proof of {slots} rounds")
+                })?;
+            rounds[slot].chips.push((chip.to_string(), height));
+        }
+        Ok(rounds)
     }
 
     /// Checks that every chip with a global-scope lookup is committed in
@@ -1250,8 +1319,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     ///   challenge;
     /// * the challenge is the one the hash chain over the shards' global
     ///   rounds gives, behind the proof of work the global proofs carry;
-    /// * each shard with a global round has one global proof, which opens
-    ///   that round under the challenge;
+    /// * each global proof opens one or more of the shards' global rounds
+    ///   under the challenge, and every round a shard committed is opened by
+    ///   exactly one global proof, in any order and any grouping;
     /// * the global proofs' sums add to zero;
     /// * the rounds hold too few lookups for a sum to cancel by wrapping
     ///   around the field's characteristic
@@ -1308,7 +1378,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let committed = rounds.iter().flatten().collect_vec();
         self.check_global_lookup_count(committed.iter().copied()).map_err(invalid)?;
-        if proof.global_proofs.len() != committed.len() {
+        if committed.is_empty() != proof.global_proofs.is_empty() {
             return Err(invalid(format!(
                 "{} shards commit a global round, the proof carries {} global proofs",
                 committed.len(),
@@ -1327,9 +1397,29 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .map_err(invalid)?
             .ok_or_else(|| invalid("the machine has no global lookups".into()))?;
 
+        let mut unopened = committed;
         let mut total = <SC as StarkGenericConfig>::Challenge::ZERO;
-        for (round, global_proof) in committed.into_iter().zip(proof.global_proofs.iter()) {
-            total += self.verify_global_proof(vk, &vk_challenger, round, global_proof, &global)?;
+        for global_proof in proof.global_proofs.iter() {
+            let opened = self.global_proof_rounds(global_proof).map_err(invalid)?;
+            let mut bindings = Vec::with_capacity(opened.len());
+            for round in opened.iter() {
+                let Some(i) = unopened.iter().position(|committed| *committed == round) else {
+                    return Err(invalid(
+                        "a global proof opens a round that no shard committed, or one that \
+                         another global proof opens"
+                            .into(),
+                    ));
+                };
+                bindings.push(unopened.swap_remove(i));
+            }
+            total +=
+                self.verify_global_proof(vk, &vk_challenger, &bindings, global_proof, &global)?;
+        }
+        if !unopened.is_empty() {
+            return Err(invalid(format!(
+                "{} global rounds the shards commit are opened by no global proof",
+                unopened.len(),
+            )));
         }
         if !total.is_zero() {
             tracing::error!("global LogUp sum: {:?}", total);
@@ -1338,19 +1428,21 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         Ok(())
     }
 
-    /// Verifies the global proof of a shard whose global round is `round`,
-    /// under the challenge `global`, in a transcript that starts from
-    /// `vk_challenger` (the machine's challenger after the verifying key).
-    /// Returns the sum of the fractions of the shard's global lookups.
+    /// Verifies the global proof of the shards whose global rounds are
+    /// `rounds`, under the challenge `global`, in a transcript that starts
+    /// from `vk_challenger` (the machine's challenger after the verifying
+    /// key). Returns the sum of the fractions of those shards' global lookups.
     ///
-    /// The proof is a shard proof of the round's chips seen as
-    /// [`crate::air::GlobalView`]s: its only committed round must be the
-    /// round the shard committed, at the same heights.
+    /// The proof is a shard proof of the rounds' chips seen as
+    /// [`crate::air::GlobalView`]s, the chips of `rounds[s]` in the table slot
+    /// `s`: its trace round `s`, the last one its main round, must be the
+    /// round `rounds[s]` a shard committed, at the same heights, and it must
+    /// commit no other round.
     pub fn verify_global_proof(
         &self,
         vk: &StarkVerifyingKey<SC>,
         vk_challenger: &SC::Challenger,
-        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        rounds: &[&crate::logup_gkr::GlobalRoundBinding<Val<SC>>],
         proof: &ShardProof<SC>,
         global: &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
     ) -> Result<<SC as StarkGenericConfig>::Challenge, MachineVerificationError<SC>>
@@ -1367,26 +1459,56 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 reason,
             ))
         };
-        let chips = self.global_view_chips(round, 0).map_err(reject)?;
+        let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        if rounds.is_empty() || rounds.len() > max {
+            return Err(reject(format!(
+                "a global proof opens between one and {max} rounds, not {}",
+                rounds.len(),
+            )));
+        }
         let shard = &proof.jagged_shard_proof;
         if !proof.public_values.is_empty() {
             return Err(reject("a global proof has no public values".into()));
         }
-        if shard.main_commitment != round.commitment {
+        if shard.preceding_rounds.len() + 1 != rounds.len() {
+            return Err(reject(format!(
+                "the global proof commits {} rounds, its shards committed {}",
+                shard.preceding_rounds.len() + 1,
+                rounds.len(),
+            )));
+        }
+        let opened = shard
+            .preceding_rounds
+            .iter()
+            .map(|round| &round.commitment)
+            .chain([&shard.main_commitment]);
+        if !opened.eq(rounds.iter().map(|round| &round.commitment)) {
             return Err(reject(
                 "the global proof opens another round than the one its shard committed".into(),
             ));
         }
-        let heights: std::collections::BTreeMap<String, usize> = round
-            .chips
-            .iter()
-            .map(|(name, height)| (crate::air::GlobalView::<A>::name_in_slot(0, name), *height))
-            .collect();
-        if shard.chip_heights != heights {
+        let mut chips = Vec::new();
+        let mut heights = std::collections::BTreeMap::new();
+        let mut slot_names = Vec::with_capacity(rounds.len());
+        for (slot, round) in rounds.iter().enumerate() {
+            let views = self.global_view_chips(round, slot).map_err(reject)?;
+            if views.is_empty() {
+                return Err(reject("a global proof opens a round without chips".into()));
+            }
+            slot_names.push(
+                views.iter().map(|view| view.name()).collect::<std::collections::BTreeSet<_>>(),
+            );
+            heights.extend(round.chips.iter().map(|(name, height)| {
+                (crate::air::GlobalView::<A>::name_in_slot(slot, name), *height)
+            }));
+            chips.extend(views);
+        }
+        if heights.len() != chips.len() || shard.chip_heights != heights {
             return Err(reject(
-                "the global proof names other tables than its shard's global round".into(),
+                "the global proof names other tables than its shards' global rounds".into(),
             ));
         }
+        slot_names.pop();
         let mut challenger = vk_challenger.clone();
         Verifier::<SC, crate::air::GlobalView<A>>::verify_shard(
             &self.config,
@@ -1397,7 +1519,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             proof,
             None,
             false,
-            None,
+            &slot_names.iter().collect_vec(),
             Some(global),
         )
         .map_err(MachineVerificationError::InvalidGlobalProof)
@@ -1486,7 +1608,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         shard_proof,
                         self.recursion_pins(),
                         has_pv_buses,
-                        self.global_round(),
+                        self.global_round().as_slice(),
                         None,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)

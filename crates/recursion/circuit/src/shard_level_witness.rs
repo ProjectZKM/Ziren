@@ -325,13 +325,15 @@ where
             .iter()
             .map(|round| round.iter().map(|f| f.read(builder)).collect())
             .collect();
-        let global =
-            self.global_original_commitment.zip(self.global_commitment).map(|(raw, commitment)| {
-                RoundCommitments {
-                    raw: core::array::from_fn(|i| raw[i].read(builder)),
-                    hash_bound: core::array::from_fn(|i| commitment[i].read(builder)),
-                }
-            });
+        assert!(
+            self.preceding_rounds.len() <= 1,
+            "a proof verified in a recursion program commits at most one round before its main \
+             round",
+        );
+        let global = self.global_round().map(|round| RoundCommitments {
+            raw: core::array::from_fn(|i| round.original_commitment[i].read(builder)),
+            hash_bound: core::array::from_fn(|i| round.commitment[i].read(builder)),
+        });
         let rounds_witness = ShardRoundsWitness::<C> {
             preprocessed_raw_commit: preprocessed_commit_arr,
             preprocessed_row_counts,
@@ -407,9 +409,8 @@ where
                 f.write(witness);
             }
         }
-        if let Some((raw, commitment)) = self.global_original_commitment.zip(self.global_commitment)
-        {
-            for f in raw.iter().chain(commitment.iter()) {
+        if let Some(round) = self.global_round() {
+            for f in round.original_commitment.iter().chain(round.commitment.iter()) {
                 f.write(witness);
             }
         }

@@ -148,8 +148,9 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
 #[serde(bound = "")]
 pub struct MachineProof<SC: StarkGenericConfig> {
     pub shard_proofs: Vec<ShardProof<SC>>,
-    /// The global proofs of a machine that defers its global lookups, one per
-    /// shard that commits a global round, in shard order; empty otherwise.
+    /// The global proofs of a machine that defers its global lookups: each
+    /// opens one or more of the global rounds the shards commit, and every
+    /// such round is opened by exactly one of them; empty otherwise.
     #[serde(default)]
     pub global_proofs: Vec<ShardProof<SC>>,
 }
