@@ -64,8 +64,11 @@ Initial values of the program image are rows of the preprocessed `MemoryProgram`
 
 Each address may be initialized and finalized once. Both chips enforce it the same way:
 
-- The value is witnessed as 32 bits and the address is bit-decomposed.
-- Consecutive rows are chained on a control bus (`MemoryGlobalInitControl` or `MemoryGlobalFinalizeControl`) carrying `(index, addr, valid)`.
-- Each row asserts `prev_addr < addr` with a 32-bit comparison.
+- The value is four bytes, each range-checked through the byte table.
+- The address is two 16-bit limbs, both range-checked. The high limb is at most `0x7F00`, and when it equals `0x7F00` the low limb is zero, so the limbs spell an integer below the field's order and every address has exactly one limb pair. The largest address, `0x7F000000`, is provable.
+- Consecutive rows are chained on a control bus (`MemoryGlobalInitControl` or `MemoryGlobalFinalizeControl`) carrying the index, the two address limbs and the valid flag, so a row compares against the limbs the row before it range-checked.
+- Each row asserts `prev_addr < addr` by a range check of the difference of the first differing limbs, less one; no assignment accepts a pair that is not strictly increasing.
 
-The chain continues across shards: each shard's first row receives the previous shard's last address from the public values (`previous_init_addr_bits`, `last_init_addr_bits` and the finalize equivalents), and the leaf checks that the ranges of consecutive shards join. The only row exempt from the comparison is the genesis row, index 0 with previous address 0, which initializes and finalizes address 0 to zero.
+A row is 18 columns (it was 152 when the address, the previous address and the value were held as bits).
+
+The chain continues across shards: each shard's first row receives the previous shard's last address from the public values (`previous_init_addr_bits`, `last_init_addr_bits` and the finalize equivalents), and the leaf checks that the ranges of consecutive shards join. The public values hold an address as 32 bit elements; at the two ends of the control bus they send the two limbs those bits spell, the weighted sums of the low 16 and of the high 16 bits. The only row exempt from the comparison is the genesis row, index 0 with previous address 0, which initializes and finalizes address 0 to zero.

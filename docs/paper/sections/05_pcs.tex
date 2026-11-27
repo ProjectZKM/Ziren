@@ -174,7 +174,7 @@ One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots
 \subsection{Quantised committed geometry}
 \label{sec:pcs-geometry}
 
-The stacking height is $H=2^{21}$, so a round is committed as a whole number of $2^{21}$-cell blocks, and a column is at most $2^{22}$ rows, which bounds the gap one synthetic column can absorb. A round with $\nu=\lceil a_r/H\rceil$ blocks of real data is committed in a \emph{bucket} of $\hat\nu$ blocks, where $\hat\nu=\nu$ for $\nu\le4$ and otherwise the next multiple of eight:
+The stacking height is $H=2^{21}$, so a round is committed as a whole number of $2^{21}$-cell blocks. Each machine fixes a row cube that bounds every column: $2^{22}$ rows for the core and wrap machines, $2^{20}$ for the recursion and shrink machines, whose tallest table over every enumerated program is about $10^6$ rows. The cube is a constant of the machine, never read from a proof; the native verifier and the recursive verifier both reject a declared height above it, and a recursion program verifies a child at the cube of the machine that proved the child. A shorter cube removes two rounds from each sumcheck over rows. The cube also bounds the gap one synthetic column can absorb. A round with $\nu=\lceil a_r/H\rceil$ blocks of real data is committed in a \emph{bucket} of $\hat\nu$ blocks, where $\hat\nu=\nu$ for $\nu\le4$ and otherwise the next multiple of eight:
 \[
   1,\;2,\;3,\;4,\;8,\;16,\;24,\;\ldots\ \text{blocks}.
 \]
