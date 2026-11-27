@@ -678,7 +678,10 @@ where
             let committed = rounds
                 .iter()
                 .zip(tables)
-                .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+                .zip(shard_proofs.iter())
+                .filter_map(|((round, tables), proof)| {
+                    Some((proof.global_lane, round.as_ref()?, tables?))
+                })
                 .collect::<Vec<_>>();
             let global_proofs = if committed.is_empty() {
                 Vec::new()
@@ -691,21 +694,14 @@ where
                         shard_proofs.iter().map(|proof| proof.global_lane),
                     )
                     .expect("a machine that defers global lookups has them");
-                let groups = self.machine().global_proof_groups(
-                    committed.iter().map(|(round, _)| *round),
-                    global_rounds_per_proof(),
-                );
+                let groups = self
+                    .machine()
+                    .global_proof_groups_by_lane(committed, global_rounds_per_proof());
                 tracing::info_span!("prove_global_rounds").in_scope(|| {
                     groups
                         .into_par_iter()
                         .map(|group| {
-                            prove_global_rounds(
-                                self.machine(),
-                                pk,
-                                &committed[group],
-                                &global,
-                                challenger,
-                            )
+                            prove_global_rounds(self.machine(), pk, &group, &global, challenger)
                         })
                         .collect()
                 })
@@ -756,14 +752,16 @@ where
     }
 }
 
-/// The global rounds one global proof opens: the environment's
+/// The most global rounds one global proof opens: the environment's
 /// `ZIREN_GLOBAL_ROUNDS_PER_PROOF`, between one and
-/// [`crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF`], and one when unset.
+/// [`crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF`], and that many when
+/// unset.
 pub fn global_rounds_per_proof() -> usize {
+    let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
     std::env::var("ZIREN_GLOBAL_ROUNDS_PER_PROOF")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .map_or(1, |k| k.clamp(1, crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF))
+        .map_or(max, |k| k.clamp(1, max))
 }
 
 /// Proves the sum of the global lookups of a shard, from the global round

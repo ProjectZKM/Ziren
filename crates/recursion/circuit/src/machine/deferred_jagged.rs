@@ -304,7 +304,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
-                None,
+                Vec::new(),
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -373,7 +373,10 @@ pub fn verify_deferred_jagged<C, SC, A>(
             eval_public_values_fn,
             jagged_evaluator_fn,
             None,
-            &vec![false; shard_chips.len()],
+            &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+                shard_chips.len(),
+                Vec::new(),
+            ),
         );
 
         let current_public_values: &RecursionPublicValues<Felt<C::F>> =

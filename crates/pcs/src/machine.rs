@@ -1131,6 +1131,81 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         groups
     }
 
+    /// Groups the consecutive global rounds of one lane of the global hash
+    /// chain, the earliest first, into the global proofs a prover makes of
+    /// them: the ranges of `rounds` each proof opens, in order. The lane's
+    /// rounds alone decide its groups, so a prover with several devices can
+    /// group each lane where its rounds are.
+    ///
+    /// A group holds rounds of one shape, the same chips at the same number of
+    /// stacking blocks, cut by [`crate::logup_gkr::global_round_groups`] and,
+    /// within the area limit and to at most `per_proof` rounds, by
+    /// [`Self::global_proof_groups`]. The rounds of a proof then have one
+    /// geometry, so proofs of as many rounds of one shape are verified by one
+    /// recursion program.
+    pub fn global_lane_proof_groups<'a>(
+        &self,
+        rounds: impl IntoIterator<Item = &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        per_proof: usize,
+    ) -> Vec<core::ops::Range<usize>>
+    where
+        Val<SC>: 'a,
+    {
+        let rounds = rounds.into_iter().collect_vec();
+        let shapes = rounds
+            .iter()
+            .map(|round| {
+                let blocks = self.global_round_blocks(round);
+                let chips = round.chips.iter().map(|(name, _)| name.as_str()).collect_vec();
+                ((chips, blocks), blocks)
+            })
+            .collect_vec();
+        let per_proof = per_proof.clamp(1, crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
+        crate::logup_gkr::global_round_groups(&shapes, per_proof)
+            .into_iter()
+            .flat_map(|group| {
+                let start = group.start;
+                self.global_proof_groups(rounds[group].iter().copied(), per_proof)
+                    .into_iter()
+                    .map(move |part| start + part.start..start + part.end)
+            })
+            .collect()
+    }
+
+    /// Groups the global rounds of a proof into its global proofs. `rounds`
+    /// holds, in shard order, the lane of each round, the round, and what the
+    /// caller keeps with it. A group is the consecutive rounds of one lane
+    /// that one global proof opens, the earliest first
+    /// ([`Self::global_lane_proof_groups`]); the lanes come in order and each
+    /// lane's groups earliest first.
+    ///
+    /// # Panics
+    /// When a round names a lane the chain does not have.
+    #[allow(clippy::type_complexity)]
+    pub fn global_proof_groups_by_lane<'a, T>(
+        &self,
+        rounds: impl IntoIterator<Item = (u8, &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>, T)>,
+        per_proof: usize,
+    ) -> Vec<Vec<(&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>, T)>>
+    where
+        Val<SC>: 'a,
+    {
+        let mut lanes: [Vec<_>; crate::logup_gkr::GLOBAL_CHAIN_LANES] =
+            core::array::from_fn(|_| Vec::new());
+        for (lane, round, kept) in rounds {
+            lanes[usize::from(lane)].push((round, kept));
+        }
+        let mut groups = Vec::new();
+        for of_lane in lanes {
+            let cuts =
+                self.global_lane_proof_groups(of_lane.iter().map(|(round, _)| *round), per_proof);
+            let mut of_lane = of_lane.into_iter();
+            groups
+                .extend(cuts.into_iter().map(|cut| of_lane.by_ref().take(cut.len()).collect_vec()));
+        }
+        groups
+    }
+
     /// The global rounds the global proof `proof` opens, read off its table
     /// slots: slot `s` gives the commitment of the proof's trace round `s`,
     /// the last one its main round, and the heights of the chips whose views

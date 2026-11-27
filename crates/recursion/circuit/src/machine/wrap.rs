@@ -300,7 +300,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     >::insertion_points_from_column_counts(&column_counts_by_round);
     let whir_pv = crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
         main_commit,
-        None,
+        Vec::new(),
         public_values_raw.clone(),
         &logup_gkr_proof,
         &zerocheck_proof,
@@ -372,7 +372,10 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         eval_public_values_fn,
         jagged_evaluator_fn,
         None,
-        &vec![false; shard_chips.len()],
+        &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+            shard_chips.len(),
+            Vec::new(),
+        ),
     );
 
     let public_values: &RootPublicValues<Felt<C::F>> = public_values_raw.as_slice().borrow();

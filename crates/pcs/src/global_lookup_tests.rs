@@ -735,3 +735,76 @@ fn global_rounds_share_a_proof_within_the_area_limit() {
     assert_eq!(groups(&[small, &large, &large, small], 8), [0..2, 2..4]);
     assert_eq!(groups(&[small; 20], usize::MAX), [0..8, 8..16, 16..20]);
 }
+
+/// A lane's rounds share a global proof while they hold the same chips at
+/// the same number of stacking blocks, within the bounds on a proof's rounds,
+/// weight and area; the lanes of a proof are grouped apart, each in order.
+#[test]
+fn a_lane_groups_its_rounds_of_one_shape() {
+    use crate::logup_gkr::{GLOBAL_BLOCKS_PER_PROGRAM, GLOBAL_ROUND_FIXED_BLOCKS};
+    let machine = deferring_machine();
+    let round_of = |chips: &[(&str, usize)]| GlobalRoundBinding {
+        commitment: [F::ZERO; 8],
+        chips: chips.iter().map(|(name, height)| (name.to_string(), *height)).collect(),
+    };
+    let sender = &round_of(&[("BusSender", 1)]);
+    let both = &round_of(&[("BusReceiver", 1), ("BusSender", 1)]);
+    let groups = |rounds: &[&GlobalRoundBinding<F>], per_proof| {
+        machine.global_lane_proof_groups(rounds.iter().copied(), per_proof)
+    };
+    assert_eq!(
+        groups(&[sender, sender, sender, both, both, sender], 8),
+        [0..3, 3..5, 5..6],
+        "a change of chips starts a proof"
+    );
+    assert_eq!(groups(&[both; 20], 8), [0..8, 8..16, 16..20]);
+    assert_eq!(groups(&[both; 5], 2), [0..2, 2..4, 4..5]);
+
+    let tall = (1usize..)
+        .map(|rows| round_of(&[("BusSender", rows << 20)]))
+        .find(|round| {
+            let weight = machine.global_round_blocks(round) + GLOBAL_ROUND_FIXED_BLOCKS;
+            2 * weight <= GLOBAL_BLOCKS_PER_PROGRAM && 3 * weight > GLOBAL_BLOCKS_PER_PROGRAM
+        })
+        .expect("a round that goes two to a proof by weight");
+    assert_eq!(
+        groups(&[sender, sender, &tall, &tall, &tall, sender], 8),
+        [0..2, 2..4, 4..5, 5..6],
+        "rounds of more blocks start a proof and share it by weight"
+    );
+
+    let limit = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+    let block = 1usize << crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+    let large = round_of(&[("BusSender", (1 << 29) / 3)]);
+    let blocks = machine.global_round_blocks(&large);
+    assert!(2 * (blocks + GLOBAL_ROUND_FIXED_BLOCKS) <= GLOBAL_BLOCKS_PER_PROGRAM);
+    assert!(2 * blocks * block >= limit);
+    assert_eq!(
+        groups(&[&large, &large, &large], 8),
+        [0..1, 1..2, 2..3],
+        "two rounds within the weight of a proof but past its area"
+    );
+
+    let by_lane = machine.global_proof_groups_by_lane(
+        [
+            (1, sender, 0),
+            (0, both, 1),
+            (1, sender, 2),
+            (0, sender, 3),
+            (1, both, 4),
+            (0, sender, 5),
+        ],
+        8,
+    );
+    let kept = |group: &Vec<(&GlobalRoundBinding<F>, usize)>| {
+        group.iter().map(|(_, kept)| *kept).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        by_lane.iter().map(kept).collect::<Vec<_>>(),
+        [vec![1], vec![3, 5], vec![0, 2], vec![4]]
+    );
+    assert!(by_lane
+        .iter()
+        .flatten()
+        .all(|(round, kept)| { *round == if [1, 4].contains(kept) { both } else { sender } }));
+}

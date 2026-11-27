@@ -245,91 +245,9 @@ const CORE_CACHE_SIZE: usize = 5;
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 3;
 
-/// The most global rounds one global-round program opens: the global proofs
-/// of up to that many consecutive rounds of one lane and one shape share a
-/// program, and a proof of it.
-pub const GLOBAL_ROUNDS_PER_PROGRAM: usize = 8;
-
-/// The weight of the global rounds one global-round program opens, at most,
-/// unless it opens a single round. A round weighs the stacking blocks it
-/// commits plus [`GLOBAL_ROUND_FIXED_BLOCKS`].
-///
-/// The program has to fit a recursion pin class
-/// (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`), and it grows with the rows its
-/// queries open: every first-round query of a global proof opens one row of
-/// each block of the round. Measured on mainnet blocks, a round of 8 blocks
-/// costs the program 10,792 hash rows and one of 232 blocks 71,224, so 270
-/// rows a block and 32 blocks' worth besides; the largest class holds about
-/// 200,000 hash rows, 740 in this weight, and the bound leaves a fifth of it
-/// free.
-pub const GLOBAL_BLOCKS_PER_PROGRAM: usize = 576;
-
-/// What a global round weighs besides its blocks: the part of verifying its
-/// global proof that does not grow with the round.
-pub const GLOBAL_ROUND_FIXED_BLOCKS: usize = 32;
-
-/// Cuts the consecutive global rounds of one lane into the groups that one
-/// global-round program each opens, in order. `rounds` holds the shape and
-/// the stacking blocks of each round. A group holds rounds of one shape, at
-/// most `max_rounds` of them, and weighs at most
-/// [`GLOBAL_BLOCKS_PER_PROGRAM`] unless it is a single round.
-pub fn global_round_groups<S: PartialEq>(
-    rounds: &[(S, usize)],
-    max_rounds: usize,
-) -> Vec<std::ops::Range<usize>> {
-    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
-    let mut weight = 0;
-    for (round, (shape, blocks)) in rounds.iter().enumerate() {
-        let round_weight = blocks + GLOBAL_ROUND_FIXED_BLOCKS;
-        match groups.last_mut() {
-            Some(group)
-                if group.len() < max_rounds
-                    && rounds[group.start].0 == *shape
-                    && weight + round_weight <= GLOBAL_BLOCKS_PER_PROGRAM =>
-            {
-                group.end += 1;
-                weight += round_weight;
-            }
-            _ => {
-                groups.push(round..round + 1);
-                weight = round_weight;
-            }
-        }
-    }
-    groups
-}
-
-/// Cuts the global rounds of a proof into the groups that one global-round
-/// program each opens, in the order the compress tree takes them. `rounds`
-/// holds the lane, the shape and the stacking blocks of each round, in shard
-/// order. A group is the lane and the indices of consecutive rounds of that
-/// lane, the earliest first, cut by [`global_round_groups`].
-///
-/// The lanes come in descending order and each lane's groups latest first,
-/// so that every program finds the lane it steps back at the head its rounds
-/// end at: the lanes above it are back at their start and the lanes below it
-/// still at their end.
-pub fn global_round_lane_groups<S: PartialEq + Clone>(
-    rounds: &[(u8, S, usize)],
-    max_rounds: usize,
-) -> Vec<(u8, Vec<usize>)> {
-    let mut groups = Vec::new();
-    for lane in (0..zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES as u8).rev() {
-        let (indices, of_lane): (Vec<usize>, Vec<(S, usize)>) = rounds
-            .iter()
-            .enumerate()
-            .filter(|(_, round)| round.0 == lane)
-            .map(|(index, (_, shape, blocks))| (index, (shape.clone(), *blocks)))
-            .unzip();
-        groups.extend(
-            global_round_groups(&of_lane, max_rounds)
-                .into_iter()
-                .rev()
-                .map(|group| (lane, indices[group].to_vec())),
-        );
-    }
-    groups
-}
+pub use zkm_pcs::logup_gkr::{
+    global_round_groups, GLOBAL_BLOCKS_PER_PROGRAM, GLOBAL_ROUND_FIXED_BLOCKS,
+};
 
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
@@ -1285,7 +1203,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// The program that verifies the global proofs of `input`, cached by
-    /// their number and shapes.
+    /// their number and shapes: the table slots of each and their chips.
     pub fn global_round_program(
         &self,
         input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
@@ -1793,85 +1711,114 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
     }
 
-    /// The inputs of the global-round programs of a core proof, in the order
-    /// the compress tree takes them: before the shards, in the order of
-    /// [`global_round_lane_groups`], so that each one starts the global hash
-    /// chain where the one before it ends. `shard_proofs[i]`'s round is
-    /// opened by the `global_proofs` entry at its position among the shards
-    /// that commit one, and one program opens the consecutive rounds of one
-    /// lane of one group.
+    /// The inputs of the global-round programs of a core proof, one for each
+    /// global proof, in the order the compress tree takes them: before the
+    /// shards, the lanes in descending order and each lane's proofs latest
+    /// first, so that each one starts the global hash chain where the one
+    /// before it ends. Every program finds the lane it steps back at the head
+    /// its rounds end at: the lanes above it are back at their start and the
+    /// lanes below it still at their end.
+    ///
+    /// A global proof is placed by the rounds it opens
+    /// (`StarkMachine::global_proof_rounds`), whatever its position in
+    /// `global_proofs`: they must be consecutive rounds of one lane, in the
+    /// lane's order, and the proofs together must open every round the shards
+    /// commit once.
     pub fn get_recursion_global_round_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
         global_proofs: &[ShardProof<CoreSC>],
-    ) -> Vec<zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>> {
+    ) -> Result<
+        Vec<zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>>,
+        ZKMRecursionProverError,
+    > {
+        let invalid = |reason: String| {
+            ZKMRecursionProverError::RuntimeError(format!("invalid global proofs: {reason}"))
+        };
         let lanes = self.global_lanes(vk, shard_proofs);
         let machine = self.core_prover.machine();
-        let global_h_star =
-            machine.global_chain_value(lanes.last().expect("the chain holds at least its start"));
-        let committed = shard_proofs
-            .iter()
-            .enumerate()
-            .filter_map(|(shard, proof)| {
-                let round = machine.global_round_binding(proof)?;
-                Some((shard, proof.global_lane, machine.global_round_blocks(&round)))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            committed.len(),
-            global_proofs.len(),
-            "a core proof holds one global proof for each shard with a global round"
-        );
-        let rounds = global_proofs
-            .iter()
-            .zip(&committed)
-            .map(|(proof, (_, lane, blocks))| {
-                let shape = zkm_recursion_circuit::machine::global_proof_shape_key(
-                    &proof.jagged_shard_proof,
-                );
-                (*lane, shape, *blocks)
-            })
-            .collect::<Vec<_>>();
-        let mut heads = *lanes.last().expect("the chain holds at least its start");
-        global_round_lane_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM)
+        let end = *lanes.last().expect("the chain holds at least its start");
+        let global_h_star = machine.global_chain_value(&end);
+        let mut committed: [Vec<_>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES] =
+            core::array::from_fn(|_| Vec::new());
+        for (shard, proof) in shard_proofs.iter().enumerate() {
+            let Some(round) = machine.global_round_binding(proof) else {
+                continue;
+            };
+            committed
+                .get_mut(usize::from(proof.global_lane))
+                .ok_or_else(|| {
+                    invalid(format!("shard {shard} is on the lane {}", proof.global_lane))
+                })?
+                .push((shard, round, false));
+        }
+        let mut placed = Vec::with_capacity(global_proofs.len());
+        for proof in global_proofs {
+            let rounds = machine.global_proof_rounds(proof).map_err(invalid)?;
+            let place = committed.iter().enumerate().find_map(|(lane, of_lane)| {
+                of_lane
+                    .windows(rounds.len())
+                    .position(|window| {
+                        window
+                            .iter()
+                            .zip(&rounds)
+                            .all(|((_, round, opened), opens)| !*opened && round == opens)
+                    })
+                    .map(|first| (lane, first))
+            });
+            let Some((lane, first)) = place else {
+                return Err(invalid(
+                    "a global proof does not open consecutive rounds of one lane, in the lane's \
+                     order, that no other global proof opens"
+                        .into(),
+                ));
+            };
+            for (_, _, opened) in &mut committed[lane][first..first + rounds.len()] {
+                *opened = true;
+            }
+            placed.push((lane, first, proof));
+        }
+        let unopened = committed.iter().flatten().filter(|(_, _, opened)| !*opened).count();
+        if unopened != 0 {
+            return Err(invalid(format!(
+                "{unopened} global rounds the shards commit are opened by no global proof"
+            )));
+        }
+        placed.sort_by_key(|(lane, first, _)| std::cmp::Reverse((*lane, *first)));
+        let mut heads = end;
+        Ok(placed
             .into_iter()
-            .map(|(lane, group)| {
-                let first_shard = committed[group[0]].0;
-                heads[usize::from(lane)] = lanes[first_shard][usize::from(lane)];
-                self.get_recursion_global_round_input(
-                    vk,
-                    group.iter().map(|&round| &global_proofs[round]),
-                    heads,
-                    lane,
-                    global_h_star,
-                )
+            .map(|(lane, first, proof)| {
+                heads[lane] = lanes[committed[lane][first].0][lane];
+                self.get_recursion_global_round_input(vk, proof, heads, lane as u8, global_h_star)
             })
-            .collect()
+            .collect())
     }
 
-    /// The global-round input of the global proofs of consecutive rounds of
-    /// lane `global_lane`, the earliest first: `global_lanes` holds the lane
-    /// heads of the global hash chain before the first of those rounds and
-    /// `global_h_star` is the chain's end.
-    pub fn get_recursion_global_round_input<'a>(
+    /// The global-round input of one global proof, which opens consecutive
+    /// rounds of lane `global_lane` in the order of its table slots:
+    /// `global_lanes` holds the lane heads of the global hash chain before
+    /// the first of those rounds and `global_h_star` is the chain's end. The
+    /// heads of the other lanes only pass through the program, so a prover
+    /// with several devices builds the input of a proof from the state of
+    /// its lane and the heads the compress tree reaches the proof with.
+    pub fn get_recursion_global_round_input(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
-        global_proofs: impl IntoIterator<Item = &'a ShardProof<CoreSC>>,
+        global_proof: &ShardProof<CoreSC>,
         global_lanes: zkm_pcs::logup_gkr::GlobalLanes<KoalaBear>,
         global_lane: u8,
         global_h_star: [KoalaBear; DIGEST_SIZE],
     ) -> zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC> {
-        let global_proofs = global_proofs.into_iter().collect::<Vec<_>>();
-        let first = global_proofs.first().expect("a global-round program opens at least one round");
         zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
             vk: vk.clone(),
-            proofs: global_proofs.iter().map(|proof| (*proof.jagged_shard_proof).clone()).collect(),
+            proofs: vec![(*global_proof.jagged_shard_proof).clone()],
             vk_root: self.recursion_vk_root,
             global_lanes,
             global_lane,
             global_h_star,
-            global_pow_witness: first
+            global_pow_witness: global_proof
                 .jagged_shard_proof
                 .global_pow_witness
                 .unwrap_or(KoalaBear::ZERO),
@@ -1942,11 +1889,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         global_proofs: &[ShardProof<CoreSC>],
         deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
-    ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
+    ) -> Result<Vec<ZKMCircuitWitness>, ZKMRecursionProverError> {
         let mut inputs = Vec::new();
 
         let global_inputs =
-            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs);
+            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs)?;
+        tracing::debug!(
+            "emitting {} GlobalJagged witness(es) of {:?} round(s), {} program shape(s)",
+            global_inputs.len(),
+            global_inputs.iter().map(|input| input.rounds()).collect::<Vec<_>>(),
+            global_inputs.iter().map(|input| input.shape_key()).collect::<BTreeSet<_>>().len(),
+        );
         inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
         let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, false);
@@ -1992,8 +1945,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )?;
 
         let num_first_layer_inputs = first_layer_inputs.len();
-        let mut chain =
-            crate::compress_tree::ShardChain::with_global_rounds(proof.proof.1.len() as u64);
+        let global_rounds: usize = first_layer_inputs
+            .iter()
+            .map(|input| match input {
+                ZKMCircuitWitness::GlobalJagged(input) => input.rounds(),
+                _ => 0,
+            })
+            .sum();
+        let mut chain = crate::compress_tree::ShardChain::with_global_rounds(global_rounds as u64);
         let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
             first_layer_inputs
                 .into_iter()
@@ -2001,7 +1960,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let range = match &input {
                         ZKMCircuitWitness::DeferredJagged(_) => chain.deferred(),
                         ZKMCircuitWitness::GlobalJagged(input) => {
-                            chain.global_rounds(input.proofs.len() as u64)
+                            chain.global_rounds(input.rounds() as u64)
                         }
                         _ => chain.core(),
                     };
@@ -3611,23 +3570,6 @@ pub mod tests {
         Ok(())
     }
 
-    /// The rounds of a large block, as `(shape, stacking blocks)`: small
-    /// rounds fill a program by count, a change of shape starts a program, the
-    /// memory shards' rounds of 232 blocks go two to a program (four of them in
-    /// one program fit no pin class), and a round past the whole budget still
-    /// gets a program of its own.
-    #[test]
-    fn global_round_groups_bound_what_a_program_opens() {
-        let mut rounds: Vec<(u8, usize)> = vec![(0, 8)];
-        rounds.extend([(1, 8); 19]);
-        rounds.extend([(2, 232); 5]);
-        rounds.push((3, 1024));
-        rounds.push((3, 1024));
-        let groups = global_round_groups(&rounds, GLOBAL_ROUNDS_PER_PROGRAM);
-        assert_eq!(groups, vec![0..1, 1..9, 9..17, 17..20, 20..22, 22..24, 24..25, 25..26, 26..27]);
-        assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
-    }
-
     /// The fibonacci test guest reads its `n` from standard input (as
     /// `examples/fibonacci` does), so every caller has to supply one. Ten keeps
     /// the cycle count the tests were tuned against.
@@ -3695,7 +3637,8 @@ pub mod tests {
     }
 
     /// Core + compress of an execution cut into several shards, whose global
-    /// rounds are on several lanes of the global hash chain.
+    /// rounds are on several lanes of the global hash chain and share global
+    /// proofs.
     #[test]
     #[serial]
     #[ignore]
@@ -3706,7 +3649,7 @@ pub mod tests {
         let mut opts = ZKMProverOpts::default();
         opts.core_opts.shard_size = 1 << 10;
         let core =
-            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+            prover.prove_core(&pk_d, program, &fib_stdin(1000), opts, ZKMContext::default())?;
         let machine = prover.core_prover.machine();
         let lanes = core
             .proof
@@ -3716,6 +3659,16 @@ pub mod tests {
             .map(|shard| shard.global_lane)
             .collect::<std::collections::BTreeSet<_>>();
         assert!(lanes.len() > 2, "the proof's global rounds are on the lanes {lanes:?}");
+        let rounds_opened = core
+            .proof
+            .1
+            .iter()
+            .map(|proof| proof.jagged_shard_proof.preceding_rounds.len() + 1)
+            .collect::<Vec<_>>();
+        assert!(
+            rounds_opened.iter().any(|rounds| *rounds > 1),
+            "the global proofs open {rounds_opened:?} rounds"
+        );
         prover.verify(&core.proof, &vk)?;
         let compressed = prover.compress(&vk, core, vec![], opts)?;
         prover.verify_compressed(&compressed, &vk)?;
@@ -4012,7 +3965,8 @@ pub mod tests {
         let machine = prover.core_prover.machine();
         let chain = prover.global_chain(&vk.vk, &core.proof.0);
         let h_star = *chain.last().unwrap();
-        let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &core.proof.0, &core.proof.1);
+        let inputs =
+            prover.get_recursion_global_round_inputs(&vk.vk, &core.proof.0, &core.proof.1)?;
         let lanes_in_use = core
             .proof
             .0
@@ -4109,6 +4063,243 @@ pub mod tests {
             Some(chain[committing + 1]),
             "a shard on another lane still ends at the host's chain value"
         );
+        Ok(())
+    }
+
+    /// The shards of the fibonacci guest on the input `n`, cut small, each
+    /// proven on its own with its global round on the lane `lane_of` gives it
+    /// by its position among the global rounds: the shard proofs, each global
+    /// round with its lane and tables in shard order, the global challenge,
+    /// and the core machine's challenger after the verifying key.
+    #[allow(clippy::type_complexity)]
+    fn prove_shards_on_lanes(
+        prover: &ZKMProver<DefaultProverComponents>,
+        pk: &DeviceProvingKey<DefaultProverComponents>,
+        program: &Program,
+        n: u32,
+        lane_of: impl Fn(usize) -> u8,
+    ) -> Result<(
+        Vec<ShardProof<CoreSC>>,
+        Vec<(u8, zkm_pcs::logup_gkr::GlobalRoundBinding<KoalaBear>, zkm_pcs::Traces<KoalaBear>)>,
+        zkm_pcs::logup_gkr::GlobalChallenge<KoalaBear, Challenge<CoreSC>>,
+        <CoreSC as StarkGenericConfig>::Challenger,
+    )> {
+        let core = &prover.core_prover;
+        let machine = core.machine();
+        let opts = ZKMCoreOpts { shard_size: 1 << 10, ..ZKMCoreOpts::default() };
+        let records = zkm_core_machine::utils::shard_records::<CoreSC, _>(
+            core,
+            program,
+            &fib_stdin(n),
+            opts,
+        )?;
+        let mut challenger = machine.config().challenger();
+        pk.observe_into(&mut challenger);
+        let mut shard_proofs = Vec::new();
+        let mut committed = Vec::new();
+        for record in records.iter() {
+            let traces = core.generate_traces(record).expect("the shard's traces");
+            let data = core.commit(record, traces, None);
+            let tables = core.global_round_tables(&data);
+            let mut proof = core.open(pk, data, &mut challenger.clone()).expect("the shard proof");
+            if let (Some(round), Some(tables)) = (machine.global_round_binding(&proof), tables) {
+                proof.global_lane = lane_of(committed.len());
+                committed.push((proof.global_lane, round, tables));
+            }
+            shard_proofs.push(proof);
+        }
+        let rounds = shard_proofs
+            .iter()
+            .map(|proof| machine.global_round_binding(proof))
+            .collect::<Vec<_>>();
+        let global = machine
+            .global_challenge(
+                &challenger,
+                rounds.iter().map(Option::as_ref),
+                shard_proofs.iter().map(|proof| proof.global_lane),
+            )
+            .expect("the core machine has global lookups");
+        Ok((shard_proofs, committed, global, challenger))
+    }
+
+    /// A global proof opens several rounds of one lane, one in each table
+    /// slot, and its program steps the lane over them in slot order: the
+    /// programs of a proof of three rounds and of one of eight unwind the
+    /// chain as the host does and carry the host's sums and lookup counts. A
+    /// proof whose slots hold the rounds in another order verifies but leaves
+    /// the chain elsewhere, and has no place among the leaves; a slot whose
+    /// commitment is replaced by another round's is rejected.
+    #[test]
+    #[serial]
+    #[ignore = "proves a core execution; run with --ignored"]
+    fn global_round_program_opens_the_rounds_of_a_grouped_proof() -> Result<()> {
+        use p3_field::BasedVectorSpace;
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
+        let (_, pk_d, program, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
+        let machine = prover.core_prover.machine();
+        let (shard_proofs, committed, global, challenger) =
+            prove_shards_on_lanes(&prover, &pk_d, &program, 1500, |round| {
+                if round % 4 == 3 {
+                    2
+                } else {
+                    5
+                }
+            })?;
+        let lane =
+            (0..committed.len()).filter(|&round| committed[round].0 == 5).collect::<Vec<_>>();
+        assert!(lane.len() >= 11, "lane 5 holds {} of {} rounds", lane.len(), committed.len());
+
+        let prove = |rounds: &[usize]| {
+            let rounds = rounds
+                .iter()
+                .map(|&round| (&committed[round].1, committed[round].2.clone()))
+                .collect::<Vec<_>>();
+            prover
+                .core_prover
+                .prove_global_rounds(&pk_d, &rounds, &global, &challenger)
+                .expect("the global proof")
+        };
+        let mut global_proofs = vec![prove(&lane[..3]), prove(&lane[3..11])];
+        let rest = machine.global_proof_groups_by_lane(
+            committed
+                .iter()
+                .enumerate()
+                .filter(|(round, _)| !lane[..11].contains(round))
+                .map(|(round, (lane, binding, _))| (*lane, binding, round)),
+            zkm_pcs::global_rounds_per_proof(),
+        );
+        for group in rest {
+            global_proofs.push(prove(&group.iter().map(|(_, round)| *round).collect::<Vec<_>>()));
+        }
+        let core_proof = zkm_pcs::MachineProof {
+            shard_proofs: shard_proofs.clone(),
+            global_proofs: global_proofs.clone(),
+        };
+        machine
+            .verify(&vk.vk, &core_proof, &mut machine.config().challenger())
+            .expect("the host rejects the grouped global proofs");
+
+        let chain = prover.global_chain(&vk.vk, &shard_proofs);
+        let h_star = *chain.last().unwrap();
+        let inputs =
+            prover.get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &global_proofs)?;
+        let run = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
+            let mut ws = Vec::new();
+            Witnessable::<InnerConfig>::write(input, &mut ws);
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                prover.global_round_program(input).0,
+                prover.compress_prover.machine().config().perm.clone(),
+            );
+            runtime.witness_stream = ws.into();
+            match catch_unwind(AssertUnwindSafe(|| runtime.run())) {
+                Ok(Ok(())) => Some(runtime.record.public_values),
+                _ => None,
+            }
+        };
+        let host_sum =
+            |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
+                let proof = global_proofs
+                    .iter()
+                    .find(|proof| {
+                        proof.jagged_shard_proof.main_commitment == input.proofs[0].main_commitment
+                    })
+                    .expect("the input holds one of the global proofs");
+                let rounds = machine.global_proof_rounds(proof).expect("the proof's rounds");
+                machine
+                    .verify_global_proof(
+                        &vk.vk,
+                        &challenger,
+                        &rounds.iter().collect::<Vec<_>>(),
+                        proof,
+                        &global,
+                    )
+                    .expect("the host rejects the global proof")
+            };
+
+        let mut after = h_star;
+        let mut units = 0u64;
+        let mut three = None;
+        let mut rounds_opened = Vec::new();
+        for input in inputs.iter() {
+            let public_values = run(input).expect("the honest global proof is rejected");
+            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(
+                public_values.global_chain_end,
+                machine.global_chain_value(&input.global_lanes)
+            );
+            assert_eq!(
+                public_values.global_sum.as_slice(),
+                host_sum(input).as_basis_coefficients_slice(),
+                "the leaf sums other lookups than the host"
+            );
+            after = public_values.global_chain_end;
+            units += u64::from(public_values.global_lookup_units.as_canonical_u32());
+            rounds_opened.push(input.rounds());
+            if input.rounds() == 3 && input.global_lane == 5 {
+                three = Some((input, public_values));
+            }
+        }
+        assert_eq!(after, chain[0], "the global proofs do not unwind the chain to its origin");
+        assert!(rounds_opened.contains(&8), "the proofs open {rounds_opened:?} rounds");
+        let host_units: u64 = committed
+            .iter()
+            .map(|(_, round, _)| {
+                zkm_pcs::logup_gkr::global_lookup_units(machine.global_lookup_count(round))
+            })
+            .sum();
+        assert_eq!(units, host_units, "the leaves count other global lookups than the host");
+
+        let (honest, honest_values) = three.expect("a proof of three rounds of lane 5");
+        let swapped = prove(&[lane[1], lane[0], lane[2]]);
+        let mut swapped_proofs = global_proofs.clone();
+        swapped_proofs[0] = swapped.clone();
+        let swapped_core = zkm_pcs::MachineProof {
+            shard_proofs: shard_proofs.clone(),
+            global_proofs: swapped_proofs.clone(),
+        };
+        machine
+            .verify(&vk.vk, &swapped_core, &mut machine.config().challenger())
+            .expect("the host verifier takes the rounds of a global proof in any order");
+        assert!(
+            prover
+                .get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &swapped_proofs)
+                .is_err(),
+            "a global proof that opens its rounds out of the lane's order was given a leaf"
+        );
+        let swapped_values = run(&prover.get_recursion_global_round_input(
+            &vk.vk,
+            &swapped,
+            honest.global_lanes,
+            honest.global_lane,
+            h_star,
+        ))
+        .expect("a valid global proof is rejected");
+        assert_eq!(swapped_values.global_chain_end, honest_values.global_chain_end);
+        assert_ne!(
+            swapped_values.global_chain_start, honest_values.global_chain_start,
+            "rounds opened out of the lane's order still link the chain"
+        );
+
+        let mut observed = honest.clone();
+        let slots = &mut observed.proofs[0].preceding_rounds;
+        slots[0].commitment = slots[1].commitment;
+        assert!(run(&observed).is_none(), "a slot passed under another round's commitment");
+
+        let mut replaced = honest.clone();
+        let slots = &mut replaced.proofs[0].preceding_rounds;
+        slots[0] = slots[1];
+        assert!(run(&replaced).is_none(), "a slot passed as another round");
+
+        let mut exchanged = honest.clone();
+        exchanged.proofs[0].preceding_rounds.swap(0, 1);
+        assert!(run(&exchanged).is_none(), "two slots passed with their commitments exchanged");
+
+        let mut last = honest.clone();
+        let proof = &mut last.proofs[0];
+        core::mem::swap(&mut proof.preceding_rounds[1].commitment, &mut proof.main_commitment);
+        assert!(run(&last).is_none(), "the last slot passed under another round's commitment");
         Ok(())
     }
 

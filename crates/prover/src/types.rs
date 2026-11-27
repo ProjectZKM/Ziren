@@ -142,7 +142,8 @@ pub type ZKMGroth16Bn254Proof = ZKMProofWithMetadata<ZKMGroth16Bn254ProofData>;
 pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
 /// A core proof: the shard proofs, then the global proofs, which prove the
-/// lookups that cross shards, one for each shard that commits a global round.
+/// lookups that cross shards and each open the global rounds of one or
+/// several shards.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMCoreProofData(
     pub Vec<ShardProof<CoreSC>>,

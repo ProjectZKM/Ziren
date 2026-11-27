@@ -306,7 +306,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
-                None,
+                Vec::new(),
                 public_values,
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -373,7 +373,10 @@ pub fn verify_compress_jagged<C, SC, A>(
             _eval_public_values_fn,
             _jagged_evaluator_fn,
             None,
-            &vec![false; _shard_chips.len()],
+            &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+            _shard_chips.len(),
+            Vec::new(),
+        ),
         );
 
         _pubvals_for_aggregate

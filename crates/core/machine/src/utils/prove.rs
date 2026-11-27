@@ -159,7 +159,8 @@ where
     let committed = rounds
         .iter()
         .zip(tables)
-        .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+        .zip(shard_proofs.iter())
+        .filter_map(|((round, tables), proof)| Some((proof.global_lane, round.as_ref()?, tables?)))
         .collect::<Vec<_>>();
     let global_proofs = tracing::debug_span!("prove global rounds").in_scope(|| {
         let Some(global) = prover
@@ -175,14 +176,9 @@ where
         };
         prover
             .machine()
-            .global_proof_groups(
-                committed.iter().map(|(round, _)| *round),
-                zkm_pcs::global_rounds_per_proof(),
-            )
+            .global_proof_groups_by_lane(committed, zkm_pcs::global_rounds_per_proof())
             .into_iter()
-            .map(|group| {
-                prover.prove_global_rounds(pk, &committed[group], &global, &challenger).unwrap()
-            })
+            .map(|group| prover.prove_global_rounds(pk, &group, &global, &challenger).unwrap())
             .collect()
     });
 
