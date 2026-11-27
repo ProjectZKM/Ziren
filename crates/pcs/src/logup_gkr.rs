@@ -295,6 +295,44 @@ pub const fn global_round_leaf_cells(blocks: usize, chips: usize, columns: usize
         + columns * GLOBAL_LEAF_COLUMN_CELLS
 }
 
+/// The rows of the tallest table of the recursion program that verifies a
+/// global proof, before any round, by the estimate of
+/// [`global_round_leaf_rows`].
+pub const GLOBAL_LEAF_FIXED_ROWS: usize = 16_000;
+
+/// The rows each round adds to that table, whatever the round holds.
+pub const GLOBAL_LEAF_ROUND_ROWS: usize = 30_592;
+
+/// The rows each stacking block of a round adds to that table.
+pub const GLOBAL_LEAF_BLOCK_ROWS: usize = 1_040;
+
+/// What a global round of `blocks` stacking blocks adds to the tallest table
+/// of the recursion program that verifies its global proof, in rows,
+/// estimated from above.
+///
+/// Measured on the programs of every enumerated global-round shape: a round
+/// of 8 blocks adds 38,912 rows to `Select` whatever its tables, and a round
+/// of more blocks adds about 22,000 rows plus 1,030 per block to `MemoryVar`.
+/// The programs of 1 round of 8 blocks have 50,024 rows in `Select`.
+pub const fn global_round_leaf_rows(blocks: usize) -> usize {
+    GLOBAL_LEAF_ROUND_ROWS + blocks * GLOBAL_LEAF_BLOCK_ROWS
+}
+
+/// The most rounds of `blocks` stacking blocks one global proof opens so that
+/// every table of the recursion program that verifies it fits the row cube
+/// of the recursion machines
+/// (`crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT`), by
+/// the estimate of [`global_round_leaf_rows`]; at least one.
+pub const fn global_rounds_within_the_row_cube(blocks: usize) -> usize {
+    let rows = 1usize << crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
+    let rounds = (rows - GLOBAL_LEAF_FIXED_ROWS) / global_round_leaf_rows(blocks);
+    if rounds == 0 {
+        1
+    } else {
+        rounds
+    }
+}
+
 /// Cuts consecutive global rounds, each given by the stacking blocks it
 /// commits, into groups of at most `per_proof` rounds, and at most
 /// [`MAX_GLOBAL_ROUNDS_PER_PROOF`], that one global proof each opens, in

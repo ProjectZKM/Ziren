@@ -259,10 +259,9 @@ where
         commit_data,
         preceding_rounds,
         global_challenge,
+        max_log_row_count,
     } = data;
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
-    let max_log_row_count =
-        crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     debug_assert!(
         main_traces.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "prove_shard_with_data: main_traces padded to a cube != the fixed \

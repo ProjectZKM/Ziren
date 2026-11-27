@@ -154,14 +154,12 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
     /// common shape: every leaf, compose and deferred proof commits under a
     /// pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`, the smallest its
     /// rows fit), so the program verifying it reads the class's geometry, not
-    /// these rows.  The row cube
-    /// (`2^max_log_row_count`) is the only cap; a program past it cannot be
-    /// proved at all.
+    /// these rows.  The row cube of the recursion machines
+    /// (`2^RECURSION_MAX_LOG_ROW_COUNT`) is the only cap; a program past it
+    /// cannot be proved at all.
     pub fn organic_shape(heights: &[(String, usize)]) -> BTreeMap<String, usize> {
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
-        let cube = 1usize
-            << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let cube = 1usize << zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
         heights
             .iter()
             .map(|(name, height)| {
@@ -322,8 +320,7 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> Default
                 "the class-{index} dummy shape must land in class {index}",
             );
         }
-        let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count;
+        let cube = zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
         for shape in allowed_shapes.iter() {
             for (name, rows) in shape.iter() {
                 assert!(

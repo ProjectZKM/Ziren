@@ -4,6 +4,7 @@ use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use zkm_pcs::{
     air::{MachineAir, PicusInfo},
     shape::OrderedShape,
+    stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };
 
@@ -89,6 +90,7 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> Recursio
         .collect::<Vec<_>>();
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
             .with_recursion_pins(Some(zkm_pcs::jagged::RECURSION_PINS))
+            .with_max_log_row_count(RECURSION_MAX_LOG_ROW_COUNT)
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -105,12 +107,14 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> Recursio
         .into_iter()
         .collect::<Vec<_>>();
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
+            .with_max_log_row_count(RECURSION_MAX_LOG_ROW_COUNT)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.
     ///
     /// This machine assumes that the `shrink` stage has a fixed shape, so there is no need to
-    /// fix the trace sizes.
+    /// fix the trace sizes.  It keeps the core row cube: the outer circuit verifies its proof,
+    /// and that circuit's constraints are a function of this machine's cube alone.
     pub fn wrap_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),

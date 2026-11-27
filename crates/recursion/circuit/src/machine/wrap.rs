@@ -152,6 +152,11 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let jagged_vk = crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
         builder, &vk_legacy,
     );

@@ -734,9 +734,7 @@ impl ZKMProofShape {
             zkm_pcs::jagged::global_round_dense_len(
                 global,
                 LOG_STACK,
-                1usize
-                    << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                        .max_log_row_count,
+                1usize << machine.max_log_row_count(),
             ) / block,
             zkm_pcs::jagged::committed_dense_len(main, LOG_STACK) / block,
         )
@@ -948,8 +946,8 @@ mod tests {
         caps_sorted.sort();
         tracing::info!("[FIXPOINT] shape = {caps_sorted:?} cells={}", cells(&caps_sorted));
 
-        let max_log_row_count = ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
         let machine = prover.compress_prover.machine();
+        let max_log_row_count = machine.max_log_row_count();
         let mut worst: std::collections::BTreeMap<String, (usize, String)> =
             std::collections::BTreeMap::new();
         let mut overflow = Vec::new();

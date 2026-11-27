@@ -63,6 +63,7 @@ fn main() {
             machine.has_public_value_buses(),
             machine.global_round().as_slice(),
             None,
+            machine.max_log_row_count(),
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());
         match result {

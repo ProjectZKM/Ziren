@@ -300,9 +300,7 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_witness(&machine);
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let max_log_row_count = machine.max_log_row_count();
         let program = build_normalize_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
             &witness,
@@ -320,9 +318,7 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_witness(&machine);
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let max_log_row_count = machine.max_log_row_count();
         let program = build_normalize_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
             &witness,
@@ -376,9 +372,7 @@ mod tests {
         use zkm_pcs::shape::OrderedShape;
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let max_log_row_count = machine.max_log_row_count();
 
         let addsub_width = {
             use p3_air::BaseAir;

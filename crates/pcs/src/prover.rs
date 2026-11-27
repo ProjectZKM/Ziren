@@ -157,6 +157,9 @@ where
     pub global_challenge: Option<
         &'a crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
     >,
+    /// The machine's row cube: every trace is padded to
+    /// `2^max_log_row_count` rows.
+    pub max_log_row_count: usize,
 }
 
 /// What `commit()` retains for the shard prove — the jagged hash-bind digest
@@ -243,10 +246,12 @@ where
     type Error = CpuProverError;
 }
 
-/// The traces of `chips` for `record`, each wrapped at the shard cube.
+/// The traces of `chips` for `record`, each wrapped at the row cube
+/// `2^max_log_row_count` of their machine.
 pub fn chip_traces<F, A>(
     chips: &[&crate::Chip<F, A>],
     record: &A::Record,
+    max_log_row_count: usize,
 ) -> Result<crate::Traces<F>, A::Error>
 where
     F: PrimeField32,
@@ -282,8 +287,7 @@ where
             })
             .collect::<Result<Vec<_>, A::Error>>()
     })?;
-    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-        .max_log_row_count as u32;
+    let cube = max_log_row_count as u32;
     Ok(crate::Traces {
         named_traces: traces
             .into_iter()
@@ -293,13 +297,13 @@ where
 }
 
 /// Adds every chip of `cluster_widths` that `traces` lacks as a height-0
-/// trace at its width.
+/// trace at its width, in the row cube `2^max_log_row_count`.
 pub fn pad_to_cluster<F: p3_field::Field>(
     traces: &mut crate::Traces<F>,
     cluster_widths: &std::collections::BTreeMap<String, usize>,
+    max_log_row_count: usize,
 ) {
-    let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
-        .max_log_row_count as u32;
+    let cube = max_log_row_count as u32;
     for (name, width) in cluster_widths.iter() {
         let w = (*width).max(1);
         traces
@@ -322,7 +326,7 @@ pub fn pad_to_global_family<SC, A>(
     A: MachineAir<Val<SC>>,
 {
     let family = machine.global_family_widths(traces.keys().map(String::as_str));
-    pad_to_cluster(traces, &family);
+    pad_to_cluster(traces, &family, machine.max_log_row_count());
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -356,7 +360,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     #[allow(clippy::type_complexity)]
     fn generate_traces(&self, record: &A::Record) -> Result<crate::Traces<Val<SC>>, A::Error> {
         let shard_chips = self.machine().shard_chips(record).collect::<Vec<_>>();
-        chip_traces(&shard_chips, record)
+        chip_traces(&shard_chips, record, self.machine().max_log_row_count())
     }
 
     /// Commit to a shard's main traces.
@@ -555,7 +559,7 @@ where
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
         if let Some(cluster_widths) = cluster_widths {
-            pad_to_cluster(&mut named_traces, &cluster_widths);
+            pad_to_cluster(&mut named_traces, &cluster_widths, self.machine().max_log_row_count());
         }
         pad_to_global_family(self.machine(), &mut named_traces);
 
@@ -619,6 +623,7 @@ where
             data.main_data,
             self.machine().global_round().as_slice(),
             data.global_challenge.as_ref(),
+            self.machine().max_log_row_count(),
         );
 
         Ok(ShardProof::<SC> {
@@ -894,6 +899,7 @@ where
         Some(retained),
         &slot_names.iter().collect::<Vec<_>>(),
         Some(global),
+        machine.max_log_row_count(),
     );
     ShardProof { public_values: Vec::new(), jagged_shard_proof, global_lane: 0 }
 }
@@ -936,8 +942,8 @@ impl Error for CpuProverError {}
 /// and the main round's area pin (the program's class). `commit_data` is the
 /// commitment `commit` retained, together with the name-keyed traces it was
 /// built over, `preceding_rounds` the chip sets of the trace rounds before the
-/// main round, and `global_challenge` the cross-shard challenge of the
-/// shard's global-scope lookups.
+/// main round, `global_challenge` the cross-shard challenge of the shard's
+/// global-scope lookups and `max_log_row_count` the machine's row cube.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
@@ -954,6 +960,7 @@ fn prove_shard_with_data_boxed<SC, A>(
     global_challenge: Option<
         &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
     >,
+    max_log_row_count: usize,
 ) -> Box<
     crate::shard_level::shard_proof::JaggedShardProof<
         Val<SC>,
@@ -988,8 +995,6 @@ where
         .as_mut()
         .and_then(|retained| retained.main_store.take())
         .expect("CpuProver::commit retains the main-trace store");
-    let max_log_row_count =
-        crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     assert!(
         main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "retained main store padded to a cube != the fixed max_log_row_count \
@@ -1025,6 +1030,7 @@ where
             commit_data,
             preceding_rounds,
             global_challenge,
+            max_log_row_count,
         },
         &mut shard_challenger,
     );

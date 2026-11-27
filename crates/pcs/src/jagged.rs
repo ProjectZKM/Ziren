@@ -165,19 +165,27 @@ impl AreaPin {
     }
 }
 
+/// The pin of a recursion round of `area` cells: its gap is split into
+/// `area / 2^RECURSION_MAX_LOG_ROW_COUNT` columns of at most one row cube of
+/// the recursion machines, the most the gap of any node of the class needs.
+const fn recursion_area_pin(area: usize) -> AreaPin {
+    AreaPin {
+        area,
+        pad_columns: area >> crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT,
+    }
+}
+
 /// The largest pin class — the compress machine's DEFAULT pins, what a
 /// program that names no class commits under.  64 stacking blocks (`2^27`
-/// cells) per round, with the gap split into `2^27 / 2^22 = 32` columns of
+/// cells) per round, with the gap split into `2^27 / 2^20 = 128` columns of
 /// at most one row cube.  It exists for the leaf verifying a chip-dense core
 /// shard at the core profile's starting rate `2^-1`: that leaf opens 203
 /// first-round queries where `2^-2` opened 124, so its Merkle-path chips grow
 /// by about a fifth and its main round passes `2^26` cells.  The root never
 /// takes it ([`RecursionPins::ROOT_CLASS`]).  `AreaPin::apply` panics past
 /// the pin.
-pub const RECURSION_PINS: RecursionPins = RecursionPins {
-    prep: AreaPin { area: 1 << 27, pad_columns: 32 },
-    main: AreaPin { area: 1 << 27, pad_columns: 32 },
-};
+pub const RECURSION_PINS: RecursionPins =
+    RecursionPins { prep: recursion_area_pin(1 << 27), main: recursion_area_pin(1 << 27) };
 
 /// The pin CLASSES a recursion node can commit under, smallest first.  A
 /// node takes the smallest class both of its rounds fit
@@ -188,14 +196,8 @@ pub const RECURSION_PINS: RecursionPins = RecursionPins {
 /// verifying a node is a function of the class, so a compose program is keyed
 /// by its children's class tuple; every tuple is enumerable.
 pub const RECURSION_PIN_CLASSES: [RecursionPins; 3] = [
-    RecursionPins {
-        prep: AreaPin { area: 1 << 25, pad_columns: 8 },
-        main: AreaPin { area: 1 << 25, pad_columns: 8 },
-    },
-    RecursionPins {
-        prep: AreaPin { area: 1 << 26, pad_columns: 16 },
-        main: AreaPin { area: 1 << 26, pad_columns: 16 },
-    },
+    RecursionPins { prep: recursion_area_pin(1 << 25), main: recursion_area_pin(1 << 25) },
+    RecursionPins { prep: recursion_area_pin(1 << 26), main: recursion_area_pin(1 << 26) },
     RECURSION_PINS,
 ];
 
@@ -842,7 +844,7 @@ mod tests {
         assert_eq!(RecursionPins::class_for_committed(middle.main.area + 1, 1), Some(2));
         assert_eq!(RecursionPins::class(RecursionPins::LAST_CLASS), RECURSION_PINS);
         assert_eq!(large.class_index(), Some(RecursionPins::LAST_CLASS));
-        let cube = 1usize << 22;
+        let cube = 1usize << crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
         for c in RECURSION_PIN_CLASSES {
             for pin in [c.main, c.prep] {
                 assert!(pin.pad_columns * cube >= pin.area);

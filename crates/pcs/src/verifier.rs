@@ -32,6 +32,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     ///   the last.
     /// * `global_challenge`: the cross-shard challenge of the global-scope
     ///   lookups; `None` on a machine without them.
+    /// * `max_log_row_count`: the machine's row cube
+    ///   (`StarkMachine::max_log_row_count`); a table taller than
+    ///   `2^max_log_row_count` is rejected.
     ///
     /// Returns the shard's global sum: the sum of its global-scope
     /// lookups' fractions under `global_challenge`, zero without them.
@@ -49,6 +52,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         global_challenge: Option<
             &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
         >,
+        max_log_row_count: usize,
     ) -> Result<<SC as StarkGenericConfig>::Challenge, VerificationError<SC>>
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
@@ -75,7 +79,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             ));
         }
         let shard_verifier =
-            crate::shard_level::verifier::JaggedShardVerifier::production_default();
+            crate::shard_level::verifier::JaggedShardVerifier::with_params(max_log_row_count);
         let num_pv_elts = proof.public_values.len();
         shard_verifier
             .verify_shard::<SC, A>(

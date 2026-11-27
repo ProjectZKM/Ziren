@@ -163,6 +163,12 @@ pub mod consts {
     /// Max log-height allowed for any single chip in a shard (the
     /// upper bound that size-class bands are measured against).
     pub const CORE_MAX_LOG_ROW_COUNT: usize = 22;
+
+    /// The row cube of the recursion machines that prove and verify at it:
+    /// the compress machine (normalize, compose, global-round, deferred and
+    /// root programs) and the shrink machine.  Every table of every program
+    /// they run has at most `2^RECURSION_MAX_LOG_ROW_COUNT` rows.
+    pub const RECURSION_MAX_LOG_ROW_COUNT: usize = 20;
 }
 
 #[cfg(test)]

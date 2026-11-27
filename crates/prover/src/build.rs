@@ -242,8 +242,7 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
 
 fn build_outer_circuit(template_input: &ZKMWrapWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
-    let max_log_row_count =
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
+    let max_log_row_count = wrap_machine.max_log_row_count();
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
     let mut builder = Builder::<OuterConfig>::new(RecursionProgramType::Wrap);

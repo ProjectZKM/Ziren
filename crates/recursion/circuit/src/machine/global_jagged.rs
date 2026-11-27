@@ -129,6 +129,11 @@ pub fn verify_global_round_jagged<C, SC, A>(
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let ZKMGlobalRoundWitnessVariable {
         vk,
         proofs,
@@ -328,9 +333,7 @@ impl ZKMGlobalRoundShape {
         A: MachineAir<SC::Val>,
     {
         let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let cube = 1usize
-            << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let cube = 1usize << machine.max_log_row_count();
         let mut widths = self
             .chips
             .iter()
@@ -399,8 +402,7 @@ impl ZKMGlobalRoundWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseido
         >(
             &views.iter().collect::<Vec<_>>(),
             &view_rows,
-            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count,
+            machine.max_log_row_count(),
             <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::WhirRing>::WHIR_PROFILE,
             &slots,
         );

@@ -61,6 +61,12 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// every chip of its family ([`Self::global_family`]). Empty on a machine
     /// whose global rounds hold the shard's own tables only.
     global_families: Vec<std::collections::BTreeSet<String>>,
+
+    /// The row cube `2^max_log_row_count` every table of this machine's
+    /// shards is padded to: the zerocheck dimension and the number of row
+    /// variables of the lookup argument.  The prover proves and the verifier
+    /// verifies this machine's shards at it, whatever a proof claims.
+    max_log_row_count: usize,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
@@ -73,6 +79,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
             recursion_pins: None,
             global_round: None,
             global_families: Vec::new(),
+            max_log_row_count: crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT,
         }
     }
 
@@ -89,6 +96,19 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         );
         self.recursion_pins = pins;
         self
+    }
+
+    /// Proves and verifies this machine's shards at the row cube
+    /// `2^max_log_row_count` ([`Self::max_log_row_count`]).  Consuming builder.
+    pub const fn with_max_log_row_count(mut self, max_log_row_count: usize) -> Self {
+        self.max_log_row_count = max_log_row_count;
+        self
+    }
+
+    /// The machine's row cube, `log2` of the rows every table is padded to.
+    #[inline]
+    pub const fn max_log_row_count(&self) -> usize {
+        self.max_log_row_count
     }
 
     /// Commits the chips named in `global_round` in a main round of their own.
@@ -1157,9 +1177,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
     ) -> usize {
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let cube = 1usize
-            << crate::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let cube = 1usize << self.max_log_row_count;
         let cells: usize = round
             .chips
             .iter()
@@ -1197,14 +1215,16 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// The most rounds of the chips `chips` at `blocks` stacking blocks each
     /// that [`Self::global_lane_proof_groups`] puts in one global proof: as
     /// many as the recursion program that verifies the proof can hold
-    /// ([`crate::logup_gkr::global_round_groups`]), within the area limit
-    /// ([`crate::logup_gkr::global_round_area_groups`]).
+    /// ([`crate::logup_gkr::global_round_groups`]) with its tables within the
+    /// row cube ([`crate::logup_gkr::global_rounds_within_the_row_cube`]),
+    /// within the area limit ([`crate::logup_gkr::global_round_area_groups`]).
     pub fn max_global_rounds_per_proof(
         &self,
         chips: &std::collections::BTreeSet<String>,
         blocks: usize,
     ) -> usize {
-        let most = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        let most = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF
+            .min(crate::logup_gkr::global_rounds_within_the_row_cube(blocks));
         let cells = self.global_round_shape_leaf_cells(chips.iter().map(String::as_str), blocks);
         let held = crate::logup_gkr::global_round_groups(&vec![((), cells); most], most)[0].len();
         crate::logup_gkr::global_round_area_groups(core::iter::repeat_n(blocks, held), most)[0]
@@ -1253,8 +1273,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// A group holds rounds of one shape, the same chips at the same number of
     /// stacking blocks, cut by [`crate::logup_gkr::global_round_groups`] to
     /// what the recursion program that verifies the proof can hold
-    /// ([`Self::global_round_leaf_cells`]) and, within the area limit and to
-    /// at most `per_proof` rounds, by [`Self::global_proof_groups`]. The
+    /// ([`Self::global_round_leaf_cells`]) and, within the area limit, to at
+    /// most `per_proof` rounds and to as many as keep that program's tables
+    /// within the row cube
+    /// ([`crate::logup_gkr::global_rounds_within_the_row_cube`]), by
+    /// [`Self::global_proof_groups`]. The
     /// rounds of a proof then have one geometry, so proofs of as many rounds
     /// of one shape are verified by one recursion program.
     pub fn global_lane_proof_groups<'a>(
@@ -1275,15 +1298,26 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect_vec();
         let per_proof = per_proof.clamp(1, crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
-        crate::logup_gkr::global_round_groups(&shapes, per_proof)
-            .into_iter()
-            .flat_map(|group| {
-                let start = group.start;
-                self.global_proof_groups(rounds[group].iter().copied(), per_proof)
-                    .into_iter()
-                    .map(move |part| start + part.start..start + part.end)
-            })
-            .collect()
+        let mut groups = Vec::new();
+        let mut run = 0;
+        while run < shapes.len() {
+            let end =
+                (run..shapes.len()).find(|&i| shapes[i].0 != shapes[run].0).unwrap_or(shapes.len());
+            let blocks = shapes[run].0 .1;
+            let per_proof =
+                per_proof.min(crate::logup_gkr::global_rounds_within_the_row_cube(blocks));
+            for group in crate::logup_gkr::global_round_groups(&shapes[run..end], per_proof) {
+                let start = run + group.start;
+                let end = run + group.end;
+                groups.extend(
+                    self.global_proof_groups(rounds[start..end].iter().copied(), per_proof)
+                        .into_iter()
+                        .map(|part| start + part.start..start + part.end),
+                );
+            }
+            run = end;
+        }
+        groups
     }
 
     /// Groups the global rounds of a proof into its global proofs. `rounds`
@@ -1804,6 +1838,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             false,
             &slot_names.iter().collect_vec(),
             Some(global),
+            self.max_log_row_count,
         )
         .map_err(MachineVerificationError::InvalidGlobalProof)
     }
@@ -1893,6 +1928,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         has_pv_buses,
                         self.global_round().as_slice(),
                         None,
+                        self.max_log_row_count,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })

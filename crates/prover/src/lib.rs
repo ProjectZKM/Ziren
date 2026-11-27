@@ -1054,21 +1054,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         })
     }
 
-    /// The FIXED zerocheck cube (= `JaggedShardVerifier`
-    /// production default `max_log_row_count`, 22).  EVERY stage builds,
-    /// proves, and verifies at this one constant; nothing floats it up
-    /// from an input proof's zerocheck dim.  The in-circuit checks bind
-    /// the cube against the input proof (`verify_zerocheck` `point.dim ==
-    /// pcs_max_log_row_count`; `verify_logup_gkr`
-    /// `round_proofs.len()+1 == max_log_row_count`), so a proof produced
-    /// at any other cube fails to verify.  Over-tall chip heights cannot
-    /// occur: the core executor's `height_split` closes a shard before
-    /// any chip reaches `2^cube` rows, and every recursion band is
-    /// asserted `<= cube` at shape construction.
-    fn pcs_max_log_row_count() -> usize {
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count
-    }
-
     /// Settle a recursion program's rows and pin class — see
     /// [`RecursionShapeConfig::fix_shape_kind`].  A no-op without a shape
     /// config (`FIX_RECURSION_SHAPES=false`), which gives up vk enumerability.
@@ -1215,7 +1200,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
                         self.core_prover.machine(),
                         input,
-                        Self::pcs_max_log_row_count(),
+                        self.core_prover.machine().max_log_row_count(),
                     ));
                 self.snapped(&program, None, "normalize")
             },
@@ -1316,7 +1301,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
             return p;
         }
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.core_prover.machine().max_log_row_count();
         let program =
             Arc::new(build_normalize_program(self.core_prover.machine(), input, max_log_row_count));
         self.normalize_programs_unsnapped_cache.lock().unwrap().insert(key, program)
@@ -1330,7 +1315,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if let Some(p) = self.compose_programs_unsnapped_cache.lock().unwrap().get(key) {
             return p;
         }
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.compress_prover.machine().max_log_row_count();
         let program = Arc::new(build_compose_program(
             self.compress_prover.machine(),
             input,
@@ -1348,7 +1333,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.core_prover.machine().max_log_row_count();
         let mut program =
             build_normalize_program(self.core_prover.machine(), input, max_log_row_count);
         self.fix_recursion_shape_kind(
@@ -1481,7 +1466,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.compress_prover.machine().max_log_row_count();
         let mut program = build_compose_program(
             self.compress_prover.machine(),
             input,
@@ -1501,7 +1486,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMDeferredWitnessValues<CompressedSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.root_prover.machine().max_log_row_count();
         let mut program = build_deferred_program(
             self.root_prover.machine(),
             input,
@@ -1519,7 +1504,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMWrapWitnessValues<CompressedSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.root_prover.machine().max_log_row_count();
         let mut program = build_wrap_program(
             self.root_prover.machine(),
             input,
@@ -1592,7 +1577,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         use zkm_pcs::air::MachineAir;
         use zkm_recursion_circuit::machine::wrap::verify_wrap_jagged;
 
-        let max_log_row_count = Self::pcs_max_log_row_count();
+        let max_log_row_count = self.shrink_prover.machine().max_log_row_count();
 
         let builder_span = tracing::debug_span!("build wrap program").entered();
         let mut builder = Builder::<WrapConfig>::new(RecursionProgramType::Wrap);
@@ -3265,9 +3250,7 @@ pub mod tests {
             "dummy witness should have {n_inputs} input proofs",
         );
 
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let max_log_row_count = compress_machine.max_log_row_count();
         let program = build_compose_program::<CompressAir<KoalaBear>>(
             &compress_machine,
             &witness,
@@ -4287,7 +4270,7 @@ pub mod tests {
                     Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
                         machine,
                         input,
-                        ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count(),
+                        machine.max_log_row_count(),
                     ));
                 let program = prover.snapped(&program, None, "normalize");
                 prover.compress_prover.setup(&program).1.hash_koalabear()
@@ -4496,14 +4479,16 @@ pub mod tests {
     /// and with what a round adds past that otherwise. The programs are
     /// built from the shapes' placeholders. Four families at six classes,
     /// less the class of 256 blocks for the two memory tables, which the row
-    /// cube keeps below it.
+    /// cube keeps below it. The tallest table of each program fits the row
+    /// cube of the recursion machines and is counted from above by the rows
+    /// estimate that bounds the rounds of a proof.
     #[test]
     #[ignore = "builds two dozen global-round programs; run with --ignored"]
     fn global_round_shapes_fit_a_pin_class() {
         use rayon::prelude::*;
         use zkm_pcs::logup_gkr::{
-            global_round_leaf_cells, GLOBAL_LEAF_CELLS, GLOBAL_LEAF_FIXED_CELLS,
-            GLOBAL_LEAF_WIDE_ROUND_CELLS,
+            global_round_leaf_cells, global_round_leaf_rows, GLOBAL_LEAF_CELLS,
+            GLOBAL_LEAF_FIXED_CELLS, GLOBAL_LEAF_FIXED_ROWS, GLOBAL_LEAF_WIDE_ROUND_CELLS,
         };
         let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
         let machine = prover.core_prover.machine();
@@ -4541,7 +4526,7 @@ pub mod tests {
             let program = zkm_recursion_circuit::machine::programs::build_global_round_program(
                 machine,
                 &input,
-                ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count(),
+                machine.max_log_row_count(),
             );
             let rows = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::organic_shape(
                 &RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
@@ -4552,6 +4537,15 @@ pub mod tests {
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::class_for_rows(&rows)
                     .is_some(),
                 "the program of {shape:?} fits no pin class"
+            );
+            let tallest = rows.values().copied().max().unwrap_or(0);
+            let rows_estimate =
+                GLOBAL_LEAF_FIXED_ROWS + shape.rounds * global_round_leaf_rows(shape.blocks);
+            assert!(
+                tallest <= 1 << prover.compress_prover.machine().max_log_row_count()
+                    && tallest <= rows_estimate,
+                "the program of {shape:?} has a table of {tallest} rows, counted as \
+                 {rows_estimate}"
             );
             let cells: usize = rows.iter().map(|(chip, rows)| rows * widths[chip]).sum();
             let columns: usize = shape
@@ -4901,7 +4895,11 @@ pub mod tests {
             })?;
         let lane =
             (0..committed.len()).filter(|&round| committed[round].0 == 5).collect::<Vec<_>>();
-        let most = zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        let most = zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF.min(
+            zkm_pcs::logup_gkr::global_rounds_within_the_row_cube(
+                machine.global_round_blocks(&committed[lane[0]].1),
+            ),
+        );
         assert!(
             lane.len() >= 3 + most,
             "lane 5 holds {} of {} rounds",
@@ -5864,7 +5862,7 @@ pub mod tests {
         );
 
         let packing = &pk.preprocessed_data().packing;
-        let cube = 1usize << ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
+        let cube = 1usize << prover.compress_prover.machine().max_log_row_count();
         let real_cells = packing.total_values;
         let real_area = packing.dense_len;
         let real_pads = real_area.saturating_sub(real_cells).div_ceil(cube).max(1);

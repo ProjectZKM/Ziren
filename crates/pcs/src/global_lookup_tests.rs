@@ -760,7 +760,11 @@ fn a_lane_groups_its_rounds_of_one_shape() {
     );
     assert_eq!(groups(&[both; 20], 8), [0..8, 8..16, 16..20]);
     assert_eq!(groups(&[both; 5], 2), [0..2, 2..4, 4..5]);
-    let fit = (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / machine.global_round_leaf_cells(both);
+    let by_cells =
+        (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / machine.global_round_leaf_cells(both);
+    let by_rows =
+        crate::logup_gkr::global_rounds_within_the_row_cube(machine.global_round_blocks(both));
+    let fit = by_cells.min(by_rows);
     assert!(fit < crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
     assert_eq!(
         groups(&[both; 40], usize::MAX),
@@ -781,7 +785,9 @@ fn a_lane_groups_its_rounds_of_one_shape() {
                 && by_weight(round) < (limit - 1) / (blocks * block)
         })
         .expect("a round of a larger class that shares a proof by weight");
-    let fit = by_weight(&tall);
+    let fit = by_weight(&tall).min(crate::logup_gkr::global_rounds_within_the_row_cube(
+        machine.global_round_blocks(&tall),
+    ));
     assert!(fit < crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
     let rounds = [sender, sender]
         .into_iter()

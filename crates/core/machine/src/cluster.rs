@@ -146,7 +146,7 @@ mod tests {
             for record in records.iter() {
                 let mut traces = prover.generate_traces(record).expect("the shard's traces");
                 let cluster = clusters.cluster_widths(record).expect("a shard without a cluster");
-                pad_to_cluster(&mut traces, &cluster);
+                pad_to_cluster(&mut traces, &cluster, machine.max_log_row_count());
                 pad_to_global_family(machine, &mut traces);
                 let chips = traces.keys().cloned().collect::<BTreeSet<_>>();
                 assert!(enumerated.contains(&chips), "a shard commits {chips:?}");

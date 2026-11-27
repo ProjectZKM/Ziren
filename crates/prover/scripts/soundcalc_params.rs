@@ -210,8 +210,8 @@ fn main() {
 
     // Soundness bounds use what the verifier admits, including its fixed row
     // cube, rather than an honest shard's area limit or a program's row count.
-    let log_rows =
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
+    let log_rows = core.max_log_row_count();
+    let recursion_log_rows = zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
     let width = |name: &str| {
         core.chips().iter().find(|chip| chip.name() == name).unwrap().preprocessed_width()
     };
@@ -224,7 +224,11 @@ fn main() {
     let main_stripes = zkm_pcs::jagged::committed_dense_len(main_cells, lsh) / stripe;
     let pins = zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
     println!("\n[verifier_bounds]");
-    println!("max_log_row_count = {log_rows}   # every stage's fixed zerocheck and LogUp cube");
+    println!("max_log_row_count = {log_rows}   # the core stage's fixed zerocheck and LogUp cube");
+    println!(
+        "recursion_max_log_row_count = {recursion_log_rows}   # the compress stage's fixed zerocheck \
+         and LogUp cube"
+    );
     println!("core_dense_batch = {}   # preprocessed + main stripes", prep_stripes + main_stripes);
     println!("compress_dense_batch = {}", (pins.prep.area + pins.main.area) / stripe);
 }

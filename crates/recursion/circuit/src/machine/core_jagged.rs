@@ -125,6 +125,11 @@ pub fn verify_core_jagged<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let ZKMCoreWitnessVariable {
         vk: vk_legacy,
         shard_proof_tuples,
