@@ -18,7 +18,7 @@ use zkm_recursion_circuit::{
 use zkm_recursion_compiler::{
     config::OuterConfig,
     constraints::{Constraint, ConstraintCompiler},
-    ir::{Builder, DslIr, TracedVec},
+    ir::Builder,
 };
 
 pub use zkm_recursion_core::stark::{outer_perm, zkm_dev_mode, zkm_imm_wrap_vk_mode};
@@ -241,34 +241,11 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
 }
 
 fn build_outer_circuit(template_input: &ZKMWrapWitnessValues<OuterSC>) -> Vec<Constraint> {
-    let wrap_span = tracing::debug_span!("build wrap circuit").entered();
-    let operations = outer_circuit_operations(template_input);
-    let mut backend = ConstraintCompiler::<OuterConfig>::default();
-    let constraints = backend.emit(operations);
-    wrap_span.exit();
-    constraints
-}
-
-/// The operations of the wrap circuit over a template proof, before they are
-/// compiled to constraints: they still carry the verifier's phase markers.
-pub fn wrap_circuit_operations(
-    template_vk: &StarkVerifyingKey<OuterSC>,
-    template_proof: &ShardProof<OuterSC>,
-) -> TracedVec<DslIr<OuterConfig>> {
-    let template_input = ZKMWrapWitnessValues {
-        vks_and_proofs: vec![(template_vk.clone(), (*template_proof.jagged_shard_proof).clone())],
-        vk_merkle_data: ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1),
-    };
-    outer_circuit_operations(&template_input)
-}
-
-fn outer_circuit_operations(
-    template_input: &ZKMWrapWitnessValues<OuterSC>,
-) -> TracedVec<DslIr<OuterConfig>> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
     let max_log_row_count =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
 
+    let wrap_span = tracing::debug_span!("build wrap circuit").entered();
     let mut builder = Builder::<OuterConfig>::new(RecursionProgramType::Wrap);
 
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
@@ -296,5 +273,9 @@ fn outer_circuit_operations(
         None,
     );
 
-    builder.into_operations()
+    let mut backend = ConstraintCompiler::<OuterConfig>::default();
+    let operations = backend.emit(builder.into_operations());
+    wrap_span.exit();
+
+    operations
 }

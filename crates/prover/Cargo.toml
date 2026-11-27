@@ -48,8 +48,8 @@ test-artifacts = { workspace = true }
 serial_test = "3.1.1"
 
 [[bin]]
-name = "soundcalc_census"
-path = "scripts/soundcalc_census.rs"
+name = "soundcalc_params"
+path = "scripts/soundcalc_params.rs"
 
 [[bin]]
 name = "write_vk_root"
@@ -120,7 +120,3 @@ type_complexity = "allow"
 [[bin]]
 name = "proof_breakdown"
 path = "scripts/proof_breakdown.rs"
-
-[[bin]]
-name = "wrap_circuit_census"
-path = "scripts/wrap_circuit_census.rs"

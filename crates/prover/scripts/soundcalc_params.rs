@@ -1,8 +1,8 @@
-//! Census of the three machines for the `soundcalc` soundness calculator
-//! (https://github.com/ethereum/soundcalc): per machine, the trace width, the
-//! constraint count, the maximum constraint degree, and the lookup interaction
-//! count and width, followed by the schedule every one of them is opened
-//! under.
+//! The parameters of the three machines for the `soundcalc` soundness
+//! calculator (https://github.com/ethereum/soundcalc): per machine, the trace
+//! width, the constraint count, the maximum constraint degree, and the lookup
+//! interaction count and width, followed by the schedule every one of them is
+//! opened under.
 //!
 //! The point of emitting both from one run is that the published model cannot
 //! then disagree with the code: the machine figures come from the same
@@ -11,7 +11,7 @@
 //! staying true only of the day the model was written by hand.
 //!
 //! Run:
-//!   cargo run --release -p zkm-prover --bin soundcalc_census
+//!   cargo run --release -p zkm-prover --bin soundcalc_params
 
 use p3_air::BaseAir;
 use zkm_core_machine::mips::MipsAir;
@@ -22,7 +22,7 @@ use zkm_pcs::{
 };
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
 
-fn census<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
+fn machine_params<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>> + p3_air::Air<p3_uni_stark::SymbolicAirBuilder<Val<SC>>>,
@@ -37,41 +37,6 @@ where
     let mut widest_chip = String::new();
     for chip in machine.chips() {
         chips += 1;
-        // `SOUNDCALC_CENSUS_CHIPS=1`: one line per chip, for area-by-chip
-        // arithmetic against the executor's `ZIREN_SHARD_CLOSE_CENSUS` rows.
-        if std::env::var_os("SOUNDCALC_CENSUS_CHIPS").is_some() {
-            let fields: usize =
-                chip.sends().iter().chain(chip.receives().iter()).map(|l| l.values.len()).sum();
-            if let Some(want) = std::env::var_os("SOUNDCALC_CENSUS_LOOKUPS") {
-                if want.to_string_lossy() == chip.name() {
-                    for (dir, l) in chip
-                        .sends()
-                        .iter()
-                        .map(|l| ("send", l))
-                        .chain(chip.receives().iter().map(|l| ("recv", l)))
-                    {
-                        let vals: Vec<String> = l.values.iter().map(|v| format!("{v:?}")).collect();
-                        println!(
-                            "lookup {name} {} {dir} kind={:?} arity={} mult={:?} vals={}",
-                            chip.name(),
-                            l.kind,
-                            l.values.len(),
-                            l.multiplicity,
-                            vals.join(" ")
-                        );
-                    }
-                }
-            }
-            println!(
-                "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
-                chip.name(),
-                BaseAir::width(&chip.air),
-                chip.preprocessed_width(),
-                chip.sends().len(),
-                chip.receives().len(),
-                fields
-            );
-        }
         main_width += BaseAir::width(&chip.air);
         pre_width += chip.preprocessed_width();
         let n = capture_machine_constraints(&chip.air).constraint_counts().base;
@@ -181,11 +146,11 @@ fn whir_schedule(
 
 fn main() {
     let core = MipsAir::<Val<CoreSC>>::machine(KoalaBearPoseidon2::default());
-    census("core", &core);
+    machine_params("core", &core);
     let compress = CompressAir::<Val<InnerSC>>::compress_machine(InnerSC::default());
-    census("compress", &compress);
+    machine_params("compress", &compress);
     let wrap = WrapAir::<Val<OuterSC>>::wrap_machine(OuterSC::default());
-    census("wrap", &wrap);
+    machine_params("wrap", &wrap);
 
     // Core shards open under the core profile, the root compose (the
     // published compressed proof) under the compress profile; every other
