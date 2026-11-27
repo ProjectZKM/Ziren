@@ -179,8 +179,8 @@ pub fn per_component_target_bits() -> f64 {
 /// doubles it: measured on one reth block over four cards, moving the query,
 /// LogUp and batching grinds to this schedule took 34.2 s to 166.2 s while the
 /// grinds ran on the host, of which 123 s was the LogUp grind alone.  Buying
-/// the same bits with queries instead cost 8.6%, which is the lever to reach
-/// for if a prover has no accelerator registered.
+/// the same bits with queries instead cost 8.6%, which is the option to take
+/// if a prover has no accelerator registered.
 pub fn query_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_WHIR_QUERY_GRINDING_BITS", 22)
 }
@@ -318,7 +318,7 @@ pub enum WhirProfile {
     Shrink,
     /// The schedule of the wrap proof, whose verifier is the gnark circuit:
     /// the compress schedule's shape, tuned for the circuit's size, with its
-    /// own knobs ([`wrap_whir_config`]).
+    /// own parameters ([`wrap_whir_config`]).
     Wrap,
 }
 
@@ -486,7 +486,7 @@ fn fold_grinding_bits_for_target(
     (target - bits).ceil().max(0.0) as usize
 }
 
-/// The knobs of a size-tuned schedule: [`compress_whir_config`] and
+/// The parameters of a size-tuned schedule: [`compress_whir_config`] and
 /// [`wrap_whir_config`] differ only in where these come from.
 #[derive(Clone, Copy, Debug)]
 pub struct SizeTunedParams {
@@ -509,7 +509,7 @@ pub struct SizeTunedParams {
 }
 
 impl SizeTunedParams {
-    /// The compress schedule's knobs.
+    /// The compress schedule's parameters.
     pub fn compress() -> Self {
         Self {
             log_inv_rate: compress_log_inv_rate(),
@@ -549,7 +549,7 @@ impl SizeTunedParams {
         }
     }
 
-    /// The wrap schedule's knobs, with `ZIREN_WRAP_*` environment overrides.
+    /// The wrap schedule's parameters, with `ZIREN_WRAP_*` environment overrides.
     pub fn wrap() -> Self {
         let env = crate::params::env_usize;
         let defaults = Self::wrap_defaults();

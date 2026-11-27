@@ -18,7 +18,7 @@ use zkm_picus::{
         build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig, PicusBuilder,
         ShrCarrySummaryMode, SubmoduleMode,
     },
-    propagate::{analyze, Verdict},
+    propagate::{analyze, Analysis},
 };
 
 #[derive(Parser, Debug)]
@@ -69,12 +69,12 @@ struct Args {
     #[arg(long = "keep-padding", default_value_t = false)]
     pub keep_padding: bool,
 
-    /// Run the determinism propagation triage on every extracted module and write nothing.
+    /// Run the determinism propagation pass on every extracted module and write nothing.
     #[arg(long, default_value_t = false)]
     pub analyze: bool,
 
-    /// Run the triage before writing Lean and replay each determined module's derivation as
-    /// its determinism proof.
+    /// Run the propagation pass before writing Lean and replay each determined module's
+    /// derivation as its determinism proof.
     #[arg(long, default_value_t = false)]
     pub derive: bool,
 
@@ -303,15 +303,15 @@ fn main() {
                 if name == "top" || !name.starts_with(&chip.name()) {
                     continue;
                 }
-                let verdict = analyze(m);
-                let line = match &verdict {
-                    Verdict::Determined { branches, rules, lemmas, .. } if lemmas.is_empty() => {
+                let analysis = analyze(m);
+                let line = match &analysis {
+                    Analysis::Determined { branches, rules, lemmas, .. } if lemmas.is_empty() => {
                         format!("DETERMINED branches={branches} rules={rules:?}")
                     }
-                    Verdict::Determined { branches, rules, lemmas, .. } => {
+                    Analysis::Determined { branches, rules, lemmas, .. } => {
                         format!("DETERMINED branches={branches} rules={rules:?} lemmas={lemmas:?}")
                     }
-                    Verdict::Stuck { branches, stuck_outputs, opaque } => {
+                    Analysis::Stuck { branches, stuck_outputs, opaque } => {
                         let shown: Vec<String> = stuck_outputs
                             .iter()
                             .take(12)
@@ -323,11 +323,11 @@ fn main() {
                             shown.join(", ")
                         )
                     }
-                    Verdict::TooManyBranches => "TOO_MANY_BRANCHES".to_string(),
-                    Verdict::Timeout => "TIMEOUT".to_string(),
+                    Analysis::TooManyBranches => "TOO_MANY_BRANCHES".to_string(),
+                    Analysis::Timeout => "TIMEOUT".to_string(),
                 };
                 println!("ANALYZE {name} {line}");
-                if let Verdict::Determined { derivation, .. } = verdict {
+                if let Analysis::Determined { derivation, .. } = analysis {
                     zkm_picus::lean::DERIVATIONS.lock().unwrap().insert(name.clone(), derivation);
                 }
             }

@@ -119,7 +119,7 @@ other files with it.
 ## Reading the result
 
 Every theorem statement compiles; an unproved one carries an explicit `sorry` and surfaces as
-a warning. The census is therefore a grep over the build log:
+a warning. The count of open obligations is therefore a grep over the build log:
 
 ```bash
 grep -c "declaration uses 'sorry'" build.log        # open obligations
@@ -188,7 +188,7 @@ Maintaining coverage and improving the extraction:
 1. **Regenerate and check after changes.** Keep the regenerated sources and strict checker receipts
    together outside Git. The generator files also stay outside Git; select their directory with
    `SNIPPET_TOOLS` when running `check/regen_all.sh`. A receipt identifies the checked source by
-   its hash and records the theorem inventory and Lean build inputs.
+   its hash and records the theorem list and Lean build inputs.
 2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
    such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
    names rather than positions.

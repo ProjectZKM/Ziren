@@ -12,7 +12,7 @@
 //!
 //! The shard is verified alone, so the cross-shard bookkeeping of the full
 //! `ZKMProver::verify` (shard numbering, global cumulative sum) is neither run
-//! nor expected to hold -- only this shard's own PCS/AIR verdict.
+//! nor expected to hold -- only this shard's own PCS/AIR verification.
 //!
 //! Run:
 //!   cargo run --release -p zkm-prover --bin verify_dumped_shard -- <proof.bin> <vk.bin>
@@ -48,7 +48,7 @@ fn main() {
     println!("proof   : {proof_path}");
     println!("chips   : {}", chips.len());
 
-    let verdict = |label: &str, key: &ZKMVerifyingKey| {
+    let verify_under = |label: &str, key: &ZKMVerifyingKey| {
         let mut challenger = machine.config().challenger();
         key.vk.observe_into(&mut challenger);
         challenger.observe_slice(&proof.public_values[0..machine.num_pv_elts()]);
@@ -66,8 +66,8 @@ fn main() {
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());
         match result {
-            Ok(_) => println!("  VERDICT: ACCEPT -- sound under this key; the circuit diverges"),
-            Err(e) => println!("  VERDICT: REJECT -- {e:?}"),
+            Ok(_) => println!("  RESULT: ACCEPT -- sound under this key; the circuit diverges"),
+            Err(e) => println!("  RESULT: REJECT -- {e:?}"),
         }
     };
 
@@ -92,11 +92,11 @@ fn main() {
         );
     }
 
-    verdict("file", &vk);
+    verify_under("file", &vk);
 
     if let Some(elf_path) = args.next() {
         let elf = std::fs::read(&elf_path).unwrap_or_else(|e| panic!("read {elf_path}: {e}"));
         let (_, _, _, derived) = prover.setup(&elf);
-        verdict("elf", &derived);
+        verify_under("elf", &derived);
     }
 }

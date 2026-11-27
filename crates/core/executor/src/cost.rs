@@ -285,7 +285,7 @@ impl ShardSplitAccumulator {
     /// There is no Cpu chip, so its width is absent from `costs` (EnumMap defaults it to
     /// 0) and the `cpu_cycles` term contributes no area.  It is not part of the height cap
     /// either: the cap keeps every real chip under the recursion row cube, while `clk` is
-    /// bounded separately by the executor's `clk_exit` fence (`CORE_SHARD_CLK_LIMIT`, the
+    /// bounded separately by the executor's `clk_exit` limit (`CORE_SHARD_CLK_LIMIT`, the
     /// width the frame's clk decomposition range-checks).  See `ELEMENT_THRESHOLD` for the
     /// area budget.
     #[inline]
@@ -343,7 +343,7 @@ impl ShardSplitAccumulator {
     /// Hand the live budgets to the JIT producer as remaining amounts: `area_left =
     /// element_threshold - trace_area`, `height_left[slot(air)] = height_threshold -
     /// heights[air]`, plus the touched-address count. The producer charges by subtracting and
-    /// fences at `<= 0`, which is exactly `check_shard_limit`'s `>=`.
+    /// closes the shard at `<= 0`, which is exactly `check_shard_limit`'s `>=`.
     ///
     /// `heights` is walked as a slice, which is in slot order: this runs around every
     /// instruction the producer hands to the interpreter.

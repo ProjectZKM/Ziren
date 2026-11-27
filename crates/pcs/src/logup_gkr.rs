@@ -22,7 +22,7 @@
 /// for a witness that, once absorbed, makes the challenger emit
 /// `gkr_grinding_bits()` leading zero bits; the verifier re-checks the witness
 /// before sampling any GKR challenge.  The LogUp-GKR term scores 84 bits with
-/// no grind and the grind is the only lever on it -- queries cannot buy it --
+/// no grind and the grind is the only parameter that raises it -- queries cannot buy it --
 /// so it carries the whole distance to the per-component target: 16 bits put
 /// the term at 100, which is the minimum-component convention, and 22 put it at
 /// 106, which is what a union above 100 needs.

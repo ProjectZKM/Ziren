@@ -89,7 +89,7 @@ impl<F: PrimeField32> ShiftLeftOperation<F> {
 }
 
 impl<F: Field> ShiftLeftOperation<F> {
-    /// The constraint mirror of `ShiftLeft::eval` minus the chip plumbing
+    /// The constraint mirror of `ShiftLeft::eval` minus the chip-level parts
     /// (selectors, frame, Instruction-bus receive).  The caller guarantees
     /// `is_real` is boolean and zero on non-real rows; `a` / `b` / `c` must be
     /// valid byte-words.

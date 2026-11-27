@@ -86,7 +86,7 @@ Take a taken \texttt{beq} at address $\mathtt{0x100}$ whose target is $\mathtt{0
 \subsection{Registers and memory}
 \label{sec:air-memory}
 
-Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}. The state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. Every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ (a one-bit selector chooses), as a range-checked 16-bit limb and 10-bit high limb, which covers a $\mathsf{clk} + \mathsf{pos}$ timestamp under the 25-bit clock fence. Figure~\ref{fig:memchain} follows one address through two shards.
+Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}. The state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. Every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ (a one-bit selector chooses), as a range-checked 16-bit limb and 10-bit high limb, which covers a $\mathsf{clk} + \mathsf{pos}$ timestamp under the 25-bit clock limit. Figure~\ref{fig:memchain} follows one address through two shards.
 
 \begin{lemma}[Memory argument]
 \label{lem:memory}

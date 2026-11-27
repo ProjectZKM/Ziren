@@ -1,4 +1,4 @@
-"""Plumbing shared by the check passes: Lean module text and the Makefile of a split root.
+"""Helpers shared by the check passes: Lean module text and the Makefile of a split root.
 
 A split root holds `PREFIX/*.lean` modules and a Makefile with one rule per module,
 `PREFIX/M.olean: PREFIX/M.lean <deps>` run by `$(LEANRUN) PREFIX M`.  A pass that moves part of a

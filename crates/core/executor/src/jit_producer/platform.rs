@@ -20,7 +20,7 @@ use zkm_core_jit::{
             POS_C, POS_HI,
         },
         JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_HOST, JIT_EXIT_ORACLE_FULL,
-        JIT_EXIT_SHARD_FENCE,
+        JIT_EXIT_SHARD_LIMIT,
     },
     context::PRODUCER_HEIGHT_SLOTS,
     driver::{DriverInstruction, JitOpcode},
@@ -70,7 +70,7 @@ struct Bridge<'a> {
     bailed: bool,
     error: Option<ExecutionError>,
     done: bool,
-    fence: bool,
+    shard_limit: bool,
 }
 
 /// Bring the native state back into the executor. Idempotent: calling it
@@ -216,8 +216,8 @@ extern "C" fn producer_handler(ctx: *mut JitContext) -> u64 {
             ctx.exit_code = JIT_EXIT_HOST;
         }
         Ok(false) => {
-            if !exec.unconstrained && exec.shard_fence_due() {
-                br.fence = true;
+            if !exec.unconstrained && exec.shard_limit_due() {
+                br.shard_limit = true;
                 ctx.exit_code = JIT_EXIT_HOST;
             }
         }
@@ -463,11 +463,11 @@ fn plan_stamps(ins: &Instruction, plan: &mut ProducerInstr) {
 
 /// Close the shard the way the interpreter loop does; `true` when the
 /// batch is complete.
-fn fence(exec: &mut Executor<'_>, num_shards_executed: &mut u32) -> bool {
+fn close_shard(exec: &mut Executor<'_>, num_shards_executed: &mut u32) -> bool {
     let closed = exec.inc_shard_if_need();
     assert!(
         closed,
-        "producer fenced at pc {:#x} where the interpreter would not close the shard",
+        "producer hit a shard limit at pc {:#x} where the interpreter would not close the shard",
         exec.state.pc
     );
     *num_shards_executed += 1;
@@ -512,7 +512,7 @@ pub(crate) fn run(
         bailed: false,
         error: None,
         done: false,
-        fence: false,
+        shard_limit: false,
     };
     ctx.user_data = std::ptr::from_mut(&mut br).cast();
     sync_out(exec, &mut ctx, &mut br);
@@ -525,13 +525,13 @@ pub(crate) fn run(
         let code = ctx.exit_code;
         sync_in(exec, &ctx, &mut br);
         match code {
-            JIT_EXIT_SHARD_FENCE => {
+            JIT_EXIT_SHARD_LIMIT => {
                 exec.state.pc = ctx.pc;
                 exec.state.next_pc = ctx.pc.wrapping_add(4);
                 if program_done(exec) {
                     return finish(exec);
                 }
-                if fence(exec, num_shards_executed) {
+                if close_shard(exec, num_shards_executed) {
                     return Ok(Some(false));
                 }
             }
@@ -548,9 +548,9 @@ pub(crate) fn run(
                 if br.done {
                     return Ok(Some(true));
                 }
-                assert!(br.fence, "producer host exit without a reason at pc {:#x}", ctx.pc);
-                br.fence = false;
-                if fence(exec, num_shards_executed) {
+                assert!(br.shard_limit, "producer host exit without a reason at pc {:#x}", ctx.pc);
+                br.shard_limit = false;
+                if close_shard(exec, num_shards_executed) {
                     return Ok(Some(false));
                 }
             }

@@ -338,7 +338,7 @@ pub mod outer_jagged_hooks {
 // Runtime validation that the stacked
 // WHIR jagged-PCS actually commits / opens / verifies over the OUTER ring
 // (Poseidon2-BN254 `OuterValMmcs` + `MultiField32Challenger`). This is the
-// cryptographic heart the wrap shard reuses; an honest proof must verify.
+// cryptographic core the wrap shard reuses; an honest proof must verify.
 #[cfg(test)]
 mod whir_over_bn254_roundtrip_test {
     use super::{outer_perm, KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};

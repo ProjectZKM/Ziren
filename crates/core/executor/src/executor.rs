@@ -92,16 +92,16 @@ pub(crate) const CORE_SHARD_HEIGHT_THRESHOLD: u64 =
 /// the argument INCOMPLETE (a legal gap stops fitting the limbs, and the shard becomes
 /// unprovable); widening the range check without a matching bound here makes it UNSOUND.
 ///
-/// The margin below the fence is deliberate: the check runs BEFORE the next instruction, which
+/// The margin below the limit is deliberate: the check runs BEFORE the next instruction, which
 /// executes at `clk` and places its register / memory accesses at `clk + 1 ..= clk + 4`
 /// (`MemoryAccessPosition`), while a syscall additionally consumes up to `max_syscall_cycles`
 /// further timestamps. Subtracting both keeps every timestamp that reaches the memory argument
-/// strictly under the fence.
+/// strictly under the limit.
 ///
 /// At `clk += 5` per instruction this caps any shard at `2^26 / 5 ≈ 13.4 M` cycles.
-/// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
+/// Measured Sep 6 at 25 bits (8 M shards, reth): the clk limit closed 29 of 48 execution shards
 /// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
-/// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
+/// binding limit; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
 pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
 
 /// BLOCK-START RAMP.  A block's first shards decide how quickly every card can
@@ -142,15 +142,12 @@ const fn ramp_area_shift(shard: u32) -> u32 {
 }
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
-/// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
+/// limit that closed it.  Read once; off unless `ZIREN_LOG_SHARD_CLOSE` is
 /// `1`/`true`.
-fn shard_close_census_enabled() -> bool {
+fn log_shard_close_enabled() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| {
-        matches!(
-            std::env::var("ZIREN_SHARD_CLOSE_CENSUS").ok().as_deref(),
-            Some("1") | Some("true")
-        )
+        matches!(std::env::var("ZIREN_LOG_SHARD_CLOSE").ok().as_deref(), Some("1") | Some("true"))
     })
 }
 
@@ -3586,7 +3583,7 @@ impl<'a> Executor<'a> {
     #[inline]
     /// Whether [`Self::inc_shard_if_need`] would close the shard right now,
     /// without closing it. Mirrors the limits it tests.
-    pub(crate) fn shard_fence_due(&self) -> bool {
+    pub(crate) fn shard_limit_due(&self) -> bool {
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
         let clk_exit = self.state.clk + self.max_syscall_cycles + MemoryAccessPosition::HI as u32
             >= CORE_SHARD_CLK_LIMIT;
@@ -3634,7 +3631,7 @@ impl<'a> Executor<'a> {
         let ramp_split = self.ramp_split_due();
 
         if cpu_exit || clk_exit || height_split || area_split || ramp_split {
-            if shard_close_census_enabled() {
+            if log_shard_close_enabled() {
                 let reason = if clk_exit {
                     "clk"
                 } else if height_split {
@@ -3647,19 +3644,19 @@ impl<'a> Executor<'a> {
                     "ramp"
                 };
                 let counts = self.split_acct.event_counts(cpu_cycles);
-                let mut census: Vec<String> = counts
+                let mut nonzero_counts: Vec<String> = counts
                     .iter()
                     .filter(|(_, &n)| n != 0)
                     .map(|(air, n)| format!("{air}:{n}"))
                     .collect();
-                census.sort();
+                nonzero_counts.sort();
                 tracing::warn!(
                     "SHARD_CLOSE reason={reason} shard={} cycles={} area={} max_height={} counts={}",
                     self.state.current_shard,
                     cpu_cycles,
                     self.split_acct.trace_area(cpu_cycles),
                     self.split_acct.max_height(cpu_cycles),
-                    census.join(","),
+                    nonzero_counts.join(","),
                 );
             }
             self.pending_shape_fingerprint = {

@@ -571,7 +571,7 @@ impl CommittedShards {
         verify_with_deferred_global_lookups(&self.vk, proof)
     }
 
-    /// The verdict on `proof` as the global proof of the rounds of the shards
+    /// The verifier's result on `proof` as the global proof of the rounds of the shards
     /// `group`, in that order.
     fn verify_global_proof(&self, group: &[usize], proof: &ShardProof<SC>) -> Result<(), String> {
         let rounds: Vec<_> = group.iter().map(|&i| &self.rounds[i]).collect();

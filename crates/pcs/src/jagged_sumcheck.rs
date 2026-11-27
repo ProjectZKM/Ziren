@@ -746,7 +746,7 @@ mod closing_identity {
 /// a dense fold — 4.0 GiB and 14.7 s on a core reth shard).
 /// These tests pin the two
 /// to be BIT-IDENTICAL across randomized and degenerate packing geometry, so
-/// the closed form cannot silently change any verdict.
+/// the closed form cannot silently change what the verifier accepts.
 #[cfg(test)]
 mod closed_form_weight_equivalence {
     use super::*;

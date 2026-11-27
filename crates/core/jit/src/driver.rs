@@ -2,7 +2,7 @@
 //! `Instruction` stream to `MipsTranspiler` calls and produces a
 //! callable [`crate::JitFunction`].
 //!
-//! This is the integration glue between the executor's symbolic
+//! This is the integration layer between the executor's symbolic
 //! instruction representation and the JIT crate's per-opcode lowering
 //! API.  The split keeps the JIT crate free of an executor dependency
 //! (driver pulls in only the small `Opcode`/`Instruction` types that
@@ -45,7 +45,7 @@ use crate::{JitError, JitResult, MipsTranspiler};
 /// executor's enum (see `crates/core/executor/src/opcode.rs`).
 ///
 /// The driver consumes these discriminants via [`Self::from_u8`]; the
-/// executor-side glue (the `jit_runner` module landing in
+/// executor-side adapter (the `jit_runner` module landing in
 /// `zkm-core-executor`) converts `executor::Opcode` to this type with
 /// `JitOpcode::from_u8(opcode as u8)`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -236,7 +236,7 @@ impl JitOpcode {
 /// One MIPS instruction in the driver's wire format.
 ///
 /// Matches the layout of `zkm_core_executor::Instruction` field-for-field
-/// (modulo the opcode encoding) so the executor-side glue is a 1-line
+/// (modulo the opcode encoding) so the executor-side adapter is a 1-line
 /// `From` conversion.
 #[derive(Copy, Clone, Debug)]
 pub struct DriverInstruction {

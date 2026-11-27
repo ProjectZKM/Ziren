@@ -61,7 +61,7 @@ const ALL_KINDS: &[LookupKind] = &[
 /// Environment variables that change what gets proven or how it is shaped.
 /// Printed on every run so a reported result carries the config that produced
 /// it.  (`SHAPE_CHECK_FREQUENCY` is retired: shard limits are exact on every
-/// cycle, so no frequency knob influences the proof digest.)
+/// cycle, so no frequency setting influences the proof digest.)
 const REPRO_ENV: &[&str] = &[
     "SHARD_SIZE",
     "SHARD_BATCH_SIZE",
@@ -248,7 +248,7 @@ fn main() {
             }
 
             if name == "static" {
-                tracing::info!("\n(no program given: static census only)");
+                tracing::info!("\n(no program given: static table only)");
                 return;
             }
             let opts = ZKMCoreOpts { shard_batch_size: 1, ..Default::default() };
@@ -428,7 +428,7 @@ fn main() {
                 tot += rows;
                 tracing::info!("{name:<22} {rows:>10}");
             };
-            macro_rules! census {
+            macro_rules! count_rows {
                 ($field:ident, $label:literal) => {{
                     let mut r = 0usize;
                     for rec in &rt.records {
@@ -437,14 +437,14 @@ fn main() {
                     report($label, r);
                 }};
             }
-            census!(add_sub_events, "AddSub");
-            census!(bitwise_events, "Bitwise");
-            census!(shift_left_events, "ShiftLeft");
-            census!(shift_right_events, "ShiftRight");
-            census!(lt_events, "Lt");
-            census!(cloclz_events, "CloClz");
-            census!(mul_events, "Mul");
-            census!(divrem_events, "DivRem");
+            count_rows!(add_sub_events, "AddSub");
+            count_rows!(bitwise_events, "Bitwise");
+            count_rows!(shift_left_events, "ShiftLeft");
+            count_rows!(shift_right_events, "ShiftRight");
+            count_rows!(lt_events, "Lt");
+            count_rows!(cloclz_events, "CloClz");
+            count_rows!(mul_events, "Mul");
+            count_rows!(divrem_events, "DivRem");
             tracing::info!("{:<22} {:>10}", "ALU TOTAL", tot);
             tracing::info!("cpu_events (one per executed instruction) = {cpu}");
             tracing::info!("shards = {}", rt.records.len());

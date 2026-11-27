@@ -701,7 +701,7 @@ pub mod jagged {
     }
 
     /// **Shared linear core** — the path-INDEPENDENT challenger sequence at
-    /// the heart of every jagged prove, under either inner PCS: sample `z_col`
+    /// the core of every jagged prove, under either inner PCS: sample `z_col`
     /// at the verifier-matching transcript position → jagged-sumcheck
     /// reduction → jagged-eval sub-protocol → point-extension
     /// `log_dense → log2(area)` via extra Fiat-Shamir coords → open.
@@ -2378,7 +2378,7 @@ mod test {
     /// `DEFAULT_LOG_STACKING_HEIGHT` must be REJECTED, and rejected before any
     /// geometry is derived from it: the height feeds `area >> h` and
     /// `1 << (h + batch_dim)`, so a hostile `h` near `usize::BITS` would
-    /// otherwise reach a shift overflow rather than a verdict.
+    /// otherwise reach a shift overflow rather than a rejection.
     ///
     /// Covers the boundary set the audit asks for — `0`, `2`, one below and one
     /// above the production value, and the two shift-overflow edges.

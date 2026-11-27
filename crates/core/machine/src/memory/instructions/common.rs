@@ -180,7 +180,7 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder, E: Into<AB::Expr> + Clone>(
     addr_aligned
 }
 
-/// The shared instruction plumbing for the memory chips: every row is a real
+/// The shared instruction constraints for the memory chips: every row is a real
 /// instruction serving itself via the frame.
 ///
 /// Every memory chip supplies the same constants: `next_next_pc = next_pc + 4`,

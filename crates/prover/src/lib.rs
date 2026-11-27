@@ -47,7 +47,7 @@ use zkm_pcs::{
     Challenge, MachineProver, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
     Val, Word, ZKMCoreOpts, ZKMProverOpts, DIGEST_SIZE,
 };
-// Used only by the `#[cfg(test)]` shape-cardinality census below; the
+// Used only by the `#[cfg(test)]` shape-cardinality count below; the
 // non-test build has no reader, which is why it needs the gate.
 #[cfg(test)]
 use zkm_pcs::shape::OrderedShape;
@@ -161,7 +161,7 @@ pub type WrapKeys<C> = (
 ///
 /// So the occupancy that matters is 29 plus however many distinct normalize
 /// keys production has been seen to produce, and it GROWS with traffic rather
-/// than being a fixed census. A height that cannot hold them is not "a smaller
+/// than being a fixed count. A height that cannot hold them is not "a smaller
 /// map" — it is a map that rejects real proofs, which is what 2^11 (2048) did.
 /// The enumerated normalize classes (one per chip cluster and preprocessed,
 /// global and main round bucket) number about 393k, so the tree holds 2^19.
@@ -1106,7 +1106,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCoreWitnessValues<CoreSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        if normalize_key_census_enabled() {
+        if log_normalize_key_enabled() {
             let mut names: Vec<&str> = input
                 .shard_proofs
                 .iter()
@@ -2700,14 +2700,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 }
 
 /// Whether to log one `NORMALIZE_KEY` line per normalize program request.
-/// Read once; off unless `ZIREN_NORMALIZE_KEY_CENSUS` is `1`/`true`.
-fn normalize_key_census_enabled() -> bool {
+/// Read once; off unless `ZIREN_LOG_NORMALIZE_KEY` is `1`/`true`.
+fn log_normalize_key_enabled() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| {
-        matches!(
-            std::env::var("ZIREN_NORMALIZE_KEY_CENSUS").ok().as_deref(),
-            Some("1") | Some("true")
-        )
+        matches!(std::env::var("ZIREN_LOG_NORMALIZE_KEY").ok().as_deref(), Some("1") | Some("true"))
     })
 }
 
@@ -5084,7 +5081,7 @@ pub mod tests {
     /// [`test_circuit_groth16_only`] over a wrap proof proved elsewhere: the
     /// `(vk, wrap proof)` pair at `ZIREN_WRAP_DUMP`, as the GPU harness writes
     /// it under `ZIREN_WRAP_VK_OUT`.  The circuit is built from the wrap
-    /// schedule this process reads, so the `ZIREN_WRAP_*` knobs must be the
+    /// schedule this process reads, so the `ZIREN_WRAP_*` variables must be the
     /// ones the proof was made with.
     #[test]
     #[serial]
@@ -5843,7 +5840,7 @@ pub mod tests {
             dummy_area.saturating_sub(dummy_cells),
         );
         tracing::info!(
-            "[PREPROBE] VERDICT: real_pad_columns={real_pads} dummy_pad_columns={dummy_pads} \
+            "[PREPROBE] RESULT: real_pad_columns={real_pads} dummy_pad_columns={dummy_pads} \
              match={}",
             real_pads == dummy_pads,
         );

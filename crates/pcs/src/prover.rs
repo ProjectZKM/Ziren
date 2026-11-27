@@ -206,7 +206,7 @@ where
 /// Three things belong to the commitment scheme rather than to the prover that
 /// drives it: the storage one committed main trace lives in, the prover-side
 /// data the commit retains for the open to consume, and the error either can
-/// fail with.  Naming them together here means the prover seam names none of
+/// fail with.  Naming them together here means the prover trait names none of
 /// them individually — exchanging the component exchanges all three at once,
 /// which is what a backend swap actually is.
 pub trait ShardPcsProver<SC: StarkGenericConfig>: 'static + Send + Sync {
@@ -331,7 +331,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
 {
     /// The polynomial-commitment component this prover commits and opens with.
     /// It owns the committed-trace storage, the retained commit data and the
-    /// commit/open error, so none of the three appears on this seam.
+    /// commit/open error, so none of the three appears on this trait.
     type Pcs: ShardPcsProver<SC>;
 
     /// The type used to store the proving key.

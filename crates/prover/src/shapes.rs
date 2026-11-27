@@ -1413,7 +1413,7 @@ mod tests {
             "[HETERO] heterogeneous arity-2 batches built={hetero_total} MISSED_by_uniform_enum={hetero_missed}"
         );
         tracing::info!(
-            "[HETERO] VERDICT: {}",
+            "[HETERO] RESULT: {}",
             if hetero_missed == 0 {
                 "uniform enum COVERS heterogeneous batches (order/mix-independent VK)"
             } else {
@@ -1486,15 +1486,15 @@ mod normalize_enumeration_tests {
     use crate::components::DefaultProverComponents;
     use crate::REDUCE_BATCH_SIZE;
 
-    /// One real leaf of the production census: whether it was the first shard
+    /// One real leaf recorded in production: whether it was the first shard
     /// and its per-chip row counts.
-    struct CensusLeaf {
+    struct RecordedLeaf {
         first: bool,
         rows: Vec<(String, usize)>,
     }
 
-    fn parse_census(path: &str) -> Vec<CensusLeaf> {
-        let text = std::fs::read_to_string(path).expect("census file");
+    fn parse_recorded_leaves(path: &str) -> Vec<RecordedLeaf> {
+        let text = std::fs::read_to_string(path).expect("recorded leaves file");
         let mut seen: BTreeSet<(bool, String)> = BTreeSet::new();
         let mut out = Vec::new();
         for line in text.lines() {
@@ -1513,7 +1513,7 @@ mod normalize_enumeration_tests {
                 .filter_map(|kv| kv.split_once(':'))
                 .map(|(n, h)| (n.to_string(), h.parse().expect("row count")))
                 .collect();
-            out.push(CensusLeaf { first, rows });
+            out.push(RecordedLeaf { first, rows });
         }
         out
     }
@@ -1583,23 +1583,27 @@ mod normalize_enumeration_tests {
         );
     }
 
-    /// Every leaf the production census recorded (`ZIREN_CENSUS_FILE`, lines
+    /// Every leaf recorded in production (`ZIREN_RECORDED_LEAVES_FILE`, lines
     /// with `first=` and `heights=`) falls in an enumerated class, and its
     /// normalize program is byte-identical to the class representative's; the
     /// first-shard flag, being a witness, does not move the program either.
     ///
-    /// `ZIREN_CENSUS_FILE=census.txt cargo test -r -p zkm-prover
-    ///  normalize_enumeration_covers_census -- --ignored --nocapture`
+    /// `ZIREN_RECORDED_LEAVES_FILE=leaves.txt cargo test -r -p zkm-prover
+    ///  normalize_enumeration_covers_recorded_leaves -- --ignored --nocapture`
     #[test]
     #[ignore]
-    fn normalize_enumeration_covers_census() {
+    fn normalize_enumeration_covers_recorded_leaves() {
         zkm_core_machine::utils::setup_logger();
-        let path = std::env::var("ZIREN_CENSUS_FILE").expect("ZIREN_CENSUS_FILE");
-        let per_class: usize =
-            std::env::var("ZIREN_CENSUS_PER_CLASS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
-        let threads: usize =
-            std::env::var("ZIREN_CENSUS_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
-        let leaves = parse_census(&path);
+        let path = std::env::var("ZIREN_RECORDED_LEAVES_FILE").expect("ZIREN_RECORDED_LEAVES_FILE");
+        let per_class: usize = std::env::var("ZIREN_RECORDED_LEAVES_PER_CLASS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3);
+        let threads: usize = std::env::var("ZIREN_RECORDED_LEAVES_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8);
+        let leaves = parse_recorded_leaves(&path);
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
         let representatives: BTreeMap<_, ZKMProofShape> =
@@ -1608,7 +1612,7 @@ mod normalize_enumeration_tests {
                 .map(|s| (ZKMProofShape::normalize_class(machine, &shape_rows(&s)), s))
                 .collect();
 
-        let mut by_class: BTreeMap<_, Vec<&CensusLeaf>> = BTreeMap::new();
+        let mut by_class: BTreeMap<_, Vec<&RecordedLeaf>> = BTreeMap::new();
         for leaf in leaves.iter() {
             by_class
                 .entry(ZKMProofShape::normalize_class(machine, &leaf.rows))
@@ -1626,7 +1630,7 @@ mod normalize_enumeration_tests {
             );
         }
 
-        let jobs: Vec<(&CensusLeaf, &ZKMProofShape)> = by_class
+        let jobs: Vec<(&RecordedLeaf, &ZKMProofShape)> = by_class
             .iter()
             .filter_map(|(class, ls)| representatives.get(class).map(|rep| (ls, rep)))
             .flat_map(|(ls, rep)| ls.iter().take(per_class).map(move |l| (*l, rep)))
@@ -1663,7 +1667,7 @@ mod normalize_enumeration_tests {
         let mismatched = mismatched.load(Ordering::Relaxed);
         let first_moved = first_moved.load(Ordering::Relaxed);
         tracing::info!(
-            "census leaves {} in {} classes; representatives {}; checked {}; missing classes {}; \
+            "recorded leaves {} in {} classes; representatives {}; checked {}; missing classes {}; \
              mismatched {}; first-flag moved {}",
             leaves.len(),
             by_class.len(),

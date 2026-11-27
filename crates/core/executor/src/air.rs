@@ -27,7 +27,7 @@ pub enum MipsAirId {
     ShaExtend = 2,
     /// The SHA-256 extend control chip (bookends the `PrecompileChain` state bus).
     //
-    // Declaration order is load-bearing: `MipsAirId::iter()` yields in declaration
+    // Declaration order matters: `MipsAirId::iter()` yields in declaration
     // order and `test_primitives_and_machine_air_names_match` zips it against
     // `MipsAir::chips()`, which builds extend, extend-control, compress,
     // compress-control.  Discriminants stay pinned to their variants, so the

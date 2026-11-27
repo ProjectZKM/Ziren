@@ -14,7 +14,7 @@
 //!
 //! i.e. the *evaluations over the low-variable hypercube* of the function
 //! `c ↦ (f's high variables monomial-evaluated at x_j)`.  Two consequences,
-//! each carried by a validated keystone (`monomial.rs`):
+//! each carried by a tested identity (`monomial.rs`):
 //!
 //!   * folding the leaf with the round's Lagrange randomness `r` gives
 //!     `Σ_c eq(r,c)·leaf_j[c] = mono_eval(f_folded, map_to_pow(x_j))` — the

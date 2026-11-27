@@ -282,7 +282,7 @@ def run_picus(sr1cs, timeout_ms):
     except subprocess.TimeoutExpired:
         return "tool-timeout", ""
     out = r.stdout
-    verdict = "unknown"
+    result = "unknown"
     detail = ""
     for line in out.splitlines():
         try:
@@ -295,15 +295,15 @@ def run_picus(sr1cs, timeout_ms):
                 pass
         s = json.dumps(j)
         if "unsafe" in s and "unknown" not in s:
-            verdict = "unsafe"
+            result = "unsafe"
             detail = s[:400]
         elif '"safe' in s or ' safe' in s:
-            if verdict != "unsafe":
-                verdict = "safe"
-    if verdict == "unknown":
+            if result != "unsafe":
+                result = "safe"
+    if result == "unknown":
         tail = (r.stdout + r.stderr)[-600:]
         detail = tail.replace("\n", " | ")
-    return verdict, detail
+    return result, detail
 
 
 def main():
@@ -330,7 +330,7 @@ def main():
             text, info = convert_module(prime, name, forms)
             entry = {"chip": chip, "module": name}
             if text is None:
-                entry["verdict"] = "skipped"
+                entry["result"] = "skipped"
                 entry["reason"] = info
                 report.append(entry)
                 continue
@@ -344,7 +344,7 @@ def main():
     if a.run:
         def work(entry):
             v, d = run_picus(entry["sr1cs"], a.timeout)
-            entry["verdict"] = v
+            entry["result"] = v
             if d:
                 entry["detail"] = d
             print(f"{entry['chip']:28} {entry['module']:36} {v}", flush=True)
@@ -354,7 +354,7 @@ def main():
         json.dump(report, open(a.report, "w"), indent=1)
     counts = {}
     for e in report:
-        counts[e.get("verdict", "converted")] = counts.get(e.get("verdict", "converted"), 0) + 1
+        counts[e.get("result", "converted")] = counts.get(e.get("result", "converted"), 0) + 1
     print("summary:", counts)
 
 

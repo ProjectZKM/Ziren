@@ -38,7 +38,7 @@ impl<F: PrimeField32> ShardClusters<F> {
     }
 
     /// Maps chip names to trace widths for the smallest cluster that contains
-    /// every chip `record` includes, restricted to the machine's chip inventory.
+    /// every chip `record` includes, restricted to the machine's chip set.
     /// Returns `None` when no cluster contains them.
     ///
     /// The first shard's memory image ([`FIRST_SHARD_CHIP`]) takes no part in

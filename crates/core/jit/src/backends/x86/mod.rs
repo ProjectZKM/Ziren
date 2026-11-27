@@ -124,9 +124,9 @@ pub(crate) const UNDO_END_OFFSET: i32 = offset_of!(JitContext, undo_end) as i32;
 /// the halt sentinels and [`JIT_EXIT_BAD_JUMP`]; none of these is an
 /// error by itself -- the host decides what each means at `ctx.pc`.
 ///
-/// The shard fence: the instruction that just completed (`ctx.pc` is its
+/// The shard limit: the instruction that just completed (`ctx.pc` is its
 /// successor) put the shard at one of the executor's split bounds.
-pub const JIT_EXIT_SHARD_FENCE: u32 = 0x5000_0001;
+pub const JIT_EXIT_SHARD_LIMIT: u32 = 0x5000_0001;
 /// The oracle vector is full; `ctx.pc` is the memory instruction that
 /// could not push (nothing of it executed).
 pub const JIT_EXIT_ORACLE_FULL: u32 = 0x5000_0002;
@@ -134,7 +134,7 @@ pub const JIT_EXIT_ORACLE_FULL: u32 = 0x5000_0002;
 pub const JIT_EXIT_FALL_OFF: u32 = 0x5000_0003;
 /// The host trampoline (a syscall or a trapping instruction handed to the
 /// interpreter) ended the run: the program finished, or the interpreter
-/// step was a fence, or it failed. The host knows which.
+/// step reached a shard limit, or it failed. The host knows which.
 pub const JIT_EXIT_HOST: u32 = 0x5000_0004;
 
 /// Where each MIPS register physically lives during JIT execution.

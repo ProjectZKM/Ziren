@@ -218,7 +218,7 @@ mod eval_trace_columns_reference_tests {
     type F = p3_koala_bear::KoalaBear;
     type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
-    /// The pre-lever form, kept verbatim as the bit-identity oracle: embed
+    /// The unoptimized form, kept verbatim as the bit-identity oracle: embed
     /// each base felt into the extension, multiply with the FULL quartic
     /// product, and accumulate one column at a time in row order.
     fn reference(trace: &[F], width: usize, eval_point: &[EF]) -> Vec<EF> {
@@ -244,7 +244,7 @@ mod eval_trace_columns_reference_tests {
             .collect()
     }
 
-    /// Bit-identity over shapes that exercise both levers: widths on either
+    /// Bit-identity over shapes that exercise both optimizations: widths on either
     /// side of a cache line, heights that straddle the `ROW_BLOCK` boundary
     /// (so the parallel reduce actually has >1 partial to re-associate), and
     /// eval points LONGER than `log2(height)` (so the truncated-eq `tail`

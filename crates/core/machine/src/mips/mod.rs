@@ -641,7 +641,7 @@ pub mod tests {
     /// the verifying key's, bounded by the LARGEST admitted Program band.  The
     /// main round is proof-controlled: the verifier admits any area strictly
     /// below `2^MAX_ROUND_LOG_AREA`, so a soundness model of the batch has to
-    /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` fence,
+    /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` limit,
     /// which only has to lie inside it.
     /// The shard verifier anchors a shard's public values to the trace iff the
     /// MACHINE has a bus `eval_public_values` closes, whatever chips the shard
@@ -714,7 +714,7 @@ pub mod tests {
         );
         assert!(
             zkm_pcs::ELEMENT_THRESHOLD <= verifier_area,
-            "the honest area fence must lie inside the verifier's bound",
+            "the honest area limit must lie inside the verifier's bound",
         );
 
         let largest =
@@ -1355,12 +1355,12 @@ pub mod tests {
         ))
     }
 
-    /// Whether a verifier verdict is the shard verifier's rejection of opened
+    /// Whether a verifier error is the shard verifier's rejection of opened
     /// degree bits that are not the bits of the chip's observed height.  This
     /// check runs before the LogUp-GKR verification, so a forged degree never
     /// reaches the last-layer reconstruction.
-    fn rejected_on_degree_bits(verdict: &str) -> bool {
-        verdict.contains("the opened degree bits are not the bits of its observed height")
+    fn rejected_on_degree_bits(error: &str) -> bool {
+        error.contains("the opened degree bits are not the bits of its observed height")
     }
 
     #[test]

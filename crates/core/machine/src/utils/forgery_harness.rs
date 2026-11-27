@@ -303,7 +303,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// LogUp-GKR reconstruction identity), the exact substrate the
 /// VK-identity change relies on once heights leave both `vk.hash` AND the
 /// transcript framing.  If THIS rejects, the degree-bit binding is
-/// load-bearing on its own.  Over-claim: set a higher bit (taller chip).
+/// enough on its own to bind the height.  Over-claim: set a higher bit (taller chip).
 fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let jagged = sp.jagged_shard_proof.as_mut();
     let opening = &mut jagged.opened_values.chips[ci];
@@ -987,7 +987,7 @@ fn multi_shard_opts() -> ZKMCoreOpts {
 }
 
 /// Proves `program` with `tamper` and `challenge`, checks the proof has at
-/// least `min_shards` shards, and returns the honest verifier's verdict.
+/// least `min_shards` shards, and returns the honest verifier's result.
 #[allow(clippy::too_many_arguments)]
 fn verify_tampered(
     label: &str,
@@ -1015,7 +1015,7 @@ fn verify_tampered(
     res
 }
 
-/// The honest verifier's verdict on `fibonacci_program` cut into several
+/// The honest verifier's result on `fibonacci_program` cut into several
 /// shards, each global proof opening up to `rounds_per_proof` consecutive
 /// global rounds under the challenge `challenge` picks for the shard of its
 /// first round. Checks that a global proof opens as many rounds as the shards

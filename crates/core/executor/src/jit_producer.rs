@@ -15,7 +15,7 @@
 //!   bit. Per instruction it stamps the registers the interpreter's
 //!   `rr`/`rw` stamp, bumps the clock by 5, pushes the pre-access value of
 //!   every memory word read or written to the oracle, charges the trace
-//!   area / chip heights / touched addresses and fences the shard where
+//!   area / chip heights / touched addresses and closes the shard where
 //!   [`Executor::inc_shard_if_need`] would.
 //! * **Interpreter** (through [`producer_handler`]): syscalls, statically
 //!   invalid encodings and operand forms the lowering does not model. The
@@ -24,7 +24,7 @@
 //!   At a branch/jump the delay-slot scheme cannot lower (a *bail site*,
 //!   normally a data word that never runs) it instead hands the rest of the
 //!   run to the interpreter.
-//! * **Host driver** ([`run`]): shard fences (`inc_shard_if_need` +
+//! * **Host driver** ([`run`]): shard closes (`inc_shard_if_need` +
 //!   `bump_record`, exactly the interpreter loop's bookkeeping), oracle
 //!   growth, program end.
 //!
@@ -44,7 +44,7 @@
 use crate::{ExecutionError, Executor};
 
 /// Batches the producer has taken, for tests and for the one-line
-/// `PRODUCER` census a caller can log. Not load-bearing.
+/// `PRODUCER` count a caller can log. Diagnostic only.
 ///
 /// `AtomicUsize`, not `AtomicU64`: a guest that verifies a proof of this
 /// system inside the machine links this crate, and the guest target is
@@ -55,7 +55,7 @@ pub static PRODUCER_BATCHES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 /// Runs that reached a bail site and finished in the interpreter, for tests.
-/// Not load-bearing.
+/// Diagnostic only.
 #[doc(hidden)]
 pub static PRODUCER_BAILS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 

@@ -56,13 +56,13 @@ use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 // ===========================================================================
-// Device jagged-eval round-engine seam: `ziren-gpu` installs an engine here.
+// Device jagged-eval round-engine hook: a device backend installs an engine here.
 //
 // The structural jagged-eval sumcheck's per-round polynomial COMPUTE (the
 // branching-program eval over all columns, ~O(N × num_cols) host work) can be
-// off-loaded to a device (CUDA) implementation supplied by `ziren-gpu`, while
+// off-loaded to a device (CUDA) implementation the backend supplies, while
 // the Fiat-Shamir challenger stays HOST-side (per-round observe/sample).  The
-// seam is a per-thread factory installed by `ziren-gpu` immediately around its
+// hook is a per-thread factory the backend installs immediately around its
 // device-path `prove_jagged_linear_core` call.  When NO factory is
 // installed (the default, and every pure-host build), the sumcheck runs on the
 // host; both paths produce identical bytes.
@@ -596,7 +596,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
 }
 
 /// Engine-driven variant of [`structural_jagged_eval_sumcheck`] used on the
-/// `ziren-gpu` device path, installed through the engine seam.  The per-round
+/// device backend's path, installed through the engine hook.  The per-round
 /// polynomial evals + fold are delegated to `engine` (a device kernel); the
 /// challenger observe/sample/interpolate stay HOST-side and identical to the
 /// host prover.  With `verify = true`, a shadow host [`StructuralJaggedEvalProver`]
@@ -978,7 +978,7 @@ mod tests {
     ///
     /// The two disagree on one convention: the structural proof's point is
     /// `prover.rhos`, in prepend order, while the naive one pushes in round order.
-    /// Reversed here rather than "fixed" -- the orders are load-bearing for their
+    /// Reversed here rather than "fixed" -- each order is relied on by its
     /// own consumers.
     #[test]
     fn structural_and_naive_jagged_eval_sumchecks_agree() {

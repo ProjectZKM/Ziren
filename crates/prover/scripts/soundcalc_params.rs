@@ -209,7 +209,7 @@ fn main() {
     );
 
     // Soundness bounds use what the verifier admits, including its fixed row
-    // cube, rather than an honest shard's area fence or a program's row count.
+    // cube, rather than an honest shard's area limit or a program's row count.
     let log_rows =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     let width = |name: &str| {

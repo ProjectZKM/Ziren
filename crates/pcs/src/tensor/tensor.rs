@@ -127,7 +127,7 @@ impl<T, A: Backend> Tensor<T, A> {
     /// Adopt an existing buffer under an explicit `[rows, cols]` shape,
     /// zero-copy, in whatever memory space the buffer already lives in.
     ///
-    /// This is the seam a device-resident matrix crosses to become a
+    /// This is where a device-resident matrix becomes a
     /// `Tensor<T, CudaBackend>` (and so an `Mle`) without a copy: the buffer
     /// carries its own allocation and allocator, so ownership simply moves.
     #[inline]

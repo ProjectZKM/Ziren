@@ -601,11 +601,11 @@ where
         C: Config<N = F, F = F> + Debug,
     {
         let debug_mode = zkm_debug_mode();
-        let region_census = std::env::var_os("ZIREN_RECURSION_REGION_CENSUS").is_some();
+        let region_op_counts = std::env::var_os("ZIREN_RECURSION_REGION_OP_COUNTS").is_some();
         let (mut top_seq_blocks, traces) =
             tracing::debug_span!("compile_one loop").in_scope(|| {
                 let mut traces = vec![];
-                let mut span_builder = if debug_mode || region_census {
+                let mut span_builder = if debug_mode || region_op_counts {
                     Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
                 } else {
                     None
@@ -614,12 +614,12 @@ where
                     self.compile_block(operations, debug_mode, &mut traces, span_builder.as_mut());
                 if let Some(span_builder) = span_builder {
                     let cycle_tracker_root_span = span_builder.finish().unwrap();
-                    if region_census {
-                        tracing::info!("REGION_CENSUS_BEGIN");
+                    if region_op_counts {
+                        tracing::info!("REGION_OP_COUNTS_BEGIN");
                         for line in cycle_tracker_root_span.lines() {
-                            tracing::info!("REGION_CENSUS {}", line);
+                            tracing::info!("REGION_OP_COUNTS {}", line);
                         }
-                        tracing::info!("REGION_CENSUS_END");
+                        tracing::info!("REGION_OP_COUNTS_END");
                     } else {
                         for line in cycle_tracker_root_span.lines() {
                             tracing::info!("{}", line);

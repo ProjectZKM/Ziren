@@ -25,7 +25,7 @@
 //! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
 //! the earlier single-polynomial (non-stacked) prover and verifier variants.
 //! They share the transcript rules above but are exercised only by this
-//! module's tests, so they compile only with them; the verdict type they
+//! module's tests, so they compile only with them; the error type they
 //! share with the production verifier lives in [`error`].
 
 pub mod code;

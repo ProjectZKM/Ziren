@@ -254,7 +254,7 @@ pub struct BranchEvent {
 
     /// instruction frame (see `AluEvent`)
     /// Branch events are always real instructions today, but the flag keeps
-    /// the recipe uniform.  FFI-safe: `u32` + `Option*` mirrors.
+    /// the event layout uniform.  FFI-safe: `u32` + `Option*` mirrors.
     pub is_instruction: u32,
     /// The clock cycle.
     pub clk: u32,

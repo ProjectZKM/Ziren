@@ -1,4 +1,4 @@
-//! Determinism propagation: a fast, proof-oriented triage of every extracted module.
+//! Determinism propagation: a fast, proof-oriented first pass over every extracted module.
 //!
 //! A module is deterministic when its outputs are functions of its inputs.  This pass decides
 //! that the way a proof would: it starts from the inputs (and the `assume-deterministic`
@@ -57,8 +57,8 @@
 //! Every field-gadget lemma rests on the gadget's limb range checks (bytes for `result` and
 //! `carry`, `u16` for the witness), which hold on real rows.
 //!
-//! This pass is triage, not proof: its verdict is only as strong as the Lean emission that will
-//! replay each step.  A `Stuck` verdict names the outputs no rule reached; each is either a
+//! This is a first pass, not a proof: its result is only as strong as the Lean emission that
+//! will replay each step.  A `Stuck` result names the outputs no rule reached; each is either a
 //! missing rule or an under-constrained column.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -631,9 +631,9 @@ pub enum DerivEnd {
     Coef { poly: Poly, pivot: bool, zero: Vec<Derivation>, nonzero: Box<Derivation> },
 }
 
-/// Verdict for one module.
+/// Analysis result for one module.
 #[derive(Clone, Debug)]
-pub enum Verdict {
+pub enum Analysis {
     Determined {
         branches: usize,
         rules: BTreeMap<Rule, usize>,
@@ -1534,7 +1534,7 @@ struct Search {
     probing: bool,
     /// Wall-clock deadline for the whole module.
     deadline: std::time::Instant,
-    /// Time spent per phase (debug census): pass, tighten, eliminate, probe.
+    /// Time spent per phase (debug timing): pass, tighten, eliminate, probe.
     phase_us: [u128; 4],
 }
 
@@ -2635,7 +2635,7 @@ impl Search {
 }
 
 /// Analyzes one module.
-pub fn analyze(m: &PicusModule) -> Verdict {
+pub fn analyze(m: &PicusModule) -> Analysis {
     let (ctx, known) = Ctx::new(m);
     let st = State {
         facts: ctx.facts.clone(),
@@ -2666,7 +2666,7 @@ pub fn analyze(m: &PicusModule) -> Verdict {
     };
     let derivation = s.run(st, 0);
     tracing::debug!(
-        "phase census: pass {} ms, tighten {} ms, eliminate {} ms, probe {} ms, branches {}",
+        "phase timing: pass {} ms, tighten {} ms, eliminate {} ms, probe {} ms, branches {}",
         s.phase_us[0] / 1000,
         s.phase_us[1] / 1000,
         s.phase_us[2] / 1000,
@@ -2674,15 +2674,15 @@ pub fn analyze(m: &PicusModule) -> Verdict {
         s.branches
     );
     if std::time::Instant::now() > s.deadline {
-        return Verdict::Timeout;
+        return Analysis::Timeout;
     }
     if s.overflow {
-        return Verdict::TooManyBranches;
+        return Analysis::TooManyBranches;
     }
     if s.stuck.is_empty() {
-        Verdict::Determined { branches: s.branches, rules: s.rules, lemmas: s.lemmas, derivation }
+        Analysis::Determined { branches: s.branches, rules: s.rules, lemmas: s.lemmas, derivation }
     } else {
-        Verdict::Stuck {
+        Analysis::Stuck {
             branches: s.branches,
             stuck_outputs: s.stuck.into_iter().collect(),
             opaque: ctx.opaque,

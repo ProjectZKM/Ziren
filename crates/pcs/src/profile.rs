@@ -53,7 +53,7 @@
 //!
 //! Every schedule — core, compress, shrink and wrap — is read through the
 //! constructor its prover calls, so an environment that overrides one of its
-//! knobs moves the digest. That is the intended behaviour: it is a different
+//! parameters moves the digest. That is the intended behaviour: it is a different
 //! transcript.
 //!
 //! The `profile_digest_is_pinned` test fails on any change, so every move is a

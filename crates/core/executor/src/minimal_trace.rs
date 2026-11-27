@@ -37,7 +37,7 @@
 //!   the resulting [`ExecutionRecord`]s back into shard order without a
 //!   side channel.
 //!
-//! - `mem_reads` is the load-bearing replay oracle: the recording executor
+//! - `mem_reads` is the oracle the replay depends on: the recording executor
 //!   pushes the pre-access value of every user memory access
 //!   (`Executor::recording_chunk_mem_reads`) and seals the run into the
 //!   chunk, and the replay consumes it as a positional cursor — the Nth
@@ -74,7 +74,7 @@ pub struct MemValue {
     pub timestamp: u32,
     /// full memory record: the `shard` field of the
     /// `MemoryRecord` at this address *before* the access (i.e. the
-    /// shard of the last prior write). Load-bearing: the memory
+    /// shard of the last prior write). Required: the memory
     /// argument's `prev_shard` for the first cross-shard touch is
     /// reconstructed from this. `0` on the JIT-recorder path (the JIT
     /// does not track per-address shard bookkeeping — see the shard-bookkeeping gap below).

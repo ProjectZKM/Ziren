@@ -130,7 +130,7 @@ impl<F: PrimeField32> LtOperation<F> {
 }
 
 impl<F: Field> LtOperation<F> {
-    /// The constraint mirror of `LtChip::eval` minus the chip plumbing
+    /// The constraint mirror of `LtChip::eval` minus the chip-level parts
     /// (selectors, frame, Instruction-bus receive).  The caller guarantees
     /// `is_slt` / `is_sltu` are boolean with at most one set, and both zero on
     /// non-real rows; `b` / `c` must be valid byte-words.

@@ -1458,8 +1458,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
-        let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
-        let mut census_rows: Vec<(String, u128)> = Vec::new();
+        let timing = std::env::var("ZIREN_DEPS_TIMING").is_ok_and(|v| v != "0");
+        let mut timing_rows: Vec<(String, u128)> = Vec::new();
         let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
         for record in records.iter_mut() {
             if !serial {
@@ -1484,8 +1484,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     match out {
                         Ok((name, mut output, us)) => {
                             record.append(&mut output);
-                            if census {
-                                census_rows.push((name, us));
+                            if timing {
+                                timing_rows.push((name, us));
                             }
                         }
                         Err(e) => {
@@ -1497,8 +1497,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         }
                     }
                 }
-                if census {
-                    census_rows
+                if timing {
+                    timing_rows
                         .push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
                 }
             } else {
@@ -1522,22 +1522,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         return Err(e);
                     }
                     record.append(&mut output);
-                    if census {
-                        census_rows.push((chip.name(), t_chip.elapsed().as_micros()));
+                    if timing {
+                        timing_rows.push((chip.name(), t_chip.elapsed().as_micros()));
                     }
                 }
             }
-            if census {
-                census_rows.sort_by_key(|r| Reverse(r.1));
-                let total: u128 = census_rows.iter().map(|r| r.1).sum();
-                let top = census_rows
+            if timing {
+                timing_rows.sort_by_key(|r| Reverse(r.1));
+                let total: u128 = timing_rows.iter().map(|r| r.1).sum();
+                let top = timing_rows
                     .iter()
                     .take(12)
                     .map(|(n, us)| format!("{n}={}us", us))
                     .collect::<Vec<_>>()
                     .join(" ");
-                tracing::info!(">>> DEPS_CENSUS total_us={total} {top}");
-                census_rows.clear();
+                tracing::info!(">>> DEPS_TIMING total_us={total} {top}");
+                timing_rows.clear();
             }
         }
         Ok(())

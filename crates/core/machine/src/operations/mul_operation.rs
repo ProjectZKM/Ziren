@@ -118,7 +118,7 @@ impl<F: PrimeField32> MulOperation<F> {
 }
 
 impl<F: Field> MulOperation<F> {
-    /// The constraint mirror of `MulChip::eval` minus the chip plumbing
+    /// The constraint mirror of `MulChip::eval` minus the chip-level parts
     /// (selectors, frame, HI-register write, Instruction-bus receive).  The
     /// caller guarantees `is_signed` / `is_unsigned` are boolean with at most
     /// one set, and both zero on non-real rows; `b` / `c` must be valid

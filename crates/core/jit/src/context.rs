@@ -90,7 +90,7 @@ pub struct JitContext {
     pub pending_jump_at_start: u32,
 
     /// Last MIPS PC the JIT'd code began executing.  Updated at
-    /// every `start_instr` block so post-mortem signal handlers
+    /// every `start_instr` block so signal handlers
     /// (e.g. catching a SIGSEGV from broken codegen) can pinpoint
     /// which instruction was running at the time of the fault.
     /// Costs one extra `mov DWORD [ctx + offset], imm` per cycle
@@ -163,14 +163,14 @@ pub struct JitContext {
     /// instruction about to execute.
     pub clk_shard: u64,
     /// `element_threshold - trace_area` of the split accumulator; the area
-    /// fence is `<= 0` after an instruction's charge.
+    /// limit is reached at `<= 0` after an instruction's charge.
     pub area_left: i64,
     /// `height_threshold - heights[air]` per air, in the accumulator's
-    /// `EnumMap` slot order; the height fence is `<= 0` after a charge.
+    /// `EnumMap` slot order; the height limit is reached at `<= 0` after a charge.
     pub height_left: [i64; PRODUCER_HEIGHT_SLOTS],
     /// The accumulator's `touched_addresses`.
     pub touched: u64,
-    /// `clk_shard`'s low half at which the clock fence trips, i.e. the
+    /// `clk_shard`'s low half at which the clock limit is reached, i.e. the
     /// clk-based shard bound plus 3.
     pub clk_limit: u32,
     /// The current shard, as a 32-bit operand for the memory hook's

@@ -6,17 +6,17 @@
 //! heights.
 //!
 //! Depending on `zkm_core_machine` would be circular, so chip names are
-//! string literals matching the MIPS chip inventory of `zkm_core_machine::mips`.
+//! string literals matching the MIPS chip list of `zkm_core_machine::mips`.
 //!
 //! ## Cluster list
 //!
-//! Curated from Ziren's MIPS chip inventory + the chip_clusters
+//! Curated from Ziren's MIPS chip list + the chip_clusters
 //! pattern:
 //!
 //! | Cluster              | Chip family                                              |
 //! |----------------------|----------------------------------------------------------|
 //! | `cluster_preprocessed` | `Program`, `Byte`, `Range` — always present            |
-//! | `cluster_core_base`  | CPU + ALU + mem-instrs + syscall-core (plumbing)         |
+//! | `cluster_core_base`  | CPU + ALU + mem-instrs + syscall-core (base chips)       |
 //! | `cluster_memory`     | `cluster_core_base` ∪ memory init/finalize + global      |
 //! | `cluster_keccak`     | core + KeccakSponge                                      |
 //! | `cluster_sha256`     | core + Sha256Extend + Sha256Compress                     |
@@ -336,7 +336,7 @@ mod tests {
     ///   2. At least the four base clusters exist, and exactly the
     ///      minimal memory/precompile shard types are Cpu-free.
     ///   3. Every cluster that DOES carry Cpu also carries the full core
-    ///      ALU set (Cpu never appears without its core plumbing).
+    ///      ALU set (Cpu never appears without its core ALU chips).
     #[test]
     fn cluster_cpu_membership_matches_shard_types() {
         let ms = build_mips_machine_shape();
