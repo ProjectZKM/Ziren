@@ -923,7 +923,7 @@ fn prove_tampered_grouped(
 
     let mut challenger = prover.machine().config().challenger();
     zkm_pcs::MachineProvingKey::observe_into(&pk, &mut challenger);
-    let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
+    let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = records
         .iter()
         .zip(traces)
         .map(|(record, traces)| {
@@ -932,13 +932,18 @@ fn prove_tampered_grouped(
             (prover.open(&pk, data, &mut challenger.clone()).unwrap(), tables)
         })
         .unzip();
+    prover.machine().assign_global_lanes(&mut shard_proofs);
     let rounds = shard_proofs
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
         .collect::<Vec<_>>();
     let global = prover
         .machine()
-        .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+        .global_challenge(
+            &challenger,
+            rounds.iter().map(Option::as_ref),
+            shard_proofs.iter().map(|proof| proof.global_lane),
+        )
         .expect("the core machine has global lookups");
 
     let (shards, committed): (Vec<_>, Vec<_>) = rounds

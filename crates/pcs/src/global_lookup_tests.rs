@@ -395,6 +395,99 @@ fn the_verifier_bounds_the_global_lookup_count() {
         .expect_err("two rounds that reach the characteristic together");
 }
 
+/// Proves `records`, each as its own shard, with the global round of shard
+/// `i` on lane `lanes[i]` of the global hash chain: a prover that assigns
+/// the lanes itself.
+fn prove_on_lanes(
+    records: &[BusRecord],
+    lanes: &[u8],
+) -> (MachineProof<SC>, StarkVerifyingKey<SC>) {
+    let prover = CpuProver::new(deferring_machine());
+    let machine = prover.machine();
+    let (pk, vk) = prover.setup(&BusProgram);
+    let mut challenger = machine.config().challenger();
+    crate::MachineProvingKey::observe_into(&pk, &mut challenger);
+    assert_eq!(records.len(), lanes.len());
+    let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
+        .iter()
+        .zip(lanes)
+        .map(|(record, lane)| {
+            let traces = prover.generate_traces(record).expect("the traces generate");
+            let data = prover.commit(record, traces, None);
+            let tables = prover.global_round_tables(&data);
+            let mut proof =
+                prover.open(&pk, data, &mut challenger.clone()).expect("the shard proves");
+            proof.global_lane = *lane;
+            (proof, tables)
+        })
+        .unzip();
+    let rounds: Vec<_> =
+        shard_proofs.iter().map(|proof| machine.global_round_binding(proof)).collect();
+    let global = machine
+        .global_challenge(&challenger, rounds.iter().map(Option::as_ref), lanes.iter().copied())
+        .expect("the machine has global lookups");
+    let global_proofs = rounds
+        .iter()
+        .zip(tables)
+        .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+        .map(|(round, tables)| {
+            prover
+                .prove_global_round(&pk, round, tables, &global, &challenger)
+                .expect("the global round proves")
+        })
+        .collect();
+    (MachineProof { shard_proofs, global_proofs }, vk)
+}
+
+/// Ten shards whose sends and receives cancel across them.
+fn ten_shards() -> Vec<BusRecord> {
+    (0..5u32)
+        .flat_map(|i| [sender(&[3 * i + 1, 3 * i + 2]), receiver(&[3 * i + 2, 3 * i + 1])])
+        .collect()
+}
+
+#[test]
+fn the_prover_spreads_the_global_rounds_over_the_lanes() {
+    let (proof, vk) = prove_with_deferred_global_lookups(&ten_shards());
+    let lanes: Vec<u8> = proof.shard_proofs.iter().map(|shard| shard.global_lane).collect();
+    assert_eq!(lanes, [0, 1, 2, 3, 4, 5, 6, 7, 0, 1], "the rounds take the lanes in turn");
+    verify_with_deferred_global_lookups(&vk, &proof).expect("rounds on every lane verify");
+
+    let mut moved = proof.clone();
+    moved.shard_proofs[3].global_lane = 6;
+    verify_with_deferred_global_lookups(&vk, &moved)
+        .expect_err("a round moved to another lane after the challenge was drawn");
+
+    let mut swapped = proof.clone();
+    swapped.shard_proofs[2].global_lane = 5;
+    swapped.shard_proofs[5].global_lane = 2;
+    verify_with_deferred_global_lookups(&vk, &swapped)
+        .expect_err("two rounds that trade their lanes");
+
+    let mut no_lane = proof;
+    no_lane.shard_proofs[9].global_lane = crate::logup_gkr::GLOBAL_CHAIN_LANES as u8;
+    let error = verify_with_deferred_global_lookups(&vk, &no_lane)
+        .expect_err("a round on a lane that does not exist");
+    assert!(error.contains("lane 8"), "{error}");
+}
+
+#[test]
+fn a_prover_chooses_the_lane_of_each_global_round() {
+    let records = ten_shards();
+    let chosen = [2, 2, 7, 2, 7, 7, 0, 2, 7, 0];
+    let (proof, vk) = prove_on_lanes(&records, &chosen);
+    verify_with_deferred_global_lookups(&vk, &proof).expect("any lane is valid for any round");
+
+    let (one_lane, vk) = prove_on_lanes(&records[..4], &[4; 4]);
+    verify_with_deferred_global_lookups(&vk, &one_lane).expect("every round on one lane");
+
+    let mut reordered = one_lane;
+    reordered.shard_proofs.swap(1, 3);
+    reordered.global_proofs.swap(1, 3);
+    verify_with_deferred_global_lookups(&vk, &reordered)
+        .expect_err("a lane binds the order of its rounds");
+}
+
 #[test]
 fn shard_proofs_alone_do_not_close_a_deferred_bus() {
     let machine = deferring_machine();

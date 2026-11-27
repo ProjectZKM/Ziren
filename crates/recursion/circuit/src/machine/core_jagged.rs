@@ -55,8 +55,11 @@ pub struct ZKMCoreWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub is_complete: bool,
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
-    /// The global hash chain's value before this shard.
-    pub global_chain_start: [SC::Val; DIGEST_SIZE],
+    /// The lane heads of the global hash chain before the first shard.
+    pub global_lanes: zkm_pcs::logup_gkr::GlobalLanes<SC::Val>,
+    /// For each shard, the lane its global round extends. The entry of a
+    /// shard without a round is not read.
+    pub global_round_lanes: Vec<u8>,
 }
 
 /// In-circuit variable form — the `shard_proof_tuples` field carries
@@ -87,7 +90,10 @@ pub struct ZKMCoreWitnessVariable<
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
-    pub global_chain_start: [Felt<C::F>; DIGEST_SIZE],
+    pub global_lanes: crate::global_challenge::GlobalLanesVariable<C>,
+    /// For each shard with a global round, one bit for each lane: the lane
+    /// the round extends. [`verify_core_jagged`] constrains the bits.
+    pub global_round_lanes: Vec<Option<[Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES]>>,
 }
 
 /// Verify a list of whir shard proofs, asserting the
@@ -125,7 +131,8 @@ pub fn verify_core_jagged<C, SC, A>(
         is_complete,
         is_first_shard,
         vk_root,
-        global_chain_start,
+        global_lanes,
+        global_round_lanes,
     } = input;
     assert!(
         !machine.defers_global_lookups()
@@ -198,10 +205,15 @@ pub fn verify_core_jagged<C, SC, A>(
     );
     let has_global_lookups = machine.has_cross_shard_lookups();
 
+    assert_eq!(
+        global_round_lanes.len(),
+        shard_proof_tuples.len(),
+        "the witness holds the lane of each shard's global round"
+    );
     let verify_outputs: Vec<(
         Vec<Felt<C::F>>,
         [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS],
-        [Felt<C::F>; DIGEST_SIZE],
+        Option<([Felt<C::F>; DIGEST_SIZE], Vec<(String, Felt<C::F>)>)>,
     )> = shard_proof_tuples.into_iter().ir_par_map_collect::<Vec<_>, _, _>(
         builder,
         |builder, proof_tuple| {
@@ -218,32 +230,56 @@ pub fn verify_core_jagged<C, SC, A>(
                 proof_tuple,
                 max_log_row_count,
             );
-            let global_chain_end = match shard.global_commitment {
-                Some(commitment) => crate::global_challenge::global_chain_step_variable(
-                    builder,
-                    machine.config(),
-                    global_chain_start,
-                    Some(&crate::global_challenge::GlobalRoundBindingVariable {
-                        commitment,
-                        chips: &shard.global_round_chips,
-                    }),
-                ),
-                None => global_chain_start,
-            };
+            let round =
+                shard.global_commitment.map(|commitment| (commitment, shard.global_round_chips));
 
-            (shard.public_values, shard.global_sum, global_chain_end)
+            (shard.public_values, shard.global_sum, round)
         },
     );
+
+    let global_chain_start = crate::global_challenge::global_lanes_digest_variable(
+        builder,
+        machine.config(),
+        &global_lanes,
+    );
+    let mut lanes_end = global_lanes;
+    let mut chain_moves = false;
+    for ((_, _, round), lane) in verify_outputs.iter().zip_eq(global_round_lanes) {
+        let Some((commitment, chips)) = round else {
+            continue;
+        };
+        let lane = crate::global_challenge::GlobalLaneSelectorVariable::constrain(
+            builder,
+            lane.expect("the witness holds the lane of a shard's global round"),
+        );
+        let head = lane.head(builder, &lanes_end);
+        let head = crate::global_challenge::global_chain_step_variable(
+            builder,
+            machine.config(),
+            head,
+            Some(&crate::global_challenge::GlobalRoundBindingVariable {
+                commitment: *commitment,
+                chips,
+            }),
+        );
+        lanes_end = lane.with_head(builder, &lanes_end, head);
+        chain_moves = true;
+    }
+    let shards_chain_end = if chain_moves {
+        crate::global_challenge::global_lanes_digest_variable(builder, machine.config(), &lanes_end)
+    } else {
+        global_chain_start
+    };
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
-        let (public_values_raw, shard_global_sum, shard_chain_end) = verify_outputs
+        let (public_values_raw, shard_global_sum, _) = verify_outputs
             .into_iter()
             .next()
             .expect("single-shard normalize has exactly one verify output");
         global_sum = shard_global_sum;
-        global_chain_end = shard_chain_end;
+        global_chain_end = shards_chain_end;
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
         let chip_names = &per_shard_chip_names[i];
@@ -301,13 +337,15 @@ pub fn verify_core_jagged<C, SC, A>(
             builder.assert_felt_eq(is_first_shard * (start_pc - vk_legacy.pc_start), C::F::ZERO);
 
             if has_global_lookups {
-                let chain_origin = crate::global_challenge::global_digest_variable(
+                let lane_origin = crate::global_challenge::global_digest_variable(
                     builder,
                     machine.config(),
                     &vk_legacy,
                 );
-                for (start, origin) in global_chain_start.iter().zip(chain_origin) {
-                    builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
+                for head in global_lanes.iter() {
+                    for (start, origin) in head.iter().zip(lane_origin) {
+                        builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
+                    }
                 }
             }
 
@@ -912,7 +950,9 @@ impl ZKMCoreWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
             is_complete,
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
-            global_chain_start: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+            global_lanes: [[p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE];
+                zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+            global_round_lanes: vec![0],
         }
     }
 

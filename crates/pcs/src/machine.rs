@@ -849,22 +849,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     }
 
     /// The cross-shard challenge of a proof whose shards commit the global
-    /// rounds `rounds`, in shard order, under the verifying key
-    /// `vk_challenger` has observed (the machine's challenger after the key),
-    /// with its proof of work ground; `None` for a machine without global
-    /// lookups.
+    /// rounds `rounds`, in shard order, on the lanes `lanes`
+    /// ([`Self::global_lanes`]), under the verifying key `vk_challenger` has
+    /// observed (the machine's challenger after the key), with its proof of
+    /// work ground; `None` for a machine without global lookups.
     ///
-    /// Its digest `h_star` ends the hash chain that starts at the key's
-    /// digest and takes one [`crate::logup_gkr::global_chain_step`] per shard.
+    /// Its digest `h_star` is the value of the hash chain after the last
+    /// shard, the last entry of [`Self::global_chain`].
     pub fn global_challenge<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
     ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
     where
         Val<SC>: 'a,
     {
-        let chain = self.global_chain(vk_challenger, rounds);
+        let chain = self.global_chain(vk_challenger, rounds, lanes);
         self.global_challenge_at(*chain.last().expect("the chain holds at least its start"))
     }
 
@@ -885,15 +886,19 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     }
 
     /// The global challenge a verifier accepts for a proof whose shards commit
-    /// the global rounds `rounds` under the verifying key `vk_challenger` has
+    /// the global rounds `rounds` on the lanes `lanes`
+    /// ([`Self::global_lanes`]) under the verifying key `vk_challenger` has
     /// observed, and whose shards carry the proof-of-work witnesses
-    /// `pow_witnesses`: every shard must carry the same witness, and it must
-    /// pass the proof of work. `Ok(None)` for a machine without global lookups.
+    /// `pow_witnesses`: every round must be on one of the
+    /// [`crate::logup_gkr::GLOBAL_CHAIN_LANES`] lanes, every shard must carry
+    /// the same witness, and it must pass the proof of work. `Ok(None)` for a
+    /// machine without global lookups.
     #[allow(clippy::type_complexity)]
     pub fn verify_global_challenge<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
         pow_witnesses: impl IntoIterator<Item = Option<Val<SC>>>,
     ) -> Result<
         Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>,
@@ -913,8 +918,17 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             }
         }
         let witness = witness.ok_or("a proof without shards")?;
-        let chain = self.global_chain(vk_challenger, rounds);
-        let h_star = *chain.last().expect("the chain holds at least its start");
+        let mut state = self.global_lanes_start(vk_challenger);
+        for shard in rounds.into_iter().zip_longest(lanes) {
+            let itertools::EitherOrBoth::Both(round, lane) = shard else {
+                return Err("the shards' global rounds and lanes differ in number".into());
+            };
+            if usize::from(lane) >= crate::logup_gkr::GLOBAL_CHAIN_LANES {
+                return Err(format!("a shard names lane {lane} of the global hash chain"));
+            }
+            state = self.global_lanes_next(&state, round, lane);
+        }
+        let h_star = self.global_chain_value(&state);
         crate::logup_gkr::GlobalChallenge::derive(
             self.config.challenger(),
             h_star,
@@ -925,47 +939,115 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         .ok_or_else(|| "the global proof-of-work witness fails".into())
     }
 
-    /// The global hash chain of a proof whose shards commit the global rounds
-    /// `rounds`, in shard order, under the verifying key `vk_challenger` has
-    /// observed: its start `h_0`, then its value after each shard. The last
-    /// entry is the `h_star` [`Self::global_challenge`] derives from.
+    /// The lane heads of the global hash chain of a proof whose shards commit
+    /// the global rounds `rounds`, in shard order, under the verifying key
+    /// `vk_challenger` has observed: the heads before the first shard, then
+    /// the heads after each shard. `lanes` names, for each shard, the lane its
+    /// round extends; the entry of a shard without a round is not read.
     ///
-    /// A shard without a global round leaves the chain where it is, so the
-    /// chain is the one over the rounds alone: what the global proofs reopen.
+    /// Every lane starts at the key's digest, and a shard's round extends its
+    /// lane by one [`crate::logup_gkr::global_chain_step`]. A shard without a
+    /// round leaves every lane where it is, so each lane is a hash chain over
+    /// its rounds alone: what the global proofs reopen.
+    ///
+    /// # Panics
+    /// When a round names a lane that does not exist, or `rounds` and `lanes`
+    /// differ in length.
+    pub fn global_lanes<'a>(
+        &self,
+        vk_challenger: &SC::Challenger,
+        rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
+    ) -> Vec<crate::logup_gkr::GlobalLanes<Val<SC>>>
+    where
+        Val<SC>: 'a,
+    {
+        let mut states = vec![self.global_lanes_start(vk_challenger)];
+        for (round, lane) in rounds.into_iter().zip_eq(lanes) {
+            let state = states.last().expect("the chain holds at least its start");
+            states.push(self.global_lanes_next(state, round, lane));
+        }
+        states
+    }
+
+    /// The global hash chain of a proof, for the `rounds` and `lanes` of
+    /// [`Self::global_lanes`]: its value before the first shard, then its
+    /// value after each shard, each the digest of the lane heads there
+    /// ([`Self::global_chain_value`]). The last entry is the `h_star`
+    /// [`Self::global_challenge`] derives from.
+    ///
+    /// The digest is collision resistant, so a chain value fixes its lane
+    /// heads, and a shard without a round leaves the value where it is.
     pub fn global_chain<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
     ) -> Vec<[Val<SC>; 8]>
     where
         Val<SC>: 'a,
     {
-        let mut chain = vec![self.global_chain_start(vk_challenger)];
-        for round in rounds {
-            let h = chain.last().expect("the chain holds at least its start");
-            chain.push(self.global_chain_next(h, round));
-        }
-        chain
+        self.global_lanes(vk_challenger, rounds, lanes)
+            .iter()
+            .map(|state| self.global_chain_value(state))
+            .collect()
     }
 
-    /// The global hash chain before the first shard.
-    pub fn global_chain_start(&self, vk_challenger: &SC::Challenger) -> [Val<SC>; 8] {
-        crate::logup_gkr::global_digest(vk_challenger.clone())
-    }
-
-    /// The global hash chain after a shard whose global round is `round`,
-    /// from its value `h` before the shard. A prover that learns the rounds
-    /// one at a time builds the chain of [`Self::global_chain`] with this.
-    pub fn global_chain_next(
+    /// The lane heads of the global hash chain before the first shard: every
+    /// lane at the digest of the verifying key `vk_challenger` has observed.
+    pub fn global_lanes_start(
         &self,
-        h: &[Val<SC>; 8],
+        vk_challenger: &SC::Challenger,
+    ) -> crate::logup_gkr::GlobalLanes<Val<SC>> {
+        [crate::logup_gkr::global_digest(vk_challenger.clone());
+            crate::logup_gkr::GLOBAL_CHAIN_LANES]
+    }
+
+    /// The lane heads of the global hash chain after a shard whose global
+    /// round is `round`, on lane `lane`, from the heads `lanes` before the
+    /// shard. A shard without a round leaves the heads as they are, whatever
+    /// its `lane`. A prover that learns the rounds one at a time builds the
+    /// states of [`Self::global_lanes`] with this.
+    ///
+    /// # Panics
+    /// When a round names a lane that does not exist.
+    pub fn global_lanes_next(
+        &self,
+        lanes: &crate::logup_gkr::GlobalLanes<Val<SC>>,
         round: Option<&crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        lane: u8,
+    ) -> crate::logup_gkr::GlobalLanes<Val<SC>> {
+        let mut next = *lanes;
+        if let Some(round) = round {
+            let head = next
+                .get_mut(usize::from(lane))
+                .expect("a global round is on one of the lanes of the hash chain");
+            *head =
+                crate::logup_gkr::global_chain_step(self.config.challenger(), head, Some(round));
+        }
+        next
+    }
+
+    /// The value of the global hash chain whose lane heads are `lanes`
+    /// ([`crate::logup_gkr::global_lanes_digest`]).
+    pub fn global_chain_value(
+        &self,
+        lanes: &crate::logup_gkr::GlobalLanes<Val<SC>>,
     ) -> [Val<SC>; 8] {
-        match round {
-            Some(round) => {
-                crate::logup_gkr::global_chain_step(self.config.challenger(), h, Some(round))
-            }
-            None => *h,
+        crate::logup_gkr::global_lanes_digest(self.config.challenger(), lanes)
+    }
+
+    /// Puts the global rounds of `proofs`, in shard order, on the lanes of
+    /// the global hash chain in turn
+    /// ([`crate::logup_gkr::round_robin_global_lanes`]). Any lane is valid
+    /// for any round: a prover with several devices sets each proof's
+    /// `global_lane` itself, before it derives the global challenge.
+    pub fn assign_global_lanes(&self, proofs: &mut [ShardProof<SC>]) {
+        let lanes = crate::logup_gkr::round_robin_global_lanes(
+            proofs.iter().map(|proof| self.global_round_binding(proof).is_some()),
+        );
+        for (proof, lane) in proofs.iter_mut().zip(lanes) {
+            proof.global_lane = lane;
         }
     }
 
@@ -1318,7 +1400,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// * every shard proof verifies on its own, under no cross-shard
     ///   challenge;
     /// * the challenge is the one the hash chain over the shards' global
-    ///   rounds gives, behind the proof of work the global proofs carry;
+    ///   rounds gives, each round on the lane its shard names, behind the
+    ///   proof of work the global proofs carry;
     /// * each global proof opens one or more of the shards' global rounds
     ///   under the challenge, and every round a shard committed is opened by
     ///   exactly one global proof, in any order and any grouping;
@@ -1368,6 +1451,16 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             ));
         }
         self.check_global_round().map_err(invalid)?;
+        if let Some(shard) = proof
+            .shard_proofs
+            .iter()
+            .find(|shard| usize::from(shard.global_lane) >= crate::logup_gkr::GLOBAL_CHAIN_LANES)
+        {
+            return Err(invalid(format!(
+                "a shard names lane {} of the global hash chain",
+                shard.global_lane
+            )));
+        }
 
         let mut vk_challenger = challenger.clone();
         vk.observe_into(&mut vk_challenger);
@@ -1392,6 +1485,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .verify_global_challenge(
                 &vk_challenger,
                 rounds.iter().map(Option::as_ref),
+                proof.shard_proofs.iter().map(|shard| shard.global_lane),
                 proof.global_proofs.iter().map(|p| p.jagged_shard_proof.global_pow_witness),
             )
             .map_err(invalid)?

@@ -134,8 +134,22 @@ pub const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
 /// challenger.
 pub const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
 
-/// The start `h_0` of the global hash chain, sampled from `challenger`: the
-/// machine's challenger after it has observed the verifying key.
+/// Separates the digest of the global hash chain's lane heads from every
+/// other use of a fresh challenger.
+pub const GLOBAL_LANES_DOMAIN: u32 = 0x474c_4e53;
+
+/// The lanes of the global hash chain. Each lane is a hash chain of its own:
+/// a shard's global round extends one lane, which its prover chooses, by one
+/// [`global_chain_step`]. A prover with several devices gives each device a
+/// lane, so that consecutive rounds of a lane are rounds of one device.
+pub const GLOBAL_CHAIN_LANES: usize = 8;
+
+/// The heads of the lanes of the global hash chain.
+pub type GlobalLanes<F> = [[F; 8]; GLOBAL_CHAIN_LANES];
+
+/// The head `h_0` every lane of the global hash chain starts at, sampled
+/// from `challenger`: the machine's challenger after it has observed the
+/// verifying key.
 pub fn global_digest<F, C>(mut challenger: C) -> [F; 8]
 where
     F: p3_field::Field,
@@ -143,6 +157,42 @@ where
 {
     challenger.observe(F::from_u32(GLOBAL_DIGEST_DOMAIN));
     core::array::from_fn(|_| challenger.sample())
+}
+
+/// The value of the global hash chain whose lane heads are `lanes`: their
+/// digest. `challenger` must be a fresh challenger of the machine's
+/// configuration.
+///
+/// The digest is collision resistant, so a chain value fixes every lane
+/// head, and its domain keeps it apart from a [`global_chain_step`].
+pub fn global_lanes_digest<F, C>(mut challenger: C, lanes: &GlobalLanes<F>) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_LANES_DOMAIN));
+    for head in lanes {
+        challenger.observe_slice(head);
+    }
+    core::array::from_fn(|_| challenger.sample())
+}
+
+/// The lane of each shard's global round when the rounds take the lanes in
+/// turn, in shard order: `committed` says of each shard whether it commits a
+/// round. A shard without one is given lane 0, which nothing reads.
+pub fn round_robin_global_lanes(committed: impl IntoIterator<Item = bool>) -> alloc::vec::Vec<u8> {
+    let mut next = 0usize;
+    committed
+        .into_iter()
+        .map(|committed| {
+            if !committed {
+                return 0;
+            }
+            let lane = next as u8;
+            next = (next + 1) % GLOBAL_CHAIN_LANES;
+            lane
+        })
+        .collect()
 }
 
 /// `log2` of the global lookups one unit of a proof's count stands for.
@@ -184,9 +234,9 @@ pub struct GlobalRoundBinding<F> {
 /// own, committed as one of the proof's trace rounds.
 pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 8;
 
-/// One step of the global hash chain: `h_prev` extended by a shard's global
-/// round, `None` for a shard without one. `challenger` must be a fresh
-/// challenger of the machine's configuration.
+/// One step of a lane of the global hash chain: the lane's head `h_prev`
+/// extended by a shard's global round, `None` for a shard without one.
+/// `challenger` must be a fresh challenger of the machine's configuration.
 pub fn global_chain_step<F, C>(
     mut challenger: C,
     h_prev: &[F; 8],

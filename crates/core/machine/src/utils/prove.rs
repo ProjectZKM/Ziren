@@ -146,7 +146,8 @@ where
         }
     }
 
-    let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    prover.machine().assign_global_lanes(&mut shard_proofs);
     let rounds = shard_proofs
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
@@ -163,7 +164,11 @@ where
     let global_proofs = tracing::debug_span!("prove global rounds").in_scope(|| {
         let Some(global) = prover
             .machine()
-            .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+            .global_challenge(
+                &challenger,
+                rounds.iter().map(Option::as_ref),
+                shard_proofs.iter().map(|proof| proof.global_lane),
+            )
             .filter(|_| !committed.is_empty())
         else {
             return Vec::new();

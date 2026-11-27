@@ -6,12 +6,18 @@
 //! challenge is derived from `h_star`, and a global proof reopens one shard's
 //! global round under that challenge and proves the sum of its lookups.
 //!
-//! The compress tree holds the global proofs before the shards, in reverse
-//! round order. Each one steps the chain backwards, from its value after the
-//! round to its value before it, so the global proofs unwind the chain from
-//! `h_star` to its origin and the shards wind it forward again. A complete
-//! proof starts and ends the chain at `h_star`, which makes the rounds the
-//! global proofs open exactly the rounds the shards committed.
+//! The chain has several lanes, each a hash chain of its own, and its value
+//! is the digest of the lane heads. A shard's round extends one lane, and
+//! one program opens consecutive rounds of one lane.
+//!
+//! The compress tree holds the global proofs before the shards, each lane's
+//! rounds in reverse order. Each program steps the chain backwards, from its
+//! value after its rounds to its value before them, so the global proofs
+//! unwind the chain from `h_star` to its origin and the shards wind it
+//! forward again. A complete proof starts and ends the chain at `h_star`.
+//! The digest is collision resistant, so a chain value fixes its lane heads:
+//! on each lane, the rounds the global proofs open are exactly the rounds
+//! the shards committed, in order.
 //!
 //! Only the global proofs know `h_star`: a shard is verified before the last
 //! shard has committed. The public values of a shard carry a zero challenge
@@ -37,8 +43,9 @@ use zkm_recursion_core::{
 use super::core_jagged::{verify_shard_tuple, ShardProofTuple};
 use crate::{
     global_challenge::{
-        add_global_lookup_units, global_chain_step_variable, global_lookup_units_variable,
-        GlobalChallengeVariable, GlobalRoundBindingVariable,
+        add_global_lookup_units, global_chain_step_variable, global_lanes_digest_variable,
+        global_lookup_units_variable, GlobalChallengeVariable, GlobalLaneSelectorVariable,
+        GlobalLanesVariable, GlobalRoundBindingVariable,
     },
     machine::recursion_public_values_digest,
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
@@ -52,11 +59,15 @@ use crate::{
 ))]
 pub struct ZKMGlobalRoundWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub vk: StarkVerifyingKey<SC>,
-    /// The global proofs of consecutive global rounds, the earliest first.
+    /// The global proofs of consecutive global rounds of one lane, the
+    /// earliest first.
     pub proofs: Vec<JaggedShardProof<InnerVal, InnerChallenge>>,
     pub vk_root: [SC::Val; DIGEST_SIZE],
-    /// The global hash chain's value before the first round the proofs open.
-    pub global_chain_end: [SC::Val; DIGEST_SIZE],
+    /// The lane heads of the global hash chain before the first round the
+    /// proofs open.
+    pub global_lanes: zkm_pcs::logup_gkr::GlobalLanes<SC::Val>,
+    /// The lane of the rounds the proofs open.
+    pub global_lane: u8,
     /// The chain end, over every shard of the execution, the global
     /// challenge is derived from.
     pub global_h_star: [SC::Val; DIGEST_SIZE],
@@ -72,18 +83,23 @@ pub struct ZKMGlobalRoundWitnessVariable<
     pub vk: VerifyingKeyVariable<C, SC>,
     pub proofs: Vec<ShardProofTuple<C>>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
-    pub global_chain_end: [Felt<C::F>; DIGEST_SIZE],
+    pub global_lanes: GlobalLanesVariable<C>,
+    /// One bit for each lane: the lane of the rounds the proofs open.
+    /// [`verify_global_round_jagged`] constrains the bits.
+    pub global_lane: [Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
     pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
     pub global_pow_witness: Felt<C::F>,
 }
 
-/// Verifies the global proofs of consecutive global rounds of `machine` under
-/// the challenge derived from `global_h_star`, and commits public values that
-/// step the global hash chain backwards over the rounds the proofs open and
-/// carry the sum of their lookups and a count of them. A round counts each
-/// table's height times the lookups of a row, in the direction with more;
-/// the core chips constrain a global lookup's multiplicity to a bit, so no
-/// direction of the round holds more lookups than that.
+/// Verifies the global proofs of consecutive global rounds of one lane of
+/// `machine` under the challenge derived from `global_h_star`, and commits
+/// public values that step the global hash chain backwards over the rounds
+/// the proofs open and carry the sum of their lookups and a count of them.
+/// The chain ends at the digest of the witnessed lane heads and starts at
+/// their digest once the rounds have extended the selected lane. A round
+/// counts each table's height times the lookups of a row, in the direction
+/// with more; the core chips constrain a global lookup's multiplicity to a
+/// bit, so no direction of the round holds more lookups than that.
 ///
 /// Every other coordinate stands at the start of the execution — shard one,
 /// the key's first program counter, no address initialized or finalized — so
@@ -107,7 +123,8 @@ pub fn verify_global_round_jagged<C, SC, A>(
         vk,
         proofs,
         vk_root,
-        global_chain_end,
+        global_lanes,
+        global_lane,
         global_h_star,
         global_pow_witness,
     } = input;
@@ -144,7 +161,9 @@ pub fn verify_global_round_jagged<C, SC, A>(
                 <= zkm_pcs::logup_gkr::max_global_lookup_units::<InnerVal>(),
         "one global round stays within the bound on a proof's global lookups",
     );
-    let mut chain = global_chain_end;
+    let global_chain_end = global_lanes_digest_variable(builder, machine.config(), &global_lanes);
+    let global_lane = GlobalLaneSelectorVariable::constrain(builder, global_lane);
+    let mut chain = global_lane.head(builder, &global_lanes);
     let mut global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
         core::array::from_fn(|_| builder.eval(C::F::ZERO));
     let mut global_lookup_units: Felt<C::F> = builder.eval(C::F::ZERO);
@@ -187,7 +206,8 @@ pub fn verify_global_round_jagged<C, SC, A>(
         let round_units = global_lookup_units_variable(builder, round_lookups, round_lookup_bits);
         global_lookup_units = add_global_lookup_units(builder, global_lookup_units, round_units);
     }
-    let global_chain_start = chain;
+    let global_lanes = global_lane.with_head(builder, &global_lanes, chain);
+    let global_chain_start = global_lanes_digest_variable(builder, machine.config(), &global_lanes);
 
     let zero: Felt<_> = builder.eval(C::F::ZERO);
     let one: Felt<_> = builder.eval(C::F::ONE);
