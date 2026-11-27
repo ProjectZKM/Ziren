@@ -202,7 +202,7 @@ pub mod koala_bear_poseidon2 {
         crate::ShardProof {
             public_values: proof.public_values,
             jagged_shard_proof: proof.jagged_shard_proof,
-            global_lane: proof.global_lane,
+            global_chain_lane: proof.global_chain_lane,
         }
     }
 

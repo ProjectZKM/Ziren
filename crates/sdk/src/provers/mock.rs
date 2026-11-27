@@ -73,7 +73,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                 let shard_proof = ShardProof {
                     public_values: vec![],
                     jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
-                    global_lane: 0,
+                    global_chain_lane: 0,
                 };
 
                 let reduce_vk = StarkVerifyingKey {

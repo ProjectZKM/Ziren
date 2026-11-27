@@ -45,9 +45,9 @@ use zkm_recursion_core::{
 use super::core_jagged::{verify_shard_tuple, ShardProofTuple};
 use crate::{
     global_challenge::{
-        add_global_lookup_units, global_chain_step_variable, global_lanes_digest_variable,
-        global_lookup_units_variable, GlobalChallengeVariable, GlobalLaneSelectorVariable,
-        GlobalLanesVariable, GlobalRoundBindingVariable,
+        add_global_lookup_units, global_chain_heads_digest_variable, global_chain_step_variable,
+        global_lookup_units_variable, GlobalChainHeadsVariable, GlobalChainLaneSelectorVariable,
+        GlobalChallengeVariable, GlobalRoundBindingVariable,
     },
     machine::recursion_public_values_digest,
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
@@ -68,9 +68,9 @@ pub struct ZKMGlobalRoundWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub vk_root: [SC::Val; DIGEST_SIZE],
     /// The lane heads of the global hash chain before the first round the
     /// proofs open.
-    pub global_lanes: zkm_pcs::logup_gkr::GlobalLanes<SC::Val>,
+    pub global_chain_heads: zkm_pcs::logup_gkr::GlobalChainHeads<SC::Val>,
     /// The lane of the rounds the proofs open.
-    pub global_lane: u8,
+    pub global_chain_lane: u8,
     /// The chain end, over every shard of the execution, the global
     /// challenge is derived from.
     pub global_h_star: [SC::Val; DIGEST_SIZE],
@@ -86,10 +86,10 @@ pub struct ZKMGlobalRoundWitnessVariable<
     pub vk: VerifyingKeyVariable<C, SC>,
     pub proofs: Vec<ShardProofTuple<C>>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
-    pub global_lanes: GlobalLanesVariable<C>,
+    pub global_chain_heads: GlobalChainHeadsVariable<C>,
     /// One bit for each lane: the lane of the rounds the proofs open.
     /// [`verify_global_round_jagged`] constrains the bits.
-    pub global_lane: [Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+    pub global_chain_lane: [Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
     pub global_h_star: [Felt<C::F>; DIGEST_SIZE],
     pub global_pow_witness: Felt<C::F>,
 }
@@ -138,8 +138,8 @@ pub fn verify_global_round_jagged<C, SC, A>(
         vk,
         proofs,
         vk_root,
-        global_lanes,
-        global_lane,
+        global_chain_heads,
+        global_chain_lane,
         global_h_star,
         global_pow_witness,
     } = input;
@@ -180,9 +180,10 @@ pub fn verify_global_round_jagged<C, SC, A>(
                 <= zkm_pcs::logup_gkr::max_global_lookup_units::<InnerVal>(),
         "one global round stays within the bound on a proof's global lookups",
     );
-    let global_chain_end = global_lanes_digest_variable(builder, machine.config(), &global_lanes);
-    let global_lane = GlobalLaneSelectorVariable::constrain(builder, global_lane);
-    let mut chain = global_lane.head(builder, &global_lanes);
+    let global_chain_end =
+        global_chain_heads_digest_variable(builder, machine.config(), &global_chain_heads);
+    let global_chain_lane = GlobalChainLaneSelectorVariable::constrain(builder, global_chain_lane);
+    let mut chain = global_chain_lane.head(builder, &global_chain_heads);
     let mut global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS] =
         core::array::from_fn(|_| builder.eval(C::F::ZERO));
     let mut global_lookup_units: Felt<C::F> = builder.eval(C::F::ZERO);
@@ -254,8 +255,9 @@ pub fn verify_global_round_jagged<C, SC, A>(
             *sum = builder.eval(*sum + part);
         }
     }
-    let global_lanes = global_lane.with_head(builder, &global_lanes, chain);
-    let global_chain_start = global_lanes_digest_variable(builder, machine.config(), &global_lanes);
+    let global_chain_heads = global_chain_lane.with_head(builder, &global_chain_heads, chain);
+    let global_chain_start =
+        global_chain_heads_digest_variable(builder, machine.config(), &global_chain_heads);
 
     let zero: Felt<_> = builder.eval(C::F::ZERO);
     let one: Felt<_> = builder.eval(C::F::ONE);
@@ -435,8 +437,9 @@ impl ZKMGlobalRoundWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseido
             },
             proofs: vec![proof],
             vk_root: [InnerVal::ZERO; DIGEST_SIZE],
-            global_lanes: [[InnerVal::ZERO; DIGEST_SIZE]; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
-            global_lane: 0,
+            global_chain_heads: [[InnerVal::ZERO; DIGEST_SIZE];
+                zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
+            global_chain_lane: 0,
             global_h_star: [InnerVal::ZERO; DIGEST_SIZE],
             global_pow_witness: InnerVal::ONE,
         }
@@ -453,7 +456,7 @@ impl<SC: zkm_pcs::StarkGenericConfig> ZKMGlobalRoundWitnessValues<SC> {
     /// table slots, the stacking blocks its rounds commit and the number of
     /// its rounds. `None` unless the input holds one proof whose rounds all
     /// have the chips and the blocks of the first, as the rounds a prover
-    /// groups do (`StarkMachine::global_lane_proof_groups`).
+    /// groups do (`StarkMachine::global_chain_lane_proof_groups`).
     pub fn shape(&self) -> Option<ZKMGlobalRoundShape> {
         let [proof] = self.proofs.as_slice() else {
             return None;

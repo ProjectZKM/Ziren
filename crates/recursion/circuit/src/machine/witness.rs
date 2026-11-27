@@ -229,10 +229,10 @@ mod jagged_witness {
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
-            let global_lanes = self.global_lanes.read(builder);
+            let global_chain_heads = self.global_chain_heads.read(builder);
             let global_round_lanes = self
                 .global_round_lanes()
-                .map(|lane| lane.map(|lane| global_lane_bits(lane).read(builder)))
+                .map(|lane| lane.map(|lane| global_chain_lane_bits(lane).read(builder)))
                 .collect();
             ZKMCoreWitnessVariable {
                 vk,
@@ -240,7 +240,7 @@ mod jagged_witness {
                 is_complete,
                 is_first_shard,
                 vk_root,
-                global_lanes,
+                global_chain_heads,
                 global_round_lanes,
             }
         }
@@ -251,9 +251,9 @@ mod jagged_witness {
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
-            self.global_lanes.write(witness);
+            self.global_chain_heads.write(witness);
             for lane in self.global_round_lanes().flatten() {
-                global_lane_bits(lane).write(witness);
+                global_chain_lane_bits(lane).write(witness);
             }
         }
     }
@@ -277,7 +277,7 @@ mod jagged_witness {
     /// The selector of lane `lane` of the global hash chain as the programs
     /// witness it: one bit for each lane, the bit of `lane` set. A lane that
     /// does not exist sets none, which the programs reject.
-    fn global_lane_bits(lane: u8) -> [InnerVal; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES] {
+    fn global_chain_lane_bits(lane: u8) -> [InnerVal; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT] {
         core::array::from_fn(|i| InnerVal::from_bool(i == usize::from(lane)))
     }
 
@@ -293,16 +293,16 @@ mod jagged_witness {
             let vk = self.vk.read(builder);
             let proofs = self.proofs.read(builder);
             let vk_root = self.vk_root.read(builder);
-            let global_lanes = self.global_lanes.read(builder);
-            let global_lane = global_lane_bits(self.global_lane).read(builder);
+            let global_chain_heads = self.global_chain_heads.read(builder);
+            let global_chain_lane = global_chain_lane_bits(self.global_chain_lane).read(builder);
             let global_h_star = self.global_h_star.read(builder);
             let global_pow_witness = self.global_pow_witness.read(builder);
             crate::machine::global_jagged::ZKMGlobalRoundWitnessVariable {
                 vk,
                 proofs,
                 vk_root,
-                global_lanes,
-                global_lane,
+                global_chain_heads,
+                global_chain_lane,
                 global_h_star,
                 global_pow_witness,
             }
@@ -312,8 +312,8 @@ mod jagged_witness {
             self.vk.write(witness);
             self.proofs.write(witness);
             self.vk_root.write(witness);
-            self.global_lanes.write(witness);
-            global_lane_bits(self.global_lane).write(witness);
+            self.global_chain_heads.write(witness);
+            global_chain_lane_bits(self.global_chain_lane).write(witness);
             self.global_h_star.write(witness);
             self.global_pow_witness.write(witness);
         }

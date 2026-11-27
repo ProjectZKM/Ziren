@@ -1618,34 +1618,34 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// The lane heads of the global hash chain over `shard_proofs` under the
     /// core key `vk`: the heads before the first shard, then the heads after
     /// each shard, each shard's round on the lane the proof names.
-    pub fn global_lanes(
+    pub fn global_chain_heads(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
-    ) -> Vec<zkm_pcs::logup_gkr::GlobalLanes<KoalaBear>> {
+    ) -> Vec<zkm_pcs::logup_gkr::GlobalChainHeads<KoalaBear>> {
         let machine = self.core_prover.machine();
         let mut challenger = machine.config().challenger();
         vk.observe_into(&mut challenger);
         let rounds: Vec<_> =
             shard_proofs.iter().map(|sp| machine.global_round_binding(sp)).collect();
-        machine.global_lanes(
+        machine.global_chain_heads(
             &challenger,
             rounds.iter().map(Option::as_ref),
-            shard_proofs.iter().map(|sp| sp.global_lane),
+            shard_proofs.iter().map(|sp| sp.global_chain_lane),
         )
     }
 
     /// The global hash chain over `shard_proofs` under the core key `vk`:
     /// its start, then its value after each shard, the last being the `h_star`
     /// every shard's global challenge is derived from. Each value is the
-    /// digest of the lane heads there ([`Self::global_lanes`]).
+    /// digest of the lane heads there ([`Self::global_chain_heads`]).
     pub fn global_chain(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
     ) -> Vec<[KoalaBear; DIGEST_SIZE]> {
         let machine = self.core_prover.machine();
-        self.global_lanes(vk, shard_proofs)
+        self.global_chain_heads(vk, shard_proofs)
             .iter()
             .map(|lanes| machine.global_chain_value(lanes))
             .collect()
@@ -1662,7 +1662,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
-        let lanes = self.global_lanes(vk, shard_proofs);
+        let lanes = self.global_chain_heads(vk, shard_proofs);
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -1685,9 +1685,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         core_inputs
     }
 
-    /// The normalize input of one core shard proof: `global_lanes` holds the
+    /// The normalize input of one core shard proof: `global_chain_heads` holds the
     /// lane heads of the global hash chain before the shard,
-    /// [`Self::global_lanes`]'s entry at the shard's index, and the shard's
+    /// [`Self::global_chain_heads`]'s entry at the shard's index, and the shard's
     /// round extends the lane the proof names. The heads depend on the shards
     /// before this one only, so a shard can be normalized as soon as it is
     /// proven.
@@ -1697,7 +1697,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shard_proof: &ShardProof<CoreSC>,
         is_first_shard: bool,
         is_complete: bool,
-        global_lanes: zkm_pcs::logup_gkr::GlobalLanes<KoalaBear>,
+        global_chain_heads: zkm_pcs::logup_gkr::GlobalChainHeads<KoalaBear>,
     ) -> ZKMCoreWitnessValues<CoreSC> {
         ZKMCoreWitnessValues {
             vk: vk.clone(),
@@ -1705,8 +1705,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             is_complete,
             is_first_shard,
             vk_root: self.recursion_vk_root,
-            global_lanes,
-            global_round_lanes: vec![shard_proof.global_lane],
+            global_chain_heads,
+            global_round_lanes: vec![shard_proof.global_chain_lane],
         }
     }
 
@@ -1735,20 +1735,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let invalid = |reason: String| {
             ZKMRecursionProverError::RuntimeError(format!("invalid global proofs: {reason}"))
         };
-        let lanes = self.global_lanes(vk, shard_proofs);
+        let lanes = self.global_chain_heads(vk, shard_proofs);
         let machine = self.core_prover.machine();
         let end = *lanes.last().expect("the chain holds at least its start");
         let global_h_star = machine.global_chain_value(&end);
-        let mut committed: [Vec<_>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES] =
+        let mut committed: [Vec<_>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT] =
             core::array::from_fn(|_| Vec::new());
         for (shard, proof) in shard_proofs.iter().enumerate() {
             let Some(round) = machine.global_round_binding(proof) else {
                 continue;
             };
             committed
-                .get_mut(usize::from(proof.global_lane))
+                .get_mut(usize::from(proof.global_chain_lane))
                 .ok_or_else(|| {
-                    invalid(format!("shard {shard} is on the lane {}", proof.global_lane))
+                    invalid(format!("shard {shard} is on the lane {}", proof.global_chain_lane))
                 })?
                 .push((shard, round, false));
         }
@@ -1796,8 +1796,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// The global-round input of one global proof, which opens consecutive
-    /// rounds of lane `global_lane` in the order of its table slots:
-    /// `global_lanes` holds the lane heads of the global hash chain before
+    /// rounds of lane `global_chain_lane` in the order of its table slots:
+    /// `global_chain_heads` holds the lane heads of the global hash chain before
     /// the first of those rounds and `global_h_star` is the chain's end. The
     /// heads of the other lanes only pass through the program, so a prover
     /// with several devices builds the input of a proof from the state of
@@ -1806,16 +1806,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         global_proof: &ShardProof<CoreSC>,
-        global_lanes: zkm_pcs::logup_gkr::GlobalLanes<KoalaBear>,
-        global_lane: u8,
+        global_chain_heads: zkm_pcs::logup_gkr::GlobalChainHeads<KoalaBear>,
+        global_chain_lane: u8,
         global_h_star: [KoalaBear; DIGEST_SIZE],
     ) -> zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC> {
         zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues {
             vk: vk.clone(),
             proofs: vec![(*global_proof.jagged_shard_proof).clone()],
             vk_root: self.recursion_vk_root,
-            global_lanes,
-            global_lane,
+            global_chain_heads,
+            global_chain_lane,
             global_h_star,
             global_pow_witness: global_proof
                 .jagged_shard_proof
@@ -3637,7 +3637,7 @@ pub mod tests {
     #[test]
     #[serial]
     #[ignore]
-    fn test_e2e_compress_on_several_lanes() -> Result<()> {
+    fn test_e2e_compress_on_several_chain_lanes() -> Result<()> {
         setup_logger();
         let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
         let (_, pk_d, program, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
@@ -3651,7 +3651,7 @@ pub mod tests {
             .0
             .iter()
             .filter(|shard| machine.global_round_binding(shard).is_some())
-            .map(|shard| shard.global_lane)
+            .map(|shard| shard.global_chain_lane)
             .collect::<std::collections::BTreeSet<_>>();
         assert!(lanes.len() > 2, "the proof's global rounds are on the lanes {lanes:?}");
         let rounds_opened = core
@@ -4020,7 +4020,7 @@ pub mod tests {
             .0
             .iter()
             .filter(|shard| machine.global_round_binding(shard).is_some())
-            .map(|shard| shard.global_lane)
+            .map(|shard| shard.global_chain_lane)
             .collect::<std::collections::BTreeSet<_>>();
         assert!(lanes_in_use.len() > 1, "the proof's global rounds are on one lane");
 
@@ -4053,7 +4053,7 @@ pub mod tests {
             assert_eq!(public_values.global_chain_start, after, "the chain step differs");
             assert_eq!(
                 public_values.global_chain_end,
-                machine.global_chain_value(&input.global_lanes)
+                machine.global_chain_value(&input.global_chain_heads)
             );
             assert_eq!(public_values.global_h_star, h_star);
             after = public_values.global_chain_end;
@@ -4083,11 +4083,11 @@ pub mod tests {
         assert!(run(&forged).is_none(), "a global proof passed under another chain end");
 
         let mut no_lane = inputs[0].clone();
-        no_lane.global_lane = zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES as u8;
+        no_lane.global_chain_lane = zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT as u8;
         assert!(run(&no_lane).is_none(), "a global proof passed on a lane that does not exist");
 
         let mut other_lane = inputs[0].clone();
-        other_lane.global_lane = (other_lane.global_lane + 1) % 8;
+        other_lane.global_chain_lane = (other_lane.global_chain_lane + 1) % 8;
         assert_ne!(
             run(&other_lane).map(|public_values| public_values.global_chain_start),
             Some(h_star),
@@ -4101,7 +4101,7 @@ pub mod tests {
             .position(|shard| machine.global_round_binding(shard).is_some())
             .expect("a shard commits a global round");
         let mut no_lane = shard_inputs[committing].clone();
-        no_lane.global_round_lanes[0] = zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES as u8;
+        no_lane.global_round_lanes[0] = zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT as u8;
         assert!(run_shard(&no_lane).is_none(), "a shard passed on a lane that does not exist");
 
         let mut other_lane = shard_inputs[committing].clone();
@@ -4120,7 +4120,7 @@ pub mod tests {
     /// round with its lane and tables in shard order, the global challenge,
     /// and the core machine's challenger after the verifying key.
     #[allow(clippy::type_complexity)]
-    fn prove_shards_on_lanes(
+    fn prove_shards_on_chain_lanes(
         prover: &ZKMProver<DefaultProverComponents>,
         pk: &DeviceProvingKey<DefaultProverComponents>,
         program: &Program,
@@ -4133,14 +4133,14 @@ pub mod tests {
         <CoreSC as StarkGenericConfig>::Challenger,
     )> {
         let opts = ZKMCoreOpts { shard_size: 1 << 10, ..ZKMCoreOpts::default() };
-        prove_records_on_lanes(prover, pk, program, &fib_stdin(n), opts, |_| true, lane_of)
+        prove_records_on_chain_lanes(prover, pk, program, &fib_stdin(n), opts, |_| true, lane_of)
     }
 
-    /// [`prove_shards_on_lanes`] for any guest: the shards of `program` on
+    /// [`prove_shards_on_chain_lanes`] for any guest: the shards of `program` on
     /// `stdin` under `opts` that `keep` takes, the global challenge drawn
     /// over their global rounds alone.
     #[allow(clippy::type_complexity)]
-    fn prove_records_on_lanes(
+    fn prove_records_on_chain_lanes(
         prover: &ZKMProver<DefaultProverComponents>,
         pk: &DeviceProvingKey<DefaultProverComponents>,
         program: &Program,
@@ -4168,8 +4168,8 @@ pub mod tests {
             let tables = core.global_round_tables(&data);
             let mut proof = core.open(pk, data, &mut challenger.clone()).expect("the shard proof");
             if let (Some(round), Some(tables)) = (machine.global_round_binding(&proof), tables) {
-                proof.global_lane = lane_of(committed.len());
-                committed.push((proof.global_lane, round, tables));
+                proof.global_chain_lane = lane_of(committed.len());
+                committed.push((proof.global_chain_lane, round, tables));
             }
             shard_proofs.push(proof);
         }
@@ -4181,7 +4181,7 @@ pub mod tests {
             .global_challenge(
                 &challenger,
                 rounds.iter().map(Option::as_ref),
-                shard_proofs.iter().map(|proof| proof.global_lane),
+                shard_proofs.iter().map(|proof| proof.global_chain_lane),
             )
             .expect("the core machine has global lookups");
         Ok((shard_proofs, committed, global, challenger))
@@ -4601,7 +4601,7 @@ pub mod tests {
         let (_, pk_d, program, vk) = prover.setup(test_artifacts::KECCAK_SPONGE_ELF);
         let machine = prover.core_prover.machine();
         let opts = ZKMCoreOpts { shard_size: 1 << 10, ..ZKMCoreOpts::default() };
-        let (shard_proofs, committed, global, challenger) = prove_records_on_lanes(
+        let (shard_proofs, committed, global, challenger) = prove_records_on_chain_lanes(
             &prover,
             &pk_d,
             &program,
@@ -4754,7 +4754,7 @@ pub mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&ZKMPublicValues::from(input.as_slice()).hash().to_vec());
         stdin.write(&input);
-        let (shard_proofs, committed, global, challenger) = prove_records_on_lanes(
+        let (shard_proofs, committed, global, challenger) = prove_records_on_chain_lanes(
             &prover,
             &pk_d,
             &program,
@@ -4853,7 +4853,7 @@ pub mod tests {
             run_global_leaf(&prover, leaf).expect("the honest global proof is rejected");
         assert_eq!(
             public_values.global_chain_end,
-            machine.global_chain_value(&leaf.global_lanes),
+            machine.global_chain_value(&leaf.global_chain_heads),
             "the leaf ends the chain elsewhere than the host"
         );
         assert_eq!(
@@ -4886,7 +4886,7 @@ pub mod tests {
         let (_, pk_d, program, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
         let machine = prover.core_prover.machine();
         let (shard_proofs, committed, global, challenger) =
-            prove_shards_on_lanes(&prover, &pk_d, &program, 4200, |round| {
+            prove_shards_on_chain_lanes(&prover, &pk_d, &program, 4200, |round| {
                 if round % 8 == 7 {
                     2
                 } else {
@@ -5009,7 +5009,7 @@ pub mod tests {
             assert_eq!(public_values.global_chain_start, after, "the chain step differs");
             assert_eq!(
                 public_values.global_chain_end,
-                machine.global_chain_value(&input.global_lanes)
+                machine.global_chain_value(&input.global_chain_heads)
             );
             assert_eq!(
                 public_values.global_sum.as_slice(),
@@ -5071,8 +5071,8 @@ pub mod tests {
         let swapped_values = run(&prover.get_recursion_global_round_input(
             &vk.vk,
             &swapped,
-            honest.global_lanes,
-            honest.global_lane,
+            honest.global_chain_heads,
+            honest.global_chain_lane,
             h_star,
         ))
         .expect("a valid global proof is rejected");
@@ -5368,8 +5368,8 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
-                global_lanes: [[KoalaBear::ZERO; DIGEST_SIZE];
-                    zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+                global_chain_heads: [[KoalaBear::ZERO; DIGEST_SIZE];
+                    zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
                 global_round_lanes: vec![0],
             };
             let vk_real_1 = prover
@@ -5583,8 +5583,8 @@ pub mod tests {
                 is_complete: true,
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
-                global_lanes: [[KoalaBear::ZERO; DIGEST_SIZE];
-                    zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+                global_chain_heads: [[KoalaBear::ZERO; DIGEST_SIZE];
+                    zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
                 global_round_lanes: vec![0; arity],
             };
             let prog_real = prover.recursion_program(&real_witness).0;

@@ -9,7 +9,7 @@
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES;
+use zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT;
 use zkm_recursion_compiler::ir::{Builder, Config, Ext, Felt, SymbolicExt, SymbolicFelt};
 use zkm_recursion_core::DIGEST_SIZE;
 
@@ -162,20 +162,22 @@ where
 }
 
 /// The heads of the lanes of the global hash chain.
-pub type GlobalLanesVariable<C> = [[Felt<<C as Config>::F>; DIGEST_SIZE]; GLOBAL_CHAIN_LANES];
+pub type GlobalChainHeadsVariable<C> =
+    [[Felt<<C as Config>::F>; DIGEST_SIZE]; GLOBAL_CHAIN_LANE_COUNT];
 
-/// `global_lanes_digest`: the value of the chain whose lane heads are
+/// `global_chain_heads_digest`: the value of the chain whose lane heads are
 /// `lanes`.
-pub fn global_lanes_digest_variable<C: CircuitConfig<F = KoalaBear>, SC>(
+pub fn global_chain_heads_digest_variable<C: CircuitConfig<F = KoalaBear>, SC>(
     builder: &mut Builder<C>,
     config: &SC,
-    lanes: &GlobalLanesVariable<C>,
+    lanes: &GlobalChainHeadsVariable<C>,
 ) -> [Felt<C::F>; DIGEST_SIZE]
 where
     SC: KoalaBearFriParametersVariable<C>,
 {
     let mut challenger = config.challenger_variable(builder);
-    let domain: Felt<C::F> = builder.eval(C::F::from_u32(zkm_pcs::logup_gkr::GLOBAL_LANES_DOMAIN));
+    let domain: Felt<C::F> =
+        builder.eval(C::F::from_u32(zkm_pcs::logup_gkr::GLOBAL_CHAIN_HEADS_DOMAIN));
     challenger.observe(builder, domain);
     for head in lanes {
         for h in head {
@@ -188,15 +190,18 @@ where
 /// The lane of the global hash chain a prover chose for a global round: one
 /// bit for each lane, exactly one of them set. It is built by
 /// [`Self::constrain`] only, so every selector in a program is constrained.
-pub struct GlobalLaneSelectorVariable<C: CircuitConfig<F = KoalaBear>> {
-    bits: [Felt<C::F>; GLOBAL_CHAIN_LANES],
+pub struct GlobalChainLaneSelectorVariable<C: CircuitConfig<F = KoalaBear>> {
+    bits: [Felt<C::F>; GLOBAL_CHAIN_LANE_COUNT],
 }
 
-impl<C: CircuitConfig<F = KoalaBear>> GlobalLaneSelectorVariable<C> {
+impl<C: CircuitConfig<F = KoalaBear>> GlobalChainLaneSelectorVariable<C> {
     /// The selector of the witnessed `bits`: asserts that each is zero or
     /// one and that they sum to one. There are fewer lanes than the field's
     /// characteristic, so the sum is one only when a single bit is set.
-    pub fn constrain(builder: &mut Builder<C>, bits: [Felt<C::F>; GLOBAL_CHAIN_LANES]) -> Self {
+    pub fn constrain(
+        builder: &mut Builder<C>,
+        bits: [Felt<C::F>; GLOBAL_CHAIN_LANE_COUNT],
+    ) -> Self {
         let mut sum: SymbolicFelt<C::F> = SymbolicFelt::ZERO;
         for bit in bits {
             builder.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
@@ -210,7 +215,7 @@ impl<C: CircuitConfig<F = KoalaBear>> GlobalLaneSelectorVariable<C> {
     pub fn head(
         &self,
         builder: &mut Builder<C>,
-        lanes: &GlobalLanesVariable<C>,
+        lanes: &GlobalChainHeadsVariable<C>,
     ) -> [Felt<C::F>; DIGEST_SIZE] {
         core::array::from_fn(|j| {
             let head: SymbolicFelt<C::F> =
@@ -224,9 +229,9 @@ impl<C: CircuitConfig<F = KoalaBear>> GlobalLaneSelectorVariable<C> {
     pub fn with_head(
         &self,
         builder: &mut Builder<C>,
-        lanes: &GlobalLanesVariable<C>,
+        lanes: &GlobalChainHeadsVariable<C>,
         head: [Felt<C::F>; DIGEST_SIZE],
-    ) -> GlobalLanesVariable<C> {
+    ) -> GlobalChainHeadsVariable<C> {
         core::array::from_fn(|i| {
             core::array::from_fn(|j| {
                 builder.eval(lanes[i][j] + self.bits[i] * (head[j] - lanes[i][j]))
@@ -249,11 +254,13 @@ mod tests {
     };
 
     use super::{
-        global_lanes_digest_variable, GlobalChallengeVariable, GlobalLaneSelectorVariable,
-        GlobalLanesVariable,
+        global_chain_heads_digest_variable, GlobalChainHeadsVariable,
+        GlobalChainLaneSelectorVariable, GlobalChallengeVariable,
     };
     use crate::utils::tests::run_test_recursion;
-    use zkm_pcs::logup_gkr::{global_lanes_digest, GlobalLanes, GLOBAL_CHAIN_LANES};
+    use zkm_pcs::logup_gkr::{
+        global_chain_heads_digest, GlobalChainHeads, GLOBAL_CHAIN_LANE_COUNT,
+    };
 
     const BETA_SEED_DIM: usize = 2;
 
@@ -310,23 +317,23 @@ mod tests {
         derive_in_circuit(&host, below, false);
     }
 
-    fn host_lanes() -> GlobalLanes<InnerVal> {
+    fn host_chain_heads() -> GlobalChainHeads<InnerVal> {
         core::array::from_fn(|i| {
             core::array::from_fn(|j| InnerVal::from_u32(97 * i as u32 + j as u32 + 5))
         })
     }
 
-    fn lanes_in_circuit(
+    fn chain_heads_in_circuit(
         builder: &mut Builder<InnerConfig>,
-        lanes: &GlobalLanes<InnerVal>,
-    ) -> GlobalLanesVariable<InnerConfig> {
+        lanes: &GlobalChainHeads<InnerVal>,
+    ) -> GlobalChainHeadsVariable<InnerConfig> {
         lanes.map(|head| head.map(|h| builder.eval(h)))
     }
 
-    fn assert_lanes_eq(
+    fn assert_chain_heads_eq(
         builder: &mut Builder<InnerConfig>,
-        lanes: &GlobalLanesVariable<InnerConfig>,
-        expected: &GlobalLanes<InnerVal>,
+        lanes: &GlobalChainHeadsVariable<InnerConfig>,
+        expected: &GlobalChainHeads<InnerVal>,
     ) {
         for (head, expected) in lanes.iter().zip(expected) {
             for (h, e) in head.iter().zip(expected) {
@@ -336,29 +343,29 @@ mod tests {
     }
 
     /// Constrains a lane selector of `bits` in-circuit and runs the program.
-    fn constrain_selector(bits: [i32; GLOBAL_CHAIN_LANES]) {
+    fn constrain_selector(bits: [i32; GLOBAL_CHAIN_LANE_COUNT]) {
         let mut builder = Builder::<InnerConfig>::default();
-        let bits: [Felt<InnerVal>; GLOBAL_CHAIN_LANES] = bits.map(|bit| {
+        let bits: [Felt<InnerVal>; GLOBAL_CHAIN_LANE_COUNT] = bits.map(|bit| {
             let magnitude = InnerVal::from_u32(bit.unsigned_abs());
             builder.eval(if bit < 0 { -magnitude } else { magnitude })
         });
-        GlobalLaneSelectorVariable::<InnerConfig>::constrain(&mut builder, bits);
+        GlobalChainLaneSelectorVariable::<InnerConfig>::constrain(&mut builder, bits);
         run_test_recursion(builder.into_operations(), std::iter::empty());
     }
 
     #[test]
-    fn the_circuit_digests_the_lanes_as_the_host_does() {
+    fn the_circuit_digests_the_chain_heads_as_the_host_does() {
         let config = KoalaBearPoseidon2::default();
-        let lanes = host_lanes();
+        let lanes = host_chain_heads();
         let mut moved = lanes;
         moved[3][6] += InnerVal::ONE;
         let mut swapped = lanes;
         swapped.swap(1, 2);
         let mut builder = Builder::<InnerConfig>::default();
         for state in [lanes, moved, swapped] {
-            let expected = global_lanes_digest(config.challenger(), &state);
-            let state = lanes_in_circuit(&mut builder, &state);
-            let digest = global_lanes_digest_variable(&mut builder, &config, &state);
+            let expected = global_chain_heads_digest(config.challenger(), &state);
+            let state = chain_heads_in_circuit(&mut builder, &state);
+            let digest = global_chain_heads_digest_variable(&mut builder, &config, &state);
             for (d, e) in digest.iter().zip(expected) {
                 builder.assert_felt_eq(*d, e);
             }
@@ -367,15 +374,16 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_selector_reads_and_replaces_the_head_of_its_lane() {
-        let lanes = host_lanes();
+    fn a_chain_lane_selector_reads_and_replaces_the_head_of_its_lane() {
+        let lanes = host_chain_heads();
         let head: [InnerVal; 8] = core::array::from_fn(|j| InnerVal::from_u32(1000 + j as u32));
         let mut builder = Builder::<InnerConfig>::default();
-        for lane in [0, 5, GLOBAL_CHAIN_LANES - 1] {
-            let state = lanes_in_circuit(&mut builder, &lanes);
-            let bits: [Felt<InnerVal>; GLOBAL_CHAIN_LANES] =
+        for lane in [0, 5, GLOBAL_CHAIN_LANE_COUNT - 1] {
+            let state = chain_heads_in_circuit(&mut builder, &lanes);
+            let bits: [Felt<InnerVal>; GLOBAL_CHAIN_LANE_COUNT] =
                 core::array::from_fn(|i| builder.eval(InnerVal::from_bool(i == lane)));
-            let selector = GlobalLaneSelectorVariable::<InnerConfig>::constrain(&mut builder, bits);
+            let selector =
+                GlobalChainLaneSelectorVariable::<InnerConfig>::constrain(&mut builder, bits);
             let selected = selector.head(&mut builder, &state);
             for (s, e) in selected.iter().zip(lanes[lane]) {
                 builder.assert_felt_eq(*s, e);
@@ -384,21 +392,21 @@ mod tests {
             let replaced = selector.with_head(&mut builder, &state, new_head);
             let mut expected = lanes;
             expected[lane] = head;
-            assert_lanes_eq(&mut builder, &replaced, &expected);
+            assert_chain_heads_eq(&mut builder, &replaced, &expected);
         }
         run_test_recursion(builder.into_operations(), std::iter::empty());
     }
 
     #[test]
     #[should_panic]
-    fn the_circuit_rejects_a_selector_of_two_lanes() {
+    fn the_circuit_rejects_a_selector_of_two_chain_lanes() {
         constrain_selector([0, 1, 0, 0, 1, 0, 0, 0]);
     }
 
     #[test]
     #[should_panic]
-    fn the_circuit_rejects_a_selector_of_no_lane() {
-        constrain_selector([0; GLOBAL_CHAIN_LANES]);
+    fn the_circuit_rejects_a_selector_of_no_chain_lane() {
+        constrain_selector([0; GLOBAL_CHAIN_LANE_COUNT]);
     }
 
     #[test]

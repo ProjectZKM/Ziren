@@ -986,7 +986,7 @@ fn prove_tampered_statement(
             (prover.open(&pk, data, &mut challenger.clone()).unwrap(), tables)
         })
         .unzip();
-    prover.machine().assign_global_lanes(&mut shard_proofs);
+    prover.machine().assign_global_chain_lanes(&mut shard_proofs);
     let rounds = shard_proofs
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
@@ -996,7 +996,7 @@ fn prove_tampered_statement(
         .global_challenge(
             &challenger,
             rounds.iter().map(Option::as_ref),
-            shard_proofs.iter().map(|proof| proof.global_lane),
+            shard_proofs.iter().map(|proof| proof.global_chain_lane),
         )
         .expect("the core machine has global lookups");
 

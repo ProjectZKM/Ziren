@@ -398,7 +398,7 @@ fn the_verifier_bounds_the_global_lookup_count() {
 /// Proves `records`, each as its own shard, with the global round of shard
 /// `i` on lane `lanes[i]` of the global hash chain: a prover that assigns
 /// the lanes itself.
-fn prove_on_lanes(
+fn prove_on_chain_lanes(
     records: &[BusRecord],
     lanes: &[u8],
 ) -> (MachineProof<SC>, StarkVerifyingKey<SC>) {
@@ -417,7 +417,7 @@ fn prove_on_lanes(
             let tables = prover.global_round_tables(&data);
             let mut proof =
                 prover.open(&pk, data, &mut challenger.clone()).expect("the shard proves");
-            proof.global_lane = *lane;
+            proof.global_chain_lane = *lane;
             (proof, tables)
         })
         .unzip();
@@ -447,38 +447,38 @@ fn ten_shards() -> Vec<BusRecord> {
 }
 
 #[test]
-fn the_prover_spreads_the_global_rounds_over_the_lanes() {
+fn the_prover_spreads_the_global_rounds_over_the_chain_lanes() {
     let (proof, vk) = prove_with_deferred_global_lookups(&ten_shards());
-    let lanes: Vec<u8> = proof.shard_proofs.iter().map(|shard| shard.global_lane).collect();
+    let lanes: Vec<u8> = proof.shard_proofs.iter().map(|shard| shard.global_chain_lane).collect();
     assert_eq!(lanes, [0, 1, 2, 3, 4, 5, 6, 7, 0, 1], "the rounds take the lanes in turn");
     verify_with_deferred_global_lookups(&vk, &proof).expect("rounds on every lane verify");
 
     let mut moved = proof.clone();
-    moved.shard_proofs[3].global_lane = 6;
+    moved.shard_proofs[3].global_chain_lane = 6;
     verify_with_deferred_global_lookups(&vk, &moved)
         .expect_err("a round moved to another lane after the challenge was drawn");
 
     let mut swapped = proof.clone();
-    swapped.shard_proofs[2].global_lane = 5;
-    swapped.shard_proofs[5].global_lane = 2;
+    swapped.shard_proofs[2].global_chain_lane = 5;
+    swapped.shard_proofs[5].global_chain_lane = 2;
     verify_with_deferred_global_lookups(&vk, &swapped)
         .expect_err("two rounds that trade their lanes");
 
     let mut no_lane = proof;
-    no_lane.shard_proofs[9].global_lane = crate::logup_gkr::GLOBAL_CHAIN_LANES as u8;
+    no_lane.shard_proofs[9].global_chain_lane = crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT as u8;
     let error = verify_with_deferred_global_lookups(&vk, &no_lane)
         .expect_err("a round on a lane that does not exist");
     assert!(error.contains("lane 8"), "{error}");
 }
 
 #[test]
-fn a_prover_chooses_the_lane_of_each_global_round() {
+fn a_prover_chooses_the_chain_lane_of_each_global_round() {
     let records = ten_shards();
     let chosen = [2, 2, 7, 2, 7, 7, 0, 2, 7, 0];
-    let (proof, vk) = prove_on_lanes(&records, &chosen);
+    let (proof, vk) = prove_on_chain_lanes(&records, &chosen);
     verify_with_deferred_global_lookups(&vk, &proof).expect("any lane is valid for any round");
 
-    let (one_lane, vk) = prove_on_lanes(&records[..4], &[4; 4]);
+    let (one_lane, vk) = prove_on_chain_lanes(&records[..4], &[4; 4]);
     verify_with_deferred_global_lookups(&vk, &one_lane).expect("every round on one lane");
 
     let mut reordered = one_lane;
@@ -529,7 +529,7 @@ impl CommittedShards {
                 (prover.open(&pk, data, &mut vk_challenger.clone()).unwrap(), tables)
             })
             .unzip();
-        prover.machine().assign_global_lanes(&mut shard_proofs);
+        prover.machine().assign_global_chain_lanes(&mut shard_proofs);
         let rounds: Vec<_> = shard_proofs
             .iter()
             .map(|proof| prover.machine().global_round_binding(proof).expect("a global round"))
@@ -539,7 +539,7 @@ impl CommittedShards {
             .global_challenge(
                 &vk_challenger,
                 rounds.iter().map(Some),
-                shard_proofs.iter().map(|shard| shard.global_lane),
+                shard_proofs.iter().map(|shard| shard.global_chain_lane),
             )
             .expect("the bus machine has global lookups");
         Self { prover, pk, vk, shard_proofs, rounds, tables, global, vk_challenger }
@@ -741,7 +741,7 @@ fn global_rounds_share_a_proof_within_the_area_limit() {
 /// the same number of stacking blocks, within the bounds on a proof's rounds,
 /// weight and area; the lanes of a proof are grouped apart, each in order.
 #[test]
-fn a_lane_groups_its_rounds_of_one_shape() {
+fn a_chain_lane_groups_its_rounds_of_one_shape() {
     use crate::logup_gkr::{GLOBAL_LEAF_CELLS, GLOBAL_LEAF_FIXED_CELLS};
     let machine = deferring_machine();
     let round_of = |chips: &[(&str, usize)]| GlobalRoundBinding {
@@ -751,7 +751,7 @@ fn a_lane_groups_its_rounds_of_one_shape() {
     let sender = &round_of(&[("BusSender", 1)]);
     let both = &round_of(&[("BusReceiver", 1), ("BusSender", 1)]);
     let groups = |rounds: &[&GlobalRoundBinding<F>], per_proof| {
-        machine.global_lane_proof_groups(rounds.iter().copied(), per_proof)
+        machine.global_chain_lane_proof_groups(rounds.iter().copied(), per_proof)
     };
     assert_eq!(
         groups(&[sender, sender, sender, both, both, sender], 8),
@@ -872,7 +872,7 @@ fn a_global_round_commits_its_family() {
     assert_eq!(rounds[0].chips, chips([0, 4]));
     assert_eq!(rounds[1].chips, chips([4, 0]));
     assert_eq!(
-        machine.global_lane_proof_groups(rounds.iter(), 8).first(),
+        machine.global_chain_lane_proof_groups(rounds.iter(), 8).first(),
         Some(&(0..2)),
         "the rounds of a sending and a receiving shard do not share a global proof"
     );

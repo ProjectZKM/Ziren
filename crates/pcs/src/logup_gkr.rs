@@ -136,16 +136,16 @@ pub const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
 
 /// Separates the digest of the global hash chain's lane heads from every
 /// other use of a fresh challenger.
-pub const GLOBAL_LANES_DOMAIN: u32 = 0x474c_4e53;
+pub const GLOBAL_CHAIN_HEADS_DOMAIN: u32 = 0x474c_4e53;
 
 /// The lanes of the global hash chain. Each lane is a hash chain of its own:
 /// a shard's global round extends one lane, which its prover chooses, by one
 /// [`global_chain_step`]. A prover with several devices gives each device a
 /// lane, so that consecutive rounds of a lane are rounds of one device.
-pub const GLOBAL_CHAIN_LANES: usize = 8;
+pub const GLOBAL_CHAIN_LANE_COUNT: usize = 8;
 
 /// The heads of the lanes of the global hash chain.
-pub type GlobalLanes<F> = [[F; 8]; GLOBAL_CHAIN_LANES];
+pub type GlobalChainHeads<F> = [[F; 8]; GLOBAL_CHAIN_LANE_COUNT];
 
 /// The head `h_0` every lane of the global hash chain starts at, sampled
 /// from `challenger`: the machine's challenger after it has observed the
@@ -165,12 +165,12 @@ where
 ///
 /// The digest is collision resistant, so a chain value fixes every lane
 /// head, and its domain keeps it apart from a [`global_chain_step`].
-pub fn global_lanes_digest<F, C>(mut challenger: C, lanes: &GlobalLanes<F>) -> [F; 8]
+pub fn global_chain_heads_digest<F, C>(mut challenger: C, lanes: &GlobalChainHeads<F>) -> [F; 8]
 where
     F: p3_field::Field,
     C: p3_challenger::FieldChallenger<F>,
 {
-    challenger.observe(F::from_u32(GLOBAL_LANES_DOMAIN));
+    challenger.observe(F::from_u32(GLOBAL_CHAIN_HEADS_DOMAIN));
     for head in lanes {
         challenger.observe_slice(head);
     }
@@ -180,7 +180,9 @@ where
 /// The lane of each shard's global round when the rounds take the lanes in
 /// turn, in shard order: `committed` says of each shard whether it commits a
 /// round. A shard without one is given lane 0, which nothing reads.
-pub fn round_robin_global_lanes(committed: impl IntoIterator<Item = bool>) -> alloc::vec::Vec<u8> {
+pub fn round_robin_global_chain_lanes(
+    committed: impl IntoIterator<Item = bool>,
+) -> alloc::vec::Vec<u8> {
     let mut next = 0usize;
     committed
         .into_iter()
@@ -189,7 +191,7 @@ pub fn round_robin_global_lanes(committed: impl IntoIterator<Item = bool>) -> al
                 return 0;
             }
             let lane = next as u8;
-            next = (next + 1) % GLOBAL_CHAIN_LANES;
+            next = (next + 1) % GLOBAL_CHAIN_LANE_COUNT;
             lane
         })
         .collect()

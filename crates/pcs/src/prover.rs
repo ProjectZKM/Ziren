@@ -629,7 +629,7 @@ where
         Ok(ShardProof::<SC> {
             public_values: data.public_values,
             jagged_shard_proof,
-            global_lane: 0,
+            global_chain_lane: 0,
         })
     }
 
@@ -689,7 +689,7 @@ where
                     .collect::<Result<Vec<_>, ShardPcsError<SC, Self::Pcs>>>()
             })?;
             let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
-            self.machine().assign_global_lanes(&mut shard_proofs);
+            self.machine().assign_global_chain_lanes(&mut shard_proofs);
 
             let rounds = shard_proofs
                 .iter()
@@ -706,7 +706,7 @@ where
                 .zip(tables)
                 .zip(shard_proofs.iter())
                 .filter_map(|((round, tables), proof)| {
-                    Some((proof.global_lane, round.as_ref()?, tables?))
+                    Some((proof.global_chain_lane, round.as_ref()?, tables?))
                 })
                 .collect::<Vec<_>>();
             let global_proofs = if committed.is_empty() {
@@ -717,7 +717,7 @@ where
                     .global_challenge(
                         challenger,
                         rounds.iter().map(Option::as_ref),
-                        shard_proofs.iter().map(|proof| proof.global_lane),
+                        shard_proofs.iter().map(|proof| proof.global_chain_lane),
                     )
                     .expect("a machine that defers global lookups has them");
                 let groups = self
@@ -901,7 +901,7 @@ where
         Some(global),
         machine.max_log_row_count(),
     );
-    ShardProof { public_values: Vec::new(), jagged_shard_proof, global_lane: 0 }
+    ShardProof { public_values: Vec::new(), jagged_shard_proof, global_chain_lane: 0 }
 }
 
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>

@@ -88,10 +88,10 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     pub jagged_shard_proof:
         Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>,
     /// The lane of the global hash chain the shard's global round extends
-    /// ([`crate::logup_gkr::GLOBAL_CHAIN_LANES`]), chosen by the prover. Zero
+    /// ([`crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT`]), chosen by the prover. Zero
     /// for a shard without a global round and for a global proof.
     #[serde(default)]
-    pub global_lane: u8,
+    pub global_chain_lane: u8,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
@@ -265,14 +265,14 @@ mod tests {
             rmp_serde::from_slice(&bytes).expect("old rmp bytes decode into the mandatory layout");
         assert_eq!(back.public_values.len(), PROOF_MAX_NUM_PVS);
         assert_eq!(back.jagged_shard_proof.public_values.len(), 16);
-        assert_eq!(back.global_lane, 0);
+        assert_eq!(back.global_chain_lane, 0);
 
         let mut on_a_lane = back;
-        on_a_lane.global_lane = 5;
+        on_a_lane.global_chain_lane = 5;
         let new_bytes = rmp_serde::to_vec(&on_a_lane).expect("mandatory layout serializes");
         assert_eq!(new_bytes[1..bytes.len()], bytes[1..], "the lane follows the old layout");
         let again: ShardProof<SC> = rmp_serde::from_slice(&new_bytes).expect("the lane decodes");
-        assert_eq!(again.global_lane, 5);
+        assert_eq!(again.global_chain_lane, 5);
     }
 
     /// `None` is the one rmp encoding the mandatory layout cannot accept, and
@@ -300,7 +300,7 @@ mod tests {
         let new_bytes = bincode::serialize(&ShardProof::<SC> {
             public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS],
             jagged_shard_proof: payload(),
-            global_lane: 0,
+            global_chain_lane: 0,
         })
         .expect("mandatory layout serializes");
         assert_eq!(

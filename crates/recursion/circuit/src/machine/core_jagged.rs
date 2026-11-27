@@ -56,7 +56,7 @@ pub struct ZKMCoreWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
     /// The lane heads of the global hash chain before the first shard.
-    pub global_lanes: zkm_pcs::logup_gkr::GlobalLanes<SC::Val>,
+    pub global_chain_heads: zkm_pcs::logup_gkr::GlobalChainHeads<SC::Val>,
     /// For each shard, the lane its global round extends. The entry of a
     /// shard without a round is not read.
     pub global_round_lanes: Vec<u8>,
@@ -90,10 +90,10 @@ pub struct ZKMCoreWitnessVariable<
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
-    pub global_lanes: crate::global_challenge::GlobalLanesVariable<C>,
+    pub global_chain_heads: crate::global_challenge::GlobalChainHeadsVariable<C>,
     /// For each shard with a global round, one bit for each lane: the lane
     /// the round extends. [`verify_core_jagged`] constrains the bits.
-    pub global_round_lanes: Vec<Option<[Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES]>>,
+    pub global_round_lanes: Vec<Option<[Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT]>>,
 }
 
 /// Verify a list of whir shard proofs, asserting the
@@ -136,7 +136,7 @@ pub fn verify_core_jagged<C, SC, A>(
         is_complete,
         is_first_shard,
         vk_root,
-        global_lanes,
+        global_chain_heads,
         global_round_lanes,
     } = input;
     assert!(
@@ -248,18 +248,18 @@ pub fn verify_core_jagged<C, SC, A>(
         },
     );
 
-    let global_chain_start = crate::global_challenge::global_lanes_digest_variable(
+    let global_chain_start = crate::global_challenge::global_chain_heads_digest_variable(
         builder,
         machine.config(),
-        &global_lanes,
+        &global_chain_heads,
     );
-    let mut lanes_end = global_lanes;
+    let mut lanes_end = global_chain_heads;
     let mut chain_moves = false;
     for ((_, _, round), lane) in verify_outputs.iter().zip_eq(global_round_lanes) {
         let Some((commitment, chips)) = round else {
             continue;
         };
-        let lane = crate::global_challenge::GlobalLaneSelectorVariable::constrain(
+        let lane = crate::global_challenge::GlobalChainLaneSelectorVariable::constrain(
             builder,
             lane.expect("the witness holds the lane of a shard's global round"),
         );
@@ -277,7 +277,11 @@ pub fn verify_core_jagged<C, SC, A>(
         chain_moves = true;
     }
     let shards_chain_end = if chain_moves {
-        crate::global_challenge::global_lanes_digest_variable(builder, machine.config(), &lanes_end)
+        crate::global_challenge::global_chain_heads_digest_variable(
+            builder,
+            machine.config(),
+            &lanes_end,
+        )
     } else {
         global_chain_start
     };
@@ -353,7 +357,7 @@ pub fn verify_core_jagged<C, SC, A>(
                     machine.config(),
                     &vk_legacy,
                 );
-                for head in global_lanes.iter() {
+                for head in global_chain_heads.iter() {
                     for (start, origin) in head.iter().zip(lane_origin) {
                         builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
                     }
@@ -991,8 +995,8 @@ impl ZKMCoreWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
             is_complete,
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
-            global_lanes: [[p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE];
-                zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+            global_chain_heads: [[p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE];
+                zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
             global_round_lanes: vec![0],
         }
     }
