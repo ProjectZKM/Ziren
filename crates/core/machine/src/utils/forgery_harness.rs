@@ -917,10 +917,33 @@ fn prove_tampered_grouped(
     challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
     rounds_per_proof: usize,
 ) -> MachineProof<SC> {
+    prove_tampered_statement(
+        prover,
+        program,
+        stdin,
+        opts,
+        |raw, _| tamper(raw),
+        challenge,
+        rounds_per_proof,
+    )
+}
+
+/// [`prove_tampered_grouped`] where `tamper` also edits the shards' records
+/// once their traces exist, so it can change the public values a shard is
+/// proven with: the statement of the shard, where the traces are its witness.
+fn prove_tampered_statement(
+    prover: &CpuProver<SC, MipsAir<Val>>,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    tamper: impl FnOnce(&mut [RawTraces], &mut [zkm_core_executor::ExecutionRecord]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+    rounds_per_proof: usize,
+) -> MachineProof<SC> {
     use zkm_pcs::air::MachineAir;
 
     let (pk, _) = prover.setup(program);
-    let records =
+    let mut records =
         crate::utils::prove::shard_records::<SC, _>(prover, program, stdin, opts).unwrap();
 
     let mut raw: Vec<RawTraces> = records
@@ -938,7 +961,7 @@ fn prove_tampered_grouped(
                 .collect()
         })
         .collect();
-    tamper(&mut raw);
+    tamper(&mut raw, &mut records);
 
     let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
         .max_log_row_count as u32;
@@ -1366,4 +1389,412 @@ fn shard_proven_under_another_h_star_rejected() {
 fn shard_records_count(program: &Program, stdin: &ZKMStdin, opts: ZKMCoreOpts) -> usize {
     let prover = honest_prover();
     crate::utils::prove::shard_records::<SC, _>(&prover, program, stdin, opts).unwrap().len()
+}
+
+// Memory tables
+//
+// MemoryGlobalInit and MemoryGlobalFinalize list their addresses in strictly
+// increasing order, as pairs of 16-bit limbs chained over a control bus. A
+// prover that wants an address in a table twice, or a value that is not a
+// word of bytes, is modelled by rows it appends after the last honest row of
+// each table: one Initialize row and one Finalize row of the same address
+// and value, which close on the global bus by themselves. Each row is
+// completed the way the constraints ask: the chain columns from the row
+// before it, the Byte table multiplicities of the range lookups the table
+// holds, and the public values of the last address and of the row count. A
+// pair with canonical limbs therefore verifies, and a forged pair breaks the
+// rules its test names and no other.
+
+use core::borrow::{Borrow, BorrowMut};
+
+use p3_field::{Field, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
+use zkm_core_executor::{events::MemoryInitializeFinalizeEvent, ByteOpcode, ExecutionRecord};
+
+use crate::memory::{MemoryChipType, MemoryGlobalChip, MemoryInitCols, TOP_ADDR_HI};
+
+const MEMORY_TABLES: [(&str, MemoryChipType); 2] = [
+    ("MemoryGlobalInit", MemoryChipType::Initialize),
+    ("MemoryGlobalFinalize", MemoryChipType::Finalize),
+];
+
+/// The field's order.
+const P: u32 = 0x7F00_0001;
+
+/// Options that put the memory events of `fibonacci_program` in two shards
+/// of their own: the Initialize rows and the first Finalize rows in one, the
+/// other Finalize rows in the next, which has no Initialize row.
+fn multi_memory_shard_opts() -> ZKMCoreOpts {
+    let mut opts = ZKMCoreOpts::default();
+    opts.split_opts.memory = 1 << 13;
+    opts.split_opts.combine_memory_threshold = 0;
+    opts
+}
+
+fn memory_cols(row: &[Val]) -> &MemoryInitCols<Val> {
+    row.borrow()
+}
+
+/// The limbs of the integer `addr`, which need not be an address.
+fn limbs_of(addr: u32) -> [Val; 2] {
+    [Val::from_u32(addr & 0xffff), Val::from_u32(addr >> 16)]
+}
+
+/// The rows of a memory table before its padding.
+fn real_rows(trace: &RowMajorMatrix<Val>) -> usize {
+    trace.values.chunks(trace.width).take_while(|row| memory_cols(row).is_real == Val::ONE).count()
+}
+
+/// The shards with rows in the table `name`, in order.
+fn shards_with(shards: &[RawTraces], name: &str) -> Vec<usize> {
+    (0..shards.len()).filter(|&i| shards[i].contains_key(name)).collect()
+}
+
+/// The last address of both memory tables, which end at the same one: the
+/// highest address the program touches is outside its image.
+fn last_memory_addr(shards: &[RawTraces]) -> u32 {
+    let last = MEMORY_TABLES.map(|(name, _)| {
+        let trace = &shards[*shards_with(shards, name).last().unwrap()][name];
+        let row = real_rows(trace) - 1;
+        let cols = memory_cols(&trace.values[row * trace.width..(row + 1) * trace.width]);
+        cols.addr[0].as_canonical_u32() + (cols.addr[1].as_canonical_u32() << 16)
+    });
+    assert_eq!(last[0], last[1], "the two memory tables end at different addresses");
+    last[0]
+}
+
+/// Adds `count` to the Byte table multiplicities of the range lookups the
+/// memory chip of `kind` sends on `row`, for the tuples the table holds.
+fn count_range_lookups(
+    byte: &mut RowMajorMatrix<Val>,
+    kind: MemoryChipType,
+    row: &[Val],
+    count: Val,
+) {
+    let chip = zkm_pcs::Chip::<Val, _>::new(MemoryGlobalChip::new(kind));
+    for lookup in chip.sends().iter().filter(|lookup| lookup.kind == zkm_pcs::LookupKind::Byte) {
+        let multiplicity = lookup.multiplicity.apply::<Val, Val>(&[], row);
+        let v: Vec<u32> = lookup
+            .values
+            .iter()
+            .map(|value| value.apply::<Val, Val>(&[], row).as_canonical_u32())
+            .collect();
+        let table_row = if v[0] == ByteOpcode::U8Range as u32 {
+            (v[1] == 0 && v[2] == 0 && v[3] < 256 && v[4] < 256).then_some((v[3] << 8) + v[4])
+        } else {
+            assert_eq!(v[0], ByteOpcode::U16Range as u32, "a memory row sends range lookups");
+            (v[1] < 1 << 16 && v[2..] == [0, 0, 0]).then_some(v[1])
+        };
+        if let Some(table_row) = table_row {
+            let cols: &mut crate::bytes::columns::ByteMultCols<Val> =
+                byte.row_mut(table_row as usize).borrow_mut();
+            cols.multiplicities[v[0] as usize] += multiplicity * count;
+        }
+    }
+}
+
+/// The 32 public value elements whose two sums are `limbs`: the bits of a
+/// limb below `2^16`, and otherwise the limb whole in the lowest element of
+/// its half.
+fn limb_elements(limbs: [Val; 2]) -> [u32; 32] {
+    let mut elements = [0; 32];
+    for (half, limb) in elements.chunks_mut(16).zip(limbs) {
+        let limb = limb.as_canonical_u32();
+        if limb < 1 << 16 {
+            for (i, bit) in half.iter_mut().enumerate() {
+                *bit = (limb >> i) & 1;
+            }
+        } else {
+            half[0] = limb;
+        }
+    }
+    elements
+}
+
+/// Appends a row of address `addr` and value `value` to the memory table
+/// `name`, after the last row of the last shard with rows of it. The row is
+/// completed as a compared row of the chain, then `forge` edits it. The Byte
+/// table counts the range lookups it holds, and the public values name the
+/// row's address as the table's last and count the row.
+fn append_memory_row(
+    shards: &mut [RawTraces],
+    records: &mut [ExecutionRecord],
+    (name, kind): (&str, MemoryChipType),
+    addr: [Val; 2],
+    value: [Val; 4],
+    forge: &impl Fn(&mut MemoryInitCols<Val>),
+) {
+    let shard = *shards_with(shards, name).last().unwrap();
+    let trace = shards[shard].get_mut(name).unwrap();
+    let width = trace.width;
+    let rows = real_rows(trace);
+    if rows * width == trace.values.len() {
+        trace.values.resize((rows + 32) * width, Val::ZERO);
+    }
+    let last = *memory_cols(&trace.values[(rows - 1) * width..rows * width]);
+    let row = &mut trace.values[rows * width..(rows + 1) * width];
+    let cols: &mut MemoryInitCols<Val> = row.borrow_mut();
+    cols.shard = Val::ZERO;
+    cols.timestamp = Val::from_bool(kind == MemoryChipType::Initialize);
+    cols.addr = addr;
+    cols.top_inv = (Val::from_u32(TOP_ADDR_HI) - addr[1]).try_inverse().unwrap_or(Val::ZERO);
+    cols.index = last.index + Val::ONE;
+    cols.prev_addr = last.addr;
+    cols.prev_valid = last.is_comp;
+    cols.hi_differs = Val::from_bool(addr[1] != last.addr[1]);
+    cols.gap =
+        if addr[1] != last.addr[1] { addr[1] - last.addr[1] } else { addr[0] - last.addr[0] };
+    cols.value = value;
+    cols.is_real = Val::ONE;
+    cols.is_comp = Val::ONE;
+    cols.zero_inv = (cols.index + last.addr[0] + last.addr[1]).inverse();
+    forge(cols);
+    let last_addr = limb_elements(cols.addr);
+    let row = row.to_vec();
+    count_range_lookups(shards[shard].get_mut("Byte").unwrap(), kind, &row, Val::ONE);
+
+    let counted = MemoryInitializeFinalizeEvent { addr: 0, value: 0, shard: 0, timestamp: 0 };
+    for (i, record) in records.iter_mut().enumerate().skip(shard) {
+        let pv = &mut record.public_values;
+        let (events, previous, last) = match kind {
+            MemoryChipType::Initialize => (
+                &mut record.global_memory_initialize_events,
+                &mut pv.previous_init_addr_bits,
+                &mut pv.last_init_addr_bits,
+            ),
+            MemoryChipType::Finalize => (
+                &mut record.global_memory_finalize_events,
+                &mut pv.previous_finalize_addr_bits,
+                &mut pv.last_finalize_addr_bits,
+            ),
+        };
+        *last = last_addr;
+        if i == shard {
+            events.push(counted);
+        } else {
+            *previous = last_addr;
+        }
+    }
+}
+
+/// [`append_memory_row`] to both memory tables.
+fn append_memory_pair(
+    shards: &mut [RawTraces],
+    records: &mut [ExecutionRecord],
+    addr: [Val; 2],
+    value: [Val; 4],
+    forge: impl Fn(&mut MemoryInitCols<Val>),
+) {
+    for table in MEMORY_TABLES {
+        append_memory_row(shards, records, table, addr, value, &forge);
+    }
+}
+
+fn bytes(value: [u32; 4]) -> [Val; 4] {
+    value.map(Val::from_u32)
+}
+
+/// The honest verifier's result on `fibonacci_program`, its memory events in
+/// two memory shards, proven after `tamper` edited the shards' traces and
+/// records.
+fn verify_tampered_memory(
+    label: &str,
+    tamper: impl FnOnce(&mut [RawTraces], &mut [ExecutionRecord]),
+) -> Result<(), MachineVerificationError<SC>> {
+    let program = fibonacci_program();
+    let proof = prove_tampered_statement(
+        &honest_prover(),
+        &program,
+        &fib_stdin(),
+        multi_memory_shard_opts(),
+        tamper,
+        same_challenge,
+        1,
+    );
+    let (machine, vk) = honest_vk(&program);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!(
+        "[memory][{label}] shards={} verify = {}",
+        proof.shard_proofs.len(),
+        reject_tag(&res)
+    );
+    res
+}
+
+/// What the verifier's rejection of a row that breaks a constraint names, and
+/// of a shard whose lookups do not balance.
+const BY_CONSTRAINTS: &str = "zerocheck";
+const BY_LOOKUPS: &str = "LogUp-GKR";
+
+/// Asserts that the verifier rejected, at the check `check`.
+fn assert_rejected(res: &Result<(), MachineVerificationError<SC>>, check: &str, case: &str) {
+    let tag = reject_tag(res);
+    assert!(res.is_err() && tag.contains(check), "{case}: expected {check}, got {tag}");
+}
+
+/// Control: an appended pair with canonical limbs verifies. The program's
+/// last address is one word below the largest address, `0x7F000000`, whose
+/// high limb is the top one and whose low limb is zero, so that address is
+/// the one a table can still take. The Initialize row is appended in a shard
+/// before the last, whose public values pass its address on unchanged.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_appended_canonical_row_verifies() {
+    setup_logger();
+    let res = verify_tampered_memory("canonical row", |shards, records| {
+        let [init, finalize] = MEMORY_TABLES.map(|(name, _)| shards_with(shards, name));
+        assert!(finalize.len() >= 2, "the Finalize rows are in one shard");
+        assert!(init.last() < finalize.last(), "every memory shard has Initialize rows");
+        assert_eq!(last_memory_addr(shards) + 4, TOP_ADDR_HI << 16);
+        append_memory_pair(
+            shards,
+            records,
+            limbs_of(TOP_ADDR_HI << 16),
+            bytes([1, 2, 3, 255]),
+            |_| {},
+        );
+    });
+    assert!(res.is_ok(), "an appended canonical row must verify: {}", reject_tag(&res));
+}
+
+/// A second limb pair for an address a table already holds. The integers the
+/// forged limbs spell are above every address, so the rows compare as
+/// increasing, and the field element they send to the global bus is the
+/// address of an honest row:
+///
+/// * the address plus the field's order: the high limb is the top one and
+///   the low limb is not zero;
+/// * the address plus twice the order: the high limb is above the top one;
+/// * a high limb of minus one, which names the last honest address: the limb
+///   is not a 16-bit integer, and neither is its distance to the limb before.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_aliased_address_limbs_rejected() {
+    setup_logger();
+    for case in 0..3 {
+        let res = verify_tampered_memory("aliased limbs", |shards, records| {
+            let init = &shards[shards_with(shards, "MemoryGlobalInit")[0]]["MemoryGlobalInit"];
+            let second = memory_cols(&init.values[init.width..2 * init.width]);
+            let held =
+                second.addr[0].as_canonical_u32() + (second.addr[1].as_canonical_u32() << 16);
+            assert!(held > 0 && held < 1 << 16, "the second address is a register's");
+            let last = last_memory_addr(shards);
+            let alias = match case {
+                0 => limbs_of(held + P),
+                1 => limbs_of(held + 2 * P),
+                _ => [Val::from_u32((last & 0xffff) - 1), -Val::ONE],
+            };
+            let named = alias[0] + alias[1] * Val::from_u32(1 << 16);
+            assert_eq!(named, Val::from_u32(if case < 2 { held } else { last }));
+            append_memory_pair(shards, records, alias, bytes([0; 4]), |_| {});
+        });
+        let check = if case == 0 { BY_CONSTRAINTS } else { BY_LOOKUPS };
+        assert_rejected(&res, check, &format!("limb pair {case} of a held address"));
+    }
+}
+
+/// An appended pair that does not increase the address: the last address
+/// again, the address one word below it, and the address one high limb below
+/// it with `hi_differs` set. The gap is zero or wraps below zero, so the gap
+/// less one is in no row of the range table.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_address_not_increasing_rejected() {
+    setup_logger();
+    for case in 0..3 {
+        let res = verify_tampered_memory("not increasing", |shards, records| {
+            let last = last_memory_addr(shards);
+            assert!(last & 0xffff >= 4 && last >> 16 >= 1);
+            let addr = [last, last - 4, last - (1 << 16)][case];
+            append_memory_pair(shards, records, limbs_of(addr), bytes([0; 4]), |cols| {
+                assert_eq!(cols.hi_differs, Val::from_bool(case == 2));
+            });
+        });
+        assert_rejected(&res, BY_LOOKUPS, &format!("address {case} that does not increase"));
+    }
+}
+
+/// An appended pair at the largest address whose first value limb is 256.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_value_limb_past_a_byte_rejected() {
+    setup_logger();
+    let res = verify_tampered_memory("value limb 256", |shards, records| {
+        let top = limbs_of(TOP_ADDR_HI << 16);
+        append_memory_pair(shards, records, top, bytes([256, 0, 0, 0]), |_| {});
+    });
+    assert_rejected(&res, BY_LOOKUPS, "a value limb past a byte");
+}
+
+/// An appended pair that does not compare, with a value that is not zero: a
+/// row may skip the comparison only at index zero after a zero address, with
+/// address and value zero. In the first case the pair repeats the last
+/// address and a canonical compared pair at the largest address follows it,
+/// so the public values still receive `is_comp = 1` from the last row and the
+/// row's constraints alone reject; in the second the forged pair is at the
+/// largest address and is the last row, and the control bus does not balance
+/// either.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_row_skipping_the_comparison_rejected() {
+    setup_logger();
+    for followed in [true, false] {
+        let res = verify_tampered_memory("comparison skipped", |shards, records| {
+            let top = limbs_of(TOP_ADDR_HI << 16);
+            let addr = if followed { limbs_of(last_memory_addr(shards)) } else { top };
+            append_memory_pair(shards, records, addr, bytes([9, 0, 0, 0]), |cols| {
+                cols.is_comp = Val::ZERO;
+                cols.zero_inv = Val::ZERO;
+            });
+            if followed {
+                append_memory_pair(shards, records, top, bytes([0; 4]), |cols| {
+                    assert_eq!(cols.prev_valid, Val::ZERO);
+                });
+            }
+        });
+        let check = if followed { BY_CONSTRAINTS } else { BY_LOOKUPS };
+        assert_rejected(&res, check, &format!("comparison skipped, followed {followed}"));
+    }
+}
+
+/// The first Finalize row of the second memory shard takes the address one
+/// word below the one the public values send it as its previous address,
+/// with the rest of the row and the Byte table following. With the shard's
+/// public values edited to send that address, the shard verifies: what
+/// rejects that statement is the equality of a shard's previous address with
+/// the last address of the shard before it, which the verifier of an
+/// execution checks over the shards. With the honest public values the
+/// control bus of the shard does not balance.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_chain_broken_across_shards_rejected() {
+    setup_logger();
+    let (name, kind) = MEMORY_TABLES[1];
+    for statement_follows in [true, false] {
+        let res = verify_tampered_memory("chain broken", |shards, records| {
+            let shard = shards_with(shards, name)[1];
+            let trace = shards[shard].get_mut(name).unwrap();
+            let width = trace.width;
+            let honest = trace.values[..width].to_vec();
+            let cols: &mut MemoryInitCols<Val> = trace.values[..width].borrow_mut();
+            assert!(cols.is_comp == Val::ONE && cols.index == Val::ZERO);
+            assert!(cols.hi_differs == Val::ZERO && cols.prev_addr[0].as_canonical_u32() >= 4);
+            cols.prev_addr[0] -= Val::from_u32(4);
+            cols.gap += Val::from_u32(4);
+            cols.zero_inv = (cols.prev_addr[0] + cols.prev_addr[1]).inverse();
+            let previous = limb_elements(cols.prev_addr);
+            let forged = trace.values[..width].to_vec();
+            let byte = shards[shard].get_mut("Byte").unwrap();
+            count_range_lookups(byte, kind, &honest, -Val::ONE);
+            count_range_lookups(byte, kind, &forged, Val::ONE);
+            if statement_follows {
+                records[shard].public_values.previous_finalize_addr_bits = previous;
+            }
+        });
+        if statement_follows {
+            assert!(res.is_ok(), "the shards of the edited statement: {}", reject_tag(&res));
+        } else {
+            assert_rejected(&res, BY_LOOKUPS, "a chain broken under the honest statement");
+        }
+    }
 }

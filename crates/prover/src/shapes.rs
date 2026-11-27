@@ -1708,9 +1708,14 @@ mod global_round_enumeration_tests {
     /// The global rounds of an execution laid out like a mainnet block's: the
     /// first shard, execution and precompile shards whose rounds mostly fill
     /// 8 stacking blocks and now and then 16 to 72, then the memory shards,
-    /// six at 232 blocks and one at each multiple of 8 below, the last with
+    /// six of 27 blocks and one at each block count below, the last with
     /// finalize events alone. However many lanes a prover spreads them over,
     /// every global proof the grouping makes has an enumerated shape.
+    ///
+    /// The two memory tables are 36 columns together: a memory shard of
+    /// `3 << 19` events per table fills 27 blocks, the class of 32, and the
+    /// row cube bounds their round at 72 blocks, so the memory family has
+    /// shapes up to the class of 128 blocks and none at 256.
     #[test]
     fn global_round_enumeration_covers_the_groups_of_a_block() {
         let machine: CoreMachine = zkm_core_machine::mips::MipsAir::machine(
@@ -1743,8 +1748,11 @@ mod global_round_enumeration_tests {
             let rows = filling("MemoryGlobalInit", blocks) / 2;
             round(&machine, &[("MemoryGlobalInit", rows), ("MemoryGlobalFinalize", rows)])
         };
-        rounds.extend((0..6).map(|_| memory(232)));
-        rounds.extend((2..29).rev().map(|eighths| memory(8 * eighths)));
+        let full =
+            round(&machine, &[("MemoryGlobalInit", 3 << 19), ("MemoryGlobalFinalize", 3 << 19)]);
+        assert_eq!(machine.global_round_blocks(&full), 32);
+        rounds.extend((0..6).map(|_| memory(27)));
+        rounds.extend((1..27).rev().map(memory));
         rounds.push(round(&machine, &[("MemoryGlobalFinalize", 5000)]));
 
         let mut seen = BTreeSet::new();
@@ -1775,8 +1783,30 @@ mod global_round_enumeration_tests {
         let families = seen.iter().map(|shape| &shape.chips).collect::<BTreeSet<_>>();
         assert_eq!(families.len(), 3, "the block's rounds are of {families:?}");
         assert!(seen.iter().any(|shape| shape.blocks == 8 && shape.rounds > 16));
-        assert!(seen.iter().any(|shape| shape.blocks == 256 && shape.rounds == 1));
         assert!(seen.iter().any(|shape| shape.blocks == 128 && shape.rounds > 1));
+
+        let memory_family = machine.global_family(["MemoryGlobalInit"]).unwrap();
+        let memory_blocks = |shapes: &mut dyn Iterator<Item = &ZKMGlobalRoundShape>| {
+            shapes
+                .filter(|shape| &shape.chips == memory_family)
+                .map(|shape| (shape.blocks, shape.rounds))
+                .collect::<BTreeSet<_>>()
+        };
+        let seen_memory = memory_blocks(&mut seen.iter());
+        assert_eq!(
+            seen_memory.last(),
+            Some(&(32, machine.max_global_rounds_per_proof(memory_family, 32))),
+            "the full memory rounds are in {seen_memory:?}"
+        );
+        let enumerated_memory =
+            memory_blocks(&mut enumerated.iter().filter_map(|shape| match shape {
+                ZKMProofShape::GlobalRound(shape) => Some(shape),
+                _ => None,
+            }));
+        assert_eq!(
+            enumerated_memory.iter().map(|(blocks, _)| *blocks).collect::<BTreeSet<_>>(),
+            BTreeSet::from([8, 16, 32, 64, 128])
+        );
     }
 }
 

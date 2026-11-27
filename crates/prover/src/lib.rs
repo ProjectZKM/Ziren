@@ -3955,6 +3955,59 @@ pub mod tests {
         Ok(())
     }
 
+    /// The memory tables chain their addresses across shards through the
+    /// public values: a shard's previous address, 32 elements for each table,
+    /// is the last address of the shard before it, and zero for the first
+    /// shard. The tables read the elements as two sums of 16; the verifier
+    /// equates every element, which equates both sums, and rejects a proof
+    /// with one element moved, in either half, before it looks at a shard
+    /// proof. The execution is cut so that its memory events fill several
+    /// shards after the execution shard.
+    #[test]
+    #[serial]
+    fn previous_memory_addresses_are_chained_across_shards() -> Result<()> {
+        use std::borrow::{Borrow, BorrowMut};
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let mut opts = ZKMProverOpts::default();
+        opts.core_opts.split_opts.memory = 1 << 12;
+        opts.core_opts.split_opts.combine_memory_threshold = 0;
+        let core =
+            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        prover.verify(&core.proof, &vk)?;
+
+        let last = core.proof.0.len() - 1;
+        assert!(last >= 2, "the memory events are in {last} shards");
+        let chained: &PublicValues<Word<KoalaBear>, KoalaBear> =
+            core.proof.0[last].public_values.as_slice().borrow();
+        assert!(chained.previous_finalize_addr_bits.contains(&KoalaBear::ONE));
+
+        for (shard, element, finalize) in
+            itertools::iproduct!([0, 1, last], [0, 15, 16, 31], [false, true])
+        {
+            let mut forged = core.proof.clone();
+            let proof = &mut forged.0[shard];
+            for values in [&mut proof.public_values, &mut proof.jagged_shard_proof.public_values] {
+                let pv: &mut PublicValues<Word<KoalaBear>, KoalaBear> =
+                    values.as_mut_slice().borrow_mut();
+                let previous = if finalize {
+                    &mut pv.previous_finalize_addr_bits
+                } else {
+                    &mut pv.previous_init_addr_bits
+                };
+                previous[element] += KoalaBear::ONE;
+            }
+            let err = prover.verify(&forged, &vk).expect_err("a moved previous address accepted");
+            assert!(
+                matches!(err, zkm_pcs::MachineVerificationError::InvalidPublicValues(_)),
+                "shard {shard}, element {element}, finalize {finalize}: rejected by {err:?}"
+            );
+        }
+        Ok(())
+    }
+
     /// The programs of the global proofs unwind the global hash chain from
     /// its end to its origin, lane by lane, and the shards' programs wind it
     /// forward again through the host's chain values. A program rejects a
@@ -4441,7 +4494,9 @@ pub mod tests {
     /// the cells of that program's main round from above: by the estimate
     /// alone while the rounds commit at most 256 stacking blocks together,
     /// and with what a round adds past that otherwise. The programs are
-    /// built from the shapes' placeholders.
+    /// built from the shapes' placeholders. Four families at six classes,
+    /// less the class of 256 blocks for the two memory tables, which the row
+    /// cube keeps below it.
     #[test]
     #[ignore = "builds two dozen global-round programs; run with --ignored"]
     fn global_round_shapes_fit_a_pin_class() {
@@ -4479,7 +4534,7 @@ pub mod tests {
                     zkm_recursion_circuit::machine::ZKMGlobalRoundShape { chips, blocks, rounds }
                 })
                 .collect::<Vec<_>>();
-        assert!(shapes.iter().any(|shape| shape.rounds > 24) && shapes.len() >= 24);
+        assert!(shapes.iter().any(|shape| shape.rounds > 24) && shapes.len() >= 23);
         shapes.par_iter().for_each(|shape| {
             let input =
                 zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues::dummy(machine, shape);
@@ -4688,7 +4743,7 @@ pub mod tests {
 
     /// A global round past the smallest class commits the stacking blocks of
     /// its class, the next power of two, and its global proof commits the
-    /// same: the memory shard of a guest that hashes 256 KiB commits a global
+    /// same: the memory shard of a guest that hashes 1.5 MiB commits a global
     /// round whose cells fill 24 blocks at 32, the shard verifies, its global
     /// proof opens the commitment the shard made and the host and the program
     /// accept it. The placeholder of that shape builds the same program.
@@ -4701,7 +4756,7 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(false));
         let (_, pk_d, program, vk) = prover.setup(test_artifacts::SHA2_RUST_ELF);
         let machine = prover.core_prover.machine();
-        let input = vec![7u8; 256 << 10];
+        let input = vec![7u8; 3 << 19];
         let mut stdin = ZKMStdin::new();
         stdin.write(&ZKMPublicValues::from(input.as_slice()).hash().to_vec());
         stdin.write(&input);
@@ -4761,6 +4816,11 @@ pub mod tests {
             .find(|(_, (_, round, _))| !natural(round).is_power_of_two())
             .expect("a memory shard whose global round fills no power of two of blocks");
         let class = natural(round).next_power_of_two();
+        assert!(
+            class > zkm_pcs::jagged::GLOBAL_ROUND_PIN_BLOCKS,
+            "the round fills {} blocks, within the smallest class",
+            natural(round)
+        );
         assert_eq!(blocks_of(shard, 1), class, "the shard commits its global round at its class");
 
         let global_proof = prover

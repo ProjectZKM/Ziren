@@ -53,7 +53,7 @@ pub enum LookupKind {
     /// public-values AIR.
     State = 9,
 
-    /// Global-memory-init ordering control bus (index, prev_addr, valid).
+    /// Global-memory-init ordering control bus (index, addr_lo, addr_hi, valid).
     MemoryGlobalInitControl = 11,
 
     /// Global-memory-finalize ordering control bus.
