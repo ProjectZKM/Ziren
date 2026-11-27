@@ -520,7 +520,7 @@ impl CommittedShards {
         let (pk, vk) = prover.setup(&BusProgram);
         let mut vk_challenger = prover.machine().config().challenger();
         pk.observe_into(&mut vk_challenger);
-        let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
+        let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = records
             .iter()
             .map(|record| {
                 let traces = prover.generate_traces(record).unwrap();
@@ -529,13 +529,18 @@ impl CommittedShards {
                 (prover.open(&pk, data, &mut vk_challenger.clone()).unwrap(), tables)
             })
             .unzip();
+        prover.machine().assign_global_lanes(&mut shard_proofs);
         let rounds: Vec<_> = shard_proofs
             .iter()
             .map(|proof| prover.machine().global_round_binding(proof).expect("a global round"))
             .collect();
         let global = prover
             .machine()
-            .global_challenge(&vk_challenger, rounds.iter().map(Some))
+            .global_challenge(
+                &vk_challenger,
+                rounds.iter().map(Some),
+                shard_proofs.iter().map(|shard| shard.global_lane),
+            )
             .expect("the bus machine has global lookups");
         Self { prover, pk, vk, shard_proofs, rounds, tables, global, vk_challenger }
     }

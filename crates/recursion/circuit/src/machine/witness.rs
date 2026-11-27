@@ -267,9 +267,10 @@ mod jagged_witness {
                 self.shard_proofs.len(),
                 "the witness names the lane of each shard's global round"
             );
-            self.shard_proofs.iter().zip(&self.global_round_lanes).map(|(proof, lane)| {
-                proof.global_original_commitment.zip(proof.global_commitment).map(|_| *lane)
-            })
+            self.shard_proofs
+                .iter()
+                .zip(&self.global_round_lanes)
+                .map(|(proof, lane)| proof.global_round().map(|_| *lane))
         }
     }
 
