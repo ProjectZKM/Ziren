@@ -3175,7 +3175,7 @@ pub mod tests {
     /// bounded. Wrap pins the legacy power-of-two table heights, and cells
     /// stack at `2^21` per stripe:
     /// under the compress schedule the shrink proof's verifier packs into
-    /// 8 preprocessed and 16 main stripes, batch 24.
+    /// 8 preprocessed and 8 main stripes, batch 16.
     #[test]
     #[serial]
     fn wrap_committed_stripes_are_pinned() {
@@ -3219,7 +3219,7 @@ pub mod tests {
         );
         assert_eq!(
             (prep_stripes, main_stripes),
-            (8, 16),
+            (8, 8),
             "the wrap geometry moved to ({prep_stripes}, {main_stripes}); update the pin and the \
              soundness model's wrap batch cardinality to {}",
             prep_stripes + main_stripes

@@ -141,7 +141,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             crate::sys::poseidon2_wide_event_to_row_koalabear(
                 input.as_ptr(),
                 input_row.as_mut_ptr(),
-                DEGREE == 3,
+                false,
             )
         };
 
@@ -262,20 +262,13 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     ) {
         let permutation = permutation_mut::<F, DEGREE>(input_row);
 
-        let (
-            external_rounds_state,
-            internal_rounds_state,
-            internal_rounds_s0,
-            mut external_sbox,
-            mut internal_sbox,
-            output_state,
-        ) = permutation.get_cols_mut();
+        let (external_rounds_state, internal_rounds_state, internal_rounds_s0, output_state) =
+            permutation.get_cols_mut();
 
         external_rounds_state[0] = input;
 
         for r in 0..NUM_EXTERNAL_ROUNDS / 2 {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
+            let next_state = self.populate_external_round(external_rounds_state, r);
             if r == NUM_EXTERNAL_ROUNDS / 2 - 1 {
                 *internal_rounds_state = next_state;
             } else {
@@ -283,15 +276,11 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             }
         }
 
-        external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
-            internal_rounds_state,
-            internal_rounds_s0,
-            &mut internal_sbox,
-        );
+        external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] =
+            self.populate_internal_rounds(internal_rounds_state, internal_rounds_s0);
 
         for r in NUM_EXTERNAL_ROUNDS / 2..NUM_EXTERNAL_ROUNDS {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
+            let next_state = self.populate_external_round(external_rounds_state, r);
             if r == NUM_EXTERNAL_ROUNDS - 1 {
                 for i in 0..WIDTH {
                     output_state[i] = next_state[i];
@@ -308,7 +297,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     fn populate_external_round<F: PrimeField32>(
         &self,
         external_rounds_state: &[[F; WIDTH]],
-        sbox: &mut Option<&mut [[F; WIDTH]; NUM_EXTERNAL_ROUNDS]>,
         r: usize,
     ) -> [F; WIDTH] {
         let mut state = {
@@ -329,10 +317,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
                 sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
             }
 
-            if let Some(sbox) = sbox.as_deref_mut() {
-                sbox[r] = sbox_deg_3;
-            }
-
             sbox_deg_3
         };
 
@@ -344,17 +328,13 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         &self,
         internal_rounds_state: &[F; WIDTH],
         internal_rounds_s0: &mut [F; NUM_INTERNAL_ROUNDS - 1],
-        sbox: &mut Option<&mut [F; NUM_INTERNAL_ROUNDS]>,
     ) -> [F; WIDTH] {
         let mut state: [F; WIDTH] = *internal_rounds_state;
-        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
         for r in 0..NUM_INTERNAL_ROUNDS {
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
             let add_rc = state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
-            sbox_deg_3[r] = add_rc * add_rc * add_rc;
-
-            state[0] = sbox_deg_3[r];
+            state[0] = add_rc * add_rc * add_rc;
 
             internal_linear_layer(&mut state);
 
@@ -363,13 +343,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             }
         }
 
-        let ret_state = state;
-
-        if let Some(sbox) = sbox.as_deref_mut() {
-            *sbox = sbox_deg_3;
-        }
-
-        ret_state
+        state
     }
 }
 
@@ -443,6 +417,8 @@ mod tests {
         assert_eq!(trace, generate_trace_reference::<9>(&shard, &mut ExecutionRecord::default()));
     }
 
+    /// The trace the core machine's Poseidon2 operation writes in its layout
+    /// without S-box columns, which is the layout of the chip at every degree.
     fn generate_trace_reference<const DEGREE: usize>(
         input: &ExecutionRecord<KoalaBear>,
         _: &mut ExecutionRecord<KoalaBear>,
@@ -461,13 +437,13 @@ mod tests {
             || {
                 values_pop.par_chunks_mut(num_columns).zip_eq(&input.poseidon2_events).for_each(
                     |(row, &event)| {
-                        populate_perm::<F, DEGREE>(event.input, Some(event.output), row);
+                        populate_perm::<F, 9>(event.input, Some(event.output), row);
                     },
                 )
             },
             || {
                 let mut dummy_row = vec![F::ZERO; num_columns];
-                populate_perm::<F, DEGREE>([F::ZERO; WIDTH], None, &mut dummy_row);
+                populate_perm::<F, 9>([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
                     .for_each(|row| row.copy_from_slice(&dummy_row))

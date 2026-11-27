@@ -245,11 +245,12 @@ pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 32;
 /// ([`GLOBAL_LEAF_WIDE_ROUND_CELLS`]).
 pub const GLOBAL_LEAF_CELLS: usize = crate::jagged::RECURSION_PINS.main.area / 5 * 4;
 
-/// What a round adds to that main round beyond the estimate of
-/// [`global_round_leaf_cells`], at most, in a proof whose rounds commit more
-/// than 256 stacking blocks together: the program then decomposes the offset
-/// of each column into 31 bits, which costs it more than fewer bits do.
-/// Measured at up to 284,000 cells for a round of every global-round chip.
+/// What a round may add to that main round beyond the estimate of
+/// [`global_round_leaf_cells`] in a proof whose rounds commit more than 256
+/// stacking blocks together: the program then decomposes the offset of each
+/// column into 31 bits, which costs it more than fewer bits do, measured at
+/// up to 320,000 cells for a round of every global-round chip. The estimate
+/// counts a round from above by more than that, so this is room to spare.
 pub const GLOBAL_LEAF_WIDE_ROUND_CELLS: usize = 300_000;
 
 const _: () = assert!(
@@ -280,13 +281,12 @@ pub const GLOBAL_LEAF_COLUMN_CELLS: usize = 2_300;
 /// columns together.
 ///
 /// Measured at the 128-bit schedules on proofs of 1 to 32 rounds: the
-/// program commits 5.0 M cells before any round; a round adds 2.0 M, 156,000
-/// for each block, and for a table between 44,000 (SyscallCore) and 320,000
-/// (a table of the memory shards), whether or not the table has rows. 28
-/// rounds of 8 blocks of the family of MemoryLocal, SyscallCore and
-/// SyscallPrecompile commit 104.2 M cells, counted as 106.0 M, and 13 rounds
-/// of 32 blocks of the memory shards' family 107.6 M, counted as 106.7 M
-/// ([`GLOBAL_LEAF_WIDE_ROUND_CELLS`]), where the largest pin class holds
+/// program commits 4.1 M cells before any round; a round of 8 blocks adds
+/// 2.5 M for the family of MemoryLocal, SyscallCore and SyscallPrecompile
+/// and 2.8 M for the memory shards' family, whether or not a table has rows,
+/// and each further block 119,000. 28 rounds of 8 blocks of the first family
+/// commit 73.8 M cells, counted as 106.0 M, and 13 rounds of 32 blocks of
+/// the second 80.6 M, counted as 106.7 M, where the largest pin class holds
 /// 134.2 M.
 pub const fn global_round_leaf_cells(blocks: usize, chips: usize, columns: usize) -> usize {
     GLOBAL_LEAF_ROUND_CELLS
