@@ -245,9 +245,7 @@ const CORE_CACHE_SIZE: usize = 5;
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 3;
 
-pub use zkm_pcs::logup_gkr::{
-    global_round_groups, GLOBAL_BLOCKS_PER_PROGRAM, GLOBAL_ROUND_FIXED_BLOCKS,
-};
+pub use zkm_pcs::logup_gkr::{global_round_groups, global_round_leaf_cells, GLOBAL_LEAF_CELLS};
 
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
@@ -4124,11 +4122,14 @@ pub mod tests {
 
     /// A global proof opens several rounds of one lane, one in each table
     /// slot, and its program steps the lane over them in slot order: the
-    /// programs of a proof of three rounds and of one of eight unwind the
-    /// chain as the host does and carry the host's sums and lookup counts. A
-    /// proof whose slots hold the rounds in another order verifies but leaves
-    /// the chain elsewhere, and has no place among the leaves; a slot whose
-    /// commitment is replaced by another round's is rejected.
+    /// programs of a proof of three rounds and of one of as many rounds as a
+    /// proof opens unwind the chain as the host does and carry the host's
+    /// sums and lookup counts. Every program commits no more cells than the
+    /// bound on a proof's rounds counts for it, and the program of the
+    /// largest proof is proven. A proof whose slots hold the rounds in
+    /// another order verifies but leaves the chain elsewhere, and has no
+    /// place among the leaves; a slot whose commitment is replaced by another
+    /// round's is rejected.
     #[test]
     #[serial]
     #[ignore = "proves a core execution; run with --ignored"]
@@ -4140,8 +4141,8 @@ pub mod tests {
         let (_, pk_d, program, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
         let machine = prover.core_prover.machine();
         let (shard_proofs, committed, global, challenger) =
-            prove_shards_on_lanes(&prover, &pk_d, &program, 1500, |round| {
-                if round % 4 == 3 {
+            prove_shards_on_lanes(&prover, &pk_d, &program, 4200, |round| {
+                if round % 8 == 7 {
                     2
                 } else {
                     5
@@ -4149,7 +4150,13 @@ pub mod tests {
             })?;
         let lane =
             (0..committed.len()).filter(|&round| committed[round].0 == 5).collect::<Vec<_>>();
-        assert!(lane.len() >= 11, "lane 5 holds {} of {} rounds", lane.len(), committed.len());
+        let most = zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        assert!(
+            lane.len() >= 3 + most,
+            "lane 5 holds {} of {} rounds",
+            lane.len(),
+            committed.len()
+        );
 
         let prove = |rounds: &[usize]| {
             let rounds = rounds
@@ -4161,12 +4168,12 @@ pub mod tests {
                 .prove_global_rounds(&pk_d, &rounds, &global, &challenger)
                 .expect("the global proof")
         };
-        let mut global_proofs = vec![prove(&lane[..3]), prove(&lane[3..11])];
+        let mut global_proofs = vec![prove(&lane[..3]), prove(&lane[3..3 + most])];
         let rest = machine.global_proof_groups_by_lane(
             committed
                 .iter()
                 .enumerate()
-                .filter(|(round, _)| !lane[..11].contains(round))
+                .filter(|(round, _)| !lane[..3 + most].contains(round))
                 .map(|(round, (lane, binding, _))| (*lane, binding, round)),
             zkm_pcs::global_rounds_per_proof(),
         );
@@ -4198,15 +4205,22 @@ pub mod tests {
                 _ => None,
             }
         };
-        let host_sum =
+        let opens =
+            |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
+             proof: &ShardProof<CoreSC>| {
+                proof.jagged_shard_proof.main_commitment == input.proofs[0].main_commitment
+            };
+        let rounds_of =
             |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
                 let proof = global_proofs
                     .iter()
-                    .find(|proof| {
-                        proof.jagged_shard_proof.main_commitment == input.proofs[0].main_commitment
-                    })
+                    .find(|proof| opens(input, proof))
                     .expect("the input holds one of the global proofs");
-                let rounds = machine.global_proof_rounds(proof).expect("the proof's rounds");
+                (proof, machine.global_proof_rounds(proof).expect("the proof's rounds"))
+            };
+        let host_sum =
+            |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
+                let (proof, rounds) = rounds_of(input);
                 machine
                     .verify_global_proof(
                         &vk.vk,
@@ -4217,6 +4231,25 @@ pub mod tests {
                     )
                     .expect("the host rejects the global proof")
             };
+        let compress_machine = prover.compress_prover.machine();
+        let widths = compress_machine
+            .chips()
+            .iter()
+            .map(|chip| {
+                (
+                    <_ as zkm_pcs::air::MachineAir<KoalaBear>>::name(chip),
+                    <_ as p3_air::BaseAir<KoalaBear>>::width(chip),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let main_cells = |program: &RecursionProgram<KoalaBear>| -> usize {
+            let heights =
+                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(program);
+            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::organic_shape(&heights)
+                .iter()
+                .map(|(chip, rows)| rows * widths[chip])
+                .sum()
+        };
 
         let mut after = h_star;
         let mut units = 0u64;
@@ -4237,12 +4270,24 @@ pub mod tests {
             after = public_values.global_chain_end;
             units += u64::from(public_values.global_lookup_units.as_canonical_u32());
             rounds_opened.push(input.rounds());
-            if input.rounds() == 3 && input.global_lane == 5 {
+            let counted = zkm_pcs::logup_gkr::GLOBAL_LEAF_FIXED_CELLS
+                + rounds_of(input)
+                    .1
+                    .iter()
+                    .map(|round| machine.global_round_leaf_cells(round))
+                    .sum::<usize>();
+            let cells = main_cells(&prover.global_round_program(input).0);
+            assert!(
+                cells <= counted,
+                "the program of a proof of {} rounds commits {cells} cells, counted as {counted}",
+                input.rounds()
+            );
+            if opens(input, &global_proofs[0]) {
                 three = Some((input, public_values));
             }
         }
         assert_eq!(after, chain[0], "the global proofs do not unwind the chain to its origin");
-        assert!(rounds_opened.contains(&8), "the proofs open {rounds_opened:?} rounds");
+        assert!(rounds_opened.contains(&most), "the proofs open {rounds_opened:?} rounds");
         let host_units: u64 = committed
             .iter()
             .map(|(_, round, _)| {
@@ -4250,6 +4295,41 @@ pub mod tests {
             })
             .sum();
         assert_eq!(units, host_units, "the leaves count other global lookups than the host");
+
+        let widest = inputs
+            .iter()
+            .find(|input| opens(input, &global_proofs[1]))
+            .expect("the proof of the most rounds has a leaf");
+        let (leaf_program, _) = prover.global_round_program(widest);
+        let mut ws = Vec::new();
+        Witnessable::<InnerConfig>::write(widest, &mut ws);
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            leaf_program.clone(),
+            compress_machine.config().perm.clone(),
+        );
+        runtime.witness_stream = ws.into();
+        runtime.run().expect("the honest global proof is rejected");
+        let mut records = vec![runtime.record];
+        compress_machine
+            .generate_dependencies(&mut records, &ZKMProverOpts::default().recursion_opts, None)
+            .expect("the leaf's dependencies");
+        let record = records.pop().unwrap();
+        let traces = prover.compress_prover.generate_traces(&record).expect("the leaf's traces");
+        let (leaf_pk, leaf_vk) = prover.compress_prover.setup(&leaf_program);
+        let mut leaf_challenger = compress_machine.config().challenger();
+        leaf_pk.observe_into(&mut leaf_challenger);
+        let data = prover.compress_prover.commit(&record, traces, None);
+        let leaf_proof = prover
+            .compress_prover
+            .open(&leaf_pk, data, &mut leaf_challenger)
+            .expect("the proof of the leaf of the most rounds");
+        compress_machine
+            .verify(
+                &leaf_vk,
+                &zkm_pcs::MachineProof::from_shards(vec![leaf_proof]),
+                &mut compress_machine.config().challenger(),
+            )
+            .expect("the proof of the leaf of the most rounds is rejected");
 
         let (honest, honest_values) = three.expect("a proof of three rounds of lane 5");
         let swapped = prove(&[lane[1], lane[0], lane[2]]);

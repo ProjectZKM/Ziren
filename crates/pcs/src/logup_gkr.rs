@@ -232,51 +232,81 @@ pub struct GlobalRoundBinding<F> {
 
 /// The most global rounds one global proof opens: each in a table slot of its
 /// own, committed as one of the proof's trace rounds.
-pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 8;
+pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 32;
 
-/// The weight of the global rounds one global proof opens, at most, unless
-/// it opens a single round. A round weighs the stacking blocks it commits
-/// plus [`GLOBAL_ROUND_FIXED_BLOCKS`].
+/// The cells the main round of the recursion program that verifies a global
+/// proof commits, at most, by the estimate of [`global_round_leaf_cells`],
+/// unless the proof opens a single round: four fifths of the main area of
+/// the largest recursion pin class (`crate::jagged::RECURSION_PIN_CLASSES`).
 ///
-/// The recursion program that verifies the proof has to fit a recursion pin
-/// class (`crate::jagged::RECURSION_PIN_CLASSES`), and it grows with the rows
-/// its queries open: every first-round query of a global proof opens one row
-/// of each block of each round. Measured on mainnet blocks with one round to
-/// a proof, a round of 8 blocks costs the program 10,792 hash rows and one of
-/// 232 blocks 71,224, so 270 rows a block and 32 blocks' worth besides; the
-/// largest class holds about 200,000 hash rows, 740 in this weight, and the
-/// bound leaves a fifth of it free.
-pub const GLOBAL_BLOCKS_PER_PROGRAM: usize = 576;
+/// That program has to fit a pin class, or the proof cannot enter the
+/// recursion, and its main round is the one that fills first. The fifth left
+/// free covers what the estimate leaves out: a proof whose rounds commit more
+/// than 256 stacking blocks together was measured to cost its program up to
+/// 210,000 cells more for each round.
+pub const GLOBAL_LEAF_CELLS: usize = crate::jagged::RECURSION_PINS.main.area / 5 * 4;
 
-/// What a global round weighs besides its blocks: the part of verifying its
-/// global proof that does not grow with the round.
-pub const GLOBAL_ROUND_FIXED_BLOCKS: usize = 32;
+/// The cells of that main round that do not depend on the rounds the proof
+/// opens.
+pub const GLOBAL_LEAF_FIXED_CELLS: usize = 5_100_000;
+
+/// The cells each round adds to it, whatever the round holds.
+pub const GLOBAL_LEAF_ROUND_CELLS: usize = 2_010_000;
+
+/// The cells each stacking block of a round adds to it: every first-round
+/// query of the proof opens one row of each block of each round.
+pub const GLOBAL_LEAF_BLOCK_CELLS: usize = 157_000;
+
+/// The cells each table of a round adds to it, besides its columns.
+pub const GLOBAL_LEAF_CHIP_CELLS: usize = 40_000;
+
+/// The cells each column of a round's tables adds to it.
+pub const GLOBAL_LEAF_COLUMN_CELLS: usize = 2_300;
+
+/// What a global round adds to the main round of the recursion program that
+/// verifies its global proof, in cells, estimated from above: the round
+/// commits `blocks` stacking blocks and holds `chips` tables of `columns`
+/// columns together.
+///
+/// Measured at the 128-bit schedules on proofs of 1 to 32 rounds: the
+/// program commits 5.0 M cells before any round; a round adds 2.0 M, 156,000
+/// for each block, and for a table between 44,000 (SyscallCore) and 320,000
+/// (a table of the memory shards). 32 rounds of 8 blocks that hold
+/// MemoryLocal alone commit 115.0 M cells and two rounds of 232 blocks of
+/// the memory shards 83.0 M, where the largest pin class holds 134.2 M.
+pub const fn global_round_leaf_cells(blocks: usize, chips: usize, columns: usize) -> usize {
+    GLOBAL_LEAF_ROUND_CELLS
+        + blocks * GLOBAL_LEAF_BLOCK_CELLS
+        + chips * GLOBAL_LEAF_CHIP_CELLS
+        + columns * GLOBAL_LEAF_COLUMN_CELLS
+}
 
 /// Cuts the consecutive global rounds of one lane into the groups that one
-/// global proof each opens, in order. `rounds` holds the shape and the
-/// stacking blocks of each round. A group holds rounds of one shape, at most
-/// `max_rounds` of them, and weighs at most [`GLOBAL_BLOCKS_PER_PROGRAM`]
-/// unless it is a single round.
+/// global proof each opens, in order. `rounds` holds the shape of each round
+/// and the cells it adds to the program that verifies its proof
+/// ([`global_round_leaf_cells`]). A group holds rounds of one shape, at most
+/// `max_rounds` of them, and its program commits at most
+/// [`GLOBAL_LEAF_CELLS`], [`GLOBAL_LEAF_FIXED_CELLS`] of them whatever it
+/// opens, unless it is a single round.
 pub fn global_round_groups<S: PartialEq>(
     rounds: &[(S, usize)],
     max_rounds: usize,
 ) -> alloc::vec::Vec<core::ops::Range<usize>> {
     let mut groups: alloc::vec::Vec<core::ops::Range<usize>> = alloc::vec::Vec::new();
-    let mut weight = 0;
-    for (round, (shape, blocks)) in rounds.iter().enumerate() {
-        let round_weight = blocks + GLOBAL_ROUND_FIXED_BLOCKS;
+    let mut cells = 0;
+    for (round, (shape, round_cells)) in rounds.iter().enumerate() {
         match groups.last_mut() {
             Some(group)
                 if group.len() < max_rounds
                     && rounds[group.start].0 == *shape
-                    && weight + round_weight <= GLOBAL_BLOCKS_PER_PROGRAM =>
+                    && cells + round_cells <= GLOBAL_LEAF_CELLS =>
             {
                 group.end += 1;
-                weight += round_weight;
+                cells += round_cells;
             }
             _ => {
                 groups.push(round..round + 1);
-                weight = round_weight;
+                cells = GLOBAL_LEAF_FIXED_CELLS + round_cells;
             }
         }
     }
@@ -423,22 +453,38 @@ mod tests {
         ch
     }
 
-    /// The rounds of a large block, as `(shape, stacking blocks)`: small
-    /// rounds fill a proof by count, a change of shape starts a proof, the
-    /// memory shards' rounds of 232 blocks go two to a proof (four of them in
-    /// one proof fit no pin class), and a round past the whole budget still
-    /// gets a proof of its own.
+    /// The rounds of a large block, as the shape and the cells of each: a
+    /// change of shape starts a proof, the small rounds fill a proof up to
+    /// its cells, the memory shards' rounds of 232 blocks go two to a proof,
+    /// and a round past the whole budget still gets a proof of its own.
     #[test]
     fn global_round_groups_bound_what_a_proof_opens() {
-        let mut rounds: alloc::vec::Vec<(u8, usize)> = alloc::vec![(0, 8)];
-        rounds.extend([(1, 8); 19]);
-        rounds.extend([(2, 232); 5]);
-        rounds.push((3, 1024));
-        rounds.push((3, 1024));
+        let small = global_round_leaf_cells(8, 3, 96);
+        let memory = global_round_leaf_cells(232, 2, 300);
+        let huge = global_round_leaf_cells(1024, 2, 300);
+        let fit = |round: usize| (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / round;
+        assert!(fit(small) > 16 && fit(small) < MAX_GLOBAL_ROUNDS_PER_PROOF);
+        assert_eq!(fit(memory), 2);
+        assert_eq!(fit(huge), 0);
+
+        let mut rounds: alloc::vec::Vec<(u8, usize)> = alloc::vec![(0, small)];
+        rounds.extend(alloc::vec![(1, small); fit(small) + 3]);
+        rounds.extend([(2, memory); 5]);
+        rounds.extend([(3, huge); 2]);
+        let memory_start = fit(small) + 4;
         let groups = global_round_groups(&rounds, MAX_GLOBAL_ROUNDS_PER_PROOF);
         assert_eq!(
             groups,
-            alloc::vec![0..1, 1..9, 9..17, 17..20, 20..22, 22..24, 24..25, 25..26, 26..27]
+            alloc::vec![
+                0..1,
+                1..fit(small) + 1,
+                fit(small) + 1..memory_start,
+                memory_start..memory_start + 2,
+                memory_start + 2..memory_start + 4,
+                memory_start + 4..memory_start + 5,
+                memory_start + 5..memory_start + 6,
+                memory_start + 6..memory_start + 7,
+            ]
         );
         assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
     }

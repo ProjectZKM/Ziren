@@ -1131,6 +1131,31 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         groups
     }
 
+    /// What the global round `round` adds to the main round of the recursion
+    /// program that verifies its global proof, in cells, by the stacking
+    /// blocks it commits, its tables and their columns
+    /// ([`crate::logup_gkr::global_round_leaf_cells`]).
+    pub fn global_round_leaf_cells(
+        &self,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+    ) -> usize {
+        let columns: usize = round
+            .chips
+            .iter()
+            .map(|(name, _)| {
+                self.chips()
+                    .iter()
+                    .find(|chip| chip.name() == *name)
+                    .map_or(0, |chip| <A as BaseAir<Val<SC>>>::width(&chip.air))
+            })
+            .sum();
+        crate::logup_gkr::global_round_leaf_cells(
+            self.global_round_blocks(round),
+            round.chips.len(),
+            columns,
+        )
+    }
+
     /// Groups the consecutive global rounds of one lane of the global hash
     /// chain, the earliest first, into the global proofs a prover makes of
     /// them: the ranges of `rounds` each proof opens, in order. The lane's
@@ -1138,11 +1163,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// group each lane where its rounds are.
     ///
     /// A group holds rounds of one shape, the same chips at the same number of
-    /// stacking blocks, cut by [`crate::logup_gkr::global_round_groups`] and,
-    /// within the area limit and to at most `per_proof` rounds, by
-    /// [`Self::global_proof_groups`]. The rounds of a proof then have one
-    /// geometry, so proofs of as many rounds of one shape are verified by one
-    /// recursion program.
+    /// stacking blocks, cut by [`crate::logup_gkr::global_round_groups`] to
+    /// what the recursion program that verifies the proof can hold
+    /// ([`Self::global_round_leaf_cells`]) and, within the area limit and to
+    /// at most `per_proof` rounds, by [`Self::global_proof_groups`]. The
+    /// rounds of a proof then have one geometry, so proofs of as many rounds
+    /// of one shape are verified by one recursion program.
     pub fn global_lane_proof_groups<'a>(
         &self,
         rounds: impl IntoIterator<Item = &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
@@ -1157,7 +1183,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .map(|round| {
                 let blocks = self.global_round_blocks(round);
                 let chips = round.chips.iter().map(|(name, _)| name.as_str()).collect_vec();
-                ((chips, blocks), blocks)
+                ((chips, blocks), self.global_round_leaf_cells(round))
             })
             .collect_vec();
         let per_proof = per_proof.clamp(1, crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);

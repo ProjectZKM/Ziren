@@ -733,7 +733,8 @@ fn global_rounds_share_a_proof_within_the_area_limit() {
     assert_eq!(groups(&[small; 3], 1), [0..1, 1..2, 2..3]);
     assert_eq!(groups(&[&large, &large, small, small, small], 3), [0..1, 1..4, 4..5]);
     assert_eq!(groups(&[small, &large, &large, small], 8), [0..2, 2..4]);
-    assert_eq!(groups(&[small; 20], usize::MAX), [0..8, 8..16, 16..20]);
+    let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+    assert_eq!(groups(&vec![small; max + 4], usize::MAX), [0..max, max..max + 4]);
 }
 
 /// A lane's rounds share a global proof while they hold the same chips at
@@ -741,7 +742,7 @@ fn global_rounds_share_a_proof_within_the_area_limit() {
 /// weight and area; the lanes of a proof are grouped apart, each in order.
 #[test]
 fn a_lane_groups_its_rounds_of_one_shape() {
-    use crate::logup_gkr::{GLOBAL_BLOCKS_PER_PROGRAM, GLOBAL_ROUND_FIXED_BLOCKS};
+    use crate::logup_gkr::{GLOBAL_LEAF_CELLS, GLOBAL_LEAF_FIXED_CELLS};
     let machine = deferring_machine();
     let round_of = |chips: &[(&str, usize)]| GlobalRoundBinding {
         commitment: [F::ZERO; 8],
@@ -759,12 +760,20 @@ fn a_lane_groups_its_rounds_of_one_shape() {
     );
     assert_eq!(groups(&[both; 20], 8), [0..8, 8..16, 16..20]);
     assert_eq!(groups(&[both; 5], 2), [0..2, 2..4, 4..5]);
+    let fit = (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / machine.global_round_leaf_cells(both);
+    assert!(fit < crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
+    assert_eq!(
+        groups(&[both; 40], usize::MAX),
+        [0..fit, fit..40],
+        "small rounds fill a proof by what its program holds"
+    );
 
     let tall = (1usize..)
         .map(|rows| round_of(&[("BusSender", rows << 20)]))
         .find(|round| {
-            let weight = machine.global_round_blocks(round) + GLOBAL_ROUND_FIXED_BLOCKS;
-            2 * weight <= GLOBAL_BLOCKS_PER_PROGRAM && 3 * weight > GLOBAL_BLOCKS_PER_PROGRAM
+            let cells = machine.global_round_leaf_cells(round);
+            GLOBAL_LEAF_FIXED_CELLS + 2 * cells <= GLOBAL_LEAF_CELLS
+                && GLOBAL_LEAF_FIXED_CELLS + 3 * cells > GLOBAL_LEAF_CELLS
         })
         .expect("a round that goes two to a proof by weight");
     assert_eq!(
@@ -777,7 +786,9 @@ fn a_lane_groups_its_rounds_of_one_shape() {
     let block = 1usize << crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
     let large = round_of(&[("BusSender", (1 << 29) / 3)]);
     let blocks = machine.global_round_blocks(&large);
-    assert!(2 * (blocks + GLOBAL_ROUND_FIXED_BLOCKS) <= GLOBAL_BLOCKS_PER_PROGRAM);
+    assert!(
+        GLOBAL_LEAF_FIXED_CELLS + 2 * machine.global_round_leaf_cells(&large) <= GLOBAL_LEAF_CELLS
+    );
     assert!(2 * blocks * block >= limit);
     assert_eq!(
         groups(&[&large, &large, &large], 8),
