@@ -190,9 +190,10 @@ pub fn query_grinding_bits() -> usize {
 /// The batch combines every stripe of both committed rounds with the powers of
 /// one challenge, at most 544 stripes on a core shard, and its error is the
 /// proximity-gap error of the first code over that many words,
-/// `(t - 1) · ((1 - rho)/2 · n + 1) / |F|`: 124 bits at `t = 544` with no
-/// grind.  Fourteen bits put it at 138, above the query rounds, for one grind
-/// of `2^14` per opening.
+/// `(t - 1) · ((1 - rho)/2 · n + 1) / |F|`: 124 bits at `t = 544`.  The grind
+/// leaves that error as it is and makes each attempt at another challenge
+/// cost `2^14` hashes, so the term counts as 138 bits of work, above the
+/// query rounds, for one grind of `2^14` per opening.
 pub fn whir_batch_grinding_bits() -> usize {
     crate::params::env_usize("ZIREN_WHIR_BATCH_GRINDING_BITS", 14)
 }
