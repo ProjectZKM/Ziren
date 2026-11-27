@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 use zkm_recursion_circuit::machine::{
     ZKMCompressWithVkeyShape, ZKMCompressWitnessValues, ZKMCoreWitnessValues, ZKMDeferredShape,
-    ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMWrapWitnessValues,
+    ZKMDeferredWitnessValues, ZKMGlobalRoundShape, ZKMRecursionShape, ZKMWrapWitnessValues,
 };
 use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
@@ -63,6 +63,9 @@ pub enum ZKMProofShape {
     /// at exactly these (name, row count) pairs — rows, not log heights, so a
     /// representative can land on any committed-block bucket.
     Normalize(OrderedShape),
+    /// A global-round (leaf) program over one global proof: as many rounds of
+    /// one family of global-round chips at one class of stacking blocks.
+    GlobalRound(ZKMGlobalRoundShape),
 }
 
 /// The witness shape of an enumerated normalize class: exact rows per chip.
@@ -79,6 +82,7 @@ pub enum ZKMCompressProgramShape {
     Shrink(ZKMCompressWithVkeyShape),
     CompressRoot(ZKMCompressWithVkeyShape),
     Normalize(ZKMNormalizeShape),
+    GlobalRound(ZKMGlobalRoundShape),
 }
 
 impl ZKMCompressProgramShape {}
@@ -534,8 +538,9 @@ impl ZKMProofShape {
     }
 
     /// Every shape the vk map is built from: the compose/deferred/shrink
-    /// classes of [`Self::generate`] and the normalize classes of
-    /// [`Self::generate_normalize`].  The map's index space is this
+    /// classes of [`Self::generate`], the normalize classes of
+    /// [`Self::generate_normalize`] and the global-round shapes of
+    /// [`Self::generate_global_rounds`].  The map's index space is this
     /// iterator's order, so every tool that addresses shapes by index runs
     /// over it.
     pub fn generate_all<'a>(
@@ -545,6 +550,36 @@ impl ZKMProofShape {
     ) -> impl Iterator<Item = Self> + 'a {
         Self::generate(recursion_shape_config, reduce_batch_size)
             .chain(Self::generate_normalize(machine))
+            .chain(Self::generate_global_rounds(machine))
+    }
+
+    /// The global-round (leaf) shapes: every global proof a prover makes
+    /// opens rounds of one family of the machine's global-round chips
+    /// (`StarkMachine::global_family`) at one class of stacking blocks
+    /// (`zkm_pcs::jagged::global_round_class`), so its program is a function
+    /// of the family, the class and the number of rounds.
+    ///
+    /// For each family and each class its chips can fill
+    /// ([`ZKMGlobalRoundShape::rows`]), the proofs of one round up to the
+    /// most the grouping puts in one proof
+    /// (`StarkMachine::max_global_rounds_per_proof`). A round past the
+    /// largest class has no shape here.
+    pub fn generate_global_rounds(machine: &CoreMachine) -> Vec<Self> {
+        let families: BTreeSet<&BTreeSet<String>> = machine.global_families().iter().collect();
+        let mut out = Vec::new();
+        for family in families {
+            for blocks in zkm_pcs::jagged::global_round_classes(LOG_STACK) {
+                let shape = |rounds| ZKMGlobalRoundShape { chips: family.clone(), blocks, rounds };
+                if shape(1).rows(machine).is_none() {
+                    continue;
+                }
+                out.extend(
+                    (1..=machine.max_global_rounds_per_proof(family, blocks))
+                        .map(|rounds| Self::GlobalRound(shape(rounds))),
+                );
+            }
+        }
+        out
     }
 
     /// The normalize (leaf) shapes: one representative per
@@ -724,6 +759,7 @@ impl ZKMCompressProgramShape {
             ZKMProofShape::Normalize(shape) => {
                 Self::Normalize(ZKMNormalizeShape { rows: shape.inner })
             }
+            ZKMProofShape::GlobalRound(shape) => Self::GlobalRound(shape),
         }
     }
 }
@@ -779,6 +815,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     false,
                 );
                 self.recursion_program(&input).0
+            }
+            ZKMCompressProgramShape::GlobalRound(shape) => {
+                self.global_round_program_for_shape(&shape).0
             }
         }
     }
@@ -1612,6 +1651,105 @@ mod normalize_enumeration_tests {
             first_moved
         );
         assert!(missing.is_empty() && mismatched == 0 && first_moved == 0);
+    }
+}
+
+#[cfg(test)]
+mod global_round_enumeration_tests {
+    use super::*;
+    use zkm_pcs::logup_gkr::GlobalRoundBinding;
+
+    /// The global round of a shard that holds `tables` (chip, rows): the
+    /// chips of its family, the ones the shard lacks without rows.
+    fn round(machine: &CoreMachine, tables: &[(&str, usize)]) -> GlobalRoundBinding<KoalaBear> {
+        let family = machine
+            .global_family(tables.iter().map(|(name, _)| *name))
+            .expect("the shard's family");
+        GlobalRoundBinding {
+            commitment: [KoalaBear::ZERO; 8],
+            chips: family
+                .iter()
+                .map(|name| {
+                    let rows =
+                        tables.iter().find(|(of, _)| of == name).map_or(0, |(_, rows)| *rows);
+                    (name.clone(), rows)
+                })
+                .collect(),
+        }
+    }
+
+    /// The global rounds of an execution laid out like a mainnet block's: the
+    /// first shard, execution and precompile shards whose rounds mostly fill
+    /// 8 stacking blocks and now and then 16 to 72, then the memory shards,
+    /// six at 232 blocks and one at each multiple of 8 below, the last with
+    /// finalize events alone. However many lanes a prover spreads them over,
+    /// every global proof the grouping makes has an enumerated shape.
+    #[test]
+    fn global_round_enumeration_covers_the_groups_of_a_block() {
+        let machine: CoreMachine = zkm_core_machine::mips::MipsAir::machine(
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::new(),
+        );
+        let enumerated: BTreeSet<ZKMProofShape> =
+            ZKMProofShape::generate_global_rounds(&machine).into_iter().collect();
+        let dims = core_chip_dims(&machine);
+        let width = |name: &str| dims.iter().find(|d| d.name == name).unwrap().main_width;
+        let filling = |name: &str, blocks: usize| ((blocks << LOG_STACK) - 100_000) / width(name);
+
+        let mut rounds = vec![round(
+            &machine,
+            &[
+                ("MemoryImage", 1 << 16),
+                ("MemoryLocal", filling("MemoryLocal", 6)),
+                ("SyscallCore", 9),
+            ],
+        )];
+        for shard in 0..600 {
+            let blocks = if shard % 20 < 17 { 8 } else { [16, 24, 32, 40, 48, 72][shard / 20 % 6] };
+            let local = ("MemoryLocal", filling("MemoryLocal", blocks) - 1000);
+            rounds.push(match shard % 7 {
+                0 => round(&machine, &[local, ("SyscallPrecompile", 1000)]),
+                1 => round(&machine, &[local]),
+                _ => round(&machine, &[local, ("SyscallCore", 1000)]),
+            });
+        }
+        let memory = |blocks: usize| {
+            let rows = filling("MemoryGlobalInit", blocks) / 2;
+            round(&machine, &[("MemoryGlobalInit", rows), ("MemoryGlobalFinalize", rows)])
+        };
+        rounds.extend((0..6).map(|_| memory(232)));
+        rounds.extend((2..29).rev().map(|eighths| memory(8 * eighths)));
+        rounds.push(round(&machine, &[("MemoryGlobalFinalize", 5000)]));
+
+        let mut seen = BTreeSet::new();
+        for lanes in [1, 2, 4, 8] {
+            let groups = machine.global_proof_groups_by_lane(
+                rounds.iter().enumerate().map(|(i, round)| ((i % lanes) as u8, round, ())),
+                zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF,
+            );
+            for group in groups {
+                let shape = |round: &GlobalRoundBinding<KoalaBear>| ZKMGlobalRoundShape {
+                    chips: round.chips.iter().map(|(name, _)| name.clone()).collect(),
+                    blocks: machine.global_round_blocks(round),
+                    rounds: group.len(),
+                };
+                let first = shape(group[0].0);
+                assert!(
+                    group.iter().all(|(round, ())| shape(round) == first),
+                    "a global proof opens rounds of several shapes"
+                );
+                assert!(
+                    enumerated.contains(&ZKMProofShape::GlobalRound(first.clone())),
+                    "on {lanes} lanes the grouping makes a proof of {first:?}, which is not \
+                     enumerated"
+                );
+                seen.insert(first);
+            }
+        }
+        let families = seen.iter().map(|shape| &shape.chips).collect::<BTreeSet<_>>();
+        assert_eq!(families.len(), 3, "the block's rounds are of {families:?}");
+        assert!(seen.iter().any(|shape| shape.blocks == 8 && shape.rounds > 16));
+        assert!(seen.iter().any(|shape| shape.blocks == 256 && shape.rounds == 1));
+        assert!(seen.iter().any(|shape| shape.blocks == 128 && shape.rounds > 1));
     }
 }
 

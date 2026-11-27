@@ -56,12 +56,24 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// commits `[preprocessed, global, main]`, every other shard
     /// `[preprocessed, main]`. `None` on a machine that never splits.
     global_round: Option<std::collections::BTreeSet<String>>,
+
+    /// The families of global-round chips: a shard's global round commits
+    /// every chip of its family ([`Self::global_family`]). Empty on a machine
+    /// whose global rounds hold the shard's own tables only.
+    global_families: Vec<std::collections::BTreeSet<String>>,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`].
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, recursion_pins: None, global_round: None }
+        Self {
+            config,
+            chips,
+            num_pv_elts,
+            recursion_pins: None,
+            global_round: None,
+            global_families: Vec::new(),
+        }
     }
 
     /// Marks this machine's shard proofs as committing under `pins` (the
@@ -100,6 +112,54 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     #[inline]
     pub const fn global_round(&self) -> Option<&std::collections::BTreeSet<String>> {
         self.global_round.as_ref()
+    }
+
+    /// Makes every global round commit a whole family of chips, one of
+    /// `families` ([`Self::global_family`]). Consuming builder.
+    ///
+    /// # Panics
+    /// When a family names a chip outside the machine's global round.
+    pub fn with_global_families(
+        mut self,
+        families: Vec<std::collections::BTreeSet<String>>,
+    ) -> Self {
+        assert!(
+            families.iter().flatten().all(|name| {
+                self.global_round.as_ref().is_some_and(|round| round.contains(name))
+            }),
+            "a family of global-round chips names chips of the machine's global round only"
+        );
+        self.global_families = families;
+        self
+    }
+
+    /// The machine's families of global-round chips, as given.
+    pub fn global_families(&self) -> &[std::collections::BTreeSet<String>] {
+        &self.global_families
+    }
+
+    /// The family of the global round of a shard with the tables `tables`:
+    /// the family with the fewest chips that names every global-round chip
+    /// among them, the first such in the machine's order. `None` for a shard
+    /// without a global-round table, and when no family holds its tables.
+    ///
+    /// A shard commits the chips of the family it lacks as tables without
+    /// rows, so its global round has the chips of the family whatever the
+    /// shard ran, and the program that verifies its global proof depends on
+    /// the family and not on the shard.
+    pub fn global_family<'a>(
+        &self,
+        tables: impl IntoIterator<Item = &'a str>,
+    ) -> Option<&std::collections::BTreeSet<String>> {
+        let round = self.global_round()?;
+        let present = tables.into_iter().filter(|name| round.contains(*name)).collect_vec();
+        if present.is_empty() {
+            return None;
+        }
+        self.global_families
+            .iter()
+            .filter(|family| present.iter().all(|name| family.contains(*name)))
+            .min_by_key(|family| family.len())
     }
 
     /// The area pins this machine's proofs commit under (`None` = natural).
@@ -523,6 +583,24 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                     .filter(|_| self.global_round().is_some_and(|set| set.contains(name)))
                     .map(|chip| chip.global_view(slot))
                     .ok_or_else(|| format!("{name} is not a global-round chip of the machine"))
+            })
+            .collect()
+    }
+
+    /// The chips of the global-round family of a shard with the tables
+    /// `tables` ([`Self::global_family`]), each with its width: the tables a
+    /// shard commits in its global round, the ones it lacks without rows
+    /// ([`crate::prover::pad_to_cluster`]). Empty without a family.
+    pub fn global_family_widths<'a>(
+        &self,
+        tables: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::BTreeMap<String, usize> {
+        self.global_family(tables)
+            .into_iter()
+            .flatten()
+            .filter_map(|name| {
+                let chip = self.chips().iter().find(|chip| chip.name() == *name)?;
+                Some((name.clone(), <A as BaseAir<Val<SC>>>::width(&chip.air)))
             })
             .collect()
     }
@@ -1110,25 +1188,46 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     where
         Val<SC>: 'a,
     {
-        let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let max_area = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
-        let per_proof = per_proof.min(crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
-        let mut groups: Vec<core::ops::Range<usize>> = Vec::new();
-        let mut area = 0usize;
-        for (i, round) in rounds.into_iter().enumerate() {
-            let cells = self.global_round_blocks(round) << log_stack;
-            match groups.last_mut() {
-                Some(group) if group.len() < per_proof && area.saturating_add(cells) < max_area => {
-                    group.end = i + 1;
-                    area += cells;
-                }
-                _ => {
-                    groups.push(i..i + 1);
-                    area = cells;
-                }
-            }
+        crate::logup_gkr::global_round_area_groups(
+            rounds.into_iter().map(|round| self.global_round_blocks(round)),
+            per_proof,
+        )
+    }
+
+    /// The most rounds of the chips `chips` at `blocks` stacking blocks each
+    /// that [`Self::global_lane_proof_groups`] puts in one global proof: as
+    /// many as the recursion program that verifies the proof can hold
+    /// ([`crate::logup_gkr::global_round_groups`]), within the area limit
+    /// ([`crate::logup_gkr::global_round_area_groups`]).
+    pub fn max_global_rounds_per_proof(
+        &self,
+        chips: &std::collections::BTreeSet<String>,
+        blocks: usize,
+    ) -> usize {
+        let most = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        let cells = self.global_round_shape_leaf_cells(chips.iter().map(String::as_str), blocks);
+        let held = crate::logup_gkr::global_round_groups(&vec![((), cells); most], most)[0].len();
+        crate::logup_gkr::global_round_area_groups(core::iter::repeat_n(blocks, held), most)[0]
+            .len()
+    }
+
+    /// [`Self::global_round_leaf_cells`] of a round of the chips `chips` at
+    /// `blocks` stacking blocks.
+    fn global_round_shape_leaf_cells<'a>(
+        &self,
+        chips: impl IntoIterator<Item = &'a str>,
+        blocks: usize,
+    ) -> usize {
+        let (mut tables, mut columns) = (0usize, 0usize);
+        for name in chips {
+            tables += 1;
+            columns += self
+                .chips()
+                .iter()
+                .find(|chip| chip.name() == name)
+                .map_or(0, |chip| <A as BaseAir<Val<SC>>>::width(&chip.air));
         }
-        groups
+        crate::logup_gkr::global_round_leaf_cells(blocks, tables, columns)
     }
 
     /// What the global round `round` adds to the main round of the recursion
@@ -1139,20 +1238,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         &self,
         round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
     ) -> usize {
-        let columns: usize = round
-            .chips
-            .iter()
-            .map(|(name, _)| {
-                self.chips()
-                    .iter()
-                    .find(|chip| chip.name() == *name)
-                    .map_or(0, |chip| <A as BaseAir<Val<SC>>>::width(&chip.air))
-            })
-            .sum();
-        crate::logup_gkr::global_round_leaf_cells(
+        self.global_round_shape_leaf_cells(
+            round.chips.iter().map(|(name, _)| name.as_str()),
             self.global_round_blocks(round),
-            round.chips.len(),
-            columns,
         )
     }
 

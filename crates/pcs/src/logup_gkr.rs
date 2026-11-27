@@ -241,10 +241,21 @@ pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 32;
 ///
 /// That program has to fit a pin class, or the proof cannot enter the
 /// recursion, and its main round is the one that fills first. The fifth left
-/// free covers what the estimate leaves out: a proof whose rounds commit more
-/// than 256 stacking blocks together was measured to cost its program up to
-/// 210,000 cells more for each round.
+/// free covers what the estimate leaves out
+/// ([`GLOBAL_LEAF_WIDE_ROUND_CELLS`]).
 pub const GLOBAL_LEAF_CELLS: usize = crate::jagged::RECURSION_PINS.main.area / 5 * 4;
+
+/// What a round adds to that main round beyond the estimate of
+/// [`global_round_leaf_cells`], at most, in a proof whose rounds commit more
+/// than 256 stacking blocks together: the program then decomposes the offset
+/// of each column into 31 bits, which costs it more than fewer bits do.
+/// Measured at up to 284,000 cells for a round of every global-round chip.
+pub const GLOBAL_LEAF_WIDE_ROUND_CELLS: usize = 300_000;
+
+const _: () = assert!(
+    GLOBAL_LEAF_CELLS + MAX_GLOBAL_ROUNDS_PER_PROOF * GLOBAL_LEAF_WIDE_ROUND_CELLS
+        <= crate::jagged::RECURSION_PINS.main.area
+);
 
 /// The cells of that main round that do not depend on the rounds the proof
 /// opens.
@@ -271,14 +282,49 @@ pub const GLOBAL_LEAF_COLUMN_CELLS: usize = 2_300;
 /// Measured at the 128-bit schedules on proofs of 1 to 32 rounds: the
 /// program commits 5.0 M cells before any round; a round adds 2.0 M, 156,000
 /// for each block, and for a table between 44,000 (SyscallCore) and 320,000
-/// (a table of the memory shards). 32 rounds of 8 blocks that hold
-/// MemoryLocal alone commit 115.0 M cells and two rounds of 232 blocks of
-/// the memory shards 83.0 M, where the largest pin class holds 134.2 M.
+/// (a table of the memory shards), whether or not the table has rows. 28
+/// rounds of 8 blocks of the family of MemoryLocal, SyscallCore and
+/// SyscallPrecompile commit 104.2 M cells, counted as 106.0 M, and 13 rounds
+/// of 32 blocks of the memory shards' family 107.6 M, counted as 106.7 M
+/// ([`GLOBAL_LEAF_WIDE_ROUND_CELLS`]), where the largest pin class holds
+/// 134.2 M.
 pub const fn global_round_leaf_cells(blocks: usize, chips: usize, columns: usize) -> usize {
     GLOBAL_LEAF_ROUND_CELLS
         + blocks * GLOBAL_LEAF_BLOCK_CELLS
         + chips * GLOBAL_LEAF_CHIP_CELLS
         + columns * GLOBAL_LEAF_COLUMN_CELLS
+}
+
+/// Cuts consecutive global rounds, each given by the stacking blocks it
+/// commits, into groups of at most `per_proof` rounds, and at most
+/// [`MAX_GLOBAL_ROUNDS_PER_PROOF`], that one global proof each opens, in
+/// order. The rounds of a group commit fewer cells together than the area a
+/// verifier accepts in the trace rounds of one proof
+/// ([`crate::jagged::MAX_ROUND_LOG_AREA`]), so a round too large to share is
+/// opened alone.
+pub fn global_round_area_groups(
+    blocks: impl IntoIterator<Item = usize>,
+    per_proof: usize,
+) -> alloc::vec::Vec<core::ops::Range<usize>> {
+    let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+    let max_area = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+    let per_proof = per_proof.min(MAX_GLOBAL_ROUNDS_PER_PROOF);
+    let mut groups: alloc::vec::Vec<core::ops::Range<usize>> = alloc::vec::Vec::new();
+    let mut area = 0usize;
+    for (i, blocks) in blocks.into_iter().enumerate() {
+        let cells = blocks << log_stack;
+        match groups.last_mut() {
+            Some(group) if group.len() < per_proof && area.saturating_add(cells) < max_area => {
+                group.end = i + 1;
+                area += cells;
+            }
+            _ => {
+                groups.push(i..i + 1);
+                area = cells;
+            }
+        }
+    }
+    groups
 }
 
 /// Cuts the consecutive global rounds of one lane into the groups that one

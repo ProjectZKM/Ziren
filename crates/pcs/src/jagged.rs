@@ -236,30 +236,55 @@ impl RecursionPins {
     }
 }
 
-/// The stacking blocks a small global round commits, whatever it holds.
+/// The stacking blocks the smallest class of global rounds commits.
 pub const GLOBAL_ROUND_PIN_BLOCKS: usize = 8;
 
+/// The class of a global round of `total_values` cells: the stacking blocks
+/// it commits, the smallest power of two, at least
+/// [`GLOBAL_ROUND_PIN_BLOCKS`], that holds its cells. `None` for a round
+/// without cells, and for one past the largest class: a class commits fewer
+/// cells than the area a verifier accepts in the trace rounds of one proof
+/// ([`MAX_ROUND_LOG_AREA`]).
+pub fn global_round_class(total_values: usize, log_stacking_height: usize) -> Option<usize> {
+    if total_values == 0 {
+        return None;
+    }
+    let blocks = total_values
+        .div_ceil(1usize << log_stacking_height)
+        .next_power_of_two()
+        .max(GLOBAL_ROUND_PIN_BLOCKS);
+    global_round_classes(log_stacking_height).contains(&blocks).then_some(blocks)
+}
+
+/// Every class of global rounds ([`global_round_class`]), in stacking blocks,
+/// the smallest first.
+pub fn global_round_classes(log_stacking_height: usize) -> Vec<usize> {
+    core::iter::successors(Some(GLOBAL_ROUND_PIN_BLOCKS), |blocks| Some(blocks * 2))
+        .take_while(|blocks| blocks << log_stacking_height < 1usize << MAX_ROUND_LOG_AREA)
+        .collect()
+}
+
 /// The area pin of a global round of `total_values` cells, in a row cube of
-/// `cube` rows: a round that fits [`GLOBAL_ROUND_PIN_BLOCKS`] stacking blocks
-/// commits exactly that many, with a fixed padding-column count, and a larger
-/// round commits its natural area (`None`).
+/// `cube` rows: the round commits the stacking blocks of its class
+/// ([`global_round_class`]), with a padding-column count the class fixes.
+/// A round without a class commits its natural area (`None`).
 ///
 /// A shard commits its global round under this pin and the shard's global
 /// proof commits the same tables under it again, so the two commitments are
-/// equal. Pinning the small rounds gives their global proofs one geometry, so
-/// the global proofs of consecutive shards are verified by one program.
+/// equal. The pin gives the global rounds of one class one geometry, so the
+/// global proofs of consecutive shards are verified by one program, and the
+/// programs that verify global proofs can be listed ahead of any proof.
 pub fn global_round_pin(
     total_values: usize,
     log_stacking_height: usize,
     cube: usize,
 ) -> Option<AreaPin> {
-    let area = GLOBAL_ROUND_PIN_BLOCKS << log_stacking_height;
-    (total_values > 0 && total_values <= area)
-        .then(|| AreaPin { area, pad_columns: area.div_ceil(cube).max(1) })
+    let area = global_round_class(total_values, log_stacking_height)? << log_stacking_height;
+    Some(AreaPin { area, pad_columns: area.div_ceil(cube).max(1) })
 }
 
 /// The cells a global round of `total_values` cells commits: its pin's area
-/// (see [`global_round_pin`]), or its natural area past the pin.
+/// (see [`global_round_pin`]), or its natural area without a pin.
 pub fn global_round_dense_len(
     total_values: usize,
     log_stacking_height: usize,
@@ -729,6 +754,32 @@ mod tests {
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;
+
+    /// A global round commits the smallest power of two of stacking blocks,
+    /// at least eight, that holds its cells, with a padding column for each
+    /// row cube of its area, and a round past the largest class its natural
+    /// area.
+    #[test]
+    fn a_global_round_commits_the_blocks_of_its_class() {
+        let (log_stack, cube) = (21, 1usize << 22);
+        let block = 1usize << log_stack;
+        let pin = |cells| global_round_pin(cells, log_stack, cube);
+        assert_eq!(pin(0), None);
+        assert_eq!(pin(1), Some(AreaPin { area: 8 * block, pad_columns: 4 }));
+        assert_eq!(pin(8 * block), Some(AreaPin { area: 8 * block, pad_columns: 4 }));
+        assert_eq!(pin(8 * block + 1), Some(AreaPin { area: 16 * block, pad_columns: 8 }));
+        assert_eq!(pin(72 * block), Some(AreaPin { area: 128 * block, pad_columns: 64 }));
+        assert_eq!(pin(232 * block), Some(AreaPin { area: 256 * block, pad_columns: 128 }));
+        assert_eq!(pin(256 * block), Some(AreaPin { area: 256 * block, pad_columns: 128 }));
+        assert_eq!(pin(256 * block + 1), None);
+        assert_eq!(global_round_dense_len(256 * block + 1, log_stack, cube), 264 * block);
+        assert_eq!(global_round_classes(log_stack), [8, 16, 32, 64, 128, 256]);
+        for cells in [1, block, 8 * block + 1, 129 * block] {
+            let AreaPin { area, pad_columns } = pin(cells).unwrap();
+            let pads = AreaPin::split_padding(area - cells, pad_columns, cube);
+            assert_eq!(pads.iter().sum::<usize>() + cells, area);
+        }
+    }
 
     #[test]
     fn test_hierarchical_jagged_pack() {

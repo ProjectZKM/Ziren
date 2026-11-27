@@ -309,6 +309,22 @@ pub fn pad_to_cluster<F: p3_field::Field>(
     }
 }
 
+/// Adds every chip of the shard's global-round family that `traces` lacks as
+/// a height-0 trace at its width ([`StarkMachine::global_family`]), so the
+/// shard's global round commits the whole family. Every prover does this
+/// before it commits a shard; a shard without a global-round table is left as
+/// it is.
+pub fn pad_to_global_family<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    traces: &mut crate::Traces<Val<SC>>,
+) where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    let family = machine.global_family_widths(traces.keys().map(String::as_str));
+    pad_to_cluster(traces, &family);
+}
+
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     'static + Send + Sync
@@ -354,6 +370,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     ///   chips commit no cells (row_count 0, which the degree-masked
     ///   reconstruction excludes).
     /// * `None` (recursion / shrink / wrap): commit the shard's own chip set.
+    ///
+    /// Either way the shard's global round commits its whole family
+    /// ([`pad_to_global_family`]), under the pin of its class
+    /// ([`crate::jagged::global_round_pin`]).
     fn commit(
         &self,
         record: &A::Record,
@@ -537,6 +557,7 @@ where
         if let Some(cluster_widths) = cluster_widths {
             pad_to_cluster(&mut named_traces, &cluster_widths);
         }
+        pad_to_global_family(self.machine(), &mut named_traces);
 
         let chip_ordering: hashbrown::HashMap<String, usize> =
             named_traces.keys().enumerate().map(|(i, name)| (name.to_owned(), i)).collect();

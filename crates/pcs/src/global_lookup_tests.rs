@@ -768,22 +768,32 @@ fn a_lane_groups_its_rounds_of_one_shape() {
         "small rounds fill a proof by what its program holds"
     );
 
+    let limit = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+    let block = 1usize << crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+    let by_weight = |round: &GlobalRoundBinding<F>| {
+        (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / machine.global_round_leaf_cells(round)
+    };
     let tall = (1usize..)
         .map(|rows| round_of(&[("BusSender", rows << 20)]))
         .find(|round| {
-            let cells = machine.global_round_leaf_cells(round);
-            GLOBAL_LEAF_FIXED_CELLS + 2 * cells <= GLOBAL_LEAF_CELLS
-                && GLOBAL_LEAF_FIXED_CELLS + 3 * cells > GLOBAL_LEAF_CELLS
+            let blocks = machine.global_round_blocks(round);
+            blocks > crate::jagged::GLOBAL_ROUND_PIN_BLOCKS
+                && by_weight(round) < (limit - 1) / (blocks * block)
         })
-        .expect("a round that goes two to a proof by weight");
+        .expect("a round of a larger class that shares a proof by weight");
+    let fit = by_weight(&tall);
+    assert!(fit < crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
+    let rounds = [sender, sender]
+        .into_iter()
+        .chain(core::iter::repeat_n(&tall, fit + 1))
+        .chain([sender])
+        .collect::<Vec<_>>();
     assert_eq!(
-        groups(&[sender, sender, &tall, &tall, &tall, sender], 8),
-        [0..2, 2..4, 4..5, 5..6],
+        groups(&rounds, usize::MAX),
+        [0..2, 2..2 + fit, 2 + fit..3 + fit, 3 + fit..4 + fit],
         "rounds of more blocks start a proof and share it by weight"
     );
 
-    let limit = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
-    let block = 1usize << crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
     let large = round_of(&[("BusSender", (1 << 29) / 3)]);
     let blocks = machine.global_round_blocks(&large);
     assert!(
@@ -818,4 +828,75 @@ fn a_lane_groups_its_rounds_of_one_shape() {
         .iter()
         .flatten()
         .all(|(round, kept)| { *round == if [1, 4].contains(kept) { both } else { sender } }));
+}
+
+/// The bus machine with its global lookups deferred, whose global rounds
+/// commit the family of both bus chips.
+fn family_machine() -> StarkMachine<SC, BusAir> {
+    let family: BTreeSet<String> = ["BusSender", "BusReceiver"].map(String::from).into();
+    bus_machine(true).with_global_families(vec![family]).with_deferred_global_lookups()
+}
+
+/// On a machine with a family of global-round chips, a shard that sends and
+/// a shard that receives both commit the two chips, the one each lacks
+/// without rows: their rounds have one shape and the bus closes. A table
+/// without rows cannot be given a row afterwards, in its opened height or in
+/// the heights the transcript observes.
+#[test]
+fn a_global_round_commits_its_family() {
+    let prover = CpuProver::new(family_machine());
+    let (pk, vk) = prover.setup(&BusProgram);
+    let machine = prover.machine();
+    let proof = prover
+        .prove(
+            &pk,
+            vec![sender(&[3, 5, 7]), receiver(&[7, 3, 5])],
+            &mut machine.config().challenger(),
+            crate::ZKMCoreOpts::default(),
+        )
+        .expect("the shards prove");
+    let rounds = proof
+        .shard_proofs
+        .iter()
+        .map(|shard| machine.global_round_binding(shard).expect("the shard's global round"))
+        .collect::<Vec<_>>();
+    let chips = |heights: [usize; 2]| {
+        ["BusReceiver", "BusSender"].map(String::from).into_iter().zip(heights).collect::<Vec<_>>()
+    };
+    assert_eq!(rounds[0].chips, chips([0, 4]));
+    assert_eq!(rounds[1].chips, chips([4, 0]));
+    assert_eq!(
+        machine.global_lane_proof_groups(rounds.iter(), 8).first(),
+        Some(&(0..2)),
+        "the rounds of a sending and a receiving shard do not share a global proof"
+    );
+
+    let verify = |proof: &MachineProof<SC>| {
+        machine.verify(&vk, proof, &mut machine.config().challenger()).map_err(|e| format!("{e:?}"))
+    };
+    verify(&proof).expect("the bus closes over rounds padded to their family");
+
+    let one = <SC as StarkGenericConfig>::Challenge::ONE;
+    let mut opened = proof.clone();
+    let global = &mut opened.global_proofs[0].jagged_shard_proof;
+    let empty =
+        global.chip_heights.values().position(|height| *height == 0).expect("a table without rows");
+    *global.opened_values.chips[empty].quotient[0].last_mut().unwrap() = one;
+    verify(&opened).expect_err("a table without rows opened a row");
+
+    let mut observed = opened.clone();
+    let global = &mut observed.global_proofs[0].jagged_shard_proof;
+    *global.chip_heights.values_mut().nth(empty).unwrap() = 1;
+    verify(&observed).expect_err("a table without rows was given a row its shard did not commit");
+
+    let mut shard = proof.clone();
+    let of_shard = &mut shard.shard_proofs[0].jagged_shard_proof;
+    let empty = of_shard
+        .chip_heights
+        .values()
+        .position(|height| *height == 0)
+        .expect("a table without rows");
+    *of_shard.opened_values.chips[empty].quotient[0].last_mut().unwrap() = one;
+    *of_shard.chip_heights.values_mut().nth(empty).unwrap() = 1;
+    verify(&shard).expect_err("a shard gave a row to a table it committed without rows");
 }

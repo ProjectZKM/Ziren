@@ -301,6 +301,146 @@ fn hash_global_proof_shape<H: std::hash::Hasher>(
     }
 }
 
+/// The shape of a global-round program over one global proof: the proof
+/// opens `rounds` global rounds of one geometry, each the chips `chips`, a
+/// family of the machine's global-round chips
+/// ([`zkm_pcs::StarkMachine::global_family`]), at `blocks` stacking blocks,
+/// a class of global rounds ([`zkm_pcs::jagged::global_round_class`]). The
+/// program is a function of the shape.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ZKMGlobalRoundShape {
+    pub chips: std::collections::BTreeSet<String>,
+    pub blocks: usize,
+    pub rounds: usize,
+}
+
+impl ZKMGlobalRoundShape {
+    /// Row counts for the chips of one round that put the round in the
+    /// shape's class: one row each, then the widest chips first, each up to
+    /// the row cube, until the round's cells pass the class below. `None`
+    /// when the chips cannot fill the class, or are not chips of `machine`.
+    pub fn rows<SC, A>(
+        &self,
+        machine: &zkm_pcs::StarkMachine<SC, A>,
+    ) -> Option<Vec<(String, usize)>>
+    where
+        SC: zkm_pcs::StarkGenericConfig,
+        A: MachineAir<SC::Val>,
+    {
+        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let cube = 1usize
+            << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
+                .max_log_row_count;
+        let mut widths = self
+            .chips
+            .iter()
+            .map(|name| {
+                let chip = machine.chips().iter().find(|chip| chip.name() == *name)?;
+                Some((name.clone(), p3_air::BaseAir::<SC::Val>::width(&chip.air)))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        widths.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let below = if self.blocks > zkm_pcs::jagged::GLOBAL_ROUND_PIN_BLOCKS {
+            (self.blocks / 2) << log_stack
+        } else {
+            0
+        };
+        let mut cells: usize = widths.iter().map(|(_, width)| width).sum();
+        let rows = widths
+            .into_iter()
+            .map(|(name, width)| {
+                let more = (below + 1).saturating_sub(cells).div_ceil(width).min(cube - 1);
+                cells += more * width;
+                (name, 1 + more)
+            })
+            .collect();
+        (zkm_pcs::jagged::global_round_class(cells, log_stack) == Some(self.blocks)).then_some(rows)
+    }
+}
+
+impl ZKMGlobalRoundWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+    /// A placeholder input with the shape of one global proof of `shape` on
+    /// `machine`: the program built from it is the one that verifies a real
+    /// global proof of that shape.
+    ///
+    /// # Panics
+    /// When the shape's chips cannot fill its blocks
+    /// ([`ZKMGlobalRoundShape::rows`]).
+    pub fn dummy<A>(
+        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+        shape: &ZKMGlobalRoundShape,
+    ) -> Self
+    where
+        A: MachineAir<InnerVal>,
+    {
+        let rows = shape.rows(machine).expect("the chips of a global round shape fill its blocks");
+        let views = (0..shape.rounds)
+            .flat_map(|slot| machine.global_views(slot))
+            .filter(|view| shape.chips.contains(GlobalView::<A>::chip_name(&view.name())))
+            .collect::<Vec<_>>();
+        let view_rows = views
+            .iter()
+            .map(|view| {
+                let name = view.name();
+                let chip = GlobalView::<A>::chip_name(&name);
+                let rows = rows.iter().find(|(of, _)| of == chip).map_or(0, |(_, rows)| *rows);
+                (name, rows)
+            })
+            .collect::<Vec<_>>();
+        let slots = (0..shape.rounds)
+            .map(|slot| {
+                shape.chips.iter().map(|chip| GlobalView::<A>::name_in_slot(slot, chip)).collect()
+            })
+            .collect::<Vec<std::collections::BTreeSet<String>>>();
+        let proof = crate::dummy::dummy_global_jagged_shard_proof::<
+            InnerVal,
+            InnerChallenge,
+            GlobalView<A>,
+        >(
+            &views.iter().collect::<Vec<_>>(),
+            &view_rows,
+            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
+                .max_log_row_count,
+            <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::WhirRing>::WHIR_PROFILE,
+            &slots,
+        );
+        let mut chip_information = machine
+            .chips()
+            .iter()
+            .filter_map(|chip| {
+                let width = p3_air::BaseAir::<InnerVal>::preprocessed_width(chip);
+                (width > 0).then(|| {
+                    (
+                        chip.name(),
+                        zkm_pcs::SerializableDomain { shift: InnerVal::ONE, log_size: 0 },
+                        (width, 1),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        chip_information.sort_by(|a, b| a.0.cmp(&b.0));
+        let chip_ordering = chip_information
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _, _))| (name.clone(), i))
+            .collect::<hashbrown::HashMap<_, _>>();
+        Self {
+            vk: StarkVerifyingKey {
+                commit: crate::fri::dummy_commit(),
+                pc_start: InnerVal::ZERO,
+                chip_information,
+                chip_ordering,
+            },
+            proofs: vec![proof],
+            vk_root: [InnerVal::ZERO; DIGEST_SIZE],
+            global_lanes: [[InnerVal::ZERO; DIGEST_SIZE]; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANES],
+            global_lane: 0,
+            global_h_star: [InnerVal::ZERO; DIGEST_SIZE],
+            global_pow_witness: InnerVal::ONE,
+        }
+    }
+}
+
 impl<SC: zkm_pcs::StarkGenericConfig> ZKMGlobalRoundWitnessValues<SC> {
     /// The global rounds the proofs open: one for each table slot.
     pub fn rounds(&self) -> usize {

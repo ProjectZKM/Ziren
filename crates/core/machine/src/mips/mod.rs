@@ -210,9 +210,33 @@ impl<F: PrimeField32> MipsAir<F> {
             .filter(|chip| chip.sends().iter().chain(chip.receives()).any(|l| l.is_global()))
             .map(|chip| chip.name())
             .collect::<std::collections::BTreeSet<_>>();
+        let global_families = Self::global_families()
+            .iter()
+            .map(|family| family.iter().map(|name| name.to_string()).collect())
+            .chain([global_round.clone()])
+            .collect();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
             .with_global_round(Some(global_round))
+            .with_global_families(global_families)
             .with_deferred_global_lookups()
+    }
+
+    /// The families of chips a shard's global round commits
+    /// ([`StarkMachine::global_family`]), before the family of every
+    /// global-round chip, which holds any other shard:
+    ///
+    /// * an execution or precompile shard: its local memory and its syscalls;
+    /// * a shard of global memory events only;
+    /// * the first shard, which also holds the memory image.
+    ///
+    /// A last shard that also takes the global memory events of a short
+    /// execution is in the family of every chip.
+    pub const fn global_families() -> [&'static [&'static str]; 3] {
+        [
+            &["MemoryLocal", "SyscallCore", "SyscallPrecompile"],
+            &["MemoryGlobalFinalize", "MemoryGlobalInit"],
+            &["MemoryImage", "MemoryLocal", "SyscallCore", "SyscallPrecompile"],
+        ]
     }
 
     /// Get all the different MIPS AIRs.
