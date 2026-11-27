@@ -1363,7 +1363,8 @@ pub mod jagged {
     /// holds; empty for a machine without preprocessed traces.
     /// `opened_main` are the openings the AIR phases consumed, index-aligned
     /// with `chip_infos` and `bundle.y_per_chip`, for the cross-bind; required
-    /// on this ring as on the inner one.
+    /// on this ring as on the inner one. A column of `chip_infos` taller than
+    /// the row cube `2^|z_row|`, a chip's or a padding column, is rejected.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
@@ -1394,6 +1395,10 @@ pub mod jagged {
         }
 
         if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
+            return false;
+        }
+        if chip_infos.iter().any(|info| info.row_count > 1usize << z_row.len()) {
+            tracing::warn!("[jagged verify] a column is taller than the row cube");
             return false;
         }
         let whir_proof = &bundle.whir_proof;

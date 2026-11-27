@@ -296,6 +296,21 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     );
 }
 
+/// Claim one row more than the row cube holds, with the degree bits, the
+/// log degree and the transcript height in agreement.
+fn overclaim_past_the_cube(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
+    let degree = &mut opening.quotient[0];
+    let bit_len = degree.len();
+    let height = (1usize << (bit_len - 1)) + 1;
+    for (i, bit) in degree.iter_mut().enumerate() {
+        *bit = Challenge::from_bool((height >> (bit_len - 1 - i)) & 1 == 1);
+    }
+    opening.log_degree = bit_len;
+    jagged.chip_heights.insert(name.to_string(), height);
+}
+
 /// Forge ONLY the `degree` bits (`quotient[0]`) — leave the transcript
 /// `chip_heights` and `log_degree` HONEST.  This is the SHARPEST
 /// de-risk probe: it isolates the NON-TRANSCRIPT height-binding
@@ -410,6 +425,22 @@ fn forge_transcript_only_fibonacci() {
         forge_transcript_only,
     );
     tracing::info!("[forgery] fibonacci TRANSCRIPT-only => {tag}");
+}
+
+/// A table taller than the row cube is rejected by the bound on its height,
+/// before any other check reads the height.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_height_past_the_row_cube_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/past-the-cube",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        overclaim_past_the_cube,
+    );
+    assert!(tag.contains("is above the row cube"), "rejected elsewhere: {tag}");
 }
 
 // (B) DEGREE-ONLY forgeries (transcript LEFT HONEST): the degree-bit

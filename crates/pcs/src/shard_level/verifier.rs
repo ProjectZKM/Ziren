@@ -290,6 +290,12 @@ impl JaggedShardVerifier {
         for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
             let name = chip.name();
             let h = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
+            if h > 1usize << self.max_log_row_count {
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                    "chip '{name}': its observed height {h} is above the row cube 2^{}",
+                    self.max_log_row_count
+                )));
+            }
             let expected = height_bits::<Challenge<SC>>(h, self.max_log_row_count + 1);
             if opening.quotient.first().map(|v| v.as_slice()) != Some(expected.as_slice()) {
                 return Err(JaggedShardVerifyError::LogupGkr(format!(
