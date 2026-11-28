@@ -71,7 +71,7 @@ use zkm_recursion_circuit::{
 };
 use zkm_recursion_compiler::{
     circuit::AsmCompiler,
-    config::InnerConfig,
+    config::{InnerConfig, OuterConfig},
     ir::{Builder, Witness},
 };
 use zkm_recursion_core::{
@@ -468,6 +468,37 @@ impl RecursionPkCache {
         }
         value
     }
+}
+
+/// What a SNARK wrap of a shrink proof proves: the outer witness and its
+/// three public inputs.
+struct SnarkWrapInput {
+    witness: Witness<OuterConfig>,
+    vkey_hash: p3_bn254_fr::Bn254,
+    committed_values_digest: p3_bn254_fr::Bn254,
+    vk_root: p3_bn254_fr::Bn254,
+}
+
+/// The outer witness of `proof` with its public inputs written.  With
+/// `bind_part_vk` the vkey hash also commits to the proof's part vk, as the
+/// immutable-wrap-vk Groth16 circuit expects.
+fn snark_wrap_input(proof: &ZKMReduceProof<OuterSC>, bind_part_vk: bool) -> SnarkWrapInput {
+    let input = ZKMWrapWitnessValues {
+        vks_and_proofs: vec![(proof.vk.clone(), (*proof.proof.jagged_shard_proof).clone())],
+        vk_merkle_data: ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1),
+    };
+    let mut vkey_hash = zkm_vkey_digest_bn254(proof);
+    if bind_part_vk {
+        vkey_hash = hash_vkey_with_part_vk(&proof.vk.part_vk(), vkey_hash);
+    }
+    let committed_values_digest = zkm_committed_values_digest_bn254(proof);
+    let vk_root = zkm_vk_root_bn254(proof);
+    let mut witness = Witness::default();
+    input.write(&mut witness);
+    witness.write_committed_values_digest(committed_values_digest);
+    witness.write_vkey_hash(vkey_hash);
+    witness.write_vk_root(vk_root);
+    SnarkWrapInput { witness, vkey_hash, committed_values_digest, vk_root }
 }
 
 /// Clears a key's in-flight mark and wakes the waiters, on the success path
@@ -2294,21 +2325,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> PlonkBn254Proof {
-        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
-        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
-            vk_merkle_data,
-        };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
-
-        let mut witness = Witness::default();
-        input.write(&mut witness);
-        witness.write_committed_values_digest(committed_values_digest);
-        witness.write_vkey_hash(vkey_hash);
-        let vk_root = zkm_vk_root_bn254(&proof);
-        witness.write_vk_root(vk_root);
+        let SnarkWrapInput { witness, vkey_hash, committed_values_digest, vk_root } =
+            snark_wrap_input(&proof, false);
 
         let prover = PlonkBn254Prover::new();
         let proof = prover.prove(witness, build_dir.to_path_buf());
@@ -2333,26 +2351,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> Groth16Bn254Proof {
-        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
-        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
-            vk_merkle_data,
-        };
-        let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
-
-        if crate::build::zkm_imm_wrap_vk_mode() {
-            vkey_hash = hash_vkey_with_part_vk(&proof.vk.part_vk(), vkey_hash);
-        }
-
-        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
-
-        let mut witness = Witness::default();
-        input.write(&mut witness);
-        witness.write_committed_values_digest(committed_values_digest);
-        witness.write_vkey_hash(vkey_hash);
-        let vk_root = zkm_vk_root_bn254(&proof);
-        witness.write_vk_root(vk_root);
+        let SnarkWrapInput { witness, vkey_hash, committed_values_digest, vk_root } =
+            snark_wrap_input(&proof, crate::build::zkm_imm_wrap_vk_mode());
 
         let prover = Groth16Bn254Prover::new();
         let proof = prover.prove(witness, build_dir.to_path_buf());
@@ -2378,22 +2378,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         build_dir: &Path,
         store_dir: &Path,
     ) -> DvSnarkBn254Proof {
-        let jagged_whir_proof = (*proof.proof.jagged_shard_proof).clone();
-        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
-        let input = ZKMWrapWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), jagged_whir_proof)],
-            vk_merkle_data,
-        };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
-
-        let mut witness = Witness::default();
-        input.write(&mut witness);
-        witness.write_committed_values_digest(committed_values_digest);
-        witness.write_vkey_hash(vkey_hash);
-        let vk_root = zkm_vk_root_bn254(&proof);
-        witness.write_vk_root(vk_root);
-
+        let witness = snark_wrap_input(&proof, false).witness;
         let prover = DvSnarkBn254Prover::new();
         prover.prove(witness, build_dir.to_path_buf(), store_dir.to_path_buf())
     }
