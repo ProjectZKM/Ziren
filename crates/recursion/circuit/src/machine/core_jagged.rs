@@ -264,7 +264,7 @@ pub fn verify_core_jagged<C, SC, A>(
             lane.expect("the witness holds the lane of a shard's global round"),
         );
         let head = lane.head(builder, &lanes_end);
-        let head = crate::global_challenge::global_chain_step_variable(
+        let head = crate::global_challenge::extend_global_chain_head_variable(
             builder,
             machine.config(),
             head,

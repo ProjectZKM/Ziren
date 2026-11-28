@@ -4050,7 +4050,7 @@ pub mod tests {
         let mut units = 0u64;
         for input in inputs.iter() {
             let public_values = run(input).expect("the honest global proof is rejected");
-            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(public_values.global_chain_start, after, "the extended chain head differs");
             assert_eq!(
                 public_values.global_chain_end,
                 machine.global_chain_value(&input.global_chain_heads)
@@ -4694,7 +4694,7 @@ pub mod tests {
                 .expect("the host rejects the global proof");
             let public_values =
                 run_global_leaf(&prover, input).expect("the honest global proof is rejected");
-            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(public_values.global_chain_start, after, "the extended chain head differs");
             assert_eq!(
                 public_values.global_sum.as_slice(),
                 host_sum.as_basis_coefficients_slice(),
@@ -5006,7 +5006,7 @@ pub mod tests {
         let mut rounds_opened = Vec::new();
         for input in inputs.iter() {
             let public_values = run(input).expect("the honest global proof is rejected");
-            assert_eq!(public_values.global_chain_start, after, "the chain step differs");
+            assert_eq!(public_values.global_chain_start, after, "the extended chain head differs");
             assert_eq!(
                 public_values.global_chain_end,
                 machine.global_chain_value(&input.global_chain_heads)

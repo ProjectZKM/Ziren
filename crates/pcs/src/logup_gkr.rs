@@ -140,7 +140,7 @@ pub const GLOBAL_CHAIN_HEADS_DOMAIN: u32 = 0x474c_4e53;
 
 /// The lanes of the global hash chain. Each lane is a hash chain of its own:
 /// a shard's global round extends one lane, which its prover chooses, by one
-/// [`global_chain_step`]. A prover with several devices gives each device a
+/// [`extend_global_chain_head`]. A prover with several devices gives each device a
 /// lane, so that consecutive rounds of a lane are rounds of one device.
 pub const GLOBAL_CHAIN_LANE_COUNT: usize = 8;
 
@@ -164,7 +164,7 @@ where
 /// configuration.
 ///
 /// The digest is collision resistant, so a chain value fixes every lane
-/// head, and its domain keeps it apart from a [`global_chain_step`].
+/// head, and its domain keeps it apart from a [`extend_global_chain_head`].
 pub fn global_chain_heads_digest<F, C>(mut challenger: C, lanes: &GlobalChainHeads<F>) -> [F; 8]
 where
     F: p3_field::Field,
@@ -402,7 +402,7 @@ pub fn global_round_groups<S: PartialEq>(
 /// One step of a lane of the global hash chain: the lane's head `h_prev`
 /// extended by a shard's global round, `None` for a shard without one.
 /// `challenger` must be a fresh challenger of the machine's configuration.
-pub fn global_chain_step<F, C>(
+pub fn extend_global_chain_head<F, C>(
     mut challenger: C,
     h_prev: &[F; 8],
     round: Option<&GlobalRoundBinding<F>>,
@@ -575,40 +575,40 @@ mod tests {
         assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
     }
 
-    /// A chain step binds the previous digest, whether the shard has a global
+    /// Extending a chain head binds the previous digest, whether the shard has a global
     /// round, the round's commitment, and every chip's name and height.
     #[test]
-    fn global_chain_step_binds_the_round() {
+    fn extending_a_chain_head_binds_the_round() {
         let fresh = || JaggedChallenger::new(zkm_primitives::poseidon2_init());
         let h0 = [JaggedVal::from_u32(1); 8];
         let round = GlobalRoundBinding {
             commitment: [JaggedVal::from_u32(7); 8],
             chips: alloc::vec![("MemoryLocal".into(), 32), ("SyscallCore".into(), 4)],
         };
-        let base = global_chain_step(fresh(), &h0, Some(&round));
-        assert_eq!(global_chain_step(fresh(), &h0, Some(&round)), base);
+        let base = extend_global_chain_head(fresh(), &h0, Some(&round));
+        assert_eq!(extend_global_chain_head(fresh(), &h0, Some(&round)), base);
 
-        let mut altered = alloc::vec![global_chain_step(fresh(), &h0, None)];
+        let mut altered = alloc::vec![extend_global_chain_head(fresh(), &h0, None)];
         let mut h1 = h0;
         h1[5] = JaggedVal::from_u32(2);
-        altered.push(global_chain_step(fresh(), &h1, Some(&round)));
+        altered.push(extend_global_chain_head(fresh(), &h1, Some(&round)));
         let mut r = round.clone();
         r.commitment[3] = JaggedVal::from_u32(8);
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips[0].1 = 33;
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips[1].0 = "SyscallPrecompile".into();
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips.pop();
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let r = GlobalRoundBinding { chips: alloc::vec::Vec::new(), ..round.clone() };
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
 
         for (i, h) in altered.iter().enumerate() {
-            assert_ne!(*h, base, "alteration {i} left the chain step unchanged");
+            assert_ne!(*h, base, "alteration {i} left the extended head unchanged");
         }
     }
 

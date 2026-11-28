@@ -1044,7 +1044,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// round extends; the entry of a shard without a round is not read.
     ///
     /// Every lane starts at the key's digest, and a shard's round extends its
-    /// lane by one [`crate::logup_gkr::global_chain_step`]. A shard without a
+    /// lane by one [`crate::logup_gkr::extend_global_chain_head`]. A shard without a
     /// round leaves every lane where it is, so each lane is a hash chain over
     /// its rounds alone: what the global proofs reopen.
     ///
@@ -1120,8 +1120,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             let head = next
                 .get_mut(usize::from(lane))
                 .expect("a global round is on one of the lanes of the hash chain");
-            *head =
-                crate::logup_gkr::global_chain_step(self.config.challenger(), head, Some(round));
+            *head = crate::logup_gkr::extend_global_chain_head(
+                self.config.challenger(),
+                head,
+                Some(round),
+            );
         }
         next
     }

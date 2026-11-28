@@ -45,9 +45,9 @@ use zkm_recursion_core::{
 use super::core_jagged::{verify_shard_tuple, ShardProofTuple};
 use crate::{
     global_challenge::{
-        add_global_lookup_units, global_chain_heads_digest_variable, global_chain_step_variable,
-        global_lookup_units_variable, GlobalChainHeadsVariable, GlobalChainLaneSelectorVariable,
-        GlobalChallengeVariable, GlobalRoundBindingVariable,
+        add_global_lookup_units, extend_global_chain_head_variable,
+        global_chain_heads_digest_variable, global_lookup_units_variable, GlobalChainHeadsVariable,
+        GlobalChainLaneSelectorVariable, GlobalChallengeVariable, GlobalRoundBindingVariable,
     },
     machine::recursion_public_values_digest,
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
@@ -234,7 +234,7 @@ pub fn verify_global_round_jagged<C, SC, A>(
                 .iter()
                 .map(|(view, height)| (GlobalView::<A>::chip_name(view).to_string(), *height))
                 .collect::<Vec<_>>();
-            chain = global_chain_step_variable(
+            chain = extend_global_chain_head_variable(
                 builder,
                 machine.config(),
                 chain,

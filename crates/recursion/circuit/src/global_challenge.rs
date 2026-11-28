@@ -120,9 +120,9 @@ pub struct GlobalRoundBindingVariable<'a, C: CircuitConfig<F = KoalaBear>> {
     pub chips: &'a [(String, Felt<C::F>)],
 }
 
-/// `global_chain_step`: a lane's head `h_prev` extended by a shard's global
+/// `extend_global_chain_head`: a lane's head `h_prev` extended by a shard's global
 /// round, `None` for a shard without one.
-pub fn global_chain_step_variable<C: CircuitConfig<F = KoalaBear>, SC>(
+pub fn extend_global_chain_head_variable<C: CircuitConfig<F = KoalaBear>, SC>(
     builder: &mut Builder<C>,
     config: &SC,
     h_prev: [Felt<C::F>; DIGEST_SIZE],
