@@ -743,6 +743,7 @@ where
         }
         let cube = 1usize << shared_eval_point.len();
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let mut main_area = 0usize;
         for (r, (round, pads)) in bundle
             .packing
             .round_counts
@@ -759,6 +760,13 @@ where
                     pads.len(),
                 )));
             }
+            main_area = pads.iter().fold(total, |a, h| a.saturating_add(*h));
+        }
+        if bundle.commit.area != main_area {
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                "outer main round: the bundle commits {} cells, the round's area is {main_area}",
+                bundle.commit.area,
+            )));
         }
 
         for raw in bundle.preceding_commits.iter() {
@@ -1140,6 +1148,13 @@ where
                 "main round: the {} padding columns are not the split its {main_total} cells \
                  determine",
                 claimed.len(),
+            )));
+        }
+        let main_area = claimed.iter().fold(main_total, |a, h| a.saturating_add(*h));
+        if bundle.commit.area != main_area {
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                "main round: the bundle commits {} cells, the round's area is {main_area}",
+                bundle.commit.area,
             )));
         }
     }

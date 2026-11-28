@@ -758,6 +758,33 @@ fn forge_padding_split_fibonacci() {
     assert!(tag.contains("padding columns are not the split"), "rejected elsewhere: {tag}");
 }
 
+/// Claim one more stacking block of committed cells for the main round.
+fn forge_committed_area(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let EvaluationProof::Bundle(bundle) = &mut sp.jagged_shard_proof.as_mut().evaluation_proof
+    else {
+        panic!("a core shard proof carries its opening as a bundle");
+    };
+    bundle.commit.area += 1 << bundle.commit.log_stacking_height;
+}
+
+/// The main round's committed area is the one its cells determine: a proof
+/// claiming another is rejected by that comparison, before the opening is
+/// verified.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_committed_area_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/committed-area",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_committed_area,
+    );
+    assert!(tag.contains("the round's area is"), "rejected elsewhere: {tag}");
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
