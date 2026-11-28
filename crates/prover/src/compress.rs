@@ -21,7 +21,41 @@ enum RecursionJob {
     },
 }
 
+/// The global hash chain of a core proof, computed once for the first layer
+/// ([`ZKMProver::global_chain_context`]).
+pub struct GlobalChainContext {
+    heads_before_and_after_shards: Vec<zkm_pcs::logup_gkr::GlobalChainHeads<KoalaBear>>,
+    h_star: [KoalaBear; DIGEST_SIZE],
+}
+
+impl GlobalChainContext {
+    /// The lane heads before the first shard, then after each shard.
+    pub fn heads_before_and_after_shards(
+        &self,
+    ) -> &[zkm_pcs::logup_gkr::GlobalChainHeads<KoalaBear>] {
+        &self.heads_before_and_after_shards
+    }
+
+    /// The chain's end, which every shard's global challenge is derived from.
+    pub fn h_star(&self) -> [KoalaBear; DIGEST_SIZE] {
+        self.h_star
+    }
+}
+
 impl<C: ZKMProverComponents> ZKMProver<C> {
+    /// The global hash chain over `shard_proofs` under the core key `vk`: the
+    /// lane heads of [`Self::global_chain_heads`] and the digest of the last.
+    pub fn global_chain_context(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+    ) -> GlobalChainContext {
+        let heads_before_and_after_shards = self.global_chain_heads(vk, shard_proofs);
+        let end = heads_before_and_after_shards.last().expect("the chain holds at least its start");
+        let h_star = self.core_prover.machine().global_chain_value(end);
+        GlobalChainContext { heads_before_and_after_shards, h_star }
+    }
+
     /// The lane heads of the global hash chain over `shard_proofs` under the
     /// core key `vk`: the heads before the first shard, then the heads after
     /// each shard, each shard's round on the lane the proof names.
@@ -61,15 +95,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Wrap each batch of `ShardProof`s into a
     /// `ZKMCoreWitnessValues`, taking the `JaggedShardProof` each
     /// one carries, with the lane heads of the global hash chain before the
-    /// shard.
+    /// shard, taken from `chain`, the context of these `shard_proofs`.
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
+        chain: &GlobalChainContext,
         batch_size: usize,
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
-        let lanes = self.global_chain_heads(vk, shard_proofs);
+        let lanes = chain.heads_before_and_after_shards();
+        assert_eq!(
+            lanes.len(),
+            shard_proofs.len() + 1,
+            "the global chain context is of another proof"
+        );
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -130,11 +170,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `global_proofs`: they must be consecutive rounds of one lane, in the
     /// lane's order, and the proofs together must open every round the shards
     /// commit once.
+    ///
+    /// `chain` is the context of these `shard_proofs`. The inputs step every
+    /// lane from its head at the chain's end back to its head at the chain's
+    /// start.
     pub fn get_recursion_global_round_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
         global_proofs: &[ShardProof<CoreSC>],
+        chain: &GlobalChainContext,
     ) -> Result<
         Vec<zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>>,
         ZKMRecursionProverError,
@@ -142,10 +187,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let invalid = |reason: String| {
             ZKMRecursionProverError::RuntimeError(format!("invalid global proofs: {reason}"))
         };
-        let lanes = self.global_chain_heads(vk, shard_proofs);
+        let lanes = chain.heads_before_and_after_shards();
+        assert_eq!(
+            lanes.len(),
+            shard_proofs.len() + 1,
+            "the global chain context is of another proof"
+        );
         let machine = self.core_prover.machine();
         let end = *lanes.last().expect("the chain holds at least its start");
-        let global_h_star = machine.global_chain_value(&end);
+        let global_h_star = chain.h_star();
+        assert_eq!(
+            global_h_star,
+            machine.global_chain_value(&end),
+            "the global chain context ends at another digest than its last heads"
+        );
         let mut committed: [Vec<_>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT] =
             core::array::from_fn(|_| Vec::new());
         for (shard, proof) in shard_proofs.iter().enumerate() {
@@ -193,13 +248,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         placed.sort_by_key(|(lane, first, _)| std::cmp::Reverse((*lane, *first)));
         let mut heads = end;
-        Ok(placed
+        let inputs = placed
             .into_iter()
             .map(|(lane, first, proof)| {
                 heads[lane] = lanes[committed[lane][first].0][lane];
                 self.get_recursion_global_round_input(vk, proof, heads, lane as u8, global_h_star)
             })
-            .collect())
+            .collect();
+        assert_eq!(
+            heads, lanes[0],
+            "the global round inputs do not step every lane back to the chain's start"
+        );
+        Ok(inputs)
     }
 
     /// The global-round input of one global proof, which opens consecutive
@@ -298,9 +358,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, ZKMRecursionProverError> {
         let mut inputs = Vec::new();
+        let chain = self.global_chain_context(&vk.vk, shard_proofs);
 
         let global_inputs =
-            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs)?;
+            self.get_recursion_global_round_inputs(&vk.vk, shard_proofs, global_proofs, &chain)?;
         tracing::debug!(
             "emitting {} GlobalJagged witness(es) of {:?} round(s), {} program shape(s)",
             global_inputs.len(),
@@ -309,19 +370,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
-        let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, false);
+        let jagged_inputs =
+            self.get_recursion_core_inputs(&vk.vk, shard_proofs, &chain, batch_size, false);
         tracing::debug!("emitting {} CoreJagged witness(es)", jagged_inputs.len());
         inputs.extend(jagged_inputs.into_iter().map(ZKMCircuitWitness::CoreJagged));
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        let global_h_star = *self
-            .global_chain(&vk.vk, shard_proofs)
-            .last()
-            .expect("the chain holds at least its start");
         let jagged_deferred = self.get_recursion_deferred_inputs(
             &vk.vk,
             last_proof_pv,
-            global_h_star,
+            chain.h_star(),
             deferred_proofs,
             batch_size,
         )?;

@@ -1179,7 +1179,13 @@ fn two_pc_lookahead_is_pinned_per_shard() -> Result<()> {
 
     let accepts = |proof: &ZKMCoreProofData| -> bool {
         let input = prover
-            .get_recursion_core_inputs(&vk.vk, &proof.0[..1], 1, false)
+            .get_recursion_core_inputs(
+                &vk.vk,
+                &proof.0[..1],
+                &prover.global_chain_context(&vk.vk, &proof.0[..1]),
+                1,
+                false,
+            )
             .into_iter()
             .next()
             .unwrap();
@@ -1271,7 +1277,12 @@ fn global_round_program_opens_the_committed_round() -> Result<()> {
     let machine = prover.core_prover.machine();
     let chain = prover.global_chain(&vk.vk, &core.proof.0);
     let h_star = *chain.last().unwrap();
-    let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &core.proof.0, &core.proof.1)?;
+    let inputs = prover.get_recursion_global_round_inputs(
+        &vk.vk,
+        &core.proof.0,
+        &core.proof.1,
+        &prover.global_chain_context(&vk.vk, &core.proof.0),
+    )?;
     let lanes_in_use = core
         .proof
         .0
@@ -1326,7 +1337,13 @@ fn global_round_program_opens_the_committed_round() -> Result<()> {
         .sum();
     assert_eq!(units, host_units, "the leaves count other global lookups than the host");
 
-    let shard_inputs = prover.get_recursion_core_inputs(&vk.vk, &core.proof.0, 1, false);
+    let shard_inputs = prover.get_recursion_core_inputs(
+        &vk.vk,
+        &core.proof.0,
+        &prover.global_chain_context(&vk.vk, &core.proof.0),
+        1,
+        false,
+    );
     for (shard, input) in shard_inputs.iter().enumerate() {
         let public_values = run_shard(input).expect("the honest shard is rejected");
         assert_eq!(public_values.global_chain_start, chain[shard], "shard {shard} starts");
@@ -1904,7 +1921,12 @@ fn global_round_program_opens_rounds_of_one_family() -> Result<()> {
 
     let chain = prover.global_chain(&vk.vk, &shard_proofs);
     let h_star = *chain.last().unwrap();
-    let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &global_proofs)?;
+    let inputs = prover.get_recursion_global_round_inputs(
+        &vk.vk,
+        &shard_proofs,
+        &global_proofs,
+        &prover.global_chain_context(&vk.vk, &shard_proofs),
+    )?;
     let group_of = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
         global_proofs
             .iter()
@@ -2064,7 +2086,12 @@ fn global_round_commits_the_blocks_of_its_class() -> Result<()> {
                 .expect("the global proof"),
         );
     }
-    let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &global_proofs)?;
+    let inputs = prover.get_recursion_global_round_inputs(
+        &vk.vk,
+        &shard_proofs,
+        &global_proofs,
+        &prover.global_chain_context(&vk.vk, &shard_proofs),
+    )?;
     let leaf = inputs
         .iter()
         .find(|input| {
@@ -2155,7 +2182,12 @@ fn global_round_program_opens_the_rounds_of_a_grouped_proof() -> Result<()> {
 
     let chain = prover.global_chain(&vk.vk, &shard_proofs);
     let h_star = *chain.last().unwrap();
-    let inputs = prover.get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &global_proofs)?;
+    let inputs = prover.get_recursion_global_round_inputs(
+        &vk.vk,
+        &shard_proofs,
+        &global_proofs,
+        &prover.global_chain_context(&vk.vk, &shard_proofs),
+    )?;
     let run = |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
         let mut ws = Vec::new();
         Witnessable::<InnerConfig>::write(input, &mut ws);
@@ -2276,7 +2308,14 @@ fn global_round_program_opens_the_rounds_of_a_grouped_proof() -> Result<()> {
         .verify(&vk.vk, &swapped_core, &mut machine.config().challenger())
         .expect("the host verifier takes the rounds of a global proof in any order");
     assert!(
-        prover.get_recursion_global_round_inputs(&vk.vk, &shard_proofs, &swapped_proofs).is_err(),
+        prover
+            .get_recursion_global_round_inputs(
+                &vk.vk,
+                &shard_proofs,
+                &swapped_proofs,
+                &prover.global_chain_context(&vk.vk, &shard_proofs),
+            )
+            .is_err(),
         "a global proof that opens its rounds out of the lane's order was given a leaf"
     );
     let swapped_values = run(&prover.get_recursion_global_round_input(
