@@ -144,12 +144,15 @@
   url          = {https://eprint.iacr.org/2022/1763}
 }
 
-@misc{stir,
+@inproceedings{stir,
   author       = {Gal Arnon and Alessandro Chiesa and Giacomo Fenzi and Eylon Yogev},
   title        = {{STIR: Reed--Solomon Proximity Testing with Fewer Queries}},
-  howpublished = {Cryptology ePrint Archive, Paper 2024/390},
+  booktitle    = {Advances in Cryptology --- CRYPTO 2024},
+  pages        = {380--413},
+  publisher    = {Springer},
   year         = {2024},
-  url          = {https://eprint.iacr.org/2024/390}
+  doi          = {10.1007/978-3-031-68403-6_12},
+  note         = {Cryptology ePrint Archive, Paper 2024/390}
 }
 
 @misc{hr18,
@@ -197,7 +200,8 @@
 @misc{chiesa-yogev,
   author       = {Alessandro Chiesa and Eylon Yogev},
   title        = {{Building Cryptographic Proofs from Hash Functions}},
-  year         = {2024},
+  year         = {2026},
+  note         = {Version of March 25, 2026},
   howpublished = {\url{https://github.com/hash-based-snargs-book/hash-based-snargs-book}},
 }
 
@@ -587,10 +591,13 @@
 @inproceedings{cms19,
   author    = {Alessandro Chiesa and Peter Manohar and Nicholas Spooner},
   title     = {Succinct Arguments in the Quantum Random Oracle Model},
-  booktitle = {Theory of Cryptography Conference (TCC)},
+  booktitle = {Theory of Cryptography --- TCC 2019, Part II},
+  series    = {LNCS},
+  volume    = {11892},
+  pages     = {1--29},
   year      = {2019},
-  note      = {Cryptology ePrint Archive, Paper 2019/834},
-  url          = {https://eprint.iacr.org/2019/834}
+  doi       = {10.1007/978-3-030-36033-7_1},
+  note      = {Full version: Cryptology ePrint Archive, Paper 2019/834}
 }
 
 @inproceedings{bht98,
@@ -744,4 +751,218 @@
   year         = {2026},
   howpublished = {\url{https://github.com/BitVM/BitVM/tree/7d1ca3660cac08aab62e76f3aa4daec0d7403ecc}},
   note         = {Source snapshot of the BitVM2 Groth16 verifier, accessed 2026-10-13},
+}
+
+@inproceedings{cgsy24,
+  author    = {Alessandro Chiesa and Ziyi Guan and Shahar Samocha and Eylon Yogev},
+  title     = {Security Bounds for Proof-Carrying Data from Straightline Extractors},
+  booktitle = {Theory of Cryptography --- TCC 2024},
+  series    = {LNCS},
+  volume    = {15365},
+  pages     = {464--496},
+  year      = {2024},
+  doi       = {10.1007/978-3-031-78017-2_16},
+  note      = {Cryptology ePrint Archive, Paper 2023/1646, version of September 11, 2024}
+}
+
+@misc{bcg24,
+  author       = {Annalisa Barbara and Alessandro Chiesa and Ziyi Guan},
+  title        = {Relativized Succinct Arguments in the {ROM} Do Not Exist},
+  howpublished = {Cryptology ePrint Archive, Paper 2024/728},
+  year         = {2024},
+  url          = {https://eprint.iacr.org/2024/728}
+}
+
+@inproceedings{bgkttz23,
+  author    = {Alexander R. Block and Albert Garreta and Jonathan Katz and Justin Thaler and Pratyush Ranjan Tiwari and Micha{\l} Zaj{\k{a}}c},
+  title     = {{Fiat--Shamir} Security of {FRI} and Related {SNARKs}},
+  booktitle = {Advances in Cryptology --- ASIACRYPT 2023},
+  pages     = {3--40},
+  publisher = {Springer},
+  year      = {2023},
+  doi       = {10.1007/978-981-99-8724-5_1},
+  note      = {Cryptology ePrint Archive, Paper 2023/1071}
+}
+
+@misc{riv26,
+  author       = {Matthieu Rivain},
+  title        = {{AES}-Based Grinding for {MPC}-in-the-Head Signatures},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/1625},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/1625}
+}
+
+@misc{bcg26,
+  author       = {Benedikt B{\"u}nz and Jessica Chen and Ziyi Guan},
+  title        = {It Takes Two: Proofs of Work for {Fiat--Shamir}},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/2326},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/2326}
+}
+
+@inproceedings{krs25,
+  author    = {Dmitry Khovratovich and Ron D. Rothblum and Lev Soukhanov},
+  title     = {How to Prove False Statements: Practical Attacks on {Fiat--Shamir}},
+  booktitle = {Advances in Cryptology --- CRYPTO 2025, Part VI},
+  series    = {LNCS},
+  volume    = {16005},
+  pages     = {3--26},
+  publisher = {Springer},
+  year      = {2025},
+  doi       = {10.1007/978-3-032-01887-8_1},
+  note      = {Cryptology ePrint Archive, Paper 2025/118}
+}
+
+@misc{fen26,
+  author       = {Giacomo Fenzi},
+  title        = {How to prove more false statements: {Fiat--Shamir} limitations on (generated) {R1CS}},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/1838},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/1838}
+}
+
+@misc{cs25,
+  author       = {Elizabeth Crites and Alistair Stewart},
+  title        = {On {Reed--Solomon} Proximity Gaps Conjectures},
+  howpublished = {Cryptology ePrint Archive, Paper 2025/2046},
+  year         = {2025},
+  url          = {https://eprint.iacr.org/2025/2046}
+}
+
+@article{fs26,
+  author  = {Giacomo Fenzi and Antonio Sanso},
+  title   = {Small-field hash-based {SNARGs} are less sound than conjectured},
+  journal = {IACR Communications in Cryptology},
+  volume  = {3},
+  number  = {3},
+  year    = {2026},
+  doi     = {10.62056/akdkmpxqi},
+  note    = {Cryptology ePrint Archive, Paper 2025/2197}
+}
+
+@misc{gruen-zerocheck,
+  author       = {Angus Gruen},
+  title        = {Some Improvements for the {PIOP} for {ZeroCheck}},
+  howpublished = {Cryptology ePrint Archive, Paper 2024/108},
+  year         = {2024},
+  url          = {https://eprint.iacr.org/2024/108}
+}
+
+@misc{ef-security-foundations,
+  author       = {George Kadianakis},
+  title        = {Shipping an {L1} {zkEVM} \#2: The Security Foundations},
+  howpublished = {Ethereum Foundation Blog, \url{https://blog.ethereum.org/2025/12/18/zkevm-security-foundations}},
+  year         = {2025},
+  month        = dec
+}
+
+@misc{zhandry-collision,
+  author       = {Mark Zhandry},
+  title        = {A Note on the Quantum Collision and Set Equality Problems},
+  howpublished = {arXiv:1312.1027},
+  year         = {2013},
+  url          = {https://arxiv.org/abs/1312.1027}
+}
+
+@misc{bernstein09,
+  author       = {Daniel J. Bernstein},
+  title        = {Cost analysis of hash collisions: Will quantum computers make {SHARCS} obsolete?},
+  year         = {2009},
+  howpublished = {\url{https://cr.yp.to/hash/collisioncost-20090823.pdf}}
+}
+
+@inproceedings{cns17,
+  author    = {Andr{\'e} Chailloux and Mar{\'i}a Naya-Plasencia and Andr{\'e} Schrottenloher},
+  title     = {An Efficient Quantum Collision Search Algorithm and Implications on Symmetric Cryptography},
+  booktitle = {Advances in Cryptology --- ASIACRYPT 2017, Part II},
+  series    = {LNCS},
+  volume    = {10625},
+  pages     = {211--240},
+  year      = {2017},
+  doi       = {10.1007/978-3-319-70697-9_8}
+}
+
+@techreport{nist-pqc-cfp,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Submission Requirements and Evaluation Criteria for the Post-Quantum Cryptography Standardization Process},
+  institution = {NIST},
+  year        = {2016},
+  url         = {https://csrc.nist.gov/CSRC/media/Projects/Post-Quantum-Cryptography/documents/call-for-proposals-final-dec-2016.pdf}
+}
+
+@misc{grover96,
+  author       = {Lov K. Grover},
+  title        = {A fast quantum mechanical algorithm for database search},
+  howpublished = {arXiv:quant-ph/9605043},
+  year         = {1996},
+  note         = {STOC 1996, pp. 212--219},
+  url          = {https://arxiv.org/abs/quant-ph/9605043}
+}
+
+@misc{acmt25,
+  author       = {Gorjan Alagic and Joseph Carolan and Christian Majenz and Saliha Tokat},
+  title        = {The Sponge is Quantum Indifferentiable},
+  howpublished = {arXiv:2504.16887},
+  year         = {2025},
+  url          = {https://arxiv.org/abs/2504.16887}
+}
+
+@misc{poseidon,
+  author       = {Lorenzo Grassi and Dmitry Khovratovich and Christian Rechberger and Arnab Roy and Markus Schofnegger},
+  title        = {Poseidon: A New Hash Function for Zero-Knowledge Proof Systems},
+  howpublished = {Cryptology ePrint Archive, Paper 2019/458},
+  year         = {2019},
+  note         = {USENIX Security 2021},
+  url          = {https://eprint.iacr.org/2019/458}
+}
+
+@misc{ckmw26,
+  author       = {Thomas Coratger and Dmitry Khovratovich and Bart Mennink and Benedikt Wagner},
+  title        = {The Billion Dollar {Merkle} Tree},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/089},
+  year         = {2026},
+  note         = {ACM CCS 2026},
+  url          = {https://eprint.iacr.org/2026/089}
+}
+
+@misc{kim26,
+  author       = {Jinwook Kim},
+  title        = {Soundness of the {GKR} Protocol for Sparse-{Merkle} Updates, with a Machine-Checked Core},
+  howpublished = {arXiv:2610.05335v3},
+  year         = {2026},
+  url          = {https://arxiv.org/abs/2610.05335}
+}
+
+@misc{chiesa-orru25,
+  author       = {Alessandro Chiesa and Michele Orr{\`u}},
+  title        = {A {Fiat--Shamir} Transformation From Duplex Sponges},
+  howpublished = {Cryptology ePrint Archive, Paper 2025/536},
+  year         = {2025},
+  doi          = {10.1007/978-3-032-12287-2_16},
+  note         = {TCC 2025},
+  url          = {https://eprint.iacr.org/2025/536}
+}
+
+@misc{bbbhj26,
+  author       = {Antoine Bak and Augustin Bariant and Aur{\'e}lien Boeuf and Ma{\"e}l Hostettler and Guilhem Jazeron},
+  title        = {Claiming bounties on small scale {Poseidon} and {Poseidon2} instances using resultant-based algebraic attacks},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/150},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/150}
+}
+
+@misc{merz-rodriguez26,
+  author       = {Simon-Philipp Merz and {\`A}lex Rodr{\'i}guez Garc{\'i}a},
+  title        = {Skipping Class: Algebraic Attacks exploiting weak matrices and operation modes of {Poseidon2(b)}},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/306},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/306}
+}
+
+@misc{poseidon-initiative,
+  author       = {{Ethereum Foundation}},
+  title        = {Poseidon Cryptanalysis Initiative 2024--2026},
+  year         = {2026},
+  howpublished = {\url{https://www.poseidon-initiative.info/}},
+  note         = {Accessed 2026-11-28}
 }

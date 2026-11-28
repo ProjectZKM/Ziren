@@ -19,7 +19,7 @@ Let there be $K$ columns $\mathbf c_0, \ldots, \mathbf c_{K-1}$ with heights $h_
   \qquad
   t_0 = 0,\quad t_{k+1} = t_k + h_k,\quad A = t_K,
 \]
-padded with zeros to $M = 2^m$, $m = \lceil \log_2 A \rceil$, and written $\widetilde Q$ as a multilinear in $m$ variables. Column $k$ occupies $[t_k, t_{k+1})$ in $\mathbf Q$, and the prefix sums are public: they enter the transcript before any challenge. $\mathbf Q$ and the prefix sums determine $p$~\citep[Fact~1.3]{jagged-pcs}, so committing to $\widetilde Q$ commits to every column at the cost of the real area $A$ rather than $K \cdot 2^n$. Our prefix sums are exclusive ($t_k$ starts column $k$), and a boundary takes $m+1$ bits because $t_K = A$ may equal $2^m$.
+padded with zeros to $M = 2^m$, $m = \lceil \log_2 A \rceil$, and written $\widetilde Q$ as a multilinear in $m$ variables. Column $k$ occupies $[t_k, t_{k+1})$ in $\mathbf Q$, and the prefix sums are public: the table heights, which determine them for the real columns, enter the transcript before any challenge (\S\ref{sec:iopp-layers}). $\mathbf Q$ and the prefix sums determine $p$~\citep[Fact~1.3]{jagged-pcs}, so committing to $\widetilde Q$ commits to every column at the cost of the real area $A$ rather than $K \cdot 2^n$. Our prefix sums are exclusive ($t_k$ starts column $k$), and a boundary takes $m+1$ bits because $t_K = A$ may equal $2^m$.
 
 \subsection{The jagged reduction}
 \label{sec:pcs-jagged}
@@ -169,7 +169,7 @@ One stacked \WHIR{} proof then authenticates every $e_{r,s}$ against $C_0,\ldots
 \end{minipage}}
 \end{figure}
 
-\paragraph{Soundness.} The three algebraic steps contribute $\kappa/|\EF|$ (column batching), $2m/|\EF|$ (jagged sumcheck, Theorem~\ref{thm:jagged}) and $4(m+1)/|\EF|$ (assist, Theorem~\ref{thm:jagged-assist}), which together form the row ``reduction to the dense polynomial'' of Table~\ref{tab:components}. Hemo et al.\ state plain soundness of each reduction; the round-by-round form Theorem~\ref{thm:composition} assumes follows because each is a sumcheck, round-by-round sound with the same per-round errors~\citep{chiesa-yogev}. The opening's terms are those of Section~\ref{sec:iopp}, and all of them are accounted in \S\ref{sec:iopp-soundness}.
+\paragraph{Soundness.} The three algebraic steps contribute $\kappa/|\EF|$ (column batching), $2m/|\EF|$ (jagged sumcheck, Theorem~\ref{thm:jagged}) and $4(m+1)/|\EF|$ (assist, Theorem~\ref{thm:jagged-assist}), which together form the row ``reduction to the dense polynomial'' of Table~\ref{tab:components}. Hemo et al.\ state plain soundness of each reduction, against an ideal multilinear oracle~\citep[Thm.~1.4]{jagged-pcs}; they state no round-by-round, knowledge or Fiat--Shamir form. Reading each reduction round by round, with the same per-round errors because each is a sumcheck, and composing it with \WHIR{} is this paper's accounting, part of hypothesis~1 of \S\ref{sec:security-relation}. The opening's terms are those of Section~\ref{sec:iopp}, and all of them are accounted in \S\ref{sec:iopp-soundness}.
 
 \subsection{Quantised committed geometry}
 \label{sec:pcs-geometry}
