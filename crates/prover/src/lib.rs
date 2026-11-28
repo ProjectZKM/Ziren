@@ -343,12 +343,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
     pub compose_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
 
-    /// The band of every compose shape asked for so far, by the key of its
-    /// unsnapped program. A band is a function of the program, so whoever
-    /// only places nodes in the tree needs the program once per shape, even
-    /// when a block has more shapes than the unsnapped cache holds.
-    pub compose_bands: Mutex<BTreeMap<u64, Option<usize>>>,
-
     /// Per-shape cache for the Compose recursion program — every
     /// interior node of the recursion tree.
     ///
@@ -391,7 +385,7 @@ pub struct RecursionPkCache {
     order: std::collections::VecDeque<[u8; 32]>,
     /// Digests that must never be evicted.
     ///
-    /// The compose programs are a small FIXED set, (band, arity), reached in
+    /// The compose programs are a small FIXED set, (child classes, arity), reached in
     /// every block; pinning them means their setup is paid once per PROCESS
     /// whatever the cap does to the normalize keys.
     pinned: std::collections::BTreeSet<[u8; 32]>,
@@ -731,7 +725,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             global_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
-            compose_bands: Mutex::new(BTreeMap::new()),
             compose_programs_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_cache: Mutex::new(RecursionPkCache::default()),
             recursion_pk_cache_ready: std::sync::Condvar::new(),
@@ -748,9 +741,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// is a small, known set, so the whole of it is a construction cost paid
     /// once per process instead of a per-node cost paid on the card thread
     /// mid-block (measured Sep 11: ~7 s apiece, re-paid after every worker
-    /// respawn).  Each tuple is also warmed under every cache band a sibling
-    /// group can settle on (`compose_program_at`), since the
-    /// pipeline keys a node by its group's band.
+    /// respawn).
     ///
     /// Bails when `compress_shape_config` is None (`FIX_RECURSION_SHAPES=false`
     /// — no classes to enumerate) or it has no shapes (defensive).
@@ -845,44 +836,27 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 );
                 witness.is_complete = is_complete;
                 if zkm_pcs::diagnostics::shape_events_enabled() {
-                    let own = self.compose_band_for(&witness);
-                    let last =
-                        self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
-                    let keys: Vec<String> = (own.unwrap_or(0)..=last)
-                        .map(|b| {
-                            format!("{b}:{:016x}", self.band_keyed(witness.shape_key(), Some(b)))
-                        })
-                        .collect();
                     tracing::debug!(
                         target: zkm_pcs::diagnostics::SHAPE_TARGET,
                         stage = "prewarm",
                         shape_key = format_args!("{:016x}", witness.shape_key()),
-                        class = ?own,
-                        band = band_index,
+                        children = band_index,
                         arity,
-                        keys = keys.join(","),
                         components = witness.shape_diag(),
                         "program shape"
                     );
                 }
                 let per_pair_start = std::time::Instant::now();
-                let own = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
-                let last =
-                    self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
-                let mut digest = [0u8; 32];
-                for band in own.unwrap_or(0)..=last {
-                    let (_program, d) = self.compose_program_at(&witness, Some(band));
-                    digest = d;
-                }
+                let (_program, digest) = self.compose_program(&witness);
                 self.pin_recursion_pk(digest);
                 tracing::debug!(
-                    "compose pre-warm: band={band_index} arity={arity} is_complete={is_complete} \
-                 snapped onto {own:?}..={last} in {:?}",
+                    "compose pre-warm: classes={band_index} arity={arity} \
+                     is_complete={is_complete} in {:?}",
                     per_pair_start.elapsed()
                 );
             })
         });
-        tracing::debug!("compose pre-warm: {n_pairs} (band, arity) pairs");
+        tracing::debug!("compose pre-warm: {n_pairs} (child classes, arity) pairs");
         tracing::debug!(
             "compose pre-warm: arity 1..={} done in {:?}",
             REDUCE_BATCH_SIZE,
@@ -1075,21 +1049,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreWitnessValues<CoreSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        self.recursion_program_at(input, None)
-    }
-
-    /// [`Self::recursion_program`], snapped onto a band the caller chooses.
-    ///
-    /// `None` keeps the program's own choice (the cheapest band it fits).
-    /// `Some(i)` overrides it, which is how a node is made to agree with its
-    /// siblings: a compose program is traced over its children's proof shapes,
-    /// so its verifying key is enumerable only when those shapes agree, and a
-    /// child cannot know what its siblings need.
-    pub fn recursion_program_at(
-        &self,
-        input: &ZKMCoreWitnessValues<CoreSC>,
-        band: Option<usize>,
-    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if zkm_pcs::diagnostics::shape_events_enabled() {
             let mut names: Vec<&str> = input
                 .shard_proofs
@@ -1159,7 +1118,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 target: zkm_pcs::diagnostics::SHAPE_TARGET,
                 stage = "normalize",
                 shape_key = format_args!("{:016x}", input.shape_key()),
-                class = ?band,
                 first = input.is_first_shard,
                 chips = names.join(","),
                 packing = packing.join(" | "),
@@ -1171,13 +1129,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         self.cached_program(
             &self.normalize_programs_cache,
-            self.band_keyed(input.shape_key(), band),
+            self.verification_keyed(input.shape_key()),
             "normalize",
             || {
                 let program = self.normalize_program_unsnapped(input);
                 self.snapped(
                     &program,
-                    band,
                     if input.is_complete { "normalize-root" } else { "normalize" },
                 )
             },
@@ -1192,7 +1149,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.cached_program(
             &self.global_programs_cache,
-            self.band_keyed(input.shape_key(), None),
+            self.verification_keyed(input.shape_key()),
             "global",
             || {
                 let program =
@@ -1201,7 +1158,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         input,
                         self.core_prover.machine().max_log_row_count(),
                     ));
-                self.snapped(&program, None, "normalize")
+                self.snapped(&program, "normalize")
             },
         )
     }
@@ -1222,55 +1179,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
-    /// The band this normalize program would choose for itself.
-    pub fn normalize_band_for(&self, input: &ZKMCoreWitnessValues<CoreSC>) -> Option<usize> {
-        let program = self.normalize_program_unsnapped(input);
-        self.band_of(&program)
-    }
-
-    /// The band this compose program would choose for itself.
-    pub fn compose_band_for(&self, input: &ZKMCompressWitnessValues<InnerSC>) -> Option<usize> {
-        let key = self.verification_keyed(input.shape_key());
-        if let Some(band) = self.compose_bands.lock().unwrap().get(&key) {
-            return *band;
-        }
-        let program = self.compose_program_unsnapped(input);
-        let band = self.band_of(&program);
-        self.compose_bands.lock().unwrap().insert(key, band);
-        band
-    }
-
-    fn band_of(&self, program: &RecursionProgram<KoalaBear>) -> Option<usize> {
-        let config = self.compress_shape_config.as_ref()?;
-        let heights =
-            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(program);
-        config.band_index_for(&heights)
-    }
-
-    /// The cheapest band that can hold every one of `bands` — see
-    /// [`RecursionShapeConfig::dominating_band_index`].
-    pub fn dominating_band(&self, bands: &[usize]) -> Option<usize> {
-        self.compress_shape_config.as_ref()?.dominating_band_index(bands)
-    }
-
-    /// A cache key that separates the same program snapped onto different
-    /// bands, since they are different programs downstream, and built with
-    /// the child-vk membership check on or off: `vk_verification` selects the
-    /// instructions the program emits (`value_assertions`), so a program built
-    /// under one setting is a different program — and a different verifying
-    /// key — from the same shape built under the other.
-    fn band_keyed(&self, shape_key: u64, band: Option<usize>) -> u64 {
-        let shape_key = self.verification_keyed(shape_key);
-        match band {
-            None => shape_key,
-            Some(b) => {
-                shape_key.rotate_left(17) ^ (0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(b as u64 + 1))
-            }
-        }
-    }
-
     /// `shape_key` with the prover's `vk_verification` folded in, the key
-    /// every program cache (snapped, unsnapped and on disk) is addressed by.
+    /// every program cache (snapped, unsnapped and on disk) is addressed by:
+    /// `vk_verification` selects the instructions the program emits
+    /// (`value_assertions`), so a program built under one setting is a
+    /// different program, with a different verifying key, from the same shape
+    /// built under the other.
     fn verification_keyed(&self, shape_key: u64) -> u64 {
         if self.vk_verification {
             shape_key ^ 0x5851_F42D_4C95_7F2D
@@ -1283,11 +1197,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     fn snapped(
         &self,
         program: &Arc<RecursionProgram<KoalaBear>>,
-        band: Option<usize>,
         kind: &str,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let mut owned = (**program).clone();
-        let _ = band;
         self.fix_recursion_shape_kind(&mut owned, kind);
         Arc::new(owned)
     }
@@ -1423,39 +1335,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressWitnessValues<InnerSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        self.compose_program_at(input, None)
-    }
-
-    /// [`Self::compose_program`], keyed by a caller-chosen band (the
-    /// sibling group's settled class; the program's own class comes from its rows) —
-    /// see [`Self::recursion_program_at`].
-    pub fn compose_program_at(
-        &self,
-        input: &ZKMCompressWitnessValues<InnerSC>,
-        band: Option<usize>,
-    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if zkm_pcs::diagnostics::shape_events_enabled() {
             tracing::debug!(
                 target: zkm_pcs::diagnostics::SHAPE_TARGET,
                 stage = "compose",
                 shape_key = format_args!("{:016x}", input.shape_key()),
-                class = ?band,
-                key = format_args!("{:016x}", self.band_keyed(input.shape_key(), band)),
+                key = format_args!("{:016x}", self.verification_keyed(input.shape_key())),
                 components = input.shape_diag(),
                 "program shape"
             );
         }
         self.cached_program(
             &self.compose_programs_cache,
-            self.band_keyed(input.shape_key(), band),
+            self.verification_keyed(input.shape_key()),
             "compose",
             || {
                 let program = self.compose_program_unsnapped(input);
-                self.snapped(
-                    &program,
-                    band,
-                    if input.is_complete { "compose-root" } else { "compose" },
-                )
+                self.snapped(&program, if input.is_complete { "compose-root" } else { "compose" })
             },
         )
     }
@@ -4265,7 +4161,7 @@ pub mod tests {
                         input,
                         machine.max_log_row_count(),
                     ));
-                let program = prover.snapped(&program, None, "normalize");
+                let program = prover.snapped(&program, "normalize");
                 prover.compress_prover.setup(&program).1.hash_koalabear()
             };
         assert_eq!(

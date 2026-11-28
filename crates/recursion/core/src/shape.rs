@@ -233,32 +233,7 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
         &self.allowed_shapes
     }
 
-    /// The pin class a program with these heights takes (its index into
-    /// [`Self::all_shapes`]): the choice [`Self::fix_shape_kind`] makes for a
-    /// non-root program, exposed so a caller can learn it without committing
-    /// to it.  Kept under its historical name for the pipeline's band API.
-    pub fn band_index_for(&self, heights: &[(String, usize)]) -> Option<usize> {
-        Self::class_for_rows(&Self::organic_shape(heights))
-    }
-
-    /// The class that holds every class in `indices`: classes form a chain,
-    /// so it is the largest.  The pipeline settles a sibling group on it and
-    /// keys the group's programs by it (`ZKMProver::band_keyed`).
-    pub fn dominating_band_index(&self, indices: &[usize]) -> Option<usize> {
-        let best = indices.iter().copied().max()?;
-        (best < self.allowed_shapes.len()).then_some(best)
-    }
-
-    /// [`Self::fix_shape_kind`] for a caller that settled a sibling-group
-    /// class: a node's OWN class is a function of its rows (its siblings'
-    /// classes are covered by the parent's class-tuple programs), so `index`
-    /// is only validated, not applied.
-    pub fn fix_shape_at(&self, program: &mut RecursionProgram<F>, index: usize) {
-        assert!(index < self.allowed_shapes.len(), "recursion pin class {index} does not exist");
-        self.fix_shape_kind(program, "forced");
-    }
-
-    /// The organic heights of a built program, for [`Self::band_index_for`].
+    /// The organic heights of a built program.
     pub fn program_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
         RecursionAir::<F, DEGREE>::heights(program).iter().map(|(n, h)| (n.clone(), *h)).collect()
     }
@@ -358,12 +333,7 @@ mod tests {
             let rows: BTreeMap<String, usize> =
                 shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
             assert_eq!(Cfg::class_for_rows(&rows), Some(index));
-            let heights: Vec<(String, usize)> = rows.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            assert_eq!(cfg.band_index_for(&heights), Some(index));
         }
-        assert_eq!(cfg.dominating_band_index(&[0, 1, 0]), Some(1));
-        assert_eq!(cfg.dominating_band_index(&[0]), Some(0));
-        assert_eq!(cfg.dominating_band_index(&[7]), None);
         assert_eq!(RecursionPins::LAST_CLASS, RECURSION_PIN_CLASSES.len() - 1);
     }
 
