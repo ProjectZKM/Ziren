@@ -33,9 +33,9 @@ const fn addr_limbs(addr: u32) -> [u32; 2] {
     [addr & 0xffff, addr >> 16]
 }
 
-/// A row's place in the chain of its table: the address the control bus gives it and what the
-/// row derives from that address and its own.
-struct ChainStep {
+/// How a row's address compares with the address before it: the previous address, which the
+/// control bus gives the row, and the flags and difference the row derives from the two.
+struct AddrComparison {
     prev_addr: u32,
     prev_valid: bool,
     is_comp: bool,
@@ -44,8 +44,8 @@ struct ChainStep {
     gap: u32,
 }
 
-impl ChainStep {
-    /// The step of row `index`, where `sorted` holds the table's events by address and
+impl AddrComparison {
+    /// The comparison of row `index`, where `sorted` holds the table's events by address and
     /// `first_prev_addr` is the address the public values give row 0.
     fn new(sorted: &[MemoryInitializeFinalizeEvent], first_prev_addr: u32, index: usize) -> Self {
         let addr = sorted[index].addr;
@@ -68,7 +68,7 @@ impl ChainStep {
 /// high limb from [`TOP_ADDR_HI`], and on a compared row the gap less one.
 fn row_blu_events(
     event: &MemoryInitializeFinalizeEvent,
-    step: &ChainStep,
+    cmp: &AddrComparison,
     blu: &mut impl ByteRecord,
 ) {
     let [lo, hi] = addr_limbs(event.addr);
@@ -76,8 +76,8 @@ fn row_blu_events(
     blu.add_u16_range_check(lo as u16);
     blu.add_u16_range_check(hi as u16);
     blu.add_u16_range_check(TOP_ADDR_HI.wrapping_sub(hi) as u16);
-    if step.is_comp {
-        blu.add_u16_range_check(step.gap.wrapping_sub(1) as u16);
+    if cmp.is_comp {
+        blu.add_u16_range_check(cmp.gap.wrapping_sub(1) as u16);
     }
 }
 
@@ -191,9 +191,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             .map(|(chunk, rows)| {
                 let mut blu = ByteLookupMap::default();
                 for (offset, event) in rows.iter().enumerate() {
-                    let step =
-                        ChainStep::new(&events, first_prev_addr, chunk * BLU_CHUNK_ROWS + offset);
-                    row_blu_events(event, &step, &mut blu);
+                    let cmp = AddrComparison::new(
+                        &events,
+                        first_prev_addr,
+                        chunk * BLU_CHUNK_ROWS + offset,
+                    );
+                    row_blu_events(event, &cmp, &mut blu);
                 }
                 blu
             })
@@ -227,15 +230,15 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         let mut values = zeroed_f_vec::<F>(padded_nb_rows * NUM_MEMORY_INIT_COLS);
         values.par_chunks_mut(NUM_MEMORY_INIT_COLS).zip(events.par_iter()).enumerate().for_each(
             |(index, (row, event))| {
-                let step = ChainStep::new(&events, first_prev_addr, index);
+                let cmp = AddrComparison::new(&events, first_prev_addr, index);
                 debug_assert!(
-                    !step.is_comp || step.prev_addr < event.addr,
+                    !cmp.is_comp || cmp.prev_addr < event.addr,
                     "memory ordering: prev_addr {} < addr {}",
-                    step.prev_addr,
+                    cmp.prev_addr,
                     event.addr
                 );
                 let cols: &mut MemoryInitCols<F> = row.borrow_mut();
-                cols.populate(event, &step, index);
+                cols.populate(event, &cmp, index);
             },
         );
 
@@ -307,28 +310,33 @@ pub struct MemoryInitCols<T: Copy> {
 pub(crate) const NUM_MEMORY_INIT_COLS: usize = size_of::<MemoryInitCols<u8>>();
 
 impl<F: Field> MemoryInitCols<F> {
-    /// Fills the row of `event`, which stands at `index` in its table with the chain step
-    /// `step`.
-    fn populate(&mut self, event: &MemoryInitializeFinalizeEvent, step: &ChainStep, index: usize) {
+    /// Fills the row of `event`, which stands at `index` in its table with the address
+    /// comparison `cmp`.
+    fn populate(
+        &mut self,
+        event: &MemoryInitializeFinalizeEvent,
+        cmp: &AddrComparison,
+        index: usize,
+    ) {
         let [lo, hi] = addr_limbs(event.addr);
-        let [prev_lo, prev_hi] = addr_limbs(step.prev_addr);
+        let [prev_lo, prev_hi] = addr_limbs(cmp.prev_addr);
         self.shard = F::from_u32(event.shard);
         self.timestamp = F::from_u32(event.timestamp);
         self.addr = [F::from_u32(lo), F::from_u32(hi)];
         self.top_inv = (F::from_u32(TOP_ADDR_HI) - self.addr[1]).try_inverse().unwrap_or(F::ZERO);
         self.index = F::from_usize(index);
         self.prev_addr = [F::from_u32(prev_lo), F::from_u32(prev_hi)];
-        self.prev_valid = F::from_bool(step.prev_valid);
-        self.hi_differs = F::from_bool(step.hi_differs);
-        self.gap = if step.hi_differs {
+        self.prev_valid = F::from_bool(cmp.prev_valid);
+        self.hi_differs = F::from_bool(cmp.hi_differs);
+        self.gap = if cmp.hi_differs {
             self.addr[1] - self.prev_addr[1]
         } else {
             self.addr[0] - self.prev_addr[0]
         };
         self.value = event.value.to_le_bytes().map(F::from_u8);
         self.is_real = F::ONE;
-        self.is_comp = F::from_bool(step.is_comp);
-        self.zero_inv = if step.is_comp {
+        self.is_comp = F::from_bool(cmp.is_comp);
+        self.zero_inv = if cmp.is_comp {
             (self.index + self.prev_addr[0] + self.prev_addr[1]).try_inverse().unwrap_or(F::ZERO)
         } else {
             F::ZERO
@@ -544,7 +552,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut row = vec![F::ZERO; NUM_MEMORY_INIT_COLS];
         let cols: &mut MemoryInitCols<F> = row.as_mut_slice().borrow_mut();
-        cols.populate(&events[index], &ChainStep::new(&events, first_prev_addr, index), index);
+        cols.populate(&events[index], &AddrComparison::new(&events, first_prev_addr, index), index);
         row
     }
 
