@@ -131,6 +131,10 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
         //        so the oracle the queries answer against need not be the one the
         //        transcript fixed.
         ("whir.round_cardinalities_pinned", 1),
+        // rev 1: the verifier fixes how a round's padding gap is split into
+        //        columns (the even split), so the column heights are a function
+        //        of the round's cells and its committed area.
+        ("jagged.padding_split_pinned", 1),
     ]
 }
 
@@ -324,7 +328,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "19f4d60b061d17470dc7632c1c11d022655720be314fe4e92b30e79a03a9a381",
+            "43b859fc7a41af3177b0fac817f4c04c71d89ea03baf69293f3839cf5367718d",
             "the transcript profile changed -- see this test's documentation",
         );
     }

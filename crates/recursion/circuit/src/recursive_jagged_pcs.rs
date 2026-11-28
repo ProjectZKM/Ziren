@@ -215,6 +215,9 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, row_count| {
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
             });
+        for heights in padding_row_heights.iter() {
+            Self::assert_even_padding_split::<C>(builder, heights);
+        }
 
         {
             use p3_field::PrimeCharacteristicRing;
@@ -338,6 +341,33 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let high_part: Felt<C::F> = builder.eval(row_count - low);
         let prod: Felt<C::F> = builder.eval(high_part * low);
         builder.assert_felt_eq(prod, C::F::ZERO);
+    }
+
+    /// Asserts that a round's padding column heights are the even split of
+    /// their sum: each height is the next one or one row more, and so is the
+    /// first against the last.
+    ///
+    /// Every height is at most the row cube and the sum is fixed by the
+    /// round's area, so one split is left, the prover's
+    /// (`zkm_pcs::jagged::AreaPin::split_padding`): `sum % k` columns of
+    /// `sum / k + 1` rows, then columns of `sum / k` rows.
+    fn assert_even_padding_split<C>(builder: &mut Builder<C>, heights: &[Felt<C::F>])
+    where
+        C: CircuitConfig,
+    {
+        use p3_field::PrimeCharacteristicRing;
+        let one: Felt<C::F> = builder.constant(C::F::ONE);
+        let closing = match heights {
+            [first, _, .., last] => Some((*first, *last)),
+            _ => None,
+        };
+        let pairs = heights.windows(2).map(|pair| (pair[0], pair[1])).chain(closing);
+        for (above, below) in pairs {
+            let step: Felt<C::F> = builder.eval(above - below);
+            let step_less_one: Felt<C::F> = builder.eval(step - one);
+            let prod: Felt<C::F> = builder.eval(step * step_less_one);
+            builder.assert_felt_eq(prod, C::F::ZERO);
+        }
     }
 }
 
@@ -523,6 +553,56 @@ mod tests {
     #[should_panic]
     fn padding_bit_bound_rejects_area_preserving_overclaim_just_above_cube() {
         run_padding_bit_bound(17, 4);
+    }
+
+    /// Run the padding split assertion on `heights`.
+    fn run_padding_split(heights: &[usize]) {
+        use crate::utils::tests::run_test_recursion;
+        let mut builder = Builder::<InnerConfig>::default();
+        let felts: Vec<Felt<InnerVal>> =
+            heights.iter().map(|h| builder.constant(InnerVal::from_usize(*h))).collect();
+        RecursiveJaggedPcsVerifier::<()>::assert_even_padding_split::<InnerConfig>(
+            &mut builder,
+            &felts,
+        );
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// The prover's split of a gap passes, whatever the gap and column count.
+    #[test]
+    fn padding_split_accepts_the_prover_split() {
+        let cube = 1usize << 20;
+        for (pad, columns) in [
+            (0, 1),
+            (5, 1),
+            (0, 4),
+            (3, 4),
+            (4, 4),
+            (4 * cube - 1, 4),
+            (32 * cube, 32),
+            (1000, 128),
+        ] {
+            run_padding_split(&zkm_pcs::jagged::AreaPin::split_padding(pad, columns, cube));
+        }
+    }
+
+    /// The prover's split with one row moved from the first column to the
+    /// second keeps the sum and every height under the cube; it is rejected.
+    #[test]
+    #[should_panic]
+    fn padding_split_rejects_a_row_moved_between_columns() {
+        let mut heights = zkm_pcs::jagged::AreaPin::split_padding(1000, 8, 1 << 20);
+        heights[0] -= 1;
+        heights[1] += 1;
+        run_padding_split(&heights);
+    }
+
+    /// Two rows more in the first column than in the last, in steps of one,
+    /// pass every neighbour check; the first-against-last check rejects them.
+    #[test]
+    #[should_panic]
+    fn padding_split_rejects_two_steps_down() {
+        run_padding_split(&[7, 6, 5]);
     }
 
     /// NEGATIVE: a doubled over-claim (`height = 2*2^max_log = 32 >
