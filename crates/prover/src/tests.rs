@@ -95,6 +95,34 @@ fn wrap_program_prewarm_populates_cache() {
     let cache = prover.wrap_programs_cache.lock().unwrap();
     assert_eq!((cache.hits, cache.misses), (1, 1));
 }
+
+/// The wrap keys are the one source of the wrap verifying key, and a second
+/// wrap program is rejected instead of replacing them.
+///
+/// `cargo test -r -p zkm-prover wrap_keys_reject_a_second_program -- --ignored`
+#[test]
+#[ignore]
+fn wrap_keys_reject_a_second_program() {
+    use crate::components::DefaultProverComponents;
+    let prover = ZKMProver::<DefaultProverComponents>::uninitialized();
+    assert!(prover.wrap_vk().is_none());
+    prover.prewarm_wrap_keys();
+    let (program, digest) = prover.wrap_program_cached(&prover.dummy_wrap_input());
+    let keys = prover.wrap_keys_cached(&program, digest).expect("the same program hits");
+    let vk_bytes = bincode::serialize(&keys.1).unwrap();
+    assert_eq!(
+        bincode::serialize(&prover.wrap_vk().expect("the keys hold the vk")).unwrap(),
+        vk_bytes
+    );
+
+    let mut other = digest;
+    other[0] ^= 1;
+    assert!(matches!(
+        prover.wrap_keys_cached(&program, other),
+        Err(ZKMRecursionProverError::WrapProgramMismatch { .. })
+    ));
+    assert_eq!(bincode::serialize(&prover.wrap_vk().expect("the keys stay")).unwrap(), vk_bytes);
+}
 use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
 use p3_field::PrimeField32;
 

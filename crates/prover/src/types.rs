@@ -239,6 +239,9 @@ pub enum ZKMRecursionProverError {
     TracesGenerationError,
     #[error("Generate dependencies error")]
     DependenciesGenerationError,
+    /// The wrap keys of this prover were built for another wrap program.
+    #[error("wrap program mismatch: the wrap keys are of program {cached}, not {requested}")]
+    WrapProgramMismatch { cached: String, requested: String },
 }
 
 /// A recursion vk whose KoalaBear digest `digest` is not one of the

@@ -226,12 +226,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.print_stats();
         tracing::debug!("wrap program executed successfully");
 
-        let wrap_keys =
-            tracing::debug_span!("setup wrap").in_scope(|| self.wrap_keys_cached(&program, digest));
+        let wrap_keys = tracing::debug_span!("setup wrap")
+            .in_scope(|| self.wrap_keys_cached(&program, digest))?;
         let (wrap_pk, wrap_vk) = &*wrap_keys;
-        if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
-            tracing::debug!("wrap verifier key set");
-        }
         if let Some(path) = std::env::var_os("ZIREN_DUMP_PART_STARK_VK") {
             match bincode::serialize(&wrap_vk.part_vk()) {
                 Ok(bytes) => match std::fs::write(&path, &bytes) {
@@ -292,29 +289,37 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
-    /// Return cached wrap keys, running setup if the program's digest differs.
+    /// The wrap keys of this prover, built by setup on the first call.
     ///
     /// `setup_digest` must be the digest returned with `program` by
     /// [`Self::cached_program`]. The lock is held through setup so concurrent
-    /// calls for the same digest reuse the resulting keys.
-    pub(crate) fn wrap_keys_cached(
+    /// calls reuse the resulting keys. The wrap program is fixed, so a call
+    /// with another digest than the keys were built for is an error.
+    pub fn wrap_keys_cached(
         &self,
         program: &RecursionProgram<KoalaBear>,
         setup_digest: [u8; 32],
-    ) -> Arc<WrapKeys<C>> {
+    ) -> Result<Arc<WrapKeys<C>>, ZKMRecursionProverError> {
         let mut cache = self.wrap_keys_cache.lock().unwrap();
         if let Some((cached_digest, keys)) = cache.as_ref() {
-            if *cached_digest == setup_digest {
-                tracing::debug!("wrap keys cache hit");
-                return Arc::clone(keys);
+            if *cached_digest != setup_digest {
+                return Err(ZKMRecursionProverError::WrapProgramMismatch {
+                    cached: hex::encode(cached_digest),
+                    requested: hex::encode(setup_digest),
+                });
             }
+            tracing::debug!("wrap keys cache hit");
+            return Ok(Arc::clone(keys));
         }
-        // Drop the cache's reference to the old keys before setup. In-flight
-        // wraps may still hold their own Arc references to those keys.
-        *cache = None;
         let keys = Arc::new(self.wrap_prover.setup(program));
         *cache = Some((setup_digest, Arc::clone(&keys)));
-        keys
+        Ok(keys)
+    }
+
+    /// The wrap verifying key, from the wrap keys: `None` until a wrap or
+    /// [`Self::prewarm_wrap_keys`] has built them.
+    pub fn wrap_vk(&self) -> Option<StarkVerifyingKey<OuterSC>> {
+        self.wrap_keys_cache.lock().unwrap().as_ref().map(|(_, keys)| keys.1.clone())
     }
 
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.

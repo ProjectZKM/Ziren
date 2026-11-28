@@ -35,7 +35,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env,
     path::Path,
-    sync::{mpsc::sync_channel, Arc, Mutex, OnceLock},
+    sync::{mpsc::sync_channel, Arc, Mutex},
     thread,
 };
 
@@ -228,16 +228,15 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The recursion shape configuration.
     pub compress_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
-    /// The verifying key for wrapping.
-    pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
-
     /// The wrap's `(pk, vk)`, with the setup digest of the program they were
     /// built from.
     ///
     /// The outer circuit pins the wrap verifying key, so every wrap builds
     /// the same program and one entry serves the whole process: a long-lived
     /// prover (the server, a multi-block run) pays the wrap setup once rather
-    /// than per proof.  A program with another digest replaces the entry.
+    /// than per proof.  A program with another digest is an error
+    /// ([`Self::wrap_keys_cached`]).  This entry is also the one source of
+    /// the wrap verifying key ([`Self::wrap_vk`]).
     pub wrap_keys_cache: Mutex<Option<([u8; 32], Arc<WrapKeys<C>>)>>,
 
     /// Cache for the wrap program, keyed by
@@ -405,7 +404,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             recursion_vk_map: allowed_vk_map,
             compress_shape_config: recursion_shape_config,
             vk_verification,
-            wrap_vk: OnceLock::new(),
             wrap_keys_cache: Mutex::new(None),
             wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_cache: Mutex::new(RecursionProgramCache::default()),

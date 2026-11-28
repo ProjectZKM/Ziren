@@ -332,8 +332,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut challenger = self.wrap_prover.machine().config().challenger();
         let machine_proof = MachineProof::from_shards(vec![proof.proof.clone()]);
 
-        let wrap_vk = self.wrap_vk.get().expect("Wrap verifier key not set");
-        self.wrap_prover.machine().verify(wrap_vk, &machine_proof, &mut challenger)?;
+        let wrap_vk = self
+            .wrap_vk()
+            .expect("no wrap keys: wrap a proof or call prewarm_wrap_keys before verifying");
+        self.wrap_prover.machine().verify(&wrap_vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
         if !is_root_public_values_valid(self.shrink_prover.machine().config(), public_values) {

@@ -147,12 +147,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let _ = self.wrap_program_cached(&self.dummy_wrap_input());
     }
 
-    /// Populate the wrap program and key caches before the first wrap.
+    /// Populate the wrap program and key caches before the first wrap, which
+    /// also makes the wrap verifying key available ([`Self::wrap_vk`]).
     ///
     /// Calls the wrap prover's setup, which requires device access for
     /// device-backed provers.
     pub fn prewarm_wrap_keys(&self) {
         let (program, digest) = self.wrap_program_cached(&self.dummy_wrap_input());
-        let _ = self.wrap_keys_cached(&program, digest);
+        self.wrap_keys_cached(&program, digest)
+            .expect("the wrap keys were built for another program than the frozen shrink shape's");
     }
 }
