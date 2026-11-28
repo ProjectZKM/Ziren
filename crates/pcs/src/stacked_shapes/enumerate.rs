@@ -6,17 +6,17 @@
 //! heights.
 //!
 //! Depending on `zkm_core_machine` would be circular, so chip names are
-//! string literals matching the MIPS chip inventory of `zkm_core_machine::mips`.
+//! string literals matching the MIPS chip list of `zkm_core_machine::mips`.
 //!
 //! ## Cluster list
 //!
-//! Curated from Ziren's MIPS chip inventory + the chip_clusters
+//! Curated from Ziren's MIPS chip list + the chip_clusters
 //! pattern:
 //!
 //! | Cluster              | Chip family                                              |
 //! |----------------------|----------------------------------------------------------|
 //! | `cluster_preprocessed` | `Program`, `Byte`, `Range` — always present            |
-//! | `cluster_core_base`  | CPU + ALU + mem-instrs + syscall-core (plumbing)         |
+//! | `cluster_core_base`  | CPU + ALU + mem-instrs + syscall-core (base chips)       |
 //! | `cluster_memory`     | `cluster_core_base` ∪ memory init/finalize + global      |
 //! | `cluster_keccak`     | core + KeccakSponge                                      |
 //! | `cluster_sha256`     | core + Sha256Extend + Sha256Compress                     |
@@ -132,6 +132,28 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
         ("uint256", &["Uint256MulMod", "U256XU2048Mul"]),
         ("syslinux", &["SysLinux"]),
     ]
+}
+
+/// The table only the first shard of an execution holds, its memory image.
+/// No cluster names it: a shard's cluster is the smallest that holds its
+/// other chips, and the first shard commits the image beside the cluster.
+pub const FIRST_SHARD_CHIP: &str = "MemoryImage";
+
+/// Whether `cluster` is the cluster of an execution shard, one that runs
+/// instructions: it names every chip of the core base. The first shard of an
+/// execution is one of these.
+#[must_use]
+pub fn is_execution_cluster(cluster: &BTreeSet<String>) -> bool {
+    core_base_chips().iter().all(|name| cluster.contains(*name))
+}
+
+/// Whether `cluster` names a chip of a precompile family.
+#[must_use]
+pub fn holds_precompile_chip(cluster: &BTreeSet<String>) -> bool {
+    precompile_families()
+        .iter()
+        .flat_map(|(_, chips)| chips.iter())
+        .any(|name| cluster.contains(*name))
 }
 
 fn set_from(names: &[&str]) -> BTreeSet<String> {
@@ -323,7 +345,7 @@ mod tests {
     ///   2. At least the four base clusters exist, and exactly the
     ///      minimal memory/precompile shard types are Cpu-free.
     ///   3. Every cluster that DOES carry Cpu also carries the full core
-    ///      ALU set (Cpu never appears without its core plumbing).
+    ///      ALU set (Cpu never appears without its core ALU chips).
     #[test]
     fn cluster_cpu_membership_matches_shard_types() {
         let ms = build_mips_machine_shape();

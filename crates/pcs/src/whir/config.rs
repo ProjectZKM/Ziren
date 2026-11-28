@@ -57,9 +57,12 @@ pub struct WhirConfig {
     /// PoW bits per final folding step.
     pub final_folding_pow_bits: Vec<usize>,
     /// PoW bits ground after the stripe claims are absorbed and before the
-    /// batching challenge is drawn.  With `t` stripes combined by the powers
-    /// of one challenge the batching error is `(t - 1) · L / |F|` for list
-    /// size `L`; the grind divides it by `2^bits`.
+    /// batching challenge is drawn.  The grind leaves the batching error as
+    /// it is: it makes each attempt at another challenge cost an expected
+    /// `2^bits` hashes.  The error is the proximity-gap error of the first
+    /// code over the batched stripes, which the schedule that sets this field
+    /// states ([`crate::whir::jagged::whir_batch_grinding_bits`],
+    /// [`crate::whir::jagged::compress_batch_grinding_bits`]).
     pub batch_pow_bits: usize,
 }
 

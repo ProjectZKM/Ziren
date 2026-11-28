@@ -41,6 +41,8 @@ pub enum ZKMCoreProverError {
     DependenciesGenerationError,
     #[error("the execution has too many cross-shard lookups: {0}")]
     TooManyGlobalLookups(String),
+    #[error("no committed chip set holds the chips of a shard: {0:?}")]
+    NoChipSet(std::collections::BTreeSet<String>),
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -146,7 +148,8 @@ where
         }
     }
 
-    let (shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
+    prover.machine().assign_global_chain_lanes(&mut shard_proofs);
     let rounds = shard_proofs
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
@@ -158,21 +161,28 @@ where
     let committed = rounds
         .iter()
         .zip(tables)
-        .filter_map(|(round, tables)| Some((round.as_ref()?, tables?)))
+        .zip(shard_proofs.iter())
+        .filter_map(|((round, tables), proof)| {
+            Some((proof.global_chain_lane, round.as_ref()?, tables?))
+        })
         .collect::<Vec<_>>();
     let global_proofs = tracing::debug_span!("prove global rounds").in_scope(|| {
         let Some(global) = prover
             .machine()
-            .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+            .global_challenge(
+                &challenger,
+                rounds.iter().map(Option::as_ref),
+                shard_proofs.iter().map(|proof| proof.global_chain_lane),
+            )
             .filter(|_| !committed.is_empty())
         else {
             return Vec::new();
         };
-        committed
+        prover
+            .machine()
+            .global_proof_groups_by_lane(committed, zkm_pcs::global_rounds_per_proof())
             .into_iter()
-            .map(|(round, tables)| {
-                prover.prove_global_round(pk, round, tables, &global, &challenger).unwrap()
-            })
+            .map(|group| prover.prove_global_rounds(pk, &group, &global, &challenger).unwrap())
             .collect()
     });
 
@@ -531,9 +541,14 @@ where
                             .map(|(record, prepared)| {
                                 let _span = span.enter();
 
-                                let cluster_widths = shard_clusters.cluster_widths(&record);
+                                let Some(cluster_widths) = shard_clusters.cluster_widths(&record)
+                                else {
+                                    return Err(ZKMCoreProverError::NoChipSet(
+                                        shard_clusters.included_chips(&record),
+                                    ));
+                                };
 
-                                consume_shard(record, prepared, cluster_widths)
+                                consume_shard(record, prepared, Some(cluster_widths))
                             })
                             .collect::<Vec<_>>();
                         outputs.extend(results);

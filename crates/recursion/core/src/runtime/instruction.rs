@@ -14,13 +14,13 @@ pub enum Instruction<F> {
     Select(SelectInstr<F>),
     HintBits(HintBitsInstr<F>),
     Print(PrintInstr<F>),
-    HintExt2Felts(HintExt2FeltsInstr<F>),
+    HintExt2Felts(Box<HintExt2FeltsInstr<F>>),
     /// Constrained twin of `HintExt2Felts`: same operands, but the rows land
     /// on the `Ext2Felt` chip, which RECEIVES the input block and sends its
     /// limbs — so no call-site re-binding is needed.  Compress-machine
     /// programs only; shrink/wrap keep `HintExt2Felts` (their machines have
     /// no `Ext2Felt` chip — the wrap R1CS must not change).
-    Ext2Felts(HintExt2FeltsInstr<F>),
+    Ext2Felts(Box<HintExt2FeltsInstr<F>>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
     Hint(HintInstr<F>),
     /// The jagged verifier's per-column prefix-sum check on the

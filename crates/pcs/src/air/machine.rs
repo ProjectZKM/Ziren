@@ -15,7 +15,7 @@ pub use zkm_derive::MachineAir;
 /// Machine AIRs receive `PROOF_MAX_NUM_PVS` public-value slots, independently of
 /// `BaseAir::num_public_values` (which they may leave at its default of zero). We therefore
 /// use `capture_symbolic_constraints` without validating the layout against that metadata.
-/// Keep this layout shared by degree inference, constraint counts, and the soundness census.
+/// Keep this layout shared by degree inference, constraint counts, and the soundness parameters.
 pub fn capture_machine_constraints<F, A>(air: &A) -> SymbolicConstraints<F>
 where
     F: Field,

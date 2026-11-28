@@ -262,7 +262,7 @@ fn rlc_eval<EF: Field>(vals: &[EF], lambda: EF) -> EF {
     acc
 }
 
-type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+type Ef4 = p3_field::extension::QuinticTrinomialExtensionField<p3_koala_bear::KoalaBear>;
 
 /// Type-erased challenger so a device zerocheck kernel signature doesn't depend
 /// on `SC::Challenger`. Not `Send`: single-threaded per shard.

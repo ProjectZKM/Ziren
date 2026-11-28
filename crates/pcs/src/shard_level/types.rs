@@ -143,7 +143,7 @@ mod tests {
     use super::*;
 
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     #[test]
     fn logup_gkr_proof_rmp_roundtrip() {

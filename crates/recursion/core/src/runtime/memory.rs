@@ -207,7 +207,7 @@ mod par_mem_vec_tests {
     fn write_then_read_roundtrip() {
         let mem = ParMemVec::<KoalaBear>::with_capacity(4);
         let addr = Address(k(0));
-        let val = Block([k(7); 4]);
+        let val = Block([k(7); crate::D]);
         unsafe {
             mem.mw_unchecked(addr, val, k(2));
             let entry = mem.mr_unchecked(addr);
@@ -228,7 +228,7 @@ mod par_mem_vec_tests {
                     for i in 0..16 {
                         let addr_idx = (tid * 16 + i) as u32;
                         let addr = Address(k(addr_idx));
-                        let val = Block([k(addr_idx); 4]);
+                        let val = Block([k(addr_idx); crate::D]);
                         unsafe { m.mw_unchecked(addr, val, KoalaBear::ONE) };
                     }
                 });

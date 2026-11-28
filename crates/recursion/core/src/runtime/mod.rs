@@ -63,7 +63,11 @@ pub const DIGEST_SIZE: usize = 8;
 
 pub const NUM_BITS: usize = 31;
 
-pub const D: usize = 4;
+/// The degree of the challenge field over the base field. A literal, as the
+/// generated C++ header takes its value from here.
+pub const D: usize = 5;
+
+const _: () = assert!(D == zkm_pcs::air::EXTENSION_DEGREE);
 
 /// Per-walker mutable state for the parallel SeqBlock executor. Each parallel
 /// sub-walker allocates its own `WalkerState` on the stack so the walker
@@ -338,13 +342,10 @@ where
 
     /// Compare to [zkm_recursion_core::runtime::Runtime::run].
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
-        let timing = std::env::var("ZIREN_REC_EXEC_TIMING").is_ok_and(|v| v != "0");
-        let t_analyze = std::time::Instant::now();
+        let t_setup = zkm_pcs::diagnostics::timing_start();
         let program_arc = self.program.clone();
         let analyzed_program = &program_arc.seq_blocks;
         let event_counts = program_arc.event_counts;
-        let analyze_secs = t_analyze.elapsed().as_secs_f64();
-        let t_walk = std::time::Instant::now();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
         unsafe {
             UnsafeCell::raw_get(unsafe_record.public_values.as_ptr())
@@ -373,6 +374,8 @@ where
         let mut debug_stdout: Box<dyn Write + 'a> =
             std::mem::replace(&mut self.debug_stdout, Box::new(stdout()));
 
+        let setup_us = zkm_pcs::diagnostics::elapsed_us(t_setup);
+        let t_walk = zkm_pcs::diagnostics::timing_start();
         let walker_result = self.execute_blocks(
             &analyzed_program.seq_blocks,
             &mut state,
@@ -380,52 +383,13 @@ where
             Some(&mut *debug_stdout),
             &unsafe_record,
         );
-        if timing {
-            let walk_secs = t_walk.elapsed().as_secs_f64();
-            let instrs = analyzed_program.iter().count();
-            let mut mix = [0usize; 12];
-            for ai in analyzed_program.iter() {
-                let k = match ai.inner() {
-                    Instruction::BaseAlu(_) => 0,
-                    Instruction::ExtAlu(_) => 1,
-                    Instruction::Mem(_) => 2,
-                    Instruction::Poseidon2(_) => 3,
-                    Instruction::Select(_) => 4,
-                    Instruction::HintBits(_) => 5,
-                    Instruction::Print(_) => 6,
-                    Instruction::HintExt2Felts(_) => 7,
-                    Instruction::Ext2Felts(_) => 8,
-                    Instruction::CommitPublicValues(_) => 9,
-                    Instruction::Hint(_) => 10,
-                    Instruction::PrefixSumChecks(_) => 11,
-                };
-                mix[k] += 1;
-            }
-            let names = [
-                "BaseAlu",
-                "ExtAlu",
-                "Mem",
-                "Poseidon2",
-                "Select",
-                "HintBits",
-                "Print",
-                "HintExt2Felts",
-                "Ext2Felts",
-                "CommitPublicValues",
-                "Hint",
-                "PrefixSumChecks",
-            ];
-            let mix_str: String = names
-                .iter()
-                .zip(mix.iter())
-                .filter(|(_, &n)| n > 0)
-                .map(|(nm, n)| format!("{nm}={n} "))
-                .collect();
-            tracing::info!("REC_MIX {mix_str}");
-            tracing::info!(
-                "REC_EXEC analyze={analyze_secs:.4}s walk={walk_secs:.4}s instrs={instrs} \
-                 rate={:.2}M/s",
-                (instrs as f64) / walk_secs / 1e6
+        if t_walk.is_some() {
+            tracing::debug!(
+                target: zkm_pcs::diagnostics::TIMING_TARGET,
+                setup_us,
+                walk_us = zkm_pcs::diagnostics::elapsed_us(t_walk),
+                events = ?event_counts,
+                "recursion program run"
             );
         }
 
@@ -716,7 +680,8 @@ where
                     }
                 }
             },
-            Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+            Instruction::HintExt2Felts(instr) => {
+                let HintExt2FeltsInstr { output_addrs_mults, input_addr } = instr.as_ref();
                 state.nb_bit_decompositions += 1;
                 let fs = self.mr_us(*input_addr).val;
                 for (i, (f, (addr, mult))) in
@@ -732,7 +697,8 @@ where
                     }
                 }
             }
-            Instruction::Ext2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+            Instruction::Ext2Felts(instr) => {
+                let HintExt2FeltsInstr { output_addrs_mults, input_addr } = instr.as_ref();
                 state.nb_bit_decompositions += 1;
                 let fs = self.mr_us(*input_addr).val;
                 for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults.iter().copied()) {

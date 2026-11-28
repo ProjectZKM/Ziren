@@ -36,7 +36,7 @@ def validate(text, expected=None):
             raise ValueError(f"duplicate axiom report: {name}")
         found[name] = set()
     if set(found) != set(expected) or len(expected) != len(set(expected)):
-        raise ValueError("axiom reports do not match the extracted theorem inventory")
+        raise ValueError("axiom reports do not match the extracted theorem list")
     for name, axioms in found.items():
         if axioms - ALLOWED_AXIOMS:
             raise ValueError(f"{name}: unexpected axioms {sorted(axioms - ALLOWED_AXIOMS)}")

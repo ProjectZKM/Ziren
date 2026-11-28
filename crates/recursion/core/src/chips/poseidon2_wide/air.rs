@@ -104,19 +104,8 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         let add_rc: [AB::Expr; WIDTH] =
             array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
-        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
-        for i in 0..WIDTH {
-            let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
-
-            if let Some(external_sbox) = local_row.external_rounds_sbox() {
-                builder.assert_eq(external_sbox[r][i].into(), calculated_sbox_deg_3);
-                sbox_deg_3[i] = external_sbox[r][i].into();
-            } else {
-                sbox_deg_3[i] = calculated_sbox_deg_3;
-            }
-        }
-
-        let mut state = sbox_deg_3;
+        let mut state: [AB::Expr; WIDTH] =
+            array::from_fn(|i| add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone());
         external_linear_layer(&mut state);
 
         let next_state = if r == (NUM_EXTERNAL_ROUNDS / 2) - 1 {
@@ -149,13 +138,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             let add_rc = if r == 0 { state[0].clone() } else { s0[r - 1].into() }
                 + AB::Expr::from_u32(RC_16_30_U32[round][0]);
 
-            let mut sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
-            if let Some(internal_sbox) = local_row.internal_rounds_sbox() {
-                builder.assert_eq(internal_sbox[r], sbox_deg_3);
-                sbox_deg_3 = internal_sbox[r].into();
-            }
-
-            state[0] = sbox_deg_3.clone();
+            state[0] = add_rc.clone() * add_rc.clone() * add_rc;
             internal_linear_layer(&mut state);
 
             if r < NUM_INTERNAL_ROUNDS - 1 {

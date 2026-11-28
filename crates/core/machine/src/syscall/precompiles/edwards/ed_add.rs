@@ -336,7 +336,7 @@ where
 mod tests {
     use super::*;
     use crate::utils;
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn non_canonical_sum_is_rejected() {
         type F = KoalaBear;
-        type EF = BinomialExtensionField<KoalaBear, 4>;
+        type EF = QuinticTrinomialExtensionField<KoalaBear>;
         utils::setup_logger();
         let program = Program::from(ED_ADD_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());

@@ -210,9 +210,33 @@ impl<F: PrimeField32> MipsAir<F> {
             .filter(|chip| chip.sends().iter().chain(chip.receives()).any(|l| l.is_global()))
             .map(|chip| chip.name())
             .collect::<std::collections::BTreeSet<_>>();
+        let global_families = Self::global_families()
+            .iter()
+            .map(|family| family.iter().map(|name| name.to_string()).collect())
+            .chain([global_round.clone()])
+            .collect();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
             .with_global_round(Some(global_round))
+            .with_global_families(global_families)
             .with_deferred_global_lookups()
+    }
+
+    /// The families of chips a shard's global round commits
+    /// ([`StarkMachine::global_family`]), before the family of every
+    /// global-round chip, which holds any other shard:
+    ///
+    /// * an execution or precompile shard: its local memory and its syscalls;
+    /// * a shard of global memory events only;
+    /// * the first shard, which also holds the memory image.
+    ///
+    /// A last shard that also takes the global memory events of a short
+    /// execution is in the family of every chip.
+    pub const fn global_families() -> [&'static [&'static str]; 3] {
+        [
+            &["MemoryLocal", "SyscallCore", "SyscallPrecompile"],
+            &["MemoryGlobalFinalize", "MemoryGlobalInit"],
+            &["MemoryImage", "MemoryLocal", "SyscallCore", "SyscallPrecompile"],
+        ]
     }
 
     /// Get all the different MIPS AIRs.
@@ -617,7 +641,7 @@ pub mod tests {
     /// the verifying key's, bounded by the LARGEST admitted Program band.  The
     /// main round is proof-controlled: the verifier admits any area strictly
     /// below `2^MAX_ROUND_LOG_AREA`, so a soundness model of the batch has to
-    /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` fence,
+    /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` limit,
     /// which only has to lie inside it.
     /// The shard verifier anchors a shard's public values to the trace iff the
     /// MACHINE has a bus `eval_public_values` closes, whatever chips the shard
@@ -690,7 +714,7 @@ pub mod tests {
         );
         assert!(
             zkm_pcs::ELEMENT_THRESHOLD <= verifier_area,
-            "the honest area fence must lie inside the verifier's bound",
+            "the honest area limit must lie inside the verifier's bound",
         );
 
         let largest =
@@ -1180,8 +1204,8 @@ pub mod tests {
         let bit_len = jagged.opened_values.chips[0].quotient[0].len();
         let one = <KoalaBear as p3_field::PrimeCharacteristicRing>::ONE;
         let zero = <KoalaBear as p3_field::PrimeCharacteristicRing>::ZERO;
-        let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
-        let zero_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(zero);
+        let one_ef = p3_field::extension::QuinticTrinomialExtensionField::<KoalaBear>::from(one);
+        let zero_ef = p3_field::extension::QuinticTrinomialExtensionField::<KoalaBear>::from(zero);
 
         let mut raise: Option<(usize, usize)> = None;
         let mut lower: Option<(usize, usize)> = None;
@@ -1275,7 +1299,7 @@ pub mod tests {
                 return None;
             }
             let bit_len = jagged.opened_values.chips[0].quotient[0].len();
-            type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+            type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
             let one_ef = EF::from(KoalaBear::ONE);
             let zero_ef = EF::from(KoalaBear::ZERO);
             let mut raise: Option<(usize, usize)> = None;
@@ -1308,7 +1332,7 @@ pub mod tests {
         let (rc, rb, lc, lb, nchips, bit_len) = desc;
 
         let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
         let scale = EF::from(KoalaBear::from_u32(2));
         let mut touched = 0usize;
         for ce in jagged.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
@@ -1331,12 +1355,12 @@ pub mod tests {
         ))
     }
 
-    /// Whether a verifier verdict is the shard verifier's rejection of opened
+    /// Whether a verifier error is the shard verifier's rejection of opened
     /// degree bits that are not the bits of the chip's observed height.  This
     /// check runs before the LogUp-GKR verification, so a forged degree never
     /// reaches the last-layer reconstruction.
-    fn rejected_on_degree_bits(verdict: &str) -> bool {
-        verdict.contains("the opened degree bits are not the bits of its observed height")
+    fn rejected_on_degree_bits(error: &str) -> bool {
+        error.contains("the opened degree bits are not the bits of its observed height")
     }
 
     #[test]
@@ -1440,7 +1464,7 @@ pub mod tests {
         let (proof, machine, vk) = prove_raw_heights(fibonacci_program(), 262_144, fib_stdin());
 
         let mut forged = proof.clone();
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
         let scale = EF::from(KoalaBear::from_u32(3));
         let jagged = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         let mut touched = 0usize;
@@ -1468,7 +1492,7 @@ pub mod tests {
         use p3_field::PrimeCharacteristicRing;
         setup_logger();
         let (proof, machine, vk) = prove_raw_heights(fibonacci_program(), 262_144, fib_stdin());
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
         let one_ef = EF::from(KoalaBear::ONE);
         let zero_ef = EF::from(KoalaBear::ZERO);
 

@@ -48,8 +48,8 @@ test-artifacts = { workspace = true }
 serial_test = "3.1.1"
 
 [[bin]]
-name = "soundcalc_census"
-path = "scripts/soundcalc_census.rs"
+name = "soundcalc_params"
+path = "scripts/soundcalc_params.rs"
 
 [[bin]]
 name = "write_vk_root"
@@ -98,10 +98,6 @@ path = "scripts/check_vk_coverage.rs"
 [[bin]]
 name = "prove_dump"
 path = "scripts/prove_dump.rs"
-
-[[bin]]
-name = "find_recursion_shapes"
-path = "scripts/find_recursion_shapes.rs"
 
 [features]
 default = ["native-gnark"]

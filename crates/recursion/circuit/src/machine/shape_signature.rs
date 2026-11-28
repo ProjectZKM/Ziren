@@ -45,7 +45,7 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     for round in sp.padding_row_heights.iter() {
         round.len().hash(h);
     }
-    sp.global_commitment.is_some().hash(h);
+    sp.preceding_rounds.len().hash(h);
     sp.public_values.len().hash(h);
 
     let lgkr = &sp.logup_gkr_proof;
@@ -92,7 +92,7 @@ pub fn hash_shard_proof_structure<H: Hasher>(
 /// The same structural dimensions [`hash_shard_proof_structure`] hashes, as
 /// readable numbers instead of one opaque `u64`.
 ///
-/// Diagnostic only, and called only behind `ZIREN_SHAPE_KEY_DIAG`: a shape-key
+/// Diagnostic only, called only when the shape events are on: a shape-key
 /// mismatch between a pre-warmed dummy and the real node it was meant to serve
 /// is invisible in the hash, so this reports the components that feed it and
 /// lets the two be diffed field by field.

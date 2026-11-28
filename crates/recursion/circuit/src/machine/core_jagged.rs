@@ -55,8 +55,11 @@ pub struct ZKMCoreWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub is_complete: bool,
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
-    /// The global hash chain's value before this shard.
-    pub global_chain_start: [SC::Val; DIGEST_SIZE],
+    /// The lane heads of the global hash chain before the first shard.
+    pub global_chain_heads: zkm_pcs::logup_gkr::GlobalChainHeads<SC::Val>,
+    /// For each shard, the lane its global round extends. The entry of a
+    /// shard without a round is not read.
+    pub global_round_lanes: Vec<u8>,
 }
 
 /// In-circuit variable form — the `shard_proof_tuples` field carries
@@ -87,7 +90,10 @@ pub struct ZKMCoreWitnessVariable<
     pub is_complete: Felt<C::F>,
     pub is_first_shard: Felt<C::F>,
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
-    pub global_chain_start: [Felt<C::F>; DIGEST_SIZE],
+    pub global_chain_heads: crate::global_challenge::GlobalChainHeadsVariable<C>,
+    /// For each shard with a global round, one bit for each lane: the lane
+    /// the round extends. [`verify_core_jagged`] constrains the bits.
+    pub global_round_lanes: Vec<Option<[Felt<C::F>; zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT]>>,
 }
 
 /// Verify a list of whir shard proofs, asserting the
@@ -119,13 +125,19 @@ pub fn verify_core_jagged<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let ZKMCoreWitnessVariable {
         vk: vk_legacy,
         shard_proof_tuples,
         is_complete,
         is_first_shard,
         vk_root,
-        global_chain_start,
+        global_chain_heads,
+        global_round_lanes,
     } = input;
     assert!(
         !machine.defers_global_lookups()
@@ -198,10 +210,15 @@ pub fn verify_core_jagged<C, SC, A>(
     );
     let has_global_lookups = machine.has_cross_shard_lookups();
 
+    assert_eq!(
+        global_round_lanes.len(),
+        shard_proof_tuples.len(),
+        "the witness holds the lane of each shard's global round"
+    );
     let verify_outputs: Vec<(
         Vec<Felt<C::F>>,
         [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS],
-        [Felt<C::F>; DIGEST_SIZE],
+        Option<([Felt<C::F>; DIGEST_SIZE], Vec<(String, Felt<C::F>)>)>,
     )> = shard_proof_tuples.into_iter().ir_par_map_collect::<Vec<_>, _, _>(
         builder,
         |builder, proof_tuple| {
@@ -211,39 +228,73 @@ pub fn verify_core_jagged<C, SC, A>(
                 &vk_legacy,
                 jagged_vk_ref,
                 machine.chips(),
-                global_round,
+                global_round.as_slice(),
                 machine.num_pv_elts(),
                 true,
                 None,
                 proof_tuple,
                 max_log_row_count,
             );
-            let global_chain_end = match shard.global_commitment {
-                Some(commitment) => crate::global_challenge::global_chain_step_variable(
-                    builder,
-                    machine.config(),
-                    global_chain_start,
-                    Some(&crate::global_challenge::GlobalRoundBindingVariable {
-                        commitment,
-                        chips: &shard.global_round_chips,
-                    }),
-                ),
-                None => global_chain_start,
-            };
+            assert!(
+                shard.preceding_commitments.len() <= 1,
+                "a shard commits at most one round, its global round, before its main round"
+            );
+            let round = shard
+                .preceding_commitments
+                .first()
+                .map(|commitment| (*commitment, shard.round_chips[0].clone()));
 
-            (shard.public_values, shard.global_sum, global_chain_end)
+            (shard.public_values, shard.global_sum, round)
         },
     );
+
+    let global_chain_start = crate::global_challenge::global_chain_heads_digest_variable(
+        builder,
+        machine.config(),
+        &global_chain_heads,
+    );
+    let mut lanes_end = global_chain_heads;
+    let mut chain_moves = false;
+    for ((_, _, round), lane) in verify_outputs.iter().zip_eq(global_round_lanes) {
+        let Some((commitment, chips)) = round else {
+            continue;
+        };
+        let lane = crate::global_challenge::GlobalChainLaneSelectorVariable::constrain(
+            builder,
+            lane.expect("the witness holds the lane of a shard's global round"),
+        );
+        let head = lane.head(builder, &lanes_end);
+        let head = crate::global_challenge::extend_global_chain_head_variable(
+            builder,
+            machine.config(),
+            head,
+            Some(&crate::global_challenge::GlobalRoundBindingVariable {
+                commitment: *commitment,
+                chips,
+            }),
+        );
+        lanes_end = lane.with_head(builder, &lanes_end, head);
+        chain_moves = true;
+    }
+    let shards_chain_end = if chain_moves {
+        crate::global_challenge::global_chain_heads_digest_variable(
+            builder,
+            machine.config(),
+            &lanes_end,
+        )
+    } else {
+        global_chain_start
+    };
 
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
-        let (public_values_raw, shard_global_sum, shard_chain_end) = verify_outputs
+        let (public_values_raw, shard_global_sum, _) = verify_outputs
             .into_iter()
             .next()
             .expect("single-shard normalize has exactly one verify output");
         global_sum = shard_global_sum;
-        global_chain_end = shard_chain_end;
+        global_chain_end = shards_chain_end;
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
         let chip_names = &per_shard_chip_names[i];
@@ -301,13 +352,15 @@ pub fn verify_core_jagged<C, SC, A>(
             builder.assert_felt_eq(is_first_shard * (start_pc - vk_legacy.pc_start), C::F::ZERO);
 
             if has_global_lookups {
-                let chain_origin = crate::global_challenge::global_digest_variable(
+                let lane_origin = crate::global_challenge::global_digest_variable(
                     builder,
                     machine.config(),
                     &vk_legacy,
                 );
-                for (start, origin) in global_chain_start.iter().zip(chain_origin) {
-                    builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
+                for head in global_chain_heads.iter() {
+                    for (start, origin) in head.iter().zip(lane_origin) {
+                        builder.assert_felt_eq(is_first_shard * (*start - origin), C::F::ZERO);
+                    }
                 }
             }
 
@@ -532,19 +585,32 @@ pub struct VerifiedShard<C: CircuitConfig> {
     pub global_sum: [Felt<C::F>; zkm_recursion_core::air::GLOBAL_SUM_NUM_ELTS],
     /// The commitment of the main round.
     pub main_commitment: [Felt<C::F>; DIGEST_SIZE],
-    /// The commitment of the global round, when the shard has one.
-    pub global_commitment: Option<[Felt<C::F>; DIGEST_SIZE]>,
-    /// `(name, height)` of the global round's chips, in name order.
-    pub global_round_chips: Vec<(String, Felt<C::F>)>,
+    /// The commitment of each trace round committed before the main round,
+    /// in the order the transcript observes them.
+    pub preceding_commitments: Vec<[Felt<C::F>; DIGEST_SIZE]>,
+    /// `(name, height)` of the chips of each trace round, in name order: the
+    /// rounds before the main round, in order, then the main round.
+    pub round_chips: Vec<Vec<(String, Felt<C::F>)>>,
+    /// The cells each trace round commits, its padding included, in the
+    /// order of [`Self::round_chips`]. The program fixes them.
+    pub round_areas: Vec<usize>,
     /// `(name, height)` of every chip of the shard, in name order.
     pub chip_heights: Vec<(String, Felt<C::F>)>,
 }
 
 /// Verifies one shard proof of the chips of `chips` it names, under the key
 /// `vk_legacy`: the transcript starts from the key and the public values.
-/// `global_round` names the chips committed in the global round, `global` is
-/// the cross-shard challenge of the proof's global lookups, and
+/// `preceding_rounds` are the chip sets of the trace rounds before the main
+/// round, in order: the proof commits the chips it names of each set in a
+/// round of their own, and commits no round for a set it names no chip of.
+/// `global` is the cross-shard challenge of the proof's global lookups, and
 /// `with_public_values` adds the lookups of the core public values.
+///
+/// Every round before the main round is verified as the main round is: its
+/// commitment enters the transcript, in round order, ahead of the main one,
+/// its column offsets come from the heights the transcript binds, the
+/// commitment is checked to bind the round's raw root to those heights, and
+/// the cells the round commits are those the program fixes.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_shard_tuple<C, SC, A>(
     builder: &mut Builder<C>,
@@ -552,7 +618,7 @@ pub fn verify_shard_tuple<C, SC, A>(
     vk_legacy: &VerifyingKeyVariable<C, SC>,
     jagged_vk: &crate::shard::ShardVerifyingKeyVariable<C>,
     chips: &[zkm_pcs::MachineChip<SC, A>],
-    global_round: Option<&std::collections::BTreeSet<String>>,
+    preceding_rounds: &[&std::collections::BTreeSet<String>],
     num_pv_elts: usize,
     with_public_values: bool,
     global: Option<&crate::global_challenge::GlobalChallengeVariable<C>>,
@@ -589,21 +655,19 @@ where
         MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
             .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
     });
-    let layout = zkm_pcs::shard_level::round_layout::TraceRoundLayout::for_chips(
+    let layout = zkm_pcs::shard_level::round_layout::TraceRoundLayout::for_rounds(
         &shard_chips_pre,
-        global_round,
+        preceding_rounds,
     );
-    let has_global_round = layout.has_global();
     assert_eq!(
-        rounds_witness.global.is_some(),
-        has_global_round,
-        "a shard commits a global round exactly when it has a global-round chip"
+        rounds_witness.preceding.len(),
+        layout.preceding().len(),
+        "a proof carries one commitment for each trace round its chips commit before the main \
+         round"
     );
     let round_widths = |indices: &[usize]| -> Vec<usize> {
         indices.iter().map(|&i| p3_air::BaseAir::<InnerVal>::width(shard_chips_pre[i])).collect()
     };
-    let global_widths_pre = round_widths(layout.global_indices());
-    let main_widths_pre = round_widths(layout.main_indices());
     let prep_widths_pre: Vec<usize> = {
         let mut dims: Vec<(String, usize)> = chips
             .iter()
@@ -623,10 +687,7 @@ where
     if !prep_widths_pre.is_empty() {
         column_counts_by_round_pre.push(prep_widths_pre.clone());
     }
-    if has_global_round {
-        column_counts_by_round_pre.push(global_widths_pre);
-    }
-    column_counts_by_round_pre.push(main_widths_pre);
+    column_counts_by_round_pre.extend(layout.rounds().into_iter().map(round_widths));
 
     let main_heights = crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
         builder,
@@ -634,8 +695,11 @@ where
         &proof_opened_values,
     );
     assert_eq!(main_heights.len(), layout.membership().len());
-    let global_round_chips: Vec<(String, Felt<C::F>)> =
-        layout.global_indices().iter().map(|&i| (chip_names[i].clone(), main_heights[i])).collect();
+    let round_chips: Vec<Vec<(String, Felt<C::F>)>> = layout
+        .rounds()
+        .into_iter()
+        .map(|indices| indices.iter().map(|&i| (chip_names[i].clone(), main_heights[i])).collect())
+        .collect();
     let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
         let mut heights = rounds_witness.preprocessed_row_counts.clone();
         for indices in layout.rounds() {
@@ -649,7 +713,8 @@ where
         preceding_commitments
             .push((rounds_witness.preprocessed_raw_commit, jagged_vk.preprocessed_commit));
     }
-    preceding_commitments.extend(rounds_witness.global.map(|round| (round.raw, round.hash_bound)));
+    preceding_commitments
+        .extend(rounds_witness.preceding.iter().map(|round| (round.raw, round.hash_bound)));
 
     use crate::shard_level_witness::LiftedEvalProof;
     let (whir_evaluation_proof_var, pack_info) = match &evaluation_proof {
@@ -719,7 +784,7 @@ where
     >::insertion_points_from_column_counts(&column_counts_by_round);
     let whir_pv = crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
         main_commit,
-        rounds_witness.global.map(|round| round.hash_bound),
+        rounds_witness.preceding.iter().map(|round| round.hash_bound).collect(),
         public_values_raw.clone(),
         &logup_gkr_proof,
         &zerocheck_proof,
@@ -760,8 +825,21 @@ where
         }
     }
 
-    let lsh = match &evaluation_proof {
-        LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+    let (lsh, round_areas) = match &evaluation_proof {
+        LiftedEvalProof::WhirBundle { host, whir_proof, .. } => {
+            let lsh = host.commit.log_stacking_height;
+            let stripes = &whir_proof.batch_evaluations;
+            let trace_rounds = layout.rounds().len();
+            assert!(
+                trace_rounds <= stripes.len(),
+                "the opening covers every trace round of the proof"
+            );
+            let areas = stripes[stripes.len() - trace_rounds..]
+                .iter()
+                .map(|round| round.len() << lsh)
+                .collect::<Vec<usize>>();
+            (lsh, areas)
+        }
         _ => unreachable!("whir proof variable implies a WhirBundle"),
     };
     let whir_verifier = crate::shard::JaggedShardVerifier::<
@@ -794,7 +872,7 @@ where
         eval_public_values_fn,
         jagged_evaluator_fn,
         global,
-        layout.membership(),
+        &layout,
     );
     let global_sum: Ext<C::F, C::EF> = builder.eval(global_sum);
     let global_sum = builder.ext2felt_v2(global_sum);
@@ -803,8 +881,13 @@ where
         public_values: public_values_raw,
         global_sum,
         main_commitment: main_commit,
-        global_commitment: rounds_witness.global.map(|round| round.hash_bound),
-        global_round_chips,
+        preceding_commitments: rounds_witness
+            .preceding
+            .iter()
+            .map(|round| round.hash_bound)
+            .collect(),
+        round_chips,
+        round_areas,
         chip_heights,
     }
 }
@@ -912,7 +995,9 @@ impl ZKMCoreWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
             is_complete,
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
-            global_chain_start: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+            global_chain_heads: [[p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE];
+                zkm_pcs::logup_gkr::GLOBAL_CHAIN_LANE_COUNT],
+            global_round_lanes: vec![0],
         }
     }
 

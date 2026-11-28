@@ -23,7 +23,7 @@ pub struct VerifyingKeyVariable<
     /// `StarkVerifyingKey` Witnessable) rather than baked from the
     /// compile-time `chip_information`, in place of a per-prep-domain
     /// HEIGHT block (`[log_n, 2^log_n, shift, generator]`).  WITNESSING (not
-    /// baking) is load-bearing for VALUE-INDEPENDENCE: the recursion program
+    /// baking) is required for VALUE-INDEPENDENCE: the recursion program
     /// must emit a FIXED number of reads per prep chip (2 here) regardless of
     /// the verified core vk's per-chip heights / name lengths / sort order,
     /// so the recursion VK depends only on the chip SET — not on which

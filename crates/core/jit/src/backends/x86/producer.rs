@@ -4,7 +4,7 @@
 //! program to produce, per shard, exactly what a worker's replay needs:
 //! the memory-read oracle (`recording_chunk_mem_reads`), the register
 //! records at the shard boundary, and the boundary itself (the
-//! `ShardSplitAccumulator` fence).  This backend emits the same three
+//! `ShardSplitAccumulator` limit).  This backend emits the same three
 //! things natively, so the parent runs the guest at JIT speed and only
 //! drops into the interpreter for the instructions that need it
 //! (syscalls, traps).
@@ -23,8 +23,8 @@
 //!   charged the exact amounts the interpreter's charging block adds to
 //!   the accumulator (supplied per instruction as a [`ProducerInstr`]),
 //!   and every charged budget is checked for exhaustion: `<= 0` means
-//!   the interpreter's `inc_shard_if_need` would fence here, and the
-//!   function exits with [`super::JIT_EXIT_SHARD_FENCE`] so the host
+//!   the interpreter's `inc_shard_if_need` would close the shard here, and the
+//!   function exits with [`super::JIT_EXIT_SHARD_LIMIT`] so the host
 //!   seals the chunk and re-enters.
 //!
 //! Memory operations translate the guest address against the flat
@@ -66,7 +66,7 @@ use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
 use super::{
     TranspilerBackend, AREA_LEFT_OFFSET, BAD_JUMP_TARGET_OFFSET, CLK_LIMIT_OFFSET,
     CLK_SHARD_OFFSET, CONTEXT, DELAYED_JUMP_TARGET_OFFSET, EXIT_CODE_OFFSET, HEIGHT_LEFT_OFFSET,
-    JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_ORACLE_FULL, JIT_EXIT_SHARD_FENCE, JUMP_TABLE,
+    JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_ORACLE_FULL, JIT_EXIT_SHARD_LIMIT, JUMP_TABLE,
     JUMP_TABLE_LEN_OFFSET, JUMP_TABLE_OFFSET, MEMORY_OFFSET, MEMORY_PTR, ORACLE_END_OFFSET,
     ORACLE_TAIL_OFFSET, PC_OFFSET, PENDING_JUMP_AT_START_OFFSET, REG_STAMPS_OFFSET, SHARD_OFFSET,
     TEMP_A, TEMP_B, TOUCHED_OFFSET, UNDO_END_OFFSET, UNDO_TAIL_OFFSET,
@@ -86,7 +86,7 @@ const FLAT_REOPEN: u8 = 1;
 pub const CLK_SHARD: u8 = 15; // r15
 /// Pinned oracle tail pointer (`*mut MemValue`, 12-byte stride).
 pub const ORACLE_TAIL: u8 = 6; // rsi
-/// Pinned trace-area budget (`i64`, fence when `<= 0`).
+/// Pinned trace-area budget (`i64`, shard limit when `<= 0`).
 pub const AREA_LEFT: u8 = 8; // r8
 
 /// Access positions, matching the executor's `MemoryAccessPosition`.
@@ -303,9 +303,9 @@ pub fn runs_in_interpreter(ins: &DriverInstruction) -> bool {
 
 /// Cold code emitted after the fall-off, one entry per site.
 enum Cold {
-    /// Fence: store the resume PC (the delayed target wins in a delay
-    /// slot) and exit with `JIT_EXIT_SHARD_FENCE`.
-    Fence { label: dynasmrt::DynamicLabel, pc_next: u32, delay_slot: bool },
+    /// Shard limit: store the resume PC (the delayed target wins in a delay
+    /// slot) and exit with `JIT_EXIT_SHARD_LIMIT`.
+    ShardLimit { label: dynasmrt::DynamicLabel, pc_next: u32, delay_slot: bool },
     /// Oracle full: un-roll the delay slot, store the PC to re-execute
     /// and exit with `JIT_EXIT_ORACLE_FULL`.
     Full { label: dynasmrt::DynamicLabel, pc: u32, delay_slot: bool },
@@ -317,8 +317,8 @@ enum Cold {
 
 struct Shared {
     interp_stub: dynasmrt::DynamicLabel,
-    fence_exit: dynasmrt::DynamicLabel,
-    fence_exit_pending: dynasmrt::DynamicLabel,
+    shard_limit_exit: dynasmrt::DynamicLabel,
+    shard_limit_exit_pending: dynasmrt::DynamicLabel,
     full_exit: dynasmrt::DynamicLabel,
     full_exit_unroll: dynasmrt::DynamicLabel,
     bad_jump: dynasmrt::DynamicLabel,
@@ -349,8 +349,8 @@ pub fn build_producer(
     t.syscall_handler = Some(cfg.syscall_handler);
     let shared = Shared {
         interp_stub: t.assembler.new_dynamic_label(),
-        fence_exit: t.assembler.new_dynamic_label(),
-        fence_exit_pending: t.assembler.new_dynamic_label(),
+        shard_limit_exit: t.assembler.new_dynamic_label(),
+        shard_limit_exit_pending: t.assembler.new_dynamic_label(),
         full_exit: t.assembler.new_dynamic_label(),
         full_exit_unroll: t.assembler.new_dynamic_label(),
         bad_jump: t.assembler.new_dynamic_label(),
@@ -451,7 +451,7 @@ pub fn build_producer(
                 );
             }
         } else {
-            let fence = t.assembler.new_dynamic_label();
+            let shard_limit = t.assembler.new_dynamic_label();
             for h in heights {
                 let off = HEIGHT_LEFT_OFFSET + i32::from(h.slot) * 8;
                 dynasm!(t.assembler ; .arch x64
@@ -461,12 +461,12 @@ pub fn build_producer(
             if area != 0 {
                 dynasm!(t.assembler ; .arch x64
                     ; sub Rq(AREA_LEFT), DWORD area
-                    ; jle =>fence
+                    ; jle =>shard_limit
                 );
             } else if memory || plan.delay_slot {
                 dynasm!(t.assembler ; .arch x64
                     ; test Rq(AREA_LEFT), Rq(AREA_LEFT)
-                    ; jle =>fence
+                    ; jle =>shard_limit
                 );
             }
             let charged = |slot: u8| heights.iter().any(|h| h.slot == slot);
@@ -474,7 +474,7 @@ pub fn build_producer(
                 let off = HEIGHT_LEFT_OFFSET + i32::from(slot) * 8;
                 dynasm!(t.assembler ; .arch x64
                     ; cmp QWORD [Rq(CONTEXT) + off], 0
-                    ; jle =>fence
+                    ; jle =>shard_limit
                 );
             };
             for h in heights {
@@ -492,10 +492,10 @@ pub fn build_producer(
             }
             dynasm!(t.assembler ; .arch x64
                 ; cmp Rd(CLK_SHARD), DWORD [Rq(CONTEXT) + CLK_LIMIT_OFFSET]
-                ; jae =>fence
+                ; jae =>shard_limit
             );
-            cold.push(Cold::Fence {
-                label: fence,
+            cold.push(Cold::ShardLimit {
+                label: shard_limit,
                 pc_next: pc.wrapping_add(4),
                 delay_slot: plan.delay_slot,
             });
@@ -788,8 +788,8 @@ fn emit_div(
 fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig) {
     let Shared {
         interp_stub,
-        fence_exit,
-        fence_exit_pending,
+        shard_limit_exit,
+        shard_limit_exit_pending,
         full_exit,
         full_exit_unroll,
         bad_jump,
@@ -819,13 +819,13 @@ fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig
     t.emit_dispatch_to_ctx_pc();
 
     dynasm!(t.assembler ; .arch x64
-        ; =>fence_exit_pending
+        ; =>shard_limit_exit_pending
         ; mov eax, DWORD [Rq(CONTEXT) + PENDING_JUMP_AT_START_OFFSET]
         ; test eax, eax
-        ; jz =>fence_exit
+        ; jz =>shard_limit_exit
         ; mov DWORD [Rq(CONTEXT) + PC_OFFSET], eax
-        ; =>fence_exit
-        ; mov DWORD [Rq(CONTEXT) + EXIT_CODE_OFFSET], DWORD JIT_EXIT_SHARD_FENCE as i32
+        ; =>shard_limit_exit
+        ; mov DWORD [Rq(CONTEXT) + EXIT_CODE_OFFSET], DWORD JIT_EXIT_SHARD_LIMIT as i32
         ; jmp =>exit
 
         ; =>full_exit_unroll
@@ -859,8 +859,8 @@ fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig
 
 fn emit_cold(t: &mut TranspilerBackend, s: &Shared, c: Cold) {
     match c {
-        Cold::Fence { label, pc_next, delay_slot } => {
-            let target = if delay_slot { s.fence_exit_pending } else { s.fence_exit };
+        Cold::ShardLimit { label, pc_next, delay_slot } => {
+            let target = if delay_slot { s.shard_limit_exit_pending } else { s.shard_limit_exit };
             dynasm!(t.assembler ; .arch x64
                 ; =>label
                 ; mov DWORD [Rq(CONTEXT) + PC_OFFSET], DWORD pc_next as i32

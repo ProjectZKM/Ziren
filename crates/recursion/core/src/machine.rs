@@ -1,9 +1,10 @@
 use std::ops::{Add, AddAssign};
 
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use zkm_pcs::{
     air::{MachineAir, PicusInfo},
     shape::OrderedShape,
+    stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };
 
@@ -21,9 +22,9 @@ use crate::{
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
-    instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
+    instruction::{HintBitsInstr, HintInstr},
     shape::RecursionShape,
-    Instruction, RecursionProgram, D,
+    Instruction, RecursionProgram,
 };
 
 #[derive(zkm_derive::MachineAir)]
@@ -33,7 +34,7 @@ use crate::{
 #[builder_path = "crate::builder::ZKMRecursionAirBuilder<F = F>"]
 #[error_path = "crate::RecursionChipError"]
 #[eval_trait_bound = "AB::Var: 'static"]
-pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> {
+pub enum RecursionAir<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
     BaseAlu(BaseAluChip),
@@ -69,7 +70,7 @@ pub struct RecursionAirEventCount {
     pub commit_pv_hash_events: usize,
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> RecursionAir<F, DEGREE> {
     /// A machine with dynamic chip sizes that includes the wide variant of the
     /// Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -89,6 +90,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .collect::<Vec<_>>();
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
             .with_recursion_pins(Some(zkm_pcs::jagged::RECURSION_PINS))
+            .with_max_log_row_count(RECURSION_MAX_LOG_ROW_COUNT)
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -105,12 +107,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .into_iter()
         .collect::<Vec<_>>();
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
+            .with_max_log_row_count(RECURSION_MAX_LOG_ROW_COUNT)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.
     ///
     /// This machine assumes that the `shrink` stage has a fixed shape, so there is no need to
-    /// fix the trace sizes.
+    /// fix the trace sizes.  It keeps the core row cube: the outer circuit verifies its proof,
+    /// and that circuit's constraints are a function of this machine's cube alone.
     pub fn wrap_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
@@ -189,10 +193,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
                 self.mem_var_events += output_addrs_mults.len()
             }
-            Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                output_addrs_mults,
-                input_addr: _,
-            }) => self.mem_var_events += output_addrs_mults.len(),
+            Instruction::HintExt2Felts(instr) => {
+                self.mem_var_events += instr.output_addrs_mults.len()
+            }
             Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
             Instruction::PrefixSumChecks(instr) => {
                 self.prefix_sum_checks_events += instr.addrs.x1.len()
@@ -302,7 +305,7 @@ pub mod tests {
 
     use crate::machine::RecursionAir;
     use p3_field::{
-        extension::{BinomialExtensionField, HasFrobenius},
+        extension::{HasFrobenius, QuinticTrinomialExtensionField},
         BasedVectorSpace, Field, PrimeCharacteristicRing,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
@@ -407,7 +410,7 @@ pub mod tests {
         assert!(split_proof
             .shard_proofs
             .iter()
-            .all(|p| p.jagged_shard_proof.global_commitment.is_some()));
+            .all(|p| p.jagged_shard_proof.global_round().is_some()));
 
         let machine = unsplit_machine();
         let (pk, unsplit_vk) = machine.setup(&program);
@@ -436,14 +439,14 @@ pub mod tests {
         };
         assert!(
             tampered(&|p| {
-                p.jagged_shard_proof.global_commitment.as_mut().unwrap()[0] += F::ONE;
+                p.jagged_shard_proof.preceding_rounds[0].commitment[0] += F::ONE;
             })
             .is_err(),
             "a global commitment the opening does not re-derive must be rejected"
         );
         assert!(
             tampered(&|p| {
-                p.jagged_shard_proof.global_original_commitment.as_mut().unwrap()[0] += F::ONE;
+                p.jagged_shard_proof.preceding_rounds[0].original_commitment[0] += F::ONE;
             })
             .is_err(),
             "a raw global root other than the opening's must be rejected"
@@ -451,9 +454,7 @@ pub mod tests {
         assert!(
             tampered(&|p| {
                 let jp = &mut p.jagged_shard_proof;
-                let global = jp.global_commitment.unwrap();
-                jp.global_commitment = Some(jp.main_commitment);
-                jp.main_commitment = global;
+                core::mem::swap(&mut jp.preceding_rounds[0].commitment, &mut jp.main_commitment);
             })
             .is_err(),
             "swapped global and main commitments must be rejected"
@@ -492,14 +493,15 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut addr = 0;
         for _ in 0..100 {
-            let inner: [F; 4] =
+            let inner: [F; D] =
                 std::iter::repeat_with(|| core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
                     .find(|xs| !xs.iter().all(F::is_zero))
                     .unwrap();
-            let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
+            let x =
+                QuinticTrinomialExtensionField::<F>::from_basis_coefficients_slice(&inner).unwrap();
             let gal = x.galois_orbit();
 
-            let mut acc = BinomialExtensionField::ONE;
+            let mut acc = QuinticTrinomialExtensionField::ONE;
 
             instructions.push(instr::mem_ext(MemAccessKind::Write, 1, addr, acc));
             for conj in gal {

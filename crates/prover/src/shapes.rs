@@ -19,35 +19,30 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 use zkm_recursion_circuit::machine::{
     ZKMCompressWithVkeyShape, ZKMCompressWitnessValues, ZKMCoreWitnessValues, ZKMDeferredShape,
-    ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMWrapWitnessValues,
+    ZKMDeferredWitnessValues, ZKMGlobalRoundShape, ZKMRecursionShape, ZKMWrapWitnessValues,
 };
-use zkm_recursion_core::{
-    shape::{RecursionShape, RecursionShapeConfig},
-    RecursionProgram,
-};
+use zkm_recursion_core::{shape::RecursionShapeConfig, RecursionProgram};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
     /// A single-shard normalize/recursion shape.  Carries exactly ONE
-    /// per-shard shape: the production normalize is arity-1 (`compress` →
-    /// `get_first_layer_inputs` with first_layer_batch_size=1 →
-    /// `get_recursion_core_inputs` chunks(1) → one core shard per
-    /// `ZKMCoreWitnessValues`, hard-asserted
-    /// there).  Arity≥2 Recursion shapes would be a PHANTOM
+    /// per-shard shape: the production normalize is arity-1
+    /// (`get_recursion_core_inputs` gives one `ZKMCoreWitnessValues` per core
+    /// shard).  Arity≥2 Recursion shapes would be a PHANTOM
     /// VK class no real proof produces; cross-shard aggregation lives in
     /// COMPRESS.  The `Vec` is retained for wire-format/serde stability but
     /// the enumerator emits only `vec![one]` and the dummy/in-circuit
     /// verifier asserts len==1.
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
-    /// Deferred proofs are batched `REDUCE_BATCH_SIZE` at a time
-    /// (`get_recursion_deferred_inputs` chunks by the reduce batch
-    /// size), so the deferred program — and its VK — is a function of the
-    /// BATCH ARITY exactly like `Compress`.  Enumerating only arity 1 left
-    /// every multi-proof deferred node out of the allowlist ("vk not allowed"
-    /// in `test_e2e_with_deferred_proofs`).
+    /// A deferred program verifies one batch of deferred proofs
+    /// (`get_recursion_deferred_inputs` chunks by its `batch_size`), so the
+    /// program — and its VK — is a function of the BATCH ARITY exactly like
+    /// `Compress`.  `compress` passes a batch size of 1, one deferred proof
+    /// per program; the enumeration covers the arities
+    /// `1..=REDUCE_BATCH_SIZE`.
     Deferred(Vec<OrderedShape>),
     Shrink(OrderedShape),
     /// The compose that closes the tree: the same children as `Compress`
@@ -63,6 +58,9 @@ pub enum ZKMProofShape {
     /// at exactly these (name, row count) pairs — rows, not log heights, so a
     /// representative can land on any committed-block bucket.
     Normalize(OrderedShape),
+    /// A global-round (leaf) program over one global proof: as many rounds of
+    /// one family of global-round chips at one class of stacking blocks.
+    GlobalRound(ZKMGlobalRoundShape),
 }
 
 /// The witness shape of an enumerated normalize class: exact rows per chip.
@@ -79,6 +77,7 @@ pub enum ZKMCompressProgramShape {
     Shrink(ZKMCompressWithVkeyShape),
     CompressRoot(ZKMCompressWithVkeyShape),
     Normalize(ZKMNormalizeShape),
+    GlobalRound(ZKMGlobalRoundShape),
 }
 
 impl ZKMCompressProgramShape {}
@@ -123,9 +122,8 @@ pub fn check_shapes<C: ZKMProverComponents>(
             s.spawn(move || {
                 while let Ok(shape) = shape_rx.lock().unwrap().recv() {
                     tracing::info!("shape is {:?}", shape);
-                    let program = catch_unwind(AssertUnwindSafe(|| {
-                        prover.program_from_shape(shape.clone(), None)
-                    }));
+                    let program =
+                        catch_unwind(AssertUnwindSafe(|| prover.program_from_shape(shape.clone())));
                     match program {
                         Ok(_) => {}
                         Err(e) => {
@@ -218,7 +216,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         tracing::info!("shape {i} is {shape:?}");
                         let compile_start = Instant::now();
                         let program = catch_unwind(AssertUnwindSafe(|| {
-                            prover.program_from_shape(shape.clone(), None)
+                            prover.program_from_shape(shape.clone())
                         }));
                         let compile_ns = compile_start.elapsed().as_nanos() as u64;
                         compile_total_ns.fetch_add(compile_ns, Ordering::Relaxed);
@@ -432,24 +430,19 @@ fn main_buckets(max_blocks: usize) -> Vec<usize> {
 }
 
 /// The rows of a round's event-driven chips `fill` (widest first) that put
-/// the round, `fixed_main` cells of tables included, in the bucket of `blocks`
-/// blocks, just past the bucket's lower edge, with the round's real cells; or
-/// `None` when the chips cannot reach the bucket, each holding at least one
-/// row and at most the row cube.
+/// the round, `fixed_main` cells of tables included, just past `lo` cells,
+/// the lower edge of a bucket, with the round's real cells; or `None` when
+/// the cells do not land in the bucket (`lands`), each chip holding at least
+/// one row and at most the row cube.
 fn fill_round(
-    blocks: usize,
-    block: usize,
+    lo: usize,
+    lands: impl Fn(usize) -> bool,
     fixed_main: usize,
     fill: &[&CoreChipDims],
     max_log_rows: usize,
 ) -> Option<(Vec<(String, usize)>, usize)> {
-    let hi = blocks * block;
-    let lo = zkm_pcs::jagged::previous_bucket_blocks(blocks) * block;
     let one_row_each: usize = fill.iter().map(|d| d.main_width).sum();
     let mut total = fixed_main + one_row_each;
-    if total > hi {
-        return None;
-    }
     let mut rows: Vec<(String, usize)> = Vec::with_capacity(fill.len());
     for d in fill.iter() {
         let needed = (lo + 1).saturating_sub(total);
@@ -457,8 +450,7 @@ fn fill_round(
         total += d.main_width * extra;
         rows.push((d.name.clone(), 1 + extra));
     }
-    (total > lo && zkm_pcs::jagged::committed_dense_len(total, LOG_STACK) == hi)
-        .then_some((rows, total))
+    (total > lo && lands(total)).then_some((rows, total))
 }
 
 /// Which prover sets a program's key up: the root's key is the compress
@@ -534,8 +526,9 @@ impl ZKMProofShape {
     }
 
     /// Every shape the vk map is built from: the compose/deferred/shrink
-    /// classes of [`Self::generate`] and the normalize classes of
-    /// [`Self::generate_normalize`].  The map's index space is this
+    /// classes of [`Self::generate`], the normalize classes of
+    /// [`Self::generate_normalize`] and the global-round shapes of
+    /// [`Self::generate_global_rounds`].  The map's index space is this
     /// iterator's order, so every tool that addresses shapes by index runs
     /// over it.
     pub fn generate_all<'a>(
@@ -545,48 +538,78 @@ impl ZKMProofShape {
     ) -> impl Iterator<Item = Self> + 'a {
         Self::generate(recursion_shape_config, reduce_batch_size)
             .chain(Self::generate_normalize(machine))
+            .chain(Self::generate_global_rounds(machine))
+    }
+
+    /// The global-round (leaf) shapes: every global proof a prover makes
+    /// opens rounds of one family of the machine's global-round chips
+    /// (`StarkMachine::global_family`) at one class of stacking blocks
+    /// (`zkm_pcs::jagged::global_round_class`), so its program is a function
+    /// of the family, the class and the number of rounds.
+    ///
+    /// For each family and each class its chips can fill
+    /// ([`ZKMGlobalRoundShape::rows`]), the proofs of one round up to the
+    /// most the grouping puts in one proof
+    /// (`StarkMachine::max_global_rounds_per_proof`). A round past the
+    /// largest class has no shape here.
+    pub fn generate_global_rounds(machine: &CoreMachine) -> Vec<Self> {
+        let families: BTreeSet<&BTreeSet<String>> = machine.global_families().iter().collect();
+        let mut out = Vec::new();
+        for family in families {
+            for blocks in zkm_pcs::jagged::global_round_classes(LOG_STACK) {
+                let shape = |rounds| ZKMGlobalRoundShape { chips: family.clone(), blocks, rounds };
+                if shape(1).rows(machine).is_none() {
+                    continue;
+                }
+                out.extend(
+                    (1..=machine.max_global_rounds_per_proof(family, blocks))
+                        .map(|rounds| Self::GlobalRound(shape(rounds))),
+                );
+            }
+        }
+        out
     }
 
     /// The normalize (leaf) shapes: one representative per
-    /// `(chip cluster, preprocessed bucket, global bucket, main bucket)` of the
+    /// `(chip set, preprocessed bucket, global class, main bucket)` of the
     /// core machine — the quantities a core shard's proof geometry, hence the
     /// normalize program verifying it, hence its verifying key, are a function
     /// of.
     ///
-    /// A shard's chip set is one of the machine's clusters
-    /// (`zkm_pcs::stacked_shapes::build_mips_machine_shape`); the cluster's
-    /// chips with global lookups commit in the global round and the rest
-    /// in the main round; each committed round lands on a block bucket of
-    /// `zkm_pcs::jagged::committed_dense_len`; and under
-    /// `zkm_pcs::jagged::unpinned_pad_columns` the padding-column count is a
-    /// function of the bucket.  Heights themselves are witnessed, so every
-    /// height vector inside one class yields the same program.  The
+    /// A shard's chip set is one of
+    /// `zkm_core_machine::cluster::ShardClusters::committed_chip_sets`: a
+    /// cluster with the family of its global round, the first shard's memory
+    /// image included where the shard can be the first. Its chips with global
+    /// lookups commit in the global round, at a class of stacking blocks
+    /// (`zkm_pcs::jagged::global_round_class`), and the rest in the main
+    /// round, which lands on a block bucket of
+    /// `zkm_pcs::jagged::committed_dense_len`, as the preprocessed round
+    /// does; under `zkm_pcs::jagged::unpinned_pad_columns` the padding-column
+    /// count is a function of the bucket.  Heights themselves are witnessed,
+    /// so every height vector inside one class yields the same program.  The
     /// representative keeps the preprocessed chips at their table sizes
     /// (`Program` at `2^k` rows, `MemoryProgram` at `2^m ≥ 2^k`, `Byte` at
-    /// `2^16`, `Range` at `2^11`) and fills each trace round just past its
-    /// bucket's lower edge with the round's other chips, widest first, each up
-    /// to the row cube; a bucket a round cannot reach, or a pair of buckets
-    /// whose cells exceed the two trace rounds' joint area bound, has no shard
-    /// and is skipped.
+    /// `2^16`, `Range` at `2^11`) and fills each trace round just past the
+    /// lower edge of its bucket or class with the round's other chips, widest
+    /// first, each up to the row cube; a bucket or class a round cannot
+    /// reach, or a pair whose cells exceed the two trace rounds' joint area
+    /// bound, has no shard and is skipped. A global round past the largest
+    /// class has no shape here.
     pub fn generate_normalize(machine: &CoreMachine) -> Vec<Self> {
         let dims = core_chip_dims(machine);
         let global_round = machine.global_round().cloned().unwrap_or_default();
         let block = 1usize << zkm_pcs::stacked_shapes::consts::LOG_STACKING_HEIGHT;
         let max_log_rows = zkm_pcs::stacked_shapes::consts::CORE_MAX_LOG_ROW_COUNT;
-        let machine_names: BTreeSet<String> = dims.iter().map(|d| d.name.clone()).collect();
-        let clusters: BTreeSet<BTreeSet<String>> =
-            zkm_pcs::stacked_shapes::build_mips_machine_shape()
-                .chip_clusters
-                .into_iter()
-                .map(|c| c.intersection(&machine_names).cloned().collect())
-                .collect();
+        let chip_sets = zkm_core_machine::cluster::ShardClusters::<KoalaBear>::new()
+            .committed_chip_sets(machine);
         // The executor's area budget counts unpadded events. Trace padding,
         // especially Keccak's power-of-two rows, can exceed that budget.
         // Enumerate through the jagged verifier's round-area ceiling.
         let max_area = 1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA;
         let buckets = main_buckets(max_area.div_ceil(block));
+        let classes = zkm_pcs::jagged::global_round_classes(LOG_STACK);
         let mut out = Vec::new();
-        for cluster in clusters.iter() {
+        for cluster in chip_sets.iter() {
             let mut seen: BTreeSet<(usize, usize, usize)> = BTreeSet::new();
             for program_log_rows in PROGRAM_LOG_ROWS {
                 for image_log_rows in program_log_rows..=max_log_rows {
@@ -621,13 +644,39 @@ impl ZKMProofShape {
                             if fixed_main == 0 && fill.is_empty() {
                                 return vec![(0, Vec::new(), 0)];
                             }
-                            buckets
-                                .iter()
-                                .filter_map(|&blocks| {
-                                    fill_round(blocks, block, fixed_main, &fill, max_log_rows)
+                            let filled =
+                                |blocks: usize, lo: usize, lands: &dyn Fn(usize) -> bool| {
+                                    fill_round(lo * block, lands, fixed_main, &fill, max_log_rows)
                                         .map(|(rows, total)| (blocks, rows, total))
-                                })
-                                .collect()
+                                };
+                            if global {
+                                classes
+                                    .iter()
+                                    .filter_map(|&blocks| {
+                                        let below =
+                                            if blocks > classes[0] { blocks / 2 } else { 0 };
+                                        filled(blocks, below, &|cells| {
+                                            zkm_pcs::jagged::global_round_class(cells, LOG_STACK)
+                                                == Some(blocks)
+                                        })
+                                    })
+                                    .collect()
+                            } else {
+                                buckets
+                                    .iter()
+                                    .filter_map(|&blocks| {
+                                        filled(
+                                            blocks,
+                                            zkm_pcs::jagged::previous_bucket_blocks(blocks),
+                                            &|cells| {
+                                                zkm_pcs::jagged::committed_dense_len(
+                                                    cells, LOG_STACK,
+                                                ) == blocks * block
+                                            },
+                                        )
+                                    })
+                                    .collect()
+                            }
                         };
                     let global_options = round_options(true);
                     let main_options = round_options(false);
@@ -679,9 +728,7 @@ impl ZKMProofShape {
             zkm_pcs::jagged::global_round_dense_len(
                 global,
                 LOG_STACK,
-                1usize
-                    << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                        .max_log_row_count,
+                1usize << machine.max_log_row_count(),
             ) / block,
             zkm_pcs::jagged::committed_dense_len(main, LOG_STACK) / block,
         )
@@ -724,28 +771,18 @@ impl ZKMCompressProgramShape {
             ZKMProofShape::Normalize(shape) => {
                 Self::Normalize(ZKMNormalizeShape { rows: shape.inner })
             }
+            ZKMProofShape::GlobalRound(shape) => Self::GlobalRound(shape),
         }
     }
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
-    pub fn program_from_shape(
-        &self,
-        shape: ZKMCompressProgramShape,
-        shrink_shape: Option<RecursionShape>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let _ = shrink_shape;
-        self.program_from_shape_jagged(shape)
-    }
-
-    /// WHIR companion to [`Self::program_from_shape`]. Builds a
-    /// recursion program from a cached shape using the jagged-pipeline
-    /// program builders (`recursion_program`,
-    /// `compose_program`, etc.).
+    /// The recursion program of an enumerated shape, built by the builders
+    /// a proof of that shape reaches (`recursion_program`, `compose_program`,
+    /// and so on) over a dummy input, so both give the same program.
     ///
-    /// Used by `build_compress_vks` to regenerate `vk_map.bin` against the
-    /// whir compress programs.
-    pub fn program_from_shape_jagged(
+    /// Used by `build_compress_vks` to regenerate `vk_map.bin`.
+    pub fn program_from_shape(
         &self,
         shape: ZKMCompressProgramShape,
     ) -> Arc<RecursionProgram<KoalaBear>> {
@@ -780,6 +817,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 );
                 self.recursion_program(&input).0
             }
+            ZKMCompressProgramShape::GlobalRound(shape) => {
+                self.global_round_program_for_shape(&shape).0
+            }
         }
     }
 }
@@ -810,10 +850,10 @@ mod tests {
             .collect();
         assert!(!roots.is_empty(), "the enumeration emits closing composes");
         for (i, shape) in roots.into_iter().enumerate() {
-            let program = prover.program_from_shape(
-                ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT),
-                None,
-            );
+            let program = prover.program_from_shape(ZKMCompressProgramShape::from_proof_shape(
+                shape,
+                crate::VK_MERKLE_TREE_HEIGHT,
+            ));
             let heights = CompressAir::<KoalaBear>::heights(&program);
             let organic =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::organic_shape(&heights);
@@ -841,7 +881,7 @@ mod tests {
     /// must itself fit the shape.  Prints the organic rows per chip against
     /// the caps, plus committed cells, so the caps can be re-sized from
     /// measurement (the leaf side is surveyed in production with
-    /// `ZIREN_FIXSHAPE_DIAG=1`; see the shape's comment).
+    /// the `fix_shape` shape events, `RUST_LOG=ziren::shape=debug`).
     ///
     /// `cargo test -r -p zkm-prover single_shape_fixed_point -- --ignored --nocapture`
     #[test]
@@ -889,8 +929,8 @@ mod tests {
         caps_sorted.sort();
         tracing::info!("[FIXPOINT] shape = {caps_sorted:?} cells={}", cells(&caps_sorted));
 
-        let max_log_row_count = ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
         let machine = prover.compress_prover.machine();
+        let max_log_row_count = machine.max_log_row_count();
         let mut worst: std::collections::BTreeMap<String, (usize, String)> =
             std::collections::BTreeMap::new();
         let mut overflow = Vec::new();
@@ -1354,7 +1394,7 @@ mod tests {
             "[HETERO] heterogeneous arity-2 batches built={hetero_total} MISSED_by_uniform_enum={hetero_missed}"
         );
         tracing::info!(
-            "[HETERO] VERDICT: {}",
+            "[HETERO] RESULT: {}",
             if hetero_missed == 0 {
                 "uniform enum COVERS heterogeneous batches (order/mix-independent VK)"
             } else {
@@ -1427,15 +1467,15 @@ mod normalize_enumeration_tests {
     use crate::components::DefaultProverComponents;
     use crate::REDUCE_BATCH_SIZE;
 
-    /// One real leaf of the production census: whether it was the first shard
+    /// One real leaf recorded in production: whether it was the first shard
     /// and its per-chip row counts.
-    struct CensusLeaf {
+    struct RecordedLeaf {
         first: bool,
         rows: Vec<(String, usize)>,
     }
 
-    fn parse_census(path: &str) -> Vec<CensusLeaf> {
-        let text = std::fs::read_to_string(path).expect("census file");
+    fn parse_recorded_leaves(path: &str) -> Vec<RecordedLeaf> {
+        let text = std::fs::read_to_string(path).expect("recorded leaves file");
         let mut seen: BTreeSet<(bool, String)> = BTreeSet::new();
         let mut out = Vec::new();
         for line in text.lines() {
@@ -1454,7 +1494,7 @@ mod normalize_enumeration_tests {
                 .filter_map(|kv| kv.split_once(':'))
                 .map(|(n, h)| (n.to_string(), h.parse().expect("row count")))
                 .collect();
-            out.push(CensusLeaf { first, rows });
+            out.push(RecordedLeaf { first, rows });
         }
         out
     }
@@ -1487,6 +1527,40 @@ mod normalize_enumeration_tests {
         assert!(shapes.len() + compose <= 1 << crate::VK_MERKLE_TREE_HEIGHT);
     }
 
+    /// The four normalize shapes of every committed chip set whose rounds
+    /// commit the most stacking blocks build programs that fit a recursion
+    /// pin class. A normalize program grows with the blocks the shard commits,
+    /// so these are the shapes of each chip set nearest the largest class; a
+    /// shape past it would have no key.
+    #[test]
+    fn the_largest_normalize_shapes_fit_a_pin_class() {
+        use rayon::prelude::*;
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let mut by_chips: BTreeMap<BTreeSet<String>, Vec<(usize, Vec<(String, usize)>)>> =
+            BTreeMap::new();
+        for shape in ZKMProofShape::generate_normalize(machine) {
+            let rows = shape_rows(&shape);
+            let (chips, prep, global, main) = ZKMProofShape::normalize_class(machine, &rows);
+            by_chips.entry(chips).or_default().push((prep + global + main, rows));
+        }
+        let largest = by_chips
+            .into_values()
+            .flat_map(|mut shapes| {
+                shapes.sort_by_key(|(blocks, _)| core::cmp::Reverse(*blocks));
+                shapes.into_iter().take(4).map(|(_, rows)| rows)
+            })
+            .collect::<Vec<_>>();
+        largest.par_iter().for_each(|rows| {
+            let input = zkm_recursion_circuit::machine::ZKMCoreWitnessValues::dummy_rows(
+                machine, rows, false,
+            );
+            prover.build_normalize_program_uncached(&input);
+        });
+    }
+
+    /// A precompile shard of a mainnet block, as the prover commits it:
+    /// `SyscallCore` is a chip of its cluster and has no rows.
     #[test]
     fn normalize_enumeration_covers_padded_keccak_shard() {
         let prover = ZKMProver::<DefaultProverComponents>::new();
@@ -1501,6 +1575,7 @@ mod normalize_enumeration_tests {
             ("MemoryLocal", 55_136),
             ("Program", 1_048_576),
             ("Range", 2_048),
+            ("SyscallCore", 0),
             ("SyscallPrecompile", 32),
         ]
         .into_iter()
@@ -1521,23 +1596,27 @@ mod normalize_enumeration_tests {
         );
     }
 
-    /// Every leaf the production census recorded (`ZIREN_CENSUS_FILE`, lines
+    /// Every leaf recorded in production (`ZIREN_RECORDED_LEAVES_FILE`, lines
     /// with `first=` and `heights=`) falls in an enumerated class, and its
     /// normalize program is byte-identical to the class representative's; the
     /// first-shard flag, being a witness, does not move the program either.
     ///
-    /// `ZIREN_CENSUS_FILE=census.txt cargo test -r -p zkm-prover
-    ///  normalize_enumeration_covers_census -- --ignored --nocapture`
+    /// `ZIREN_RECORDED_LEAVES_FILE=leaves.txt cargo test -r -p zkm-prover
+    ///  normalize_enumeration_covers_recorded_leaves -- --ignored --nocapture`
     #[test]
     #[ignore]
-    fn normalize_enumeration_covers_census() {
+    fn normalize_enumeration_covers_recorded_leaves() {
         zkm_core_machine::utils::setup_logger();
-        let path = std::env::var("ZIREN_CENSUS_FILE").expect("ZIREN_CENSUS_FILE");
-        let per_class: usize =
-            std::env::var("ZIREN_CENSUS_PER_CLASS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
-        let threads: usize =
-            std::env::var("ZIREN_CENSUS_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
-        let leaves = parse_census(&path);
+        let path = std::env::var("ZIREN_RECORDED_LEAVES_FILE").expect("ZIREN_RECORDED_LEAVES_FILE");
+        let per_class: usize = std::env::var("ZIREN_RECORDED_LEAVES_PER_CLASS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3);
+        let threads: usize = std::env::var("ZIREN_RECORDED_LEAVES_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8);
+        let leaves = parse_recorded_leaves(&path);
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
         let representatives: BTreeMap<_, ZKMProofShape> =
@@ -1546,7 +1625,7 @@ mod normalize_enumeration_tests {
                 .map(|s| (ZKMProofShape::normalize_class(machine, &shape_rows(&s)), s))
                 .collect();
 
-        let mut by_class: BTreeMap<_, Vec<&CensusLeaf>> = BTreeMap::new();
+        let mut by_class: BTreeMap<_, Vec<&RecordedLeaf>> = BTreeMap::new();
         for leaf in leaves.iter() {
             by_class
                 .entry(ZKMProofShape::normalize_class(machine, &leaf.rows))
@@ -1564,7 +1643,7 @@ mod normalize_enumeration_tests {
             );
         }
 
-        let jobs: Vec<(&CensusLeaf, &ZKMProofShape)> = by_class
+        let jobs: Vec<(&RecordedLeaf, &ZKMProofShape)> = by_class
             .iter()
             .filter_map(|(class, ls)| representatives.get(class).map(|rep| (ls, rep)))
             .flat_map(|(ls, rep)| ls.iter().take(per_class).map(move |l| (*l, rep)))
@@ -1601,7 +1680,7 @@ mod normalize_enumeration_tests {
         let mismatched = mismatched.load(Ordering::Relaxed);
         let first_moved = first_moved.load(Ordering::Relaxed);
         tracing::info!(
-            "census leaves {} in {} classes; representatives {}; checked {}; missing classes {}; \
+            "recorded leaves {} in {} classes; representatives {}; checked {}; missing classes {}; \
              mismatched {}; first-flag moved {}",
             leaves.len(),
             by_class.len(),
@@ -1612,6 +1691,135 @@ mod normalize_enumeration_tests {
             first_moved
         );
         assert!(missing.is_empty() && mismatched == 0 && first_moved == 0);
+    }
+}
+
+#[cfg(test)]
+mod global_round_enumeration_tests {
+    use super::*;
+    use zkm_pcs::logup_gkr::GlobalRoundBinding;
+
+    /// The global round of a shard that holds `tables` (chip, rows): the
+    /// chips of its family, the ones the shard lacks without rows.
+    fn round(machine: &CoreMachine, tables: &[(&str, usize)]) -> GlobalRoundBinding<KoalaBear> {
+        let family = machine
+            .global_family(tables.iter().map(|(name, _)| *name))
+            .expect("the shard's family");
+        GlobalRoundBinding {
+            commitment: [KoalaBear::ZERO; 8],
+            chips: family
+                .iter()
+                .map(|name| {
+                    let rows =
+                        tables.iter().find(|(of, _)| of == name).map_or(0, |(_, rows)| *rows);
+                    (name.clone(), rows)
+                })
+                .collect(),
+        }
+    }
+
+    /// The global rounds of an execution laid out like a mainnet block's: the
+    /// first shard, execution and precompile shards whose rounds mostly fill
+    /// 8 stacking blocks and now and then 16 to 72, then the memory shards,
+    /// six of 27 blocks and one at each block count below, the last with
+    /// finalize events alone. However many lanes a prover spreads them over,
+    /// every global proof the grouping makes has an enumerated shape.
+    ///
+    /// The two memory tables are 36 columns together: a memory shard of
+    /// `3 << 19` events per table fills 27 blocks, the class of 32, and the
+    /// row cube bounds their round at 72 blocks, so the memory family has
+    /// shapes up to the class of 128 blocks and none at 256.
+    #[test]
+    fn global_round_enumeration_covers_the_groups_of_a_block() {
+        let machine: CoreMachine = zkm_core_machine::mips::MipsAir::machine(
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::new(),
+        );
+        let enumerated: BTreeSet<ZKMProofShape> =
+            ZKMProofShape::generate_global_rounds(&machine).into_iter().collect();
+        let dims = core_chip_dims(&machine);
+        let width = |name: &str| dims.iter().find(|d| d.name == name).unwrap().main_width;
+        let filling = |name: &str, blocks: usize| ((blocks << LOG_STACK) - 100_000) / width(name);
+
+        let mut rounds = vec![round(
+            &machine,
+            &[
+                ("MemoryImage", 1 << 16),
+                ("MemoryLocal", filling("MemoryLocal", 6)),
+                ("SyscallCore", 9),
+            ],
+        )];
+        for shard in 0..600 {
+            let blocks = if shard % 20 < 17 { 8 } else { [16, 24, 32, 40, 48, 72][shard / 20 % 6] };
+            let local = ("MemoryLocal", filling("MemoryLocal", blocks) - 1000);
+            rounds.push(match shard % 7 {
+                0 => round(&machine, &[local, ("SyscallPrecompile", 1000)]),
+                1 => round(&machine, &[local]),
+                _ => round(&machine, &[local, ("SyscallCore", 1000)]),
+            });
+        }
+        let memory = |blocks: usize| {
+            let rows = filling("MemoryGlobalInit", blocks) / 2;
+            round(&machine, &[("MemoryGlobalInit", rows), ("MemoryGlobalFinalize", rows)])
+        };
+        let full =
+            round(&machine, &[("MemoryGlobalInit", 3 << 19), ("MemoryGlobalFinalize", 3 << 19)]);
+        assert_eq!(machine.global_round_blocks(&full), 32);
+        rounds.extend((0..6).map(|_| memory(27)));
+        rounds.extend((1..27).rev().map(memory));
+        rounds.push(round(&machine, &[("MemoryGlobalFinalize", 5000)]));
+
+        let mut seen = BTreeSet::new();
+        for lanes in [1, 2, 4, 8] {
+            let groups = machine.global_proof_groups_by_lane(
+                rounds.iter().enumerate().map(|(i, round)| ((i % lanes) as u8, round, ())),
+                zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF,
+            );
+            for group in groups {
+                let shape = |round: &GlobalRoundBinding<KoalaBear>| ZKMGlobalRoundShape {
+                    chips: round.chips.iter().map(|(name, _)| name.clone()).collect(),
+                    blocks: machine.global_round_blocks(round),
+                    rounds: group.len(),
+                };
+                let first = shape(group[0].0);
+                assert!(
+                    group.iter().all(|(round, ())| shape(round) == first),
+                    "a global proof opens rounds of several shapes"
+                );
+                assert!(
+                    enumerated.contains(&ZKMProofShape::GlobalRound(first.clone())),
+                    "on {lanes} lanes the grouping makes a proof of {first:?}, which is not \
+                     enumerated"
+                );
+                seen.insert(first);
+            }
+        }
+        let families = seen.iter().map(|shape| &shape.chips).collect::<BTreeSet<_>>();
+        assert_eq!(families.len(), 3, "the block's rounds are of {families:?}");
+        assert!(seen.iter().any(|shape| shape.blocks == 8 && shape.rounds > 16));
+        assert!(seen.iter().any(|shape| shape.blocks == 128 && shape.rounds > 1));
+
+        let memory_family = machine.global_family(["MemoryGlobalInit"]).unwrap();
+        let memory_blocks = |shapes: &mut dyn Iterator<Item = &ZKMGlobalRoundShape>| {
+            shapes
+                .filter(|shape| &shape.chips == memory_family)
+                .map(|shape| (shape.blocks, shape.rounds))
+                .collect::<BTreeSet<_>>()
+        };
+        let seen_memory = memory_blocks(&mut seen.iter());
+        assert_eq!(
+            seen_memory.last(),
+            Some(&(32, machine.max_global_rounds_per_proof(memory_family, 32))),
+            "the full memory rounds are in {seen_memory:?}"
+        );
+        let enumerated_memory =
+            memory_blocks(&mut enumerated.iter().filter_map(|shape| match shape {
+                ZKMProofShape::GlobalRound(shape) => Some(shape),
+                _ => None,
+            }));
+        assert_eq!(
+            enumerated_memory.iter().map(|(blocks, _)| *blocks).collect::<BTreeSet<_>>(),
+            BTreeSet::from([8, 16, 32, 64, 128])
+        );
     }
 }
 
@@ -1646,7 +1854,7 @@ mod shape_program_dump {
             let shape = shape.clone();
             let program_shape =
                 ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT);
-            let program = prover.program_from_shape(program_shape, None);
+            let program = prover.program_from_shape(program_shape);
             let heights =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
                     &program,

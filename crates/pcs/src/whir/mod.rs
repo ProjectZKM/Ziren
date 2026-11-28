@@ -8,9 +8,9 @@
 //! Merkle-opened against the previous codeword and folded into the running
 //! claim.  [`jagged::core_whir_config`] fixes the production geometry — folds
 //! `[3, 6, 6, …]`, two OOD samples per committed round, per-round query
-//! counts chosen for 100 bits in the unique-decoding regime, a 16-bit query
-//! grind and the batching grind — and `whir_circuit.rs` in the recursion
-//! circuit verifies the same transcript in-circuit.
+//! counts solved for 128 bits (the committed stripes in the unique-decoding
+//! regime), the query grind and the batching grind — and `whir_circuit.rs` in
+//! the recursion circuit verifies the same transcript in-circuit.
 //!
 //! The building blocks are shared with the production path: [`config`] holds
 //! the round parameters, [`proof`] the wire types, [`sumcheck::prove_fold`]
@@ -25,7 +25,7 @@
 //! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
 //! the earlier single-polynomial (non-stacked) prover and verifier variants.
 //! They share the transcript rules above but are exercised only by this
-//! module's tests, so they compile only with them; the verdict type they
+//! module's tests, so they compile only with them; the error type they
 //! share with the production verifier lives in [`error`].
 
 pub mod code;

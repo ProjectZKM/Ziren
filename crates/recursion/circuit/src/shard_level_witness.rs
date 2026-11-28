@@ -268,7 +268,8 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // placeholder).
 /// Commitments and heights witnessed for a shard's opening rounds.
 /// Chip names and widths come from the machine; these values bind the
-/// preprocessed and optional global rounds and every round's padding.
+/// preprocessed round, the trace rounds before the main round and every
+/// round's padding.
 pub struct ShardRoundsWitness<C: CircuitConfig> {
     /// The preprocessed round's RAW WHIR cap root, which the WHIR open binds
     /// against.  `compress([this, hash(counts)])` must equal the key's
@@ -281,9 +282,11 @@ pub struct ShardRoundsWitness<C: CircuitConfig> {
     /// recursion round (whose committed area is PINNED far above its real
     /// cells) carries many where a core round carries one.
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
-    /// The global round's raw root and hash-bound commitment, when the
-    /// shard commits one.
-    pub global: Option<RoundCommitments<C::F>>,
+    /// The raw root and hash-bound commitment of each trace round committed
+    /// before the main round, in the order the transcript observes them: a
+    /// shard's global round, or every table slot of a global proof but the
+    /// last.
+    pub preceding: Vec<RoundCommitments<C::F>>,
 }
 
 /// The two commitments to one round, in witness-stream order.
@@ -325,18 +328,19 @@ where
             .iter()
             .map(|round| round.iter().map(|f| f.read(builder)).collect())
             .collect();
-        let global =
-            self.global_original_commitment.zip(self.global_commitment).map(|(raw, commitment)| {
-                RoundCommitments {
-                    raw: core::array::from_fn(|i| raw[i].read(builder)),
-                    hash_bound: core::array::from_fn(|i| commitment[i].read(builder)),
-                }
-            });
+        let preceding = self
+            .preceding_rounds
+            .iter()
+            .map(|round| RoundCommitments {
+                raw: core::array::from_fn(|i| round.original_commitment[i].read(builder)),
+                hash_bound: core::array::from_fn(|i| round.commitment[i].read(builder)),
+            })
+            .collect();
         let rounds_witness = ShardRoundsWitness::<C> {
             preprocessed_raw_commit: preprocessed_commit_arr,
             preprocessed_row_counts,
             padding_heights: padding_row_heights,
-            global,
+            preceding,
         };
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
@@ -407,9 +411,8 @@ where
                 f.write(witness);
             }
         }
-        if let Some((raw, commitment)) = self.global_original_commitment.zip(self.global_commitment)
-        {
-            for f in raw.iter().chain(commitment.iter()) {
+        for round in self.preceding_rounds.iter() {
+            for f in round.original_commitment.iter().chain(round.commitment.iter()) {
                 f.write(witness);
             }
         }

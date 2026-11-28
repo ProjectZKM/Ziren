@@ -139,6 +139,16 @@ pub(crate) mod tests {
 
     use super::WIDTH;
 
+    /// The zerocheck sums constraints of degree at most 3, so the chip of the
+    /// compress machine, which has no columns for the cubes of the S-box,
+    /// must not exceed it.
+    #[test]
+    fn compress_chip_constraints_have_degree_three() {
+        let chip = RecursionAir::<KoalaBear, 3>::Poseidon2Wide(super::Poseidon2WideChip::<3>);
+        let degrees = zkm_pcs::air::capture_machine_constraints(&chip).max_constraint_degrees();
+        assert_eq!(degrees.base.max(degrees.extension), 3);
+    }
+
     #[test]
     fn test_poseidon2() {
         setup_logger();

@@ -138,9 +138,11 @@ pub struct JaggedShardProofVariable<C: CircuitConfig, HV: crate::hash::FieldHash
     /// so this stays `[Felt;8]` and is observed felt-by-felt to match
     /// the host shard verifier's transcript.
     pub main_commitment: [Felt<C::F>; 8],
-    /// The global round's commitment, observed between the public
-    /// values and the main commitment; `None` for a shard without one.
-    pub global_commitment: Option<[Felt<C::F>; 8]>,
+    /// The commitment of each trace round committed before the main round,
+    /// observed in order between the public values and the main commitment:
+    /// a shard's global round, or every table slot of a global proof but the
+    /// last.
+    pub preceding_commitments: Vec<[Felt<C::F>; 8]>,
     /// Per-chip log-degree bits (variable-width, max bound by
     /// `pcs_verifier.max_log_row_count + 1`).
     pub chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
@@ -305,9 +307,9 @@ impl<P> JaggedShardVerifier<P> {
     ///   * `global` — the cross-shard challenge of the shard's global
     ///     lookups; its digest opens the transcript.  `None` for a machine
     ///     without global lookups.
-    ///   * `in_global_round` — per shard chip, whether it is committed in the
-    ///     global round, which is opened between the preprocessed round
-    ///     and the main round.
+    ///   * `trace_rounds` — which shard chips each trace round before the
+    ///     main round commits, and which the main round. The rounds are
+    ///     opened in that order, after the preprocessed round.
     ///
     /// Returns the sum of the shard's global lookup fractions.
     #[allow(clippy::too_many_arguments)]
@@ -326,7 +328,7 @@ impl<P> JaggedShardVerifier<P> {
         eval_public_values_fn: EVPV,
         jagged_evaluator_fn: JE,
         global: Option<&crate::global_challenge::GlobalChallengeVariable<C>>,
-        in_global_round: &[bool],
+        trace_rounds: &zkm_pcs::shard_level::round_layout::TraceRoundLayout,
     ) -> SymbolicExt<C::F, C::EF>
     where
         C: CircuitConfig<F = SC::Val>,
@@ -354,19 +356,19 @@ impl<P> JaggedShardVerifier<P> {
         let _ = vk;
         let JaggedShardProofVariable {
             main_commitment,
-            global_commitment,
+            preceding_commitments,
             chip_height_bits,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
         } = proof;
-        assert_eq!(in_global_round.len(), shard_chips.len());
-        let has_global_round = in_global_round.contains(&true);
+        assert_eq!(trace_rounds.membership().len(), shard_chips.len());
         assert_eq!(
-            global_commitment.is_some(),
-            has_global_round,
-            "a shard commits a global round exactly when it has a global-round chip"
+            preceding_commitments.len(),
+            trace_rounds.preceding().len(),
+            "a proof carries one commitment for each trace round its chips commit before the \
+             main round"
         );
 
         for h in global.iter().flat_map(|g| g.h_star.iter()) {
@@ -377,7 +379,7 @@ impl<P> JaggedShardVerifier<P> {
             challenger.observe(builder, *value);
         }
 
-        for limb in global_commitment.iter().flatten() {
+        for limb in preceding_commitments.iter().flatten() {
             challenger.observe(builder, *limb);
         }
 
@@ -457,22 +459,16 @@ impl<P> JaggedShardVerifier<P> {
             })
             .map(|(i, _)| i)
             .collect();
-        let has_prep_round = insertion_points.len() > 1 + usize::from(has_global_round);
+        let has_prep_round = insertion_points.len() > 1 + trace_rounds.preceding().len();
         let mut evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
         if has_prep_round && !prep_positions.is_empty() {
             for &i in prep_positions.iter() {
                 evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
             }
         }
-        for global_round in [true, false] {
-            evaluation_claims.extend(
-                opened_values
-                    .chips
-                    .iter()
-                    .zip(in_global_round.iter())
-                    .filter(|(_, in_global)| **in_global == global_round)
-                    .map(|(chip, _)| chip.main.local.clone()),
-            );
+        for round in trace_rounds.rounds() {
+            evaluation_claims
+                .extend(round.iter().map(|&i| opened_values.chips[i].main.local.clone()));
         }
 
         {

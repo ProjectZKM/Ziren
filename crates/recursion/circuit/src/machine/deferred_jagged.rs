@@ -135,6 +135,11 @@ pub fn verify_deferred_jagged<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let ZKMDeferredWitnessVariable {
         vks_and_proofs,
         vk_merkle_data,
@@ -178,6 +183,10 @@ pub fn verify_deferred_jagged<C, SC, A>(
             proof_opened_values,
             rounds_witness,
         ) = proof_tuple;
+        assert!(
+            rounds_witness.preceding.is_empty(),
+            "a recursion shard proof commits no trace round before its main round"
+        );
 
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
@@ -304,7 +313,7 @@ pub fn verify_deferred_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
-                None,
+                Vec::new(),
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -373,7 +382,10 @@ pub fn verify_deferred_jagged<C, SC, A>(
             eval_public_values_fn,
             jagged_evaluator_fn,
             None,
-            &vec![false; shard_chips.len()],
+            &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+                shard_chips.len(),
+                Vec::new(),
+            ),
         );
 
         let current_public_values: &RecursionPublicValues<Felt<C::F>> =

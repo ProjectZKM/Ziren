@@ -701,7 +701,7 @@ pub mod jagged {
     }
 
     /// **Shared linear core** — the path-INDEPENDENT challenger sequence at
-    /// the heart of every jagged prove, under either inner PCS: sample `z_col`
+    /// the core of every jagged prove, under either inner PCS: sample `z_col`
     /// at the verifier-matching transcript position → jagged-sumcheck
     /// reduction → jagged-eval sub-protocol → point-extension
     /// `log_dense → log2(area)` via extra Fiat-Shamir coords → open.
@@ -1019,19 +1019,16 @@ pub mod jagged {
             r_row_per_chip.extend(r.r_row_per_chip.iter().cloned());
 
             let area = r.precomputed.prover_data.area;
-            let pad = area - pk.total_values;
             {
                 let cube = 1usize << z_row.len();
-                let pad_heights: Vec<usize> = {
-                    let k = r.precomputed.fixed_pad_columns.unwrap_or_else(|| {
-                        crate::jagged::unpinned_pad_columns(
-                            pk.total_values,
-                            DEFAULT_LOG_STACKING_HEIGHT as usize,
-                            cube,
-                        )
-                    });
-                    crate::jagged::AreaPin::split_padding(pad, k, cube)
-                };
+                let pad_heights: Vec<usize> = crate::jagged::round_padding_heights(
+                    pk.total_values,
+                    area,
+                    r.precomputed.fixed_pad_columns,
+                    DEFAULT_LOG_STACKING_HEIGHT as usize,
+                    cube,
+                )
+                .expect("a round's padding gap fits its padding columns");
                 let mut pad_off = base + pk.total_values;
                 let mut this_round_pads: Vec<usize> = Vec::new();
                 for h in pad_heights {
@@ -1363,7 +1360,8 @@ pub mod jagged {
     /// holds; empty for a machine without preprocessed traces.
     /// `opened_main` are the openings the AIR phases consumed, index-aligned
     /// with `chip_infos` and `bundle.y_per_chip`, for the cross-bind; required
-    /// on this ring as on the inner one.
+    /// on this ring as on the inner one. A column of `chip_infos` taller than
+    /// the row cube `2^|z_row|`, a chip's or a padding column, is rejected.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
@@ -1396,6 +1394,10 @@ pub mod jagged {
         if bundle.commit.log_stacking_height != DEFAULT_LOG_STACKING_HEIGHT {
             return false;
         }
+        if chip_infos.iter().any(|info| info.row_count > 1usize << z_row.len()) {
+            tracing::warn!("[jagged verify] a column is taller than the row cube");
+            return false;
+        }
         let whir_proof = &bundle.whir_proof;
         if !skip_commit_observe {
             challenger.observe(bundle.commit.original_commitment.clone());
@@ -1424,10 +1426,18 @@ pub mod jagged {
             z_row,
             challenger,
         );
-        let Some((z_star, q_at_z, _w_at_z)) = red_result else {
+        let Some((z_star, q_at_z, w_at_z)) = red_result else {
             tracing::warn!("[jagged verify] jagged sumcheck reduction rejected");
             return false;
         };
+        if let Err(why) = crate::jagged_eval_sumcheck::check_jagged_evaluation_claim(
+            &bundle.jagged_eval,
+            &packing.offsets,
+            w_at_z,
+        ) {
+            tracing::warn!("[jagged verify] {why}");
+            return false;
+        }
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
             &bundle.jagged_eval,
             challenger,
@@ -1698,7 +1708,7 @@ mod test {
 
     fn rand_ef<R: Rng>(rng: &mut R) -> JaggedChallenge {
         <JaggedChallenge as BasedVectorSpace<JaggedVal>>::from_basis_coefficients_iter(
-            (0..4).map(|_| rand_kb(rng)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(rng)),
         )
         .unwrap()
     }
@@ -2378,7 +2388,7 @@ mod test {
     /// `DEFAULT_LOG_STACKING_HEIGHT` must be REJECTED, and rejected before any
     /// geometry is derived from it: the height feeds `area >> h` and
     /// `1 << (h + batch_dim)`, so a hostile `h` near `usize::BITS` would
-    /// otherwise reach a shift overflow rather than a verdict.
+    /// otherwise reach a shift overflow rather than a rejection.
     ///
     /// Covers the boundary set the audit asks for — `0`, `2`, one below and one
     /// above the production value, and the two shift-overflow edges.

@@ -18,7 +18,9 @@ impl<F> BaseAir<F> for SyscallInstrsChip {
 mod tests {
     use std::borrow::{Borrow, BorrowMut};
 
-    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing, PrimeField32};
+    use p3_field::{
+        extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing, PrimeField32,
+    };
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use zkm_core_executor::{
@@ -32,7 +34,7 @@ mod tests {
     use super::{columns::SyscallInstrColumns, SyscallInstrsChip};
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     /// The `SYSCALL` row of one call of `code` with arguments `a0`, `a1`.
     fn syscall_row(code: SyscallCode, a0: u32, a1: u32) -> Vec<F> {

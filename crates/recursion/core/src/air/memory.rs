@@ -1,7 +1,7 @@
 use p3_field::PrimeField32;
 use zkm_derive::AlignedBorrow;
 
-use crate::air::Block;
+use crate::{air::Block, runtime::D};
 
 #[derive(AlignedBorrow, Default, Debug, Clone)]
 #[repr(C)]
@@ -35,7 +35,7 @@ impl<T: PrimeField32> MemoryInitCols<T> {
         Self {
             addr: T::ZERO,
             timestamp: T::ZERO,
-            value: Block::from([T::ZERO; 4]),
+            value: Block::from([T::ZERO; D]),
             is_initialize: T::ZERO,
             is_finalize: T::ZERO,
             diff_16bit_limb: T::ZERO,

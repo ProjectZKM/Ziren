@@ -20,6 +20,13 @@ fn main() {
             ZKMProofShape::Deferred(v) => ("Deferred", v.as_slice()),
             ZKMProofShape::Shrink(v) => ("Shrink", std::slice::from_ref(v)),
             ZKMProofShape::Normalize(v) => ("Normalize", std::slice::from_ref(v)),
+            ZKMProofShape::GlobalRound(shape) => {
+                println!(
+                    "{i} GlobalRound rounds={} blocks={} chips={:?}",
+                    shape.rounds, shape.blocks, shape.chips
+                );
+                continue;
+            }
         };
         let summary: Vec<String> = children
             .iter()

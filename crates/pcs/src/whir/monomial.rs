@@ -15,8 +15,9 @@
 //!   * [`mono_eval`] evaluates a coefficient vector: `Σ_i coeff_i · v[i]`.
 //!   * [`map_to_pow`] maps a domain element `x` to `[x^{2^{k-1}}, …, x², x]`,
 //!     the point at which a monomial multilinear eval equals the univariate
-//!     `Σ_i coeff_i x^i` (the keystone that makes STIR's codeword-fold a
-//!     multilinear constraint — see the `keystone_*` tests).
+//!     `Σ_i coeff_i x^i` (the identity that makes STIR's codeword-fold a
+//!     multilinear constraint — see the `mono_eval_is_univariate` and
+//!     `codeword_is_mono_eval` tests).
 //!   * [`full_monomial_basis_eq`] is `Π_j (a_j·b_j + 1 − b_j)`.
 
 use alloc::vec::Vec;
@@ -111,14 +112,17 @@ mod test {
     }
     fn rand_ef(r: &mut StdRng) -> EF {
         use p3_field::BasedVectorSpace;
-        <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| clamp(r))).unwrap()
+        <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
+            (0..crate::air::EXTENSION_DEGREE).map(|_| clamp(r)),
+        )
+        .unwrap()
     }
 
-    /// The keystone: a monomial multilinear eval at `map_to_pow(x)` equals the
+    /// The key identity: a monomial multilinear eval at `map_to_pow(x)` equals the
     /// univariate `Σ_i coeff_i x^i`.  This is what turns a codeword value (a
     /// univariate evaluation) into a multilinear constraint for the sumcheck.
     #[test]
-    fn keystone_mono_eval_is_univariate() {
+    fn mono_eval_is_univariate() {
         let m = 5usize;
         let mut rng = StdRng::seed_from_u64(0x1);
         let coeffs: Vec<F> = (0..(1usize << m)).map(|_| clamp(&mut rng)).collect();
@@ -138,7 +142,7 @@ mod test {
     /// point `g^j`, exactly `mono_eval(coeffs, map_to_pow(g^j))`.  So a STIR
     /// codeword opening IS a monomial multilinear evaluation.
     #[test]
-    fn keystone_codeword_is_mono_eval() {
+    fn codeword_is_mono_eval() {
         let m = 4usize;
         let log_blowup = 2usize;
         let mut rng = StdRng::seed_from_u64(0x2);

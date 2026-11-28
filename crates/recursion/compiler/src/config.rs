@@ -1,5 +1,5 @@
 use p3_bn254_fr::Bn254;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::QuinticTrinomialExtensionField;
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
@@ -13,5 +13,5 @@ pub struct OuterConfig;
 impl Config for OuterConfig {
     type N = Bn254;
     type F = KoalaBear;
-    type EF = BinomialExtensionField<KoalaBear, 4>;
+    type EF = QuinticTrinomialExtensionField<KoalaBear>;
 }

@@ -746,7 +746,7 @@ mod closing_identity {
 /// a dense fold — 4.0 GiB and 14.7 s on a core reth shard).
 /// These tests pin the two
 /// to be BIT-IDENTICAL across randomized and degenerate packing geometry, so
-/// the closed form cannot silently change any verdict.
+/// the closed form cannot silently change what the verifier accepts.
 #[cfg(test)]
 mod closed_form_weight_equivalence {
     use super::*;
@@ -761,7 +761,8 @@ mod closed_form_weight_equivalence {
     fn rand_ef(rng: &mut StdRng) -> InnerChallenge {
         use p3_field::BasedVectorSpace;
         <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-            (0..4).map(|_| InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)),
+            (0..crate::air::EXTENSION_DEGREE)
+                .map(|_| InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)),
         )
         .unwrap()
     }

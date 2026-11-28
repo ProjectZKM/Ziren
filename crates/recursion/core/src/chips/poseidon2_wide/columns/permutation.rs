@@ -26,13 +26,6 @@ pub struct PermutationState<T: Copy> {
     pub output_state: [T; WIDTH],
 }
 
-#[derive(AlignedBorrow, Clone, Copy)]
-#[repr(C)]
-pub struct PermutationSBoxState<T: Copy> {
-    pub external_rounds_sbox_state: [[T; WIDTH]; NUM_EXTERNAL_ROUNDS],
-    pub internal_rounds_sbox_state: [T; NUM_INTERNAL_ROUNDS],
-}
-
 /// Trait that describes getter functions for the permutation columns.
 pub trait Poseidon2<T: Copy> {
     fn external_rounds_state(&self) -> &[[T; WIDTH]];
@@ -40,10 +33,6 @@ pub trait Poseidon2<T: Copy> {
     fn internal_rounds_state(&self) -> &[T; WIDTH];
 
     fn internal_rounds_s0(&self) -> &[T; NUM_INTERNAL_ROUNDS - 1];
-
-    fn external_rounds_sbox(&self) -> Option<&[[T; WIDTH]; NUM_EXTERNAL_ROUNDS]>;
-
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]>;
 
     fn perm_output(&self) -> &[T; WIDTH];
 }
@@ -53,73 +42,10 @@ pub trait Poseidon2Mut<T: Copy> {
     #[allow(clippy::type_complexity)]
     fn get_cols_mut(
         &mut self,
-    ) -> (
-        &mut [[T; WIDTH]],
-        &mut [T; WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS - 1],
-        Option<&mut [[T; WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; WIDTH],
-    );
+    ) -> (&mut [[T; WIDTH]], &mut [T; WIDTH], &mut [T; NUM_INTERNAL_ROUNDS - 1], &mut [T; WIDTH]);
 }
 
-/// Permutation columns struct with S-boxes.
-#[derive(AlignedBorrow, Clone, Copy)]
-#[repr(C)]
-pub struct PermutationSBox<T: Copy> {
-    pub state: PermutationState<T>,
-    pub sbox_state: PermutationSBoxState<T>,
-}
-
-impl<T: Copy> Poseidon2<T> for PermutationSBox<T> {
-    fn external_rounds_state(&self) -> &[[T; WIDTH]] {
-        &self.state.external_rounds_state
-    }
-
-    fn internal_rounds_state(&self) -> &[T; WIDTH] {
-        &self.state.internal_rounds_state
-    }
-
-    fn internal_rounds_s0(&self) -> &[T; NUM_INTERNAL_ROUNDS - 1] {
-        &self.state.internal_rounds_s0
-    }
-
-    fn external_rounds_sbox(&self) -> Option<&[[T; WIDTH]; NUM_EXTERNAL_ROUNDS]> {
-        Some(&self.sbox_state.external_rounds_sbox_state)
-    }
-
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]> {
-        Some(&self.sbox_state.internal_rounds_sbox_state)
-    }
-
-    fn perm_output(&self) -> &[T; WIDTH] {
-        &self.state.output_state
-    }
-}
-
-impl<T: Copy> Poseidon2Mut<T> for PermutationSBox<T> {
-    fn get_cols_mut(
-        &mut self,
-    ) -> (
-        &mut [[T; WIDTH]],
-        &mut [T; WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS - 1],
-        Option<&mut [[T; WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; WIDTH],
-    ) {
-        (
-            &mut self.state.external_rounds_state,
-            &mut self.state.internal_rounds_state,
-            &mut self.state.internal_rounds_s0,
-            Some(&mut self.sbox_state.external_rounds_sbox_state),
-            Some(&mut self.sbox_state.internal_rounds_sbox_state),
-            &mut self.state.output_state,
-        )
-    }
-}
-
-/// Permutation columns struct without S-boxes.
+/// Permutation columns struct without S-boxes: the layout of every degree.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct PermutationNoSbox<T: Copy> {
@@ -139,14 +65,6 @@ impl<T: Copy> Poseidon2<T> for PermutationNoSbox<T> {
         &self.state.internal_rounds_s0
     }
 
-    fn external_rounds_sbox(&self) -> Option<&[[T; WIDTH]; NUM_EXTERNAL_ROUNDS]> {
-        None
-    }
-
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]> {
-        None
-    }
-
     fn perm_output(&self) -> &[T; WIDTH] {
         &self.state.output_state
     }
@@ -155,20 +73,12 @@ impl<T: Copy> Poseidon2<T> for PermutationNoSbox<T> {
 impl<T: Copy> Poseidon2Mut<T> for PermutationNoSbox<T> {
     fn get_cols_mut(
         &mut self,
-    ) -> (
-        &mut [[T; WIDTH]],
-        &mut [T; WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS - 1],
-        Option<&mut [[T; WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; WIDTH],
-    ) {
+    ) -> (&mut [[T; WIDTH]], &mut [T; WIDTH], &mut [T; NUM_INTERNAL_ROUNDS - 1], &mut [T; WIDTH])
+    {
         (
             &mut self.state.external_rounds_state,
             &mut self.state.internal_rounds_state,
             &mut self.state.internal_rounds_s0,
-            None,
-            None,
             &mut self.state.output_state,
         )
     }
@@ -187,8 +97,8 @@ where
 {
     if DEGREE == 3 {
         let start = POSEIDON2_DEGREE3_COL_MAP.state.external_rounds_state[0][0];
-        let end = start + size_of::<PermutationSBox<u8>>();
-        let convert: &mut PermutationSBox<T> = row[start..end].borrow_mut();
+        let end = start + size_of::<PermutationNoSbox<u8>>();
+        let convert: &mut PermutationNoSbox<T> = row[start..end].borrow_mut();
         Box::new(convert)
     } else if DEGREE == 9 || DEGREE == 17 {
         let start = POSEIDON2_DEGREE9_COL_MAP.state.external_rounds_state[0][0];
@@ -207,8 +117,8 @@ where
 {
     if DEGREE == 3 {
         let start = POSEIDON2_DEGREE3_COL_MAP.state.external_rounds_state[0][0];
-        let end = start + size_of::<PermutationSBox<u8>>();
-        let convert: PermutationSBox<T> = *row[start..end].borrow();
+        let end = start + size_of::<PermutationNoSbox<u8>>();
+        let convert: PermutationNoSbox<T> = *row[start..end].borrow();
         Box::new(convert)
     } else if DEGREE == 9 || DEGREE == 17 {
         let start = POSEIDON2_DEGREE9_COL_MAP.state.external_rounds_state[0][0];

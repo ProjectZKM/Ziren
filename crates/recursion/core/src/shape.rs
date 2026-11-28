@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use hashbrown::HashMap;
 
 use itertools::Itertools;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
 use zkm_pcs::{air::MachineAir, shape::OrderedShape};
 
@@ -20,7 +20,7 @@ use crate::{
         select::SelectChip,
     },
     machine::RecursionAir,
-    RecursionProgram, D,
+    RecursionProgram,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ pub struct RecursionShapeConfig<F, A> {
     _marker: PhantomData<(F, A)>,
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
     RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
@@ -93,7 +93,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         } else {
             own
         };
-        if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
+        if zkm_pcs::diagnostics::shape_events_enabled() {
             let (mw, pw) = Self::round_widths();
             let cells: u128 = shape
                 .iter()
@@ -106,7 +106,16 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
             organic.sort();
             let rows: Vec<(String, usize)> = shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            tracing::info!("FIXSHAPE kind={kind} band_index={class} cells={cells} organic={organic:?} -> band={rows:?}");
+            tracing::debug!(
+                target: zkm_pcs::diagnostics::SHAPE_TARGET,
+                stage = "fix_shape",
+                class,
+                kind,
+                cells = cells as u64,
+                organic = ?organic,
+                rows = ?rows,
+                "program shape"
+            );
         }
         *program.shape_mut() = Some(RecursionShape {
             inner: shape,
@@ -154,14 +163,12 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     /// common shape: every leaf, compose and deferred proof commits under a
     /// pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`, the smallest its
     /// rows fit), so the program verifying it reads the class's geometry, not
-    /// these rows.  The row cube
-    /// (`2^max_log_row_count`) is the only cap; a program past it cannot be
-    /// proved at all.
+    /// these rows.  The row cube of the recursion machines
+    /// (`2^RECURSION_MAX_LOG_ROW_COUNT`) is the only cap; a program past it
+    /// cannot be proved at all.
     pub fn organic_shape(heights: &[(String, usize)]) -> BTreeMap<String, usize> {
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
-        let cube = 1usize
-            << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let cube = 1usize << zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
         heights
             .iter()
             .map(|(name, height)| {
@@ -226,38 +233,13 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         &self.allowed_shapes
     }
 
-    /// The pin class a program with these heights takes (its index into
-    /// [`Self::all_shapes`]): the choice [`Self::fix_shape_kind`] makes for a
-    /// non-root program, exposed so a caller can learn it without committing
-    /// to it.  Kept under its historical name for the pipeline's band API.
-    pub fn band_index_for(&self, heights: &[(String, usize)]) -> Option<usize> {
-        Self::class_for_rows(&Self::organic_shape(heights))
-    }
-
-    /// The class that holds every class in `indices`: classes form a chain,
-    /// so it is the largest.  The pipeline settles a sibling group on it and
-    /// keys the group's programs by it (`ZKMProver::band_keyed`).
-    pub fn dominating_band_index(&self, indices: &[usize]) -> Option<usize> {
-        let best = indices.iter().copied().max()?;
-        (best < self.allowed_shapes.len()).then_some(best)
-    }
-
-    /// [`Self::fix_shape_kind`] for a caller that settled a sibling-group
-    /// class: a node's OWN class is a function of its rows (its siblings'
-    /// classes are covered by the parent's class-tuple programs), so `index`
-    /// is only validated, not applied.
-    pub fn fix_shape_at(&self, program: &mut RecursionProgram<F>, index: usize) {
-        assert!(index < self.allowed_shapes.len(), "recursion pin class {index} does not exist");
-        self.fix_shape_kind(program, "forced");
-    }
-
-    /// The organic heights of a built program, for [`Self::band_index_for`].
+    /// The organic heights of a built program.
     pub fn program_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
         RecursionAir::<F, DEGREE>::heights(program).iter().map(|(n, h)| (n.clone(), *h)).collect()
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
+impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize> Default
     for RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
     fn default() -> Self {
@@ -283,7 +265,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(73_728)),
                 (mem_const.clone(), rows(2_048)),
                 (base_alu.clone(), rows(253_536)),
-                (ext_alu.clone(), rows(323_936)),
+                (ext_alu.clone(), rows(259_136)),
                 (poseidon2_wide.clone(), rows(34_816)),
                 (ext2felt.clone(), rows(34_272)),
                 (prefix_sum_checks.clone(), rows(24_576)),
@@ -294,7 +276,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(147_456)),
                 (mem_const.clone(), rows(4_096)),
                 (base_alu.clone(), rows(507_072)),
-                (ext_alu.clone(), rows(647_872)),
+                (ext_alu.clone(), rows(518_272)),
                 (poseidon2_wide.clone(), rows(69_632)),
                 (ext2felt.clone(), rows(68_512)),
                 (prefix_sum_checks.clone(), rows(163_840)),
@@ -305,7 +287,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), rows(294_912)),
                 (mem_const.clone(), rows(8_192)),
                 (base_alu.clone(), rows(1_014_144)),
-                (ext_alu.clone(), rows(1_295_744)),
+                (ext_alu.clone(), rows(1_036_544)),
                 (poseidon2_wide.clone(), rows(139_264)),
                 (ext2felt.clone(), rows(137_024)),
                 (prefix_sum_checks.clone(), rows(327_680)),
@@ -322,8 +304,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 "the class-{index} dummy shape must land in class {index}",
             );
         }
-        let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count;
+        let cube = zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
         for shape in allowed_shapes.iter() {
             for (name, rows) in shape.iter() {
                 assert!(
@@ -352,12 +333,7 @@ mod tests {
             let rows: BTreeMap<String, usize> =
                 shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
             assert_eq!(Cfg::class_for_rows(&rows), Some(index));
-            let heights: Vec<(String, usize)> = rows.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            assert_eq!(cfg.band_index_for(&heights), Some(index));
         }
-        assert_eq!(cfg.dominating_band_index(&[0, 1, 0]), Some(1));
-        assert_eq!(cfg.dominating_band_index(&[0]), Some(0));
-        assert_eq!(cfg.dominating_band_index(&[7]), None);
         assert_eq!(RecursionPins::LAST_CLASS, RECURSION_PIN_CLASSES.len() - 1);
     }
 

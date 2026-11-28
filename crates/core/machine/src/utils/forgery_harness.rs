@@ -55,7 +55,7 @@ use crate::utils::{prove_with_context, setup_logger};
 
 type SC = KoalaBearPoseidon2;
 type Val = KoalaBear;
-type Challenge = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+type Challenge = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
 /// The fibonacci guest reads one `u32` from the input stream, so an empty
 /// stream fails its first syscall before any trace exists.
@@ -296,6 +296,21 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     );
 }
 
+/// Claim one row more than the row cube holds, with the degree bits, the
+/// log degree and the transcript height in agreement.
+fn overclaim_past_the_cube(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
+    let jagged = sp.jagged_shard_proof.as_mut();
+    let opening = &mut jagged.opened_values.chips[ci];
+    let degree = &mut opening.quotient[0];
+    let bit_len = degree.len();
+    let height = (1usize << (bit_len - 1)) + 1;
+    for (i, bit) in degree.iter_mut().enumerate() {
+        *bit = Challenge::from_bool((height >> (bit_len - 1 - i)) & 1 == 1);
+    }
+    opening.log_degree = bit_len;
+    jagged.chip_heights.insert(name.to_string(), height);
+}
+
 /// Forge ONLY the `degree` bits (`quotient[0]`) — leave the transcript
 /// `chip_heights` and `log_degree` HONEST.  This is the SHARPEST
 /// de-risk probe: it isolates the NON-TRANSCRIPT height-binding
@@ -303,7 +318,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// LogUp-GKR reconstruction identity), the exact substrate the
 /// VK-identity change relies on once heights leave both `vk.hash` AND the
 /// transcript framing.  If THIS rejects, the degree-bit binding is
-/// load-bearing on its own.  Over-claim: set a higher bit (taller chip).
+/// enough on its own to bind the height.  Over-claim: set a higher bit (taller chip).
 fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let jagged = sp.jagged_shard_proof.as_mut();
     let opening = &mut jagged.opened_values.chips[ci];
@@ -410,6 +425,22 @@ fn forge_transcript_only_fibonacci() {
         forge_transcript_only,
     );
     tracing::info!("[forgery] fibonacci TRANSCRIPT-only => {tag}");
+}
+
+/// A table taller than the row cube is rejected by the bound on its height,
+/// before any other check reads the height.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_height_past_the_row_cube_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/past-the-cube",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        overclaim_past_the_cube,
+    );
+    assert!(tag.contains("is above the row cube"), "rejected elsewhere: {tag}");
 }
 
 // (B) DEGREE-ONLY forgeries (transcript LEFT HONEST): the degree-bit
@@ -642,6 +673,140 @@ fn forge_short_zerocheck_point_fibonacci() {
     }
 }
 
+/// Append a chip's preprocessed LogUp-GKR opening to its main one, so the two
+/// vectors still concatenate to the committed columns but split elsewhere.
+fn forge_logup_opening_split(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    let openings = &mut sp.jagged_shard_proof.as_mut().logup_gkr_proof.logup_evaluations;
+    let opening = openings
+        .chip_openings
+        .values_mut()
+        .find(|o| o.preprocessed_trace_evaluations_full.as_ref().is_some_and(|p| !p.is_empty()))
+        .expect("a shard has a chip with preprocessed columns");
+    let preprocessed = opening.preprocessed_trace_evaluations_full.clone().unwrap();
+    opening.main_trace_evaluations_full.as_mut().unwrap().extend(preprocessed);
+}
+
+/// Drop a chip's preprocessed LogUp-GKR opening.
+fn forge_logup_opening_missing(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    let openings = &mut sp.jagged_shard_proof.as_mut().logup_gkr_proof.logup_evaluations;
+    let opening = openings
+        .chip_openings
+        .values_mut()
+        .find(|o| o.preprocessed_trace_evaluations_full.as_ref().is_some_and(|p| !p.is_empty()))
+        .expect("a shard has a chip with preprocessed columns");
+    opening.preprocessed_trace_evaluations_full = None;
+}
+
+/// The LogUp-GKR openings of a chip are as wide as its columns: the width
+/// check rejects any other length before the openings are used.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_logup_opening_lengths_fibonacci() {
+    setup_logger();
+    for (label, forge, expected) in [
+        (
+            "fibonacci/logup-opening-split",
+            forge_logup_opening_split as fn(&mut _, _, &_),
+            "LogUp-GKR main opening is",
+        ),
+        (
+            "fibonacci/logup-opening-missing",
+            forge_logup_opening_missing,
+            "LogUp-GKR preprocessed opening is 0 columns",
+        ),
+    ] {
+        let tag = run_forgery(label, fibonacci_program(), fib_stdin(), true, forge);
+        assert!(tag.contains(expected), "[{label}] rejected elsewhere: {tag}");
+    }
+}
+
+/// Move one row between two padding columns of the main round, or shorten the
+/// round's one padding column by a row.
+fn forge_padding_split(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let EvaluationProof::Bundle(bundle) = &mut sp.jagged_shard_proof.as_mut().evaluation_proof
+    else {
+        panic!("a core shard proof carries its opening as a bundle");
+    };
+    let packing = &mut bundle.packing;
+    let columns = packing.offsets.len() - 1;
+    let pads = packing.padding_heights.last_mut().expect("the main round has padding columns");
+    let first = pads.iter().position(|h| *h > 0).expect("the main round has a padding row");
+    pads[first] -= 1;
+    if first + 1 < pads.len() {
+        pads[first + 1] += 1;
+        packing.offsets[columns - pads.len() + first + 1] -= 1;
+    } else {
+        packing.offsets[columns] -= 1;
+        packing.total_values -= 1;
+    }
+}
+
+/// The padding columns of a round are split one way, fixed by the round's
+/// cells: a proof with another split is rejected by that check.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_padding_split_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/padding-split",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_padding_split,
+    );
+    assert!(tag.contains("padding columns are not the split"), "rejected elsewhere: {tag}");
+}
+
+/// Claim one more stacking block of committed cells for the main round.
+fn forge_committed_area(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let EvaluationProof::Bundle(bundle) = &mut sp.jagged_shard_proof.as_mut().evaluation_proof
+    else {
+        panic!("a core shard proof carries its opening as a bundle");
+    };
+    bundle.commit.area += 1 << bundle.commit.log_stacking_height;
+}
+
+/// The main round's committed area is the one its cells determine: a proof
+/// claiming another is rejected by that comparison, before the opening is
+/// verified.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_committed_area_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/committed-area",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_committed_area,
+    );
+    assert!(tag.contains("the round's area is"), "rejected elsewhere: {tag}");
+}
+
+/// Append one public value to the shard, in both places the proof carries
+/// them.
+fn forge_extra_public_value(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    sp.public_values.push(Val::ZERO);
+    sp.jagged_shard_proof.as_mut().public_values.push(Val::ZERO);
+}
+
+/// A shard has exactly the machine's public value slots.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_extra_public_value_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/extra-public-value",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_extra_public_value,
+    );
+    assert!(tag.contains("public_values length mismatch"), "rejected elsewhere: {tag}");
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
@@ -871,10 +1036,48 @@ fn prove_tampered(
     tamper: impl FnOnce(&mut [RawTraces]),
     challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
 ) -> MachineProof<SC> {
+    prove_tampered_grouped(prover, program, stdin, opts, tamper, challenge, 1)
+}
+
+/// [`prove_tampered`] with each global proof opening up to `rounds_per_proof`
+/// consecutive global rounds; `challenge` is asked for the shard of the first
+/// round a global proof opens.
+fn prove_tampered_grouped(
+    prover: &CpuProver<SC, MipsAir<Val>>,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    tamper: impl FnOnce(&mut [RawTraces]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+    rounds_per_proof: usize,
+) -> MachineProof<SC> {
+    prove_tampered_statement(
+        prover,
+        program,
+        stdin,
+        opts,
+        |raw, _| tamper(raw),
+        challenge,
+        rounds_per_proof,
+    )
+}
+
+/// [`prove_tampered_grouped`] where `tamper` also edits the shards' records
+/// once their traces exist, so it can change the public values a shard is
+/// proven with: the statement of the shard, where the traces are its witness.
+fn prove_tampered_statement(
+    prover: &CpuProver<SC, MipsAir<Val>>,
+    program: &Program,
+    stdin: &ZKMStdin,
+    opts: ZKMCoreOpts,
+    tamper: impl FnOnce(&mut [RawTraces], &mut [zkm_core_executor::ExecutionRecord]),
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+    rounds_per_proof: usize,
+) -> MachineProof<SC> {
     use zkm_pcs::air::MachineAir;
 
     let (pk, _) = prover.setup(program);
-    let records =
+    let mut records =
         crate::utils::prove::shard_records::<SC, _>(prover, program, stdin, opts).unwrap();
 
     let mut raw: Vec<RawTraces> = records
@@ -892,7 +1095,7 @@ fn prove_tampered(
                 .collect()
         })
         .collect();
-    tamper(&mut raw);
+    tamper(&mut raw, &mut records);
 
     let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
         .max_log_row_count as u32;
@@ -908,7 +1111,7 @@ fn prove_tampered(
 
     let mut challenger = prover.machine().config().challenger();
     zkm_pcs::MachineProvingKey::observe_into(&pk, &mut challenger);
-    let (shard_proofs, tables): (Vec<_>, Vec<_>) = records
+    let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = records
         .iter()
         .zip(traces)
         .map(|(record, traces)| {
@@ -917,24 +1120,33 @@ fn prove_tampered(
             (prover.open(&pk, data, &mut challenger.clone()).unwrap(), tables)
         })
         .unzip();
+    prover.machine().assign_global_chain_lanes(&mut shard_proofs);
     let rounds = shard_proofs
         .iter()
         .map(|proof| prover.machine().global_round_binding(proof))
         .collect::<Vec<_>>();
     let global = prover
         .machine()
-        .global_challenge(&challenger, rounds.iter().map(Option::as_ref))
+        .global_challenge(
+            &challenger,
+            rounds.iter().map(Option::as_ref),
+            shard_proofs.iter().map(|proof| proof.global_chain_lane),
+        )
         .expect("the core machine has global lookups");
 
-    let global_proofs = rounds
+    let (shards, committed): (Vec<_>, Vec<_>) = rounds
         .iter()
         .zip(tables)
         .enumerate()
-        .filter_map(|(i, (round, tables))| Some((i, round.as_ref()?, tables?)))
-        .map(|(i, round, tables)| {
-            prover
-                .prove_global_round(&pk, round, tables, &challenge(i, &global), &challenger)
-                .unwrap()
+        .filter_map(|(i, (round, tables))| Some((i, (round.as_ref()?, tables?))))
+        .unzip();
+    let global_proofs = prover
+        .machine()
+        .global_proof_groups(committed.iter().map(|(round, _)| *round), rounds_per_proof)
+        .into_iter()
+        .map(|group| {
+            let global = challenge(shards[group.start], &global);
+            prover.prove_global_rounds(&pk, &committed[group], &global, &challenger).unwrap()
         })
         .collect();
     MachineProof { shard_proofs, global_proofs }
@@ -963,7 +1175,7 @@ fn multi_shard_opts() -> ZKMCoreOpts {
 }
 
 /// Proves `program` with `tamper` and `challenge`, checks the proof has at
-/// least `min_shards` shards, and returns the honest verifier's verdict.
+/// least `min_shards` shards, and returns the honest verifier's result.
 #[allow(clippy::too_many_arguments)]
 fn verify_tampered(
     label: &str,
@@ -989,6 +1201,93 @@ fn verify_tampered(
         reject_tag(&res)
     );
     res
+}
+
+/// The honest verifier's result on `fibonacci_program` cut into several
+/// shards, each global proof opening up to `rounds_per_proof` consecutive
+/// global rounds under the challenge `challenge` picks for the shard of its
+/// first round. Checks that a global proof opens as many rounds as the shards
+/// allow.
+fn verify_grouped(
+    label: &str,
+    rounds_per_proof: usize,
+    challenge: impl Fn(usize, &GlobalChallenge) -> GlobalChallenge,
+) -> Result<(), MachineVerificationError<SC>> {
+    let program = fibonacci_program();
+    let proof = prove_tampered_grouped(
+        &honest_prover(),
+        &program,
+        &fib_stdin(),
+        multi_shard_opts(),
+        |_| {},
+        challenge,
+        rounds_per_proof,
+    );
+    let committed =
+        proof.shard_proofs.iter().filter(|p| p.jagged_shard_proof.global_round().is_some()).count();
+    let most_rounds = proof
+        .global_proofs
+        .iter()
+        .map(|p| p.jagged_shard_proof.preceding_rounds.len() + 1)
+        .max()
+        .unwrap_or(0);
+    assert!(
+        most_rounds >= 3 && most_rounds == rounds_per_proof.min(committed),
+        "[{label}] {committed} global rounds, at most {most_rounds} in one global proof",
+    );
+    let (machine, vk) = honest_vk(&program);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!(
+        "[global][{label}] shards={} global proofs={} verify = {}",
+        proof.shard_proofs.len(),
+        proof.global_proofs.len(),
+        reject_tag(&res)
+    );
+    res
+}
+
+/// Global proofs that each open several shards' global rounds close the
+/// global bus of an honest multi-shard execution.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn grouped_global_proofs_verify() {
+    setup_logger();
+    for rounds_per_proof in [3, zkm_pcs::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF] {
+        let res = verify_grouped("grouped", rounds_per_proof, same_challenge);
+        assert!(
+            res.is_ok(),
+            "global proofs of {rounds_per_proof} rounds must verify: {}",
+            reject_tag(&res)
+        );
+    }
+}
+
+/// Every global proof but the first opens its shards' global rounds under a
+/// challenge derived from a digest other than the chain's `h_star`.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn grouped_global_proof_under_another_h_star_rejected() {
+    setup_logger();
+    let machine = MipsAir::machine(KoalaBearPoseidon2::new());
+    let res = verify_grouped("grouped, mixed h_star", 3, |i, global| {
+        if i == 0 {
+            return global.clone();
+        }
+        let mut h_star = global.h_star;
+        h_star[0] += Val::ONE;
+        let mut forged = zkm_pcs::logup_gkr::GlobalChallenge::grind(
+            machine.config().challenger(),
+            h_star,
+            machine.global_beta_seed_dim(),
+        );
+        forged.pow_witness = global.pow_witness;
+        forged
+    });
+    assert!(
+        matches!(res, Err(MachineVerificationError::InvalidGlobalProof(_))),
+        "a global proof of several rounds under another h_star must be rejected: {}",
+        reject_tag(&res)
+    );
 }
 
 /// Mutable views of every row of `trace`.
@@ -1224,4 +1523,412 @@ fn shard_proven_under_another_h_star_rejected() {
 fn shard_records_count(program: &Program, stdin: &ZKMStdin, opts: ZKMCoreOpts) -> usize {
     let prover = honest_prover();
     crate::utils::prove::shard_records::<SC, _>(&prover, program, stdin, opts).unwrap().len()
+}
+
+// Memory tables
+//
+// MemoryGlobalInit and MemoryGlobalFinalize list their addresses in strictly
+// increasing order, as pairs of 16-bit limbs chained over a control bus. A
+// prover that wants an address in a table twice, or a value that is not a
+// word of bytes, is modelled by rows it appends after the last honest row of
+// each table: one Initialize row and one Finalize row of the same address
+// and value, which close on the global bus by themselves. Each row is
+// completed the way the constraints ask: the chain columns from the row
+// before it, the Byte table multiplicities of the range lookups the table
+// holds, and the public values of the last address and of the row count. A
+// pair with canonical limbs therefore verifies, and a forged pair breaks the
+// rules its test names and no other.
+
+use core::borrow::{Borrow, BorrowMut};
+
+use p3_field::{Field, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
+use zkm_core_executor::{events::MemoryInitializeFinalizeEvent, ByteOpcode, ExecutionRecord};
+
+use crate::memory::{MemoryChipType, MemoryGlobalChip, MemoryInitCols, TOP_ADDR_HI};
+
+const MEMORY_TABLES: [(&str, MemoryChipType); 2] = [
+    ("MemoryGlobalInit", MemoryChipType::Initialize),
+    ("MemoryGlobalFinalize", MemoryChipType::Finalize),
+];
+
+/// The field's order.
+const P: u32 = 0x7F00_0001;
+
+/// Options that put the memory events of `fibonacci_program` in two shards
+/// of their own: the Initialize rows and the first Finalize rows in one, the
+/// other Finalize rows in the next, which has no Initialize row.
+fn multi_memory_shard_opts() -> ZKMCoreOpts {
+    let mut opts = ZKMCoreOpts::default();
+    opts.split_opts.memory = 1 << 13;
+    opts.split_opts.combine_memory_threshold = 0;
+    opts
+}
+
+fn memory_cols(row: &[Val]) -> &MemoryInitCols<Val> {
+    row.borrow()
+}
+
+/// The limbs of the integer `addr`, which need not be an address.
+fn limbs_of(addr: u32) -> [Val; 2] {
+    [Val::from_u32(addr & 0xffff), Val::from_u32(addr >> 16)]
+}
+
+/// The rows of a memory table before its padding.
+fn real_rows(trace: &RowMajorMatrix<Val>) -> usize {
+    trace.values.chunks(trace.width).take_while(|row| memory_cols(row).is_real == Val::ONE).count()
+}
+
+/// The shards with rows in the table `name`, in order.
+fn shards_with(shards: &[RawTraces], name: &str) -> Vec<usize> {
+    (0..shards.len()).filter(|&i| shards[i].contains_key(name)).collect()
+}
+
+/// The last address of both memory tables, which end at the same one: the
+/// highest address the program touches is outside its image.
+fn last_memory_addr(shards: &[RawTraces]) -> u32 {
+    let last = MEMORY_TABLES.map(|(name, _)| {
+        let trace = &shards[*shards_with(shards, name).last().unwrap()][name];
+        let row = real_rows(trace) - 1;
+        let cols = memory_cols(&trace.values[row * trace.width..(row + 1) * trace.width]);
+        cols.addr[0].as_canonical_u32() + (cols.addr[1].as_canonical_u32() << 16)
+    });
+    assert_eq!(last[0], last[1], "the two memory tables end at different addresses");
+    last[0]
+}
+
+/// Adds `count` to the Byte table multiplicities of the range lookups the
+/// memory chip of `kind` sends on `row`, for the tuples the table holds.
+fn count_range_lookups(
+    byte: &mut RowMajorMatrix<Val>,
+    kind: MemoryChipType,
+    row: &[Val],
+    count: Val,
+) {
+    let chip = zkm_pcs::Chip::<Val, _>::new(MemoryGlobalChip::new(kind));
+    for lookup in chip.sends().iter().filter(|lookup| lookup.kind == zkm_pcs::LookupKind::Byte) {
+        let multiplicity = lookup.multiplicity.apply::<Val, Val>(&[], row);
+        let v: Vec<u32> = lookup
+            .values
+            .iter()
+            .map(|value| value.apply::<Val, Val>(&[], row).as_canonical_u32())
+            .collect();
+        let table_row = if v[0] == ByteOpcode::U8Range as u32 {
+            (v[1] == 0 && v[2] == 0 && v[3] < 256 && v[4] < 256).then_some((v[3] << 8) + v[4])
+        } else {
+            assert_eq!(v[0], ByteOpcode::U16Range as u32, "a memory row sends range lookups");
+            (v[1] < 1 << 16 && v[2..] == [0, 0, 0]).then_some(v[1])
+        };
+        if let Some(table_row) = table_row {
+            let cols: &mut crate::bytes::columns::ByteMultCols<Val> =
+                byte.row_mut(table_row as usize).borrow_mut();
+            cols.multiplicities[v[0] as usize] += multiplicity * count;
+        }
+    }
+}
+
+/// The 32 public value elements whose two sums are `limbs`: the bits of a
+/// limb below `2^16`, and otherwise the limb whole in the lowest element of
+/// its half.
+fn limb_elements(limbs: [Val; 2]) -> [u32; 32] {
+    let mut elements = [0; 32];
+    for (half, limb) in elements.chunks_mut(16).zip(limbs) {
+        let limb = limb.as_canonical_u32();
+        if limb < 1 << 16 {
+            for (i, bit) in half.iter_mut().enumerate() {
+                *bit = (limb >> i) & 1;
+            }
+        } else {
+            half[0] = limb;
+        }
+    }
+    elements
+}
+
+/// Appends a row of address `addr` and value `value` to the memory table
+/// `name`, after the last row of the last shard with rows of it. The row is
+/// completed as a compared row of the chain, then `forge` edits it. The Byte
+/// table counts the range lookups it holds, and the public values name the
+/// row's address as the table's last and count the row.
+fn append_memory_row(
+    shards: &mut [RawTraces],
+    records: &mut [ExecutionRecord],
+    (name, kind): (&str, MemoryChipType),
+    addr: [Val; 2],
+    value: [Val; 4],
+    forge: &impl Fn(&mut MemoryInitCols<Val>),
+) {
+    let shard = *shards_with(shards, name).last().unwrap();
+    let trace = shards[shard].get_mut(name).unwrap();
+    let width = trace.width;
+    let rows = real_rows(trace);
+    if rows * width == trace.values.len() {
+        trace.values.resize((rows + 32) * width, Val::ZERO);
+    }
+    let last = *memory_cols(&trace.values[(rows - 1) * width..rows * width]);
+    let row = &mut trace.values[rows * width..(rows + 1) * width];
+    let cols: &mut MemoryInitCols<Val> = row.borrow_mut();
+    cols.shard = Val::ZERO;
+    cols.timestamp = Val::from_bool(kind == MemoryChipType::Initialize);
+    cols.addr = addr;
+    cols.top_inv = (Val::from_u32(TOP_ADDR_HI) - addr[1]).try_inverse().unwrap_or(Val::ZERO);
+    cols.index = last.index + Val::ONE;
+    cols.prev_addr = last.addr;
+    cols.prev_valid = last.is_comp;
+    cols.hi_differs = Val::from_bool(addr[1] != last.addr[1]);
+    cols.gap =
+        if addr[1] != last.addr[1] { addr[1] - last.addr[1] } else { addr[0] - last.addr[0] };
+    cols.value = value;
+    cols.is_real = Val::ONE;
+    cols.is_comp = Val::ONE;
+    cols.zero_inv = (cols.index + last.addr[0] + last.addr[1]).inverse();
+    forge(cols);
+    let last_addr = limb_elements(cols.addr);
+    let row = row.to_vec();
+    count_range_lookups(shards[shard].get_mut("Byte").unwrap(), kind, &row, Val::ONE);
+
+    let counted = MemoryInitializeFinalizeEvent { addr: 0, value: 0, shard: 0, timestamp: 0 };
+    for (i, record) in records.iter_mut().enumerate().skip(shard) {
+        let pv = &mut record.public_values;
+        let (events, previous, last) = match kind {
+            MemoryChipType::Initialize => (
+                &mut record.global_memory_initialize_events,
+                &mut pv.previous_init_addr_bits,
+                &mut pv.last_init_addr_bits,
+            ),
+            MemoryChipType::Finalize => (
+                &mut record.global_memory_finalize_events,
+                &mut pv.previous_finalize_addr_bits,
+                &mut pv.last_finalize_addr_bits,
+            ),
+        };
+        *last = last_addr;
+        if i == shard {
+            events.push(counted);
+        } else {
+            *previous = last_addr;
+        }
+    }
+}
+
+/// [`append_memory_row`] to both memory tables.
+fn append_memory_pair(
+    shards: &mut [RawTraces],
+    records: &mut [ExecutionRecord],
+    addr: [Val; 2],
+    value: [Val; 4],
+    forge: impl Fn(&mut MemoryInitCols<Val>),
+) {
+    for table in MEMORY_TABLES {
+        append_memory_row(shards, records, table, addr, value, &forge);
+    }
+}
+
+fn bytes(value: [u32; 4]) -> [Val; 4] {
+    value.map(Val::from_u32)
+}
+
+/// The honest verifier's result on `fibonacci_program`, its memory events in
+/// two memory shards, proven after `tamper` edited the shards' traces and
+/// records.
+fn verify_tampered_memory(
+    label: &str,
+    tamper: impl FnOnce(&mut [RawTraces], &mut [ExecutionRecord]),
+) -> Result<(), MachineVerificationError<SC>> {
+    let program = fibonacci_program();
+    let proof = prove_tampered_statement(
+        &honest_prover(),
+        &program,
+        &fib_stdin(),
+        multi_memory_shard_opts(),
+        tamper,
+        same_challenge,
+        1,
+    );
+    let (machine, vk) = honest_vk(&program);
+    let res = verify(&machine, &vk, &proof);
+    tracing::info!(
+        "[memory][{label}] shards={} verify = {}",
+        proof.shard_proofs.len(),
+        reject_tag(&res)
+    );
+    res
+}
+
+/// What the verifier's rejection of a row that breaks a constraint names, and
+/// of a shard whose lookups do not balance.
+const BY_CONSTRAINTS: &str = "zerocheck";
+const BY_LOOKUPS: &str = "LogUp-GKR";
+
+/// Asserts that the verifier rejected, at the check `check`.
+fn assert_rejected(res: &Result<(), MachineVerificationError<SC>>, check: &str, case: &str) {
+    let tag = reject_tag(res);
+    assert!(res.is_err() && tag.contains(check), "{case}: expected {check}, got {tag}");
+}
+
+/// Control: an appended pair with canonical limbs verifies. The program's
+/// last address is one word below the largest address, `0x7F000000`, whose
+/// high limb is the top one and whose low limb is zero, so that address is
+/// the one a table can still take. The Initialize row is appended in a shard
+/// before the last, whose public values pass its address on unchanged.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_appended_canonical_row_verifies() {
+    setup_logger();
+    let res = verify_tampered_memory("canonical row", |shards, records| {
+        let [init, finalize] = MEMORY_TABLES.map(|(name, _)| shards_with(shards, name));
+        assert!(finalize.len() >= 2, "the Finalize rows are in one shard");
+        assert!(init.last() < finalize.last(), "every memory shard has Initialize rows");
+        assert_eq!(last_memory_addr(shards) + 4, TOP_ADDR_HI << 16);
+        append_memory_pair(
+            shards,
+            records,
+            limbs_of(TOP_ADDR_HI << 16),
+            bytes([1, 2, 3, 255]),
+            |_| {},
+        );
+    });
+    assert!(res.is_ok(), "an appended canonical row must verify: {}", reject_tag(&res));
+}
+
+/// A second limb pair for an address a table already holds. The integers the
+/// forged limbs spell are above every address, so the rows compare as
+/// increasing, and the field element they send to the global bus is the
+/// address of an honest row:
+///
+/// * the address plus the field's order: the high limb is the top one and
+///   the low limb is not zero;
+/// * the address plus twice the order: the high limb is above the top one;
+/// * a high limb of minus one, which names the last honest address: the limb
+///   is not a 16-bit integer, and neither is its distance to the limb before.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_aliased_address_limbs_rejected() {
+    setup_logger();
+    for case in 0..3 {
+        let res = verify_tampered_memory("aliased limbs", |shards, records| {
+            let init = &shards[shards_with(shards, "MemoryGlobalInit")[0]]["MemoryGlobalInit"];
+            let second = memory_cols(&init.values[init.width..2 * init.width]);
+            let held =
+                second.addr[0].as_canonical_u32() + (second.addr[1].as_canonical_u32() << 16);
+            assert!(held > 0 && held < 1 << 16, "the second address is a register's");
+            let last = last_memory_addr(shards);
+            let alias = match case {
+                0 => limbs_of(held + P),
+                1 => limbs_of(held + 2 * P),
+                _ => [Val::from_u32((last & 0xffff) - 1), -Val::ONE],
+            };
+            let named = alias[0] + alias[1] * Val::from_u32(1 << 16);
+            assert_eq!(named, Val::from_u32(if case < 2 { held } else { last }));
+            append_memory_pair(shards, records, alias, bytes([0; 4]), |_| {});
+        });
+        let check = if case == 0 { BY_CONSTRAINTS } else { BY_LOOKUPS };
+        assert_rejected(&res, check, &format!("limb pair {case} of a held address"));
+    }
+}
+
+/// An appended pair that does not increase the address: the last address
+/// again, the address one word below it, and the address one high limb below
+/// it with `hi_differs` set. The gap is zero or wraps below zero, so the gap
+/// less one is in no row of the range table.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_address_not_increasing_rejected() {
+    setup_logger();
+    for case in 0..3 {
+        let res = verify_tampered_memory("not increasing", |shards, records| {
+            let last = last_memory_addr(shards);
+            assert!(last & 0xffff >= 4 && last >> 16 >= 1);
+            let addr = [last, last - 4, last - (1 << 16)][case];
+            append_memory_pair(shards, records, limbs_of(addr), bytes([0; 4]), |cols| {
+                assert_eq!(cols.hi_differs, Val::from_bool(case == 2));
+            });
+        });
+        assert_rejected(&res, BY_LOOKUPS, &format!("address {case} that does not increase"));
+    }
+}
+
+/// An appended pair at the largest address whose first value limb is 256.
+#[test]
+#[ignore = "proves a real multi-shard core proof; run with --ignored"]
+fn global_memory_value_limb_past_a_byte_rejected() {
+    setup_logger();
+    let res = verify_tampered_memory("value limb 256", |shards, records| {
+        let top = limbs_of(TOP_ADDR_HI << 16);
+        append_memory_pair(shards, records, top, bytes([256, 0, 0, 0]), |_| {});
+    });
+    assert_rejected(&res, BY_LOOKUPS, "a value limb past a byte");
+}
+
+/// An appended pair that does not compare, with a value that is not zero: a
+/// row may skip the comparison only at index zero after a zero address, with
+/// address and value zero. In the first case the pair repeats the last
+/// address and a canonical compared pair at the largest address follows it,
+/// so the public values still receive `is_comp = 1` from the last row and the
+/// row's constraints alone reject; in the second the forged pair is at the
+/// largest address and is the last row, and the control bus does not balance
+/// either.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_row_skipping_the_comparison_rejected() {
+    setup_logger();
+    for followed in [true, false] {
+        let res = verify_tampered_memory("comparison skipped", |shards, records| {
+            let top = limbs_of(TOP_ADDR_HI << 16);
+            let addr = if followed { limbs_of(last_memory_addr(shards)) } else { top };
+            append_memory_pair(shards, records, addr, bytes([9, 0, 0, 0]), |cols| {
+                cols.is_comp = Val::ZERO;
+                cols.zero_inv = Val::ZERO;
+            });
+            if followed {
+                append_memory_pair(shards, records, top, bytes([0; 4]), |cols| {
+                    assert_eq!(cols.prev_valid, Val::ZERO);
+                });
+            }
+        });
+        let check = if followed { BY_CONSTRAINTS } else { BY_LOOKUPS };
+        assert_rejected(&res, check, &format!("comparison skipped, followed {followed}"));
+    }
+}
+
+/// The first Finalize row of the second memory shard takes the address one
+/// word below the one the public values send it as its previous address,
+/// with the rest of the row and the Byte table following. With the shard's
+/// public values edited to send that address, the shard verifies: what
+/// rejects that statement is the equality of a shard's previous address with
+/// the last address of the shard before it, which the verifier of an
+/// execution checks over the shards. With the honest public values the
+/// control bus of the shard does not balance.
+#[test]
+#[ignore = "proves real multi-shard core proofs; run with --ignored"]
+fn global_memory_chain_broken_across_shards_rejected() {
+    setup_logger();
+    let (name, kind) = MEMORY_TABLES[1];
+    for statement_follows in [true, false] {
+        let res = verify_tampered_memory("chain broken", |shards, records| {
+            let shard = shards_with(shards, name)[1];
+            let trace = shards[shard].get_mut(name).unwrap();
+            let width = trace.width;
+            let honest = trace.values[..width].to_vec();
+            let cols: &mut MemoryInitCols<Val> = trace.values[..width].borrow_mut();
+            assert!(cols.is_comp == Val::ONE && cols.index == Val::ZERO);
+            assert!(cols.hi_differs == Val::ZERO && cols.prev_addr[0].as_canonical_u32() >= 4);
+            cols.prev_addr[0] -= Val::from_u32(4);
+            cols.gap += Val::from_u32(4);
+            cols.zero_inv = (cols.prev_addr[0] + cols.prev_addr[1]).inverse();
+            let previous = limb_elements(cols.prev_addr);
+            let forged = trace.values[..width].to_vec();
+            let byte = shards[shard].get_mut("Byte").unwrap();
+            count_range_lookups(byte, kind, &honest, -Val::ONE);
+            count_range_lookups(byte, kind, &forged, Val::ONE);
+            if statement_follows {
+                records[shard].public_values.previous_finalize_addr_bits = previous;
+            }
+        });
+        if statement_follows {
+            assert!(res.is_ok(), "the shards of the edited statement: {}", reject_tag(&res));
+        } else {
+            assert_rejected(&res, BY_LOOKUPS, "a chain broken under the honest statement");
+        }
+    }
 }

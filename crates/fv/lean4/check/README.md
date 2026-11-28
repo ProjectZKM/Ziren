@@ -20,7 +20,7 @@ crates/fv/lean4/check/check.py /scratch/regen/ZirenDet/Chips/MiscInstrs.lean /sc
 | `lift_steps.py` | Moves the top-level `have` steps of one theorem into lemmas in their own modules. |
 | `flat_gadget.py` | Rewrites a snippet's `gadget_det` or `row_spec` so its constraint conjuncts are projected where used instead of opened as hypotheses. |
 | `flat_det.py` | Rewrites a generated `deterministic` so neither witness is split into its fields: each step lemma gets an adapter that restates it over projections of the whole witnesses. |
-| `leanmod.py` | Shared plumbing: reading and writing modules, locating a theorem, adding modules to the `Makefile`. |
+| `leanmod.py` | Shared helpers: reading and writing modules, locating a theorem, adding modules to the `Makefile`. |
 | `run_mod.sh` | Elaborates one module under a memory gate (`MIN_FREE` GB) and a time cap (`MOD_TIMEOUT`, 1800 s), logging `START`/`END` with `rc`, `sorry`, open-step and error counts to `progress.log`. |
 
 A chip is closed when `Check` prints only `propext`, `Classical.choice` and `Quot.sound` for every
@@ -28,7 +28,7 @@ A chip is closed when `Check` prints only `propext`, `Classical.choice` and `Quo
 
 These conditions are enforced: admitted obligations, missing theorem reports, and additional
 axioms fail the command. A successful `check.py` writes `OUTROOT/closure.json`, containing the
-SHA-256 of the original generated source and the complete determinism theorem inventory. An old
+SHA-256 of the original generated source and the complete list of determinism theorems. An old
 receipt is removed before each check; a failed elaboration or closure check produces no receipt.
 The checker requires `LEAN_PROJECT` to match the repository's Lean library and dependency pins,
 builds that library, and records its build inputs in the receipt.

@@ -32,7 +32,7 @@ and a cost estimate before the measurements.
 | appendices | `appendix_units` (frame and chips), `appendix_isa`, `appendix_prior` (results imported from prior work, by number) |
 
 Build: `make` (pdflatex + bibtex). Protocol parameters come from
-`crates/pcs/src/whir/jagged.rs`. Matching soundness inputs, the machine census,
+`crates/pcs/src/whir/jagged.rs`. Matching soundness inputs, the machine's counts,
 component report and reproduction script are retained as local validation evidence
 and are not included in this repository.
 The report uses the current core and Johnson-bound root schedules, sums the

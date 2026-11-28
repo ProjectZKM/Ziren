@@ -121,6 +121,11 @@ pub fn verify_compress_jagged<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     use std::borrow::BorrowMut;
     let ZKMCompressWitnessVariable { vks_and_proofs, vk_merkle_data, is_complete } = input;
 
@@ -168,6 +173,10 @@ pub fn verify_compress_jagged<C, SC, A>(
             proof_opened_values,
             rounds_witness,
         ) = proof_tuple;
+        assert!(
+            rounds_witness.preceding.is_empty(),
+            "a recursion shard proof commits no trace round before its main round"
+        );
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
         let chip_names: Vec<String> =
@@ -306,7 +315,7 @@ pub fn verify_compress_jagged<C, SC, A>(
         let whir_pv =
             crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
-                None,
+                Vec::new(),
                 public_values,
                 &logup_gkr_proof,
                 &zerocheck_proof,
@@ -373,7 +382,10 @@ pub fn verify_compress_jagged<C, SC, A>(
             _eval_public_values_fn,
             _jagged_evaluator_fn,
             None,
-            &vec![false; _shard_chips.len()],
+            &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+            _shard_chips.len(),
+            Vec::new(),
+        ),
         );
 
         _pubvals_for_aggregate
@@ -979,7 +991,7 @@ impl<const P: u8>
 
     /// One line naming every component [`Self::shape_key`] hashes.
     ///
-    /// Diagnostic only (call sites gate on `ZIREN_SHAPE_KEY_DIAG`).  The
+    /// Diagnostic only (call sites run it only when the shape events are on).  The
     /// compose pre-warm builds a key per (band, arity) yet real nodes still
     /// miss, and the hash alone cannot say which component diverged.
     pub fn shape_diag(&self) -> String {

@@ -142,7 +142,8 @@ pub type ZKMGroth16Bn254Proof = ZKMProofWithMetadata<ZKMGroth16Bn254ProofData>;
 pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
 /// A core proof: the shard proofs, then the global proofs, which prove the
-/// lookups that cross shards, one for each shard that commits a global round.
+/// lookups that cross shards and each open the global rounds of one or
+/// several shards.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMCoreProofData(
     pub Vec<ShardProof<CoreSC>>,
@@ -238,6 +239,9 @@ pub enum ZKMRecursionProverError {
     TracesGenerationError,
     #[error("Generate dependencies error")]
     DependenciesGenerationError,
+    /// The wrap keys of this prover were built for another wrap program.
+    #[error("wrap program mismatch: the wrap keys are of program {cached}, not {requested}")]
+    WrapProgramMismatch { cached: String, requested: String },
 }
 
 /// A recursion vk whose KoalaBear digest `digest` is not one of the

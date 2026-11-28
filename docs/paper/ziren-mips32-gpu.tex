@@ -98,7 +98,7 @@
 
 % ---------- Macros ----------
 \newcommand{\F}{\ensuremath{\mathbb{F}}}
-\newcommand{\EF}{\ensuremath{\mathbb{F}_{p^4}}}
+\newcommand{\EF}{\ensuremath{\mathbb{F}_{p^5}}}
 \newcommand{\KB}{\ensuremath{\mathsf{KoalaBear}}}
 \newcommand{\Mle}{\ensuremath{\mathsf{MLE}}}
 \newcommand{\LogUp}{\ensuremath{\mathsf{LogUp\text{-}GKR}}}
@@ -140,7 +140,7 @@ Proving MIPS32 execution requires preserving branch-delay semantics while contro
 
 We mechanically extract \ndettotal{} determinism theorems from the constraint system and discharge them in \Lean{}. The kernel-checked proofs cover 57 of the core machine's 62 chips, including precompiles, and establish unique outputs for fixed inputs under the declared lookup-table assumptions. We also formulate a cost model that separates trace cells and bus interactions per guest instruction from hardware-dependent proving throughput.
 
-On the evaluated Ethereum blocks, one NVIDIA RTX~5090 GPU proves the execution of the Reth client at $14.0$\,MHz and two at $21.2$\,MHz; with the Geth client an earlier configuration reaches $75.8$\,MHz on eight. Each proof stage has more than 100 bits of interactive soundness; a union bound for a tree with 149 core-schedule proofs and one root gives $93.5$ bits of interactive composite security, which the per-block term of the cross-shard challenge, ground by 22 bits, leaves unchanged. Shards are joined by a \LogUp{} challenge drawn from a hash chain over every shard's cross-shard rows, so every component of the compressed proof is hash-based; the throughput figures were measured with the elliptic-curve digest this challenge replaces, over which it costs a commit pass before proving. End-to-end knowledge soundness remains conditional on four stated hypotheses, including enforcement of the recursion relation.
+Every component of every proof stage has at least 128 bits of interactive soundness over the degree-five extension of the field. A union bound gives at least $124.07$ bits for each stage and $121.81$ bits over all five stages; for a tree with 149 core-schedule proofs and one root it gives $116.9$ bits of interactive composite security. Shards are joined by a \LogUp{} challenge drawn from the digest of an eight-lane hash chain over every shard's cross-shard rows, so every component of the compressed proof is hash-based. On two NVIDIA RTX~5090 GPUs, the 128-bit configuration proves 25 Ethereum blocks with the Reth client in a mean of $333.0$\,s, against $350.9$\,s for the previous release, which has schedules of about 100 bits and joins shards with an elliptic-curve multiset hash that is not post-quantum: $5.1\,\%$ faster at the higher level. The compressed proof of a Fibonacci guest is 270\,477 bytes. End-to-end knowledge soundness remains conditional on four stated hypotheses, including enforcement of the recursion relation.
 \end{abstract}
 
 \noindent\textbf{Index terms:} arithmetic circuits, formal verification, GPU acceleration, MIPS32, polynomial commitment schemes, round-by-round soundness, verifiable computation, zero-knowledge virtual machines.

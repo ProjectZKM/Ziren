@@ -26,8 +26,8 @@ use super::mle::Mle;
 /// each destination column contiguously.
 ///
 /// # Panics
-/// If the stripes do not cover `dense_len` cells.  That is the load-bearing
-/// guard: the ziren-gpu device commit deliberately stores **width-only
+/// If the stripes do not cover `dense_len` cells.  That guard is
+/// required: the device commit deliberately stores **width-only
 /// placeholder** stripes (`vec![ZERO; bwidth]`, i.e. height 1) when it keeps
 /// the real stripes device-resident, and reconstructing from those would
 /// silently yield a zero dense polynomial.  A short cover is therefore a hard

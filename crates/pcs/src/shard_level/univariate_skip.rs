@@ -219,8 +219,8 @@ where
                 for (b, gb) in g.iter_mut().enumerate().take(real) {
                     let r = row0 + b;
                     let mut t = EF::ZERO;
-                    for c in 0..nm {
-                        t += gk[c] * input.main_cells[r * nm + c];
+                    for (c, power) in gk.iter().enumerate().take(nm) {
+                        t += *power * input.main_cells[r * nm + c];
                     }
                     if let Some(p) = input.prep_cells {
                         for c in 0..np {
@@ -230,12 +230,12 @@ where
                     *gb = t * eq;
                 }
                 for (j, w) in lz_f.iter().enumerate() {
-                    for c in 0..nm {
+                    for (c, cell) in mz.iter_mut().enumerate().take(nm) {
                         let mut v = F::ZERO;
-                        for b in 0..real {
-                            v += w[b] * input.main_cells[(row0 + b) * nm + c];
+                        for (b, weight) in w.iter().enumerate().take(real) {
+                            v += *weight * input.main_cells[(row0 + b) * nm + c];
                         }
-                        mz[c] = v;
+                        *cell = v;
                     }
                     if let Some(p) = input.prep_cells {
                         for c in 0..np {
@@ -372,18 +372,18 @@ mod tests {
     use crate::shard_level::test_machine::{MockProgram, MockRecord};
     use crate::shard_level::zerocheck_poly::compute_padded_row_adjustment;
     use p3_air::{BaseAir, WindowAccess};
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{Rng, SeedableRng};
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     fn rand_ef(rng: &mut impl Rng) -> EF {
         EF::from_basis_coefficients_iter(
-            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
         )
         .unwrap()
     }

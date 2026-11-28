@@ -1,4 +1,4 @@
-//! The verdicts a WHIR verifier can return, shared by the stacked production
+//! The errors a WHIR verifier can return, shared by the stacked production
 //! verifier and the jagged layer above it.
 
 use alloc::string::String;

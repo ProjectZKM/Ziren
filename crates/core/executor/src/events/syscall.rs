@@ -29,8 +29,8 @@ pub struct SyscallEvent {
 
     /// instruction frame (see `AluEvent`)
     /// Every entry in `record.syscall_events` is a real SYSCALL instruction
-    /// (single producer: `emit_syscall_event`), but the flag keeps the recipe
-    /// uniform.  `a_record` above already carries the op_a write.
+    /// (single producer: `emit_syscall_event`), but the flag keeps the event
+    /// layout uniform.  `a_record` above already carries the op_a write.
     pub is_instruction: u32,
     /// The `next_pc` RECEIVED on the `State` bus — equals `next_pc` except on
     /// the halt row, where it is the predecessor continuation `pc + 4`.

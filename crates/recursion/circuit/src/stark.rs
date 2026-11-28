@@ -63,7 +63,6 @@ where
         + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2Ring<P>>>,
 {
     use zkm_pcs::shard_level::ceil_log2;
-    use zkm_pcs::shard_level::verifier::JaggedShardVerifier;
 
     let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = rows
         .iter()
@@ -81,7 +80,7 @@ where
         })
         .collect();
 
-    let max_log_row_count = JaggedShardVerifier::production_default().max_log_row_count;
+    let max_log_row_count = machine.max_log_row_count();
     let shape_max_log =
         chip_heights_pairs.iter().map(|(_n, rows)| ceil_log2(*rows)).max().unwrap_or(0);
     assert!(

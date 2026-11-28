@@ -554,7 +554,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(7);
         let rand_ef = |rng: &mut rand::rngs::StdRng| {
             InnerChallenge::from_basis_coefficients_iter(
-                (0..4).map(|_| InnerVal::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+                (0..crate::air::EXTENSION_DEGREE)
+                    .map(|_| InnerVal::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
             )
             .unwrap()
         };

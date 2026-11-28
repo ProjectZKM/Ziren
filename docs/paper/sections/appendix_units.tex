@@ -73,7 +73,7 @@ System call & \texttt{syscall} & R & 79 & 4 \\
 Family & Chips (width) \\
 \midrule
 System-call tables & core and precompile call tables (11 each), Linux-call chip (135) \\
-Memory argument & shard-boundary chip (80), register shadow-read chip (12), memory initialisation and finalisation chips (152 each), cross-shard digest chip (65) \\
+Memory argument & shard-boundary chip (80), register shadow-read chip (12), memory initialisation and finalisation chips (18 each), cross-shard digest chip (65) \\
 Preprocessed tables & program (1, +14), byte (10, +12), range (1, +2) \\
 Hash precompiles & SHA-256 message extension and compression and the Keccak sponge, each with a control chip, and the \Poseidon{} permutation: 7 chips (4 to 2637) \\
 Curve precompiles & addition and doubling on secp256k1, secp256r1, BN254 and BLS12-381, addition on Ed25519, and decompression on secp256k1, secp256r1, BLS12-381 and Ed25519: 13 chips (1040 to 2533) \\

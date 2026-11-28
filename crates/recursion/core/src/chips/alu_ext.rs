@@ -6,7 +6,7 @@ use std::{borrow::BorrowMut, iter::zip};
 use p3_air::{Air, BaseAir, WindowAccess};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -73,7 +73,7 @@ impl<F: Field> BaseAir<F> for ExtAluChip {
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
+impl<F: PrimeField32 + QuinticTrinomialExtendable> MachineAir<F> for ExtAluChip {
     type Record = ExecutionRecord<F>;
 
     type Program = crate::RecursionProgram<F>;
@@ -307,7 +307,9 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{extension::BinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing};
+    use p3_field::{
+        extension::QuinticTrinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing,
+    };
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -344,8 +346,8 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_extfelt = move || {
-            let inner: [F; 4] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
-            BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap()
+            let inner: [F; D] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
+            QuinticTrinomialExtensionField::<F>::from_basis_coefficients_slice(&inner).unwrap()
         };
         let mut addr = 0;
 

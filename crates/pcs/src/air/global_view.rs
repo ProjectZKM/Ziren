@@ -35,6 +35,16 @@ impl<A> GlobalView<A> {
         format!("{slot:02}.{chip}")
     }
 
+    /// The table slot and the chip of a view named by [`Self::name_in_slot`];
+    /// `None` for any other name.
+    pub fn slot_and_chip(view: &str) -> Option<(usize, &str)> {
+        let (slot, chip) = view.split_once('.')?;
+        if slot.len() != 2 || !slot.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        Some((slot.parse().ok()?, chip))
+    }
+
     /// The chip a view named by [`Self::name_in_slot`] is a view of.
     pub fn chip_name(view: &str) -> &str {
         view.split_once('.').map_or(view, |(_, chip)| chip)

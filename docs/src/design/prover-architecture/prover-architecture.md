@@ -16,7 +16,7 @@ The executor (`crates/core/executor`) interprets the MIPS32r2 program and record
 - the cycle budget (`shard_size`);
 - the per-shard clock, so that every timestamp stays below the \\( 2^{26} \\) range the memory argument checks;
 - the estimated trace area of the shard, in cells;
-- the height of the tallest chip, which must stay below \\( 2^{22} \\) rows, the size the recursion verifier is built for.
+- the height of the tallest chip, which must stay below \\( 2^{22} \\) rows, the core machine's row cube.
 
 A shard is never closed in front of a delay slot. Precompile events are moved into separate precompile shards, and the memory initialization and finalization events of the whole execution are placed in the last shards. Each shard records its public values: start and end `pc`, shard and execution-shard numbers, the memory address ranges it initialized and finalized, the committed-value and deferred-proof digests, the exit code and its global digest.
 

@@ -152,6 +152,11 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::constraint_folder::ShardConstraintFolder<'b, C>>,
 {
+    assert_eq!(
+        max_log_row_count,
+        machine.max_log_row_count(),
+        "a child proof is verified at the row cube of the machine that proved it"
+    );
     let jagged_vk = crate::shard_proof_variable_lift::build_verifying_key_variable::<C, SC>(
         builder, &vk_legacy,
     );
@@ -164,6 +169,10 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         proof_opened_values,
         rounds_witness,
     ) = proof_tuple;
+    assert!(
+        rounds_witness.preceding.is_empty(),
+        "a recursion shard proof commits no trace round before its main round"
+    );
 
     let chip_names: Vec<String> =
         logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
@@ -300,7 +309,7 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
     >::insertion_points_from_column_counts(&column_counts_by_round);
     let whir_pv = crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
         main_commit,
-        None,
+        Vec::new(),
         public_values_raw.clone(),
         &logup_gkr_proof,
         &zerocheck_proof,
@@ -372,7 +381,10 @@ pub fn verify_wrap_jagged_core<C, SC, A>(
         eval_public_values_fn,
         jagged_evaluator_fn,
         None,
-        &vec![false; shard_chips.len()],
+        &zkm_pcs::shard_level::round_layout::TraceRoundLayout::from_round_indices(
+            shard_chips.len(),
+            Vec::new(),
+        ),
     );
 
     let public_values: &RootPublicValues<Felt<C::F>> = public_values_raw.as_slice().borrow();

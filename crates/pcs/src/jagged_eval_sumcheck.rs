@@ -56,13 +56,13 @@ use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 // ===========================================================================
-// Device jagged-eval round-engine seam: `ziren-gpu` installs an engine here.
+// Device jagged-eval round-engine hook: a device backend installs an engine here.
 //
 // The structural jagged-eval sumcheck's per-round polynomial COMPUTE (the
 // branching-program eval over all columns, ~O(N × num_cols) host work) can be
-// off-loaded to a device (CUDA) implementation supplied by `ziren-gpu`, while
+// off-loaded to a device (CUDA) implementation the backend supplies, while
 // the Fiat-Shamir challenger stays HOST-side (per-round observe/sample).  The
-// seam is a per-thread factory installed by `ziren-gpu` immediately around its
+// hook is a per-thread factory the backend installs immediately around its
 // device-path `prove_jagged_linear_core` call.  When NO factory is
 // installed (the default, and every pure-host build), the sumcheck runs on the
 // host; both paths produce identical bytes.
@@ -596,7 +596,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
 }
 
 /// Engine-driven variant of [`structural_jagged_eval_sumcheck`] used on the
-/// `ziren-gpu` device path, installed through the engine seam.  The per-round
+/// device backend's path, installed through the engine hook.  The per-round
 /// polynomial evals + fold are delegated to `engine` (a device kernel); the
 /// challenger observe/sample/interpolate stay HOST-side and identical to the
 /// host prover.  With `verify = true`, a shadow host [`StructuralJaggedEvalProver`]
@@ -739,10 +739,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
         return JaggedSumcheckEvalProof::dummy();
     }
 
-    let last = prefix_sums.last().copied().unwrap_or(0);
-    let log_m =
-        if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    let half = log_m + 1;
+    let half = prefix_sum_bits(prefix_sums);
     let n = 2 * half;
 
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
@@ -809,6 +806,47 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 
+/// The bits of one prefix sum in the jagged-eval sumcheck over `prefix_sums`:
+/// one more than the bits of the last cell index. The sumcheck has twice as
+/// many variables, for a column's first cell and the next column's.
+fn prefix_sum_bits(prefix_sums: &[usize]) -> usize {
+    let last = prefix_sums.last().copied().unwrap_or(0);
+    let log_m =
+        if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
+    log_m + 1
+}
+
+/// Checks what the host verifier checks of a jagged-eval proof over
+/// `prefix_sums`: its claimed sum is `weight`, the jagged evaluation the host
+/// computes itself, and it has one quadratic round polynomial and one point
+/// coordinate per variable. The round identities are checked by the recursion
+/// verifier.
+pub fn check_jagged_evaluation_claim(
+    proof: &JaggedSumcheckEvalProof<InnerChallenge>,
+    prefix_sums: &[usize],
+    weight: InnerChallenge,
+) -> Result<(), alloc::string::String> {
+    let psp = &proof.partial_sumcheck_proof;
+    let rounds = 2 * prefix_sum_bits(prefix_sums);
+    if psp.univariate_polys.len() != rounds || psp.point_and_eval.0.len() != rounds {
+        return Err(alloc::format!(
+            "jagged-eval proof has {} round(s) and a {}-coordinate point for {rounds} variables",
+            psp.univariate_polys.len(),
+            psp.point_and_eval.0.len(),
+        ));
+    }
+    if let Some(poly) = psp.univariate_polys.iter().find(|poly| poly.coefficients.len() != 3) {
+        return Err(alloc::format!(
+            "jagged-eval round polynomial has {} coefficients, not 3",
+            poly.coefficients.len(),
+        ));
+    }
+    if psp.claimed_sum != weight {
+        return Err("jagged-eval claimed sum is not the jagged evaluation".into());
+    }
+    Ok(())
+}
+
 /// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]
 /// writes, without re-deriving the polynomial.  Host verifiers (e.g.
 /// `verify_jagged_no_observe`) call this to keep the challenger in sync
@@ -862,6 +900,46 @@ mod tests {
         );
         assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 14);
         assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 14);
+    }
+
+    /// An honest proof passes the host's claim check against the jagged
+    /// evaluation the host computes; a changed claim, a dropped round and a
+    /// longer round polynomial do not.
+    #[test]
+    fn jagged_evaluation_claim_check_accepts_honest_and_rejects_altered() {
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let mut point = |n: usize| -> Vec<InnerChallenge> {
+            (0..n).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() >> 2)).collect()
+        };
+        let prefix_sums = [0usize, 16, 32, 48];
+        let (z_row, z_col, z_trace) = (point(5), point(2), point(6));
+        let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
+        let mut challenger = InnerChallenger::new(perm);
+        let proof =
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
+        let weight = crate::jagged_branching_program::full_jagged_evaluation(
+            &prefix_sums,
+            &z_row,
+            &z_col,
+            &z_trace,
+        );
+        assert!(check_jagged_evaluation_claim(&proof, &prefix_sums, weight).is_ok());
+
+        let other = weight + InnerChallenge::ONE;
+        assert!(check_jagged_evaluation_claim(&proof, &prefix_sums, other).is_err());
+        let mut short = proof.clone();
+        short.partial_sumcheck_proof.univariate_polys.pop();
+        assert!(check_jagged_evaluation_claim(&short, &prefix_sums, weight).is_err());
+        let mut wide = proof.clone();
+        wide.partial_sumcheck_proof.univariate_polys[0].coefficients.push(InnerChallenge::ZERO);
+        assert!(check_jagged_evaluation_claim(&wide, &prefix_sums, weight).is_err());
+        assert!(check_jagged_evaluation_claim(
+            &JaggedSumcheckEvalProof::dummy(),
+            &prefix_sums,
+            weight
+        )
+        .is_err());
     }
 
     /// naive sumcheck: round-by-round identity holds.  Each
@@ -978,7 +1056,7 @@ mod tests {
     ///
     /// The two disagree on one convention: the structural proof's point is
     /// `prover.rhos`, in prepend order, while the naive one pushes in round order.
-    /// Reversed here rather than "fixed" -- the orders are load-bearing for their
+    /// Reversed here rather than "fixed" -- each order is relied on by its
     /// own consumers.
     #[test]
     fn structural_and_naive_jagged_eval_sumchecks_agree() {

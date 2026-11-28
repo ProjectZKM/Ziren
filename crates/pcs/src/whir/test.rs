@@ -80,7 +80,7 @@ fn folds_reduce_the_claim() {
             .map(|_| {
                 use p3_field::BasedVectorSpace;
                 <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                    (0..4).map(|_| rand_kb(rng)),
+                    (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(rng)),
                 )
                 .unwrap()
             })
@@ -164,7 +164,7 @@ fn run_tower(
             .map(|_| {
                 use p3_field::BasedVectorSpace;
                 <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                    (0..4).map(|_| rand_kb(rng)),
+                    (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(rng)),
                 )
                 .unwrap()
             })
@@ -210,7 +210,7 @@ fn tower_folds_original_poly() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -267,7 +267,7 @@ fn tower_roundtrip_verifies() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -329,7 +329,7 @@ fn interleaved_roundtrip_verifies() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -433,7 +433,7 @@ fn stacked_roundtrip_verifies() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -587,7 +587,7 @@ fn jagged_whir_roundtrip_matches_layout() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -695,7 +695,7 @@ fn jagged_whir_roundtrip_mixed_fold_schedule() {
         .map(|_| {
             use p3_field::BasedVectorSpace;
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -841,7 +841,7 @@ fn stacked_open_stripe_passes_match_reference() {
     let point: Vec<EF> = (0..n)
         .map(|_| {
             <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-                (0..4).map(|_| rand_kb(&mut rng)),
+                (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
             )
             .unwrap()
         })
@@ -852,7 +852,7 @@ fn stacked_open_stripe_passes_match_reference() {
         assert_eq!(eq_weighted_sum(&eq, s), mle.eval_at::<EF>(&point)[0]);
     }
     let lambda: EF = <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
-        (0..4).map(|_| rand_kb(&mut rng)),
+        (0..crate::air::EXTENSION_DEGREE).map(|_| rand_kb(&mut rng)),
     )
     .unwrap();
     let mut lam = EF::ONE;

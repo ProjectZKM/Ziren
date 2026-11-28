@@ -128,8 +128,8 @@ pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<
 /// `2^18` EF values, and the host round-1 fold, the host encode + Merkle
 /// commit of its codeword, the OOD `eval_at` on the folded vector and the
 /// host↔device copies of the weight for the constraint absorption measured
-/// ~25 ms per open on a multi-GPU worker lane (`ZIREN_WHIR_OPEN_TIMING`:
-/// folds 6.5 + ood 9.4 + commits/absorb ~10 ms of a 73 ms open).  An engine
+/// ~25 ms per open on a multi-GPU worker lane (the `whir opening` timing
+/// event: folds 6.5 + ood 9.4 + commits/absorb ~10 ms of a 73 ms open).  An engine
 /// may therefore keep the vectors resident past round 0
 /// ([`Self::keep_resident`]): it then folds the following rounds through the
 /// same `c0_c2`/`apply_rc` calls, answers the OOD samples
@@ -232,74 +232,89 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     }
 }
 
-/// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
-/// open — process-global sums, dumped every 32 opens.  Diagnostic only.
+/// The phase times of one stacked opening, sent as one event to
+/// [`crate::diagnostics::TIMING_TARGET`] when the opening ends. With the
+/// timing events off nothing is timed.
+///
+/// `queries` holds `query_grind` and either `round0_queries` or
+/// `later_queries`; `constraints` holds `engine_constraints` and
+/// `host_constraints`; `final_round` holds `final_grind` and `final_queries`.
 mod open_timing {
-    // Backing storage uses `AtomicUsize`, not `AtomicU64`, so this file
-    // compiles for the guest target (mipsel-zkm-zkvm-elf is 32-bit and has
-    // no `target_has_atomic = "64"`).  A guest that verifies a proof of this
-    // system inside the machine links this crate, so the module has to
-    // type-check there even though the timers never run: they are gated on
-    // an environment variable the guest has no way to set.  Nanosecond sums
-    // still fit: `usize::MAX` nanoseconds is 584 years on a 64-bit host, and
-    // on a 32-bit target the counters are inert.
-    use core::sync::atomic::{AtomicUsize, Ordering};
-    pub static ENGINE: AtomicUsize = AtomicUsize::new(0);
-    pub static FOLDS: AtomicUsize = AtomicUsize::new(0);
-    pub static COMMITS: AtomicUsize = AtomicUsize::new(0);
-    pub static OOD: AtomicUsize = AtomicUsize::new(0);
-    pub static QUERIES: AtomicUsize = AtomicUsize::new(0);
-    pub static CONSTRAINTS: AtomicUsize = AtomicUsize::new(0);
-    pub static FINAL: AtomicUsize = AtomicUsize::new(0);
-    // Sub-sections (NESTED inside QUERIES / FINAL — they double-count
-    // against their umbrella; umbrella minus subs = residual assembly).
-    pub static GRINDQ: AtomicUsize = AtomicUsize::new(0);
-    pub static QR0: AtomicUsize = AtomicUsize::new(0);
-    pub static QLATER: AtomicUsize = AtomicUsize::new(0);
-    pub static FGRIND: AtomicUsize = AtomicUsize::new(0);
-    pub static FOPEN: AtomicUsize = AtomicUsize::new(0);
-    pub static CENGINE: AtomicUsize = AtomicUsize::new(0);
-    pub static CHOST: AtomicUsize = AtomicUsize::new(0);
-    // The prologue: everything before the round loop.  Without these, the
-    // umbrellas above leave a large share of `whir_open` uncovered.
-    pub static PEVALS: AtomicUsize = AtomicUsize::new(0);
-    pub static PINIT: AtomicUsize = AtomicUsize::new(0);
-    pub static OPENS: AtomicUsize = AtomicUsize::new(0);
+    use core::cell::Cell;
+    use std::time::Instant;
 
-    pub fn enabled() -> bool {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ON.get_or_init(|| std::env::var("ZIREN_WHIR_OPEN_TIMING").is_ok())
+    #[derive(Clone, Copy)]
+    pub enum Phase {
+        StripeEvals,
+        Init,
+        Round0Fold,
+        LaterFolds,
+        Commits,
+        Ood,
+        Queries,
+        QueryGrind,
+        Round0Queries,
+        LaterQueries,
+        Constraints,
+        EngineConstraints,
+        HostConstraints,
+        FinalRound,
+        FinalGrind,
+        FinalQueries,
     }
 
-    pub struct Timer(std::time::Instant, &'static AtomicUsize);
-    impl Timer {
-        pub fn new(slot: &'static AtomicUsize) -> Option<Self> {
-            enabled().then(|| Timer(std::time::Instant::now(), slot))
-        }
+    const PHASES: usize = 16;
+
+    pub struct OpenTimes {
+        start: Option<Instant>,
+        nanos: [Cell<u64>; PHASES],
     }
-    impl Drop for Timer {
+
+    pub struct Timer<'a>(Instant, &'a Cell<u64>);
+
+    impl Drop for Timer<'_> {
         fn drop(&mut self) {
-            self.1.fetch_add(self.0.elapsed().as_nanos() as usize, Ordering::Relaxed);
+            self.1.set(self.1.get() + self.0.elapsed().as_nanos() as u64);
         }
     }
 
-    pub fn tick_open() {
-        if !enabled() {
-            return;
+    impl OpenTimes {
+        pub fn new() -> Self {
+            Self {
+                start: crate::diagnostics::timing_start(),
+                nanos: core::array::from_fn(|_| Cell::new(0)),
+            }
         }
-        let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
-        if n.is_multiple_of(32) {
-            let g = |a: &AtomicUsize| a.load(Ordering::Relaxed) as f64 / 1e9;
-            tracing::info!(
-                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
-                g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
-                g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN),
-                g(&CENGINE), g(&CHOST)
-            );
-            tracing::info!(
-                "#WHIR-OPEN-TIMING n={n} pevals={:.2}s pinit={:.2}s",
-                g(&PEVALS),
-                g(&PINIT)
+
+        pub fn time(&self, phase: Phase) -> Option<Timer<'_>> {
+            self.start.map(|_| Timer(Instant::now(), &self.nanos[phase as usize]))
+        }
+
+        pub fn emit(self) {
+            let Some(start) = self.start else {
+                return;
+            };
+            let us = |phase: Phase| self.nanos[phase as usize].get() / 1_000;
+            tracing::debug!(
+                target: crate::diagnostics::TIMING_TARGET,
+                stripe_evals_us = us(Phase::StripeEvals),
+                init_us = us(Phase::Init),
+                round0_fold_us = us(Phase::Round0Fold),
+                later_folds_us = us(Phase::LaterFolds),
+                commits_us = us(Phase::Commits),
+                ood_us = us(Phase::Ood),
+                queries_us = us(Phase::Queries),
+                query_grind_us = us(Phase::QueryGrind),
+                round0_queries_us = us(Phase::Round0Queries),
+                later_queries_us = us(Phase::LaterQueries),
+                constraints_us = us(Phase::Constraints),
+                engine_constraints_us = us(Phase::EngineConstraints),
+                host_constraints_us = us(Phase::HostConstraints),
+                final_round_us = us(Phase::FinalRound),
+                final_grind_us = us(Phase::FinalGrind),
+                final_queries_us = us(Phase::FinalQueries),
+                total_us = start.elapsed().as_micros() as u64,
+                "whir opening"
             );
         }
     }
@@ -406,7 +421,8 @@ where
         let num_rounds = self.config.round_parameters.len();
         debug_assert_eq!(stack_point.len(), lsh);
 
-        let _t_pevals = open_timing::Timer::new(&open_timing::PEVALS);
+        let open_times = open_timing::OpenTimes::new();
+        let _t_pevals = open_times.time(open_timing::Phase::StripeEvals);
         let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
             e.stripe_evals(&stack_point)
         } else {
@@ -425,7 +441,7 @@ where
         }
 
         drop(_t_pevals);
-        let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
+        let _t_pinit = open_times.time(open_timing::Phase::Init);
         let batch_grinding_witness =
             crate::whir::grind::accelerated_grind(challenger, self.config.batch_pow_bits);
         let lambda: EF = challenger.sample_algebra_element();
@@ -510,10 +526,10 @@ where
 
         drop(_t_pinit);
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
-            let _t_fold = open_timing::Timer::new(if r == 0 {
-                &open_timing::ENGINE
+            let _t_fold = open_times.time(if r == 0 {
+                open_timing::Phase::Round0Fold
             } else {
-                &open_timing::FOLDS
+                open_timing::Phase::LaterFolds
             });
             let mut this_round_randomness = Vec::new();
             let polys = if resident {
@@ -564,7 +580,7 @@ where
             }
 
             drop(_t_fold);
-            let _t_commit = open_timing::Timer::new(&open_timing::COMMITS);
+            let _t_commit = open_times.time(open_timing::Phase::Commits);
             let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = cur_log;
             let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
@@ -604,7 +620,7 @@ where
             };
 
             drop(_t_commit);
-            let _t_ood = open_timing::Timer::new(&open_timing::OOD);
+            let _t_ood = open_times.time(open_timing::Phase::Ood);
             let folded = (!resident)
                 .then(|| Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
@@ -622,9 +638,9 @@ where
             round_ood_answers.push(ood_answers.clone());
 
             drop(_t_ood);
-            let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
+            let _t_q = open_times.time(open_timing::Phase::Queries);
             {
-                let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
+                let _t_g = open_times.time(open_timing::Phase::QueryGrind);
                 folding_pow.push(ProofOfWork(crate::whir::grind::accelerated_grind(
                     challenger,
                     round_cfg.queries_pow_bits,
@@ -649,10 +665,10 @@ where
                     (PrevTree::Engine, Some(e)) => Some(e.open_folded_queries(&indices).into()),
                     _ => None,
                 };
-            let _t_qkind = open_timing::Timer::new(if matches!(prev_single, PrevTree::Stripes) {
-                &open_timing::QR0
+            let _t_qkind = open_times.time(if matches!(prev_single, PrevTree::Stripes) {
+                open_timing::Phase::Round0Queries
             } else {
-                &open_timing::QLATER
+                open_timing::Phase::LaterQueries
             });
             let stripes_mode = matches!(prev_single, PrevTree::Stripes);
             let mut per_query: Vec<Vec<LeafOpening<F, MT>>> = Vec::with_capacity(indices.len());
@@ -741,31 +757,31 @@ where
 
             drop(_t_qkind);
             drop(_t_q);
-            let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
+            let _t_c = open_times.time(open_timing::Phase::Constraints);
             let round_batch: EF = challenger.sample_algebra_element();
             let ood_coeffs = folder.ood_coeffs(&ood_answers, round_batch);
             let ood_absorbed = {
-                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                let _t_e = open_times.time(open_timing::Phase::EngineConstraints);
                 engine
                     .as_deref_mut()
                     .is_some_and(|e| e.absorb_ood(&mut folder.weight, &ood_points, &ood_coeffs))
             };
             if !ood_absorbed {
                 assert!(!resident, "WhirRound0Engine declined absorb_ood while resident");
-                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
+                let _t_h = open_times.time(open_timing::Phase::HostConstraints);
                 folder.absorb_eq_tables(&ood_points, &ood_coeffs);
             }
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
             let (mono_coeffs, _) = folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
             let absorbed = {
-                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                let _t_e = open_times.time(open_timing::Phase::EngineConstraints);
                 engine.as_deref_mut().is_some_and(|e| {
                     e.absorb_monomials(&mut folder.weight, &stir_points, &mono_coeffs)
                 })
             };
             if !absorbed {
                 assert!(!resident, "WhirRound0Engine declined absorb_monomials while resident");
-                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
+                let _t_h = open_times.time(open_timing::Phase::HostConstraints);
                 folder.absorb_monomial_tables(&stir_points, &mono_coeffs);
             }
 
@@ -773,20 +789,20 @@ where
             prev_single = this_tree;
         }
 
-        let _t_final = open_timing::Timer::new(&open_timing::FINAL);
+        let _t_final = open_times.time(open_timing::Phase::FinalRound);
         let final_poly = folder.f_vec.clone();
         for c in final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
         let final_pow = {
-            let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
+            let _t_g = open_times.time(open_timing::Phase::FinalGrind);
             ProofOfWork(crate::whir::grind::accelerated_grind(
                 challenger,
                 self.config.final_pow_bits,
             ))
         };
         let final_mask = (1usize << prev_domain_log) - 1;
-        let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
+        let _t_fopen = open_times.time(open_timing::Phase::FinalQueries);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
         let final_indices: Vec<usize> = (0..self.config.final_queries)
             .map(|_| challenger.sample_bits(prev_domain_log) & final_mask)
@@ -830,7 +846,7 @@ where
         {
             drop(_t_fopen);
             drop(_t_final);
-            open_timing::tick_open();
+            open_times.emit();
         }
         StackedWhirProof {
             whir_proof: WhirProof {

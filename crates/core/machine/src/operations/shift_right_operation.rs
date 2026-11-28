@@ -134,7 +134,7 @@ impl<F: PrimeField32> ShiftRightOperation<F> {
 }
 
 impl<F: Field> ShiftRightOperation<F> {
-    /// The constraint mirror of `ShiftRightChip::eval` minus the chip plumbing
+    /// The constraint mirror of `ShiftRightChip::eval` minus the chip-level parts
     /// (selectors, frame, Instruction-bus receive).  The caller guarantees
     /// `is_srl` / `is_sra` / `is_ror` are boolean with at most one set, and
     /// all zero on non-real rows; `b` / `c` must be valid byte-words.

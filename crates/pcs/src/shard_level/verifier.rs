@@ -11,7 +11,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing,
 use super::constraint_folder::{
     compute_padded_row_adjustment_shard_host, eval_constraints_shard_host, ShardConstraintFolder,
 };
-use super::shard_proof::{FoldOrientation, JaggedShardProof};
+use super::shard_proof::JaggedShardProof;
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::lookup::LookupKind;
@@ -166,12 +166,14 @@ impl JaggedShardVerifier {
     /// name order. `pinned` says whether the machine pins its rounds
     /// (`StarkMachine::recursion_pins`): on a pinned machine the preprocessed
     /// round's area and padding split are those of the proof's pin class, read
-    /// off its padding layout and checked against the rows. `global_round` is
-    /// the machine's global-round chip set (`StarkMachine::global_round`): a
-    /// shard naming any of its chips commits them in a main round of their
-    /// own, observed as `C_global` before `C_main`. `global_challenge` is the
-    /// cross-shard challenge of the global-scope lookups; its digest
-    /// `h_star` opens the transcript.
+    /// off its padding layout and checked against the rows. `preceding_rounds`
+    /// are the chip sets of the trace rounds before the main round, in order:
+    /// a proof naming any chip of a set commits those chips in a round of
+    /// their own, whose commitment is observed, in round order, before
+    /// `C_main`. A shard's only such set is the machine's global-round chip
+    /// set (`StarkMachine::global_round`); a global proof's are its table
+    /// slots but the last. `global_challenge` is the cross-shard challenge of
+    /// the global-scope lookups; its digest `h_star` opens the transcript.
     ///
     /// Returns the shard's global sum `S`: the sum of the fractions of its
     /// global-scope lookups under `global_challenge`, read off the GKR
@@ -192,7 +194,7 @@ impl JaggedShardVerifier {
         num_pv_elts: usize,
         pinned: Option<crate::jagged::RecursionPins>,
         machine_has_pv_buses: bool,
-        global_round: Option<&std::collections::BTreeSet<String>>,
+        preceding_rounds: &[&std::collections::BTreeSet<String>],
         global_challenge: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
     ) -> Result<Challenge<SC>, JaggedShardVerifyError>
     where
@@ -239,18 +241,38 @@ impl JaggedShardVerifier {
                     got: opening.preprocessed.local.len(),
                 });
             }
+            let name = chip.name();
+            let logup = proof.logup_gkr_proof.logup_evaluations.chip_openings.get(name.as_str());
+            let logup_main =
+                logup.and_then(|o| o.main_trace_evaluations_full.as_deref()).map_or(0, <[_]>::len);
+            if logup_main != expected_main {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
+                    chip: name,
+                    round: "LogUp-GKR main",
+                    expected: expected_main,
+                    got: logup_main,
+                });
+            }
+            let logup_prep = logup
+                .and_then(|o| o.preprocessed_trace_evaluations_full.as_deref())
+                .map_or(0, <[_]>::len);
+            if logup_prep != expected_prep {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
+                    chip: name,
+                    round: "LogUp-GKR preprocessed",
+                    expected: expected_prep,
+                    got: logup_prep,
+                });
+            }
         }
 
-        let layout = super::round_layout::TraceRoundLayout::for_chips(chips, global_round);
-        let has_global = layout.has_global();
-        if proof.global_commitment.is_some() != has_global
-            || proof.global_original_commitment.is_some() != has_global
-        {
+        let layout = super::round_layout::TraceRoundLayout::for_rounds(chips, preceding_rounds);
+        if proof.preceding_rounds.len() != layout.preceding().len() {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
-                "the shard's chips {} a global round, but the proof carries {} commitment \
-                 for one",
-                if has_global { "commit" } else { "do not commit" },
-                if proof.global_commitment.is_some() { "a" } else { "no" },
+                "the shard's chips commit {} trace round(s) before the main round, but the \
+                 proof carries {} commitment(s) for them",
+                layout.preceding().len(),
+                proof.preceding_rounds.len(),
             )));
         }
 
@@ -260,7 +282,7 @@ impl JaggedShardVerifier {
         for &pv in proof.public_values.iter() {
             challenger.observe(pv);
         }
-        for &c in proof.global_commitment.iter().flatten() {
+        for &c in proof.preceding_rounds.iter().flat_map(|round| round.commitment.iter()) {
             challenger.observe(c);
         }
         for &c in proof.main_commitment.iter() {
@@ -291,6 +313,12 @@ impl JaggedShardVerifier {
         for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
             let name = chip.name();
             let h = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
+            if h > 1usize << self.max_log_row_count {
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                    "chip '{name}': its observed height {h} is above the row cube 2^{}",
+                    self.max_log_row_count
+                )));
+            }
             let expected = height_bits::<Challenge<SC>>(h, self.max_log_row_count + 1);
             if opening.quotient.first().map(|v| v.as_slice()) != Some(expected.as_slice()) {
                 return Err(JaggedShardVerifyError::LogupGkr(format!(
@@ -316,7 +344,6 @@ impl JaggedShardVerifier {
             &proof.opened_values,
             max_log_row_count,
             beta_seed_dim,
-            proof.fold_orientation,
             &proof.public_values,
             machine_has_pv_buses,
             global_challenge,
@@ -393,13 +420,15 @@ impl JaggedShardVerifier {
                     ));
                 }
 
-                if let (Some(observed_global), Some(claimed_raw)) =
-                    (proof.global_commitment.as_ref(), proof.global_original_commitment.as_ref())
-                {
+                let n_preceding = proof.preceding_rounds.len();
+                for (r, round) in proof.preceding_rounds.iter().enumerate() {
+                    let (observed_global, claimed_raw) =
+                        (&round.commitment, &round.original_commitment);
                     let rounds = &bundle.packing.round_counts;
+                    let raws = &bundle.preceding_commits;
                     let (Some(global_round_counts), Some(raw_global)) = (
-                        rounds.len().checked_sub(2).and_then(|i| rounds.get(i)),
-                        bundle.preceding_commits.last(),
+                        rounds.len().checked_sub(n_preceding + 1).and_then(|i| rounds.get(i + r)),
+                        raws.len().checked_sub(n_preceding).and_then(|i| raws.get(i + r)),
                     ) else {
                         return Err(JaggedShardVerifyError::JaggedPcs(
                             "global round: the opening carries no round before the main round"
@@ -458,6 +487,7 @@ impl JaggedShardVerifier {
             &layout,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
+            global_challenge.is_some(),
         )?;
 
         Ok(global_sum)
@@ -489,10 +519,13 @@ impl JaggedShardVerifier {
 /// * `observed_chip_heights` — the h_i the prologue observed, before any
 ///   challenge of this phase: the canonical main-round row counts, against
 ///   which the jagged geometry is checked.
-/// * `layout` — the global- and main-round chip indices, in opening order.
+/// * `layout` — the chip indices of the trace rounds before the main round
+///   and of the main round, in opening order.
 /// * `claimed_prep_pad_columns` — `Some(n)` on a pinned machine, where the
 ///   number of preprocessed padding columns names the proof's pin class;
 ///   `None` for natural rounds.
+/// * `global_proof` — the proof is a global proof, whose main round is a
+///   global round and commits under that round's pin.
 ///
 /// The `unsafe` reinterprets are sound under the `TypeId` gate, which forces
 /// `Val<SC> = JaggedVal = KoalaBear`, `Challenge<SC> = InnerChallenge` and
@@ -512,6 +545,7 @@ fn verify_jagged_pcs_host<SC, A>(
     layout: &super::round_layout::TraceRoundLayout,
     challenger: &mut SC::Challenger,
     claimed_prep_pad_columns: Option<usize>,
+    global_proof: bool,
 ) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig + crate::WhirRing,
@@ -707,6 +741,50 @@ where
                 bundle.packing.round_counts.len(),
             )));
         }
+        let cube = 1usize << shared_eval_point.len();
+        let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let pins = match claimed_prep_pad_columns {
+            Some(_) if expected_preceding == 1 => {
+                let claimed = bundle.packing.padding_heights.first().map_or(0, |p| p.len());
+                let Some(class) = crate::jagged::RECURSION_PIN_CLASSES
+                    .iter()
+                    .position(|c| c.prep.pad_columns == claimed)
+                else {
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                        "outer preprocessed round: {claimed} padding columns name no pin class",
+                    )));
+                };
+                Some(crate::jagged::RecursionPins::class(class))
+            }
+            _ => None,
+        };
+        let rounds = bundle.packing.round_counts.len();
+        let mut main_area = 0usize;
+        for (r, (round, pads)) in bundle
+            .packing
+            .round_counts
+            .iter()
+            .zip(bundle.packing.padding_heights.iter())
+            .enumerate()
+        {
+            let total =
+                round.iter().fold(0usize, |a, (h, w)| a.saturating_add(h.saturating_mul(*w)));
+            let pin = pins.map(|pins| if r + 1 == rounds { pins.main } else { pins.prep });
+            if expected_round_padding(total, pin, log_stack, cube).as_ref() != Some(pads) {
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                    "outer round {r}: the {} padding columns are not the split its {total} cells \
+                     determine",
+                    pads.len(),
+                )));
+            }
+            main_area = pads.iter().fold(total, |a, h| a.saturating_add(*h));
+        }
+        if bundle.commit.area != main_area {
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                "outer main round: the bundle commits {} cells, the round's area is {main_area}",
+                bundle.commit.area,
+            )));
+        }
 
         for raw in bundle.preceding_commits.iter() {
             match <SC as crate::WhirRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
@@ -874,14 +952,15 @@ where
     use p3_air::BaseAir;
 
     let has_global = layout.has_global();
-    let expected_rounds = usize::from(n_prep > 0) + usize::from(has_global) + 1;
+    let n_preceding = layout.preceding().len();
+    let expected_rounds = usize::from(n_prep > 0) + n_preceding + 1;
     if combined_packing.round_counts.len() != expected_rounds {
         return Err(JaggedShardVerifyError::JaggedPcs(format!(
             "inner bundle describes {} round(s); the machine commits {expected_rounds} \
-             ({} preprocessed chip(s), {} global round, plus the main round)",
+             ({} preprocessed chip(s), {n_preceding} trace round(s) before the main round, \
+             plus the main round)",
             combined_packing.round_counts.len(),
             n_prep,
-            if has_global { "a" } else { "no" },
         )));
     }
     if bundle.preceding_commits.len() + 1 != expected_rounds {
@@ -912,10 +991,10 @@ where
             .collect()
     };
     let first_main_round = usize::from(n_prep > 0);
-    if has_global {
+    for (r, indices) in layout.preceding().iter().enumerate() {
         crate::jagged_pcs::check_round_geometry(
-            &combined_packing.round_counts[first_main_round],
-            &expected_for(layout.global_indices()),
+            &combined_packing.round_counts[first_main_round + r],
+            &expected_for(indices),
             "inner global round",
         )
         .map_err(JaggedShardVerifyError::JaggedPcs)?;
@@ -938,9 +1017,10 @@ where
             .copied()
             .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(chip))
     };
-    if has_global {
+    let mut preceding_ends: Vec<usize> = Vec::with_capacity(n_preceding);
+    for indices in layout.preceding() {
         let mut global_cells = 0usize;
-        for &i in layout.global_indices() {
+        for &i in indices {
             let chip = chips[i];
             let h = observed_height(chip);
             let column_count = column_count_at(chip_infos.len(), chip);
@@ -974,6 +1054,7 @@ where
                 );
             }
         }
+        preceding_ends.push(chip_infos.len());
     }
     let n_global_end = chip_infos.len();
     for &i in layout.main_indices() {
@@ -1068,6 +1149,31 @@ where
                     "pin class {class} claimed for rows that need class {floor}",
                 )));
             }
+        }
+        let main_end = n_global_end + n_main_infos;
+        let main_total = chip_infos[n_global_end..main_end]
+            .iter()
+            .fold(0usize, |a, i| a.saturating_add(i.row_count.saturating_mul(i.column_count)));
+        let main_pin = if global_proof {
+            crate::jagged::global_round_pin(main_total, log_stack, cube)
+        } else {
+            pin_class.map(|class| crate::jagged::RecursionPins::class(class).main)
+        };
+        let claimed: Vec<usize> = chip_infos[main_end..].iter().map(|i| i.row_count).collect();
+        if expected_round_padding(main_total, main_pin, log_stack, cube).as_ref() != Some(&claimed)
+        {
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                "main round: the {} padding columns are not the split its {main_total} cells \
+                 determine",
+                claimed.len(),
+            )));
+        }
+        let main_area = claimed.iter().fold(main_total, |a, h| a.saturating_add(*h));
+        if bundle.commit.area != main_area {
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                "main round: the bundle commits {} cells, the round's area is {main_area}",
+                bundle.commit.area,
+            )));
         }
     }
 
@@ -1178,17 +1284,19 @@ where
         }
         alloc::vec![(raw.clone(), area)]
     };
-    if has_global {
-        let global_cells: usize = chip_infos[n_prep_infos..n_global_end]
+    let mut round_start = n_prep_infos;
+    for (r, &round_end) in preceding_ends.iter().enumerate() {
+        let global_cells: usize = chip_infos[round_start..round_end]
             .iter()
             .map(|i| i.row_count.saturating_mul(i.column_count))
             .sum();
         let area = global_cells.div_ceil(1usize << log_stack) << log_stack;
         let raw = bundle
             .preceding_commits
-            .get(first_main_round)
+            .get(first_main_round + r)
             .expect("the preceding round count was checked above");
         preceding_rounds.push((raw.clone(), area));
+        round_start = round_end;
     }
 
     if !crate::jagged_pcs::jagged::verify_jagged_no_observe_with_profile(
@@ -1207,6 +1315,30 @@ where
     }
 
     Ok(())
+}
+
+/// The stacking-padding column heights a proof must carry for a round of
+/// `total` real cells: the prover's split ([`crate::jagged::round_padding_heights`])
+/// at the round's area, which is its pin's or, without a pin,
+/// `committed_dense_len(total)`.
+///
+/// Every input is fixed by the verifying key or by heights the transcript
+/// observed, so a proof has no choice in the split.
+fn expected_round_padding(
+    total: usize,
+    pin: Option<crate::jagged::AreaPin>,
+    log_stack: usize,
+    cube: usize,
+) -> Option<Vec<usize>> {
+    let area =
+        pin.map_or_else(|| crate::jagged::committed_dense_len(total, log_stack), |pin| pin.area);
+    crate::jagged::round_padding_heights(
+        total,
+        area,
+        pin.map(|pin| pin.pad_columns),
+        log_stack,
+        cube,
+    )
 }
 
 /// Host-side `full_geq`: padded-row mask used by the zerocheck
@@ -1806,7 +1938,6 @@ fn verify_logup_gkr_host<SC, A>(
     opened_values: &ShardOpenedValues<Challenge<SC>>,
     max_log_row_count: usize,
     beta_seed_dim: usize,
-    fold_orientation: FoldOrientation,
     public_values: &[Val<SC>],
     machine_has_pv_buses: bool,
     global: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
@@ -1859,6 +1990,11 @@ where
         })
         .collect();
     let columns = numerator.len() / 2;
+    if columns == 0 {
+        return Err(JaggedShardVerifyError::LogupGkr(
+            "circuit_output holds no lookup column".into(),
+        ));
+    }
     if lookups.len() > columns {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "circuit_output holds {columns} lookup columns, the chips have {}",
@@ -1945,14 +2081,7 @@ where
 
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
-        let eq_val = match fold_orientation {
-            FoldOrientation::Msb => eq_eval_host(sumcheck_point, &eval_point),
-            FoldOrientation::Lsb => {
-                let mut rev = eval_point.clone();
-                rev.reverse();
-                eq_eval_host(sumcheck_point, &rev)
-            }
-        };
+        let eq_val = eq_eval_host(sumcheck_point, &eval_point);
         let n0 = round_proof.numerator_0;
         let n1 = round_proof.numerator_1;
         let d0 = round_proof.denominator_0;
@@ -2201,7 +2330,7 @@ mod tests {
     fn full_geq_host_zero_threshold_is_one() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let threshold = vec![EF::ZERO; 4];
         let eval_point = vec![EF::from_u32(3), EF::from_u32(7), EF::from_u32(11), EF::from_u32(13)];
@@ -2216,7 +2345,7 @@ mod tests {
     fn full_geq_host_equal_boolean_threshold_is_one() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let point = vec![EF::ONE, EF::ZERO, EF::ONE];
         let result = full_geq_host(&point, &point);
@@ -2231,7 +2360,7 @@ mod tests {
     fn full_geq_host_boolean_strict_greater() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let threshold = vec![EF::ZERO, EF::ZERO];
         let eval_point = vec![EF::ONE, EF::ZERO];
@@ -2246,7 +2375,7 @@ mod tests {
     fn degree_stub_host_is_zero_filled_with_extra_bit() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         for max_log in [0usize, 1, 5, 22] {
             let v: Vec<EF> = degree_stub_host(max_log);
@@ -2260,7 +2389,7 @@ mod tests {
     fn eq_eval_host_indicator() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let a = vec![EF::from_u32(3), EF::from_u32(5)];
         let b = vec![EF::from_u32(3), EF::from_u32(5)];
@@ -2278,7 +2407,7 @@ mod tests {
     fn evaluate_mle_host_endpoints() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let evals: Vec<EF> = (10..14).map(EF::from_u32).collect();
 
@@ -2300,7 +2429,7 @@ mod tests {
     fn eval_coeffs_host_horner_correctness() {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
-        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        type EF = p3_field::extension::QuinticTrinomialExtensionField<KoalaBear>;
 
         let coeffs: Vec<EF> = vec![EF::from_u32(3), EF::from_u32(5), EF::from_u32(7)];
 
@@ -2316,7 +2445,7 @@ mod tests {
 
     fn rand_ef(rng: &mut impl Rng) -> EF {
         EF::from_basis_coefficients_iter(
-            (0..4).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
+            (0..crate::air::EXTENSION_DEGREE).map(|_| F::from_u32(rng.gen::<u32>() % 0x7f00_0001)),
         )
         .unwrap()
     }

@@ -562,7 +562,7 @@ fn i_type_instruction<AB: AirBuilder>(
 /// register write elsewhere is byte-checked by its
 /// writer (this check where `check_op_a_bytes` is `true`, the chips' own
 /// operations otherwise); memory holds bytes because MemoryGlobalInit
-/// rebuilds initial words from bits, MemoryLocal checks every shard's initial
+/// byte-checks initial words, MemoryLocal checks every shard's initial
 /// values, MemoryBump checks a register's first touch per shard,
 /// stores copy register bytes, and precompile writes go through the checked
 /// `eval_memory_access`.  The ALU immediate chips pass `true`.

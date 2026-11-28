@@ -34,36 +34,48 @@ pub fn eval_public_values<AB: ZKMAirBuilder>(builder: &mut AB) {
     eval_global_memory_finalize::<AB>(builder, pv);
 }
 
-/// Recompose a 32-bit little-endian bit array into a single field element
-/// (mod the field), matching `memory/global.rs`'s `prev_addr` recompose
-/// (`Σ bit_i · 2^i`).  Addresses are carried as one field element + a
-/// 32-bit decomposition; the `< 2^32` ordering is enforced by the bit
-/// comparison, while this recompose is the field-element form used on the
-/// `MemoryGlobal*Control` bus tuple.
-fn addr_from_bits<AB: ZKMAirBuilder>(bits: &[AB::PublicVar; 32]) -> AB::Expr {
-    let mut acc = AB::Expr::ZERO;
-    for (i, bit) in bits.iter().enumerate() {
-        acc += (*bit).into() * AB::Expr::from_u32(1u32 << i);
-    }
-    acc
+/// The two 16-bit limbs the 32 elements of an address spell: the sums
+/// `Σ bit_i · 2^i` over the low and over the high 16 of them. They are the
+/// `[addr_lo, addr_hi]` of a `MemoryGlobal*Control` tuple, the form
+/// `memory/global.rs` holds an address in.
+///
+/// Nothing asserts the elements boolean. The sums of a shard's last address
+/// equal the range-checked limbs of the last row of its table, or the sums
+/// of its previous address when the table has no rows, and the verifier of
+/// an execution equates the elements of a shard's previous address with
+/// those of the shard before it.
+fn addr_limbs_from_bits<AB: ZKMAirBuilder>(bits: &[AB::PublicVar; 32]) -> [AB::Expr; 2] {
+    let (lo, hi) = bits.split_at(16);
+    [lo, hi].map(|half| {
+        let mut acc = AB::Expr::ZERO;
+        for (i, bit) in half.iter().enumerate() {
+            acc += (*bit).into() * AB::Expr::from_u32(1u32 << i);
+        }
+        acc
+    })
 }
 
 /// `MemoryGlobalInitControl` boundary: anchor the global-memory-init
 /// address-ordering chain.  The `MemoryGlobalChip` (Initialize) rows form
-/// `receive(index, prev_addr, prev_valid) -> send(index+1, addr, is_comp)`
-/// (sorted, strictly-increasing addresses).  This SENDs the chain head
-/// `(0, previous_init_addr, 1)` [received by row 0 as its prev_addr] and
-/// RECEIVEs the chain tail `(global_init_count, last_init_addr, 1)` [sent
-/// by the last real row].  Tuple = [index, addr, valid] (3 values).
+/// `receive(index, prev_addr_lo, prev_addr_hi, prev_valid) ->
+/// send(index+1, addr_lo, addr_hi, is_comp)` (sorted, strictly-increasing
+/// addresses).  This SENDs the chain head `(0, previous_init_addr, 1)`
+/// [received by row 0 as its prev_addr] and RECEIVEs the chain tail
+/// `(global_init_count, last_init_addr, 1)` [sent by the last real row].
+/// Tuple = [index, addr_lo, addr_hi, valid] (4 values).
+///
+/// A shard without rows of the chip sends and receives one tuple each, so
+/// its count is zero and the limbs of its last address are those of its
+/// previous one: the chain passes through such a shard unchanged.
 fn eval_global_memory_init<AB: ZKMAirBuilder>(
     builder: &mut AB,
     pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
 ) {
-    let prev_addr = addr_from_bits::<AB>(&pv.previous_init_addr_bits);
-    let last_addr = addr_from_bits::<AB>(&pv.last_init_addr_bits);
+    let [prev_lo, prev_hi] = addr_limbs_from_bits::<AB>(&pv.previous_init_addr_bits);
+    let [last_lo, last_hi] = addr_limbs_from_bits::<AB>(&pv.last_init_addr_bits);
     builder.send(
         AirLookup::new(
-            vec![AB::Expr::ZERO, prev_addr, AB::Expr::ONE],
+            vec![AB::Expr::ZERO, prev_lo, prev_hi, AB::Expr::ONE],
             AB::Expr::ONE,
             LookupKind::MemoryGlobalInitControl,
         ),
@@ -71,7 +83,7 @@ fn eval_global_memory_init<AB: ZKMAirBuilder>(
     );
     builder.receive(
         AirLookup::new(
-            vec![pv.global_init_count.into(), last_addr, AB::Expr::ONE],
+            vec![pv.global_init_count.into(), last_lo, last_hi, AB::Expr::ONE],
             AB::Expr::ONE,
             LookupKind::MemoryGlobalInitControl,
         ),
@@ -86,11 +98,11 @@ fn eval_global_memory_finalize<AB: ZKMAirBuilder>(
     builder: &mut AB,
     pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
 ) {
-    let prev_addr = addr_from_bits::<AB>(&pv.previous_finalize_addr_bits);
-    let last_addr = addr_from_bits::<AB>(&pv.last_finalize_addr_bits);
+    let [prev_lo, prev_hi] = addr_limbs_from_bits::<AB>(&pv.previous_finalize_addr_bits);
+    let [last_lo, last_hi] = addr_limbs_from_bits::<AB>(&pv.last_finalize_addr_bits);
     builder.send(
         AirLookup::new(
-            vec![AB::Expr::ZERO, prev_addr, AB::Expr::ONE],
+            vec![AB::Expr::ZERO, prev_lo, prev_hi, AB::Expr::ONE],
             AB::Expr::ONE,
             LookupKind::MemoryGlobalFinalizeControl,
         ),
@@ -98,7 +110,7 @@ fn eval_global_memory_finalize<AB: ZKMAirBuilder>(
     );
     builder.receive(
         AirLookup::new(
-            vec![pv.global_finalize_count.into(), last_addr, AB::Expr::ONE],
+            vec![pv.global_finalize_count.into(), last_lo, last_hi, AB::Expr::ONE],
             AB::Expr::ONE,
             LookupKind::MemoryGlobalFinalizeControl,
         ),

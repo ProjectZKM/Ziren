@@ -178,12 +178,76 @@ where
     EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
     A: MachineAir<F>,
 {
-    let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS];
+    dummy_proof_of_rounds(
+        chips,
+        chip_heights_pairs,
+        max_log_row_count,
+        pins,
+        profile,
+        global_round.as_slice(),
+        false,
+    )
+}
+
+/// A zero-filled [`JaggedShardProof`] with the shape of a global proof of
+/// `views`, the views of its table slots: the views named in `slots[s]` are
+/// the slot `s`, a trace round under its global-round pin
+/// ([`zkm_pcs::jagged::global_round_pin`]), the last slot the main round.
+/// `view_heights_pairs` holds each view's (name, rows). A global proof has
+/// no public values and no preprocessed round.
+pub fn dummy_global_jagged_shard_proof<F, EF, A>(
+    views: &[&Chip<F, A>],
+    view_heights_pairs: &[(String, usize)],
+    max_log_row_count: usize,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+    slots: &[std::collections::BTreeSet<String>],
+) -> JaggedShardProof<F, EF>
+where
+    F: Field + Copy + PrimeCharacteristicRing,
+    EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
+    A: MachineAir<F>,
+{
+    let (_, preceding) = slots.split_last().expect("a global proof opens at least one round");
+    dummy_proof_of_rounds(
+        views,
+        view_heights_pairs,
+        max_log_row_count,
+        None,
+        profile,
+        &preceding.iter().collect::<Vec<_>>(),
+        true,
+    )
+}
+
+/// [`dummy_jagged_shard_proof`] over the trace rounds `preceding_rounds`
+/// before the main round, each under its global-round pin. A global proof
+/// (`global_proof`) has no public values and commits its main round under a
+/// global-round pin as well.
+fn dummy_proof_of_rounds<F, EF, A>(
+    chips: &[&Chip<F, A>],
+    chip_heights_pairs: &[(String, usize)],
+    max_log_row_count: usize,
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+    preceding_rounds: &[&std::collections::BTreeSet<String>],
+    global_proof: bool,
+) -> JaggedShardProof<F, EF>
+where
+    F: Field + Copy + PrimeCharacteristicRing,
+    EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
+    A: MachineAir<F>,
+{
+    let public_values = if global_proof { Vec::new() } else { vec![F::ZERO; PROOF_MAX_NUM_PVS] };
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
-    let in_global_round = |chip: &Chip<F, A>| {
-        global_round.is_some_and(|set| set.contains(MachineAir::<F>::name(chip).as_str()))
+    let chips_by_name = {
+        let mut by_name: Vec<&Chip<F, A>> = chips.to_vec();
+        by_name.sort_by_key(|a| MachineAir::<F>::name(*a));
+        by_name
     };
-    let has_global_round = chips.iter().any(|chip| in_global_round(chip));
+    let layout = zkm_pcs::shard_level::round_layout::TraceRoundLayout::for_rounds(
+        &chips_by_name,
+        preceding_rounds,
+    );
 
     let logup_gkr_proof = dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
 
@@ -238,20 +302,21 @@ where
         let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
-        let round_dims = |global: bool| -> Vec<(usize, usize)> {
-            name_sorted
+        let round_dims = |indices: &[usize]| -> Vec<(usize, usize)> {
+            indices
                 .iter()
-                .filter(|chip| in_global_round(chip) == global)
-                .map(|chip| {
-                    let name = MachineAir::<F>::name(**chip);
+                .map(|&i| {
+                    let chip = name_sorted[i];
+                    let name = MachineAir::<F>::name(*chip);
                     let w = <_ as BaseAir<F>>::width(&chip.air);
                     let rows = heights.get(&name).copied().unwrap_or(0);
                     (w, rows)
                 })
                 .collect()
         };
-        let global_dims = round_dims(true);
-        let chip_dims = round_dims(false);
+        let preceding_dims: Vec<Vec<(usize, usize)>> =
+            layout.preceding().iter().map(|indices| round_dims(indices)).collect();
+        let chip_dims = round_dims(layout.main_indices());
         let prep_dims: Vec<(usize, usize)> = name_sorted
             .iter()
             .filter_map(|chip| {
@@ -264,10 +329,11 @@ where
                 Some((w, rows))
             })
             .collect();
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_bundle(
+        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_bundle_of_rounds(
             &prep_dims,
-            &global_dims,
+            &preceding_dims.iter().map(Vec::as_slice).collect::<Vec<_>>(),
             &chip_dims,
+            global_proof,
             max_log_row_count,
             pins,
             profile,
@@ -301,33 +367,34 @@ where
         zkm_pcs::jagged::unpinned_pad_columns(real, log_stack, cube)
     };
     let heights_by_name: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
-    let round_real = |preprocessed: bool, global: Option<bool>| -> usize {
-        chips
-            .iter()
-            .filter(|c| global.is_none_or(|global| in_global_round(c) == global))
-            .map(|c| {
-                let w = if preprocessed {
-                    <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air)
-                } else {
-                    <_ as BaseAir<F>>::width(&c.air)
-                };
-                let rows = heights_by_name.get(&MachineAir::<F>::name(*c)).copied().unwrap_or(0);
-                w * rows
-            })
-            .sum()
+    let cells = |preprocessed: bool, c: &Chip<F, A>| -> usize {
+        let w = if preprocessed {
+            <A as p3_air::BaseAir<F>>::preprocessed_width(&c.air)
+        } else {
+            <_ as BaseAir<F>>::width(&c.air)
+        };
+        w * heights_by_name.get(&MachineAir::<F>::name(c)).copied().unwrap_or(0)
+    };
+    let round_real = |indices: &[usize]| -> usize {
+        indices.iter().map(|&i| cells(false, chips_by_name[i])).sum()
     };
     let mut padding_row_heights: Vec<Vec<F>> = Vec::new();
     if n_prep > 0 {
-        padding_row_heights
-            .push(vec![F::ZERO; pad_columns(round_real(true, None), pins.map(|p| p.prep))]);
+        let real = chips.iter().map(|c| cells(true, c)).sum();
+        padding_row_heights.push(vec![F::ZERO; pad_columns(real, pins.map(|p| p.prep))]);
     }
-    if has_global_round {
-        let real = round_real(false, Some(true));
+    for indices in layout.preceding() {
+        let real = round_real(indices);
         let pin = zkm_pcs::jagged::global_round_pin(real, log_stack, cube);
         padding_row_heights.push(vec![F::ZERO; pad_columns(real, pin)]);
     }
-    padding_row_heights
-        .push(vec![F::ZERO; pad_columns(round_real(false, Some(false)), pins.map(|p| p.main))]);
+    let main_real = round_real(layout.main_indices());
+    let main_pin = if global_proof {
+        zkm_pcs::jagged::global_round_pin(main_real, log_stack, cube)
+    } else {
+        pins.map(|p| p.main)
+    };
+    padding_row_heights.push(vec![F::ZERO; pad_columns(main_real, main_pin)]);
 
     #[allow(clippy::needless_update)]
     JaggedShardProof {
@@ -345,8 +412,14 @@ where
         row_counts,
         padding_column_counts,
         main_original_commitment: std::array::from_fn(|_| F::ZERO),
-        global_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
-        global_original_commitment: has_global_round.then(|| std::array::from_fn(|_| F::ZERO)),
+        preceding_rounds: layout
+            .preceding()
+            .iter()
+            .map(|_| zkm_pcs::shard_level::shard_proof::TraceRoundCommitment {
+                commitment: std::array::from_fn(|_| F::ZERO),
+                original_commitment: std::array::from_fn(|_| F::ZERO),
+            })
+            .collect(),
         global_pow_witness: None,
     }
 }
@@ -389,6 +462,30 @@ pub fn dummy_jagged_bundle(
     pins: Option<zkm_pcs::jagged::RecursionPins>,
     profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
+    dummy_bundle_of_rounds(
+        prep_dims,
+        &[global_dims],
+        chip_dims,
+        false,
+        max_log_row_count,
+        pins,
+        profile,
+    )
+}
+
+/// [`dummy_jagged_bundle`] over the trace rounds `preceding_dims` before the
+/// main round, each under its global-round pin; an empty one is not
+/// committed. `main_is_global` commits the main round under a global-round
+/// pin as well, as a global proof does.
+fn dummy_bundle_of_rounds(
+    prep_dims: &[(usize, usize)],
+    preceding_dims: &[&[(usize, usize)]],
+    chip_dims: &[(usize, usize)],
+    main_is_global: bool,
+    max_log_row_count: usize,
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
+) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
     use p3_symmetric::MerkleCap;
     use zkm_pcs::jagged::compute_jagged_metadata_from_dims;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
@@ -405,12 +502,16 @@ pub fn dummy_jagged_bundle(
     if !prep_dims.is_empty() {
         round_dims.push(prep_dims);
     }
-    let global_round_index = (!global_dims.is_empty()).then_some(round_dims.len());
-    if !global_dims.is_empty() {
+    let first_trace_round = round_dims.len();
+    for dims in preceding_dims.iter().filter(|dims| !dims.is_empty()) {
         assert!(pins.is_none(), "a pinned machine commits no global round");
-        round_dims.push(global_dims);
+        round_dims.push(dims);
     }
+    let main_round = round_dims.len();
     round_dims.push(chip_dims);
+    let under_global_pin = |r: usize| {
+        (first_trace_round..main_round).contains(&r) || (main_is_global && r == main_round)
+    };
 
     let pack_round = |dims: &[(usize, usize)]| {
         let dims: Vec<(String, usize, usize)> = dims
@@ -426,7 +527,7 @@ pub fn dummy_jagged_bundle(
 
     let cube = 1usize << max_log_row_count;
     let round_pin = |r: usize, n_rounds: usize| -> Option<zkm_pcs::jagged::AreaPin> {
-        if global_round_index == Some(r) {
+        if under_global_pin(r) {
             return zkm_pcs::jagged::global_round_pin(packings[r].total_values, log_stacking, cube);
         }
         let pins = pins?;
@@ -595,7 +696,7 @@ fn dummy_stacked_whir_proof(
 
     type F = InnerVal;
     type EF = InnerChallenge;
-    const D: usize = 4;
+    const D: usize = zkm_recursion_core::D;
 
     let config = zkm_pcs::whir::jagged::whir_config_for_profile(profile, log_stacking);
     let rounds = &config.round_parameters;
@@ -692,11 +793,11 @@ fn log2_ceil_usize(n: usize) -> usize {
 mod tests {
     use super::*;
 
-    use p3_field::extension::BinomialExtensionField;
+    use p3_field::extension::QuinticTrinomialExtensionField;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;
-    type EF = BinomialExtensionField<F, 4>;
+    type EF = QuinticTrinomialExtensionField<F>;
 
     /// `log2_ceil_usize` matches the canonical ceil-log2 semantics
     /// across the n=0,1,2,3,4,5,8,1024 spectrum.

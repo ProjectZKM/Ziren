@@ -37,7 +37,7 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 3 << 14;
 /// [`ZKMCoreOpts::max`] (hence the recursion prover), so a change must be gated
 /// on the full core → compress → shrink → wrap chain.
 ///
-/// ## The three fences on a core shard
+/// ## The three limits on a core shard
 ///
 /// 1. This threshold (trace area).
 /// 2. Per-chip height, `CORE_SHARD_HEIGHT_THRESHOLD` = 4,128,768 rows.
@@ -56,8 +56,8 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 3 << 14;
 /// committed `width × padded height` (not `T`), and class `k+1` costs ~2× class
 /// `k`. Peak VRAM is therefore not monotone in `T`: measure the class histogram
 /// at the exact value to ship rather than interpolating. Past the point where
-/// fence 3 binds, raising `T` removes no shards and only adds memory pressure.
-/// This knob fails by OOM on a fraction of runs, not smoothly, so a run that
+/// limit 3 binds, raising `T` removes no shards and only adds memory pressure.
+/// This setting fails by OOM on a fraction of runs, not smoothly, so a run that
 /// needs an allocator rescue counts as a failure.
 ///
 /// 460M: shards close on this budget and the largest shard's LogUp-GKR round-0

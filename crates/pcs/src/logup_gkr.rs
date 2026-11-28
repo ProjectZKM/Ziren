@@ -22,7 +22,7 @@
 /// for a witness that, once absorbed, makes the challenger emit
 /// `gkr_grinding_bits()` leading zero bits; the verifier re-checks the witness
 /// before sampling any GKR challenge.  The LogUp-GKR term scores 84 bits with
-/// no grind and the grind is the only lever on it -- queries cannot buy it --
+/// no grind and the grind is the only parameter that raises it -- queries cannot buy it --
 /// so it carries the whole distance to the per-component target: 16 bits put
 /// the term at 100, which is the minimum-component convention, and 22 put it at
 /// 106, which is what a union above 100 needs.
@@ -134,8 +134,22 @@ pub const GLOBAL_DIGEST_DOMAIN: u32 = 0x4744_4754;
 /// challenger.
 pub const GLOBAL_CHAIN_DOMAIN: u32 = 0x4743_484e;
 
-/// The start `h_0` of the global hash chain, sampled from `challenger`: the
-/// machine's challenger after it has observed the verifying key.
+/// Separates the digest of the global hash chain's lane heads from every
+/// other use of a fresh challenger.
+pub const GLOBAL_CHAIN_HEADS_DOMAIN: u32 = 0x474c_4e53;
+
+/// The lanes of the global hash chain. Each lane is a hash chain of its own:
+/// a shard's global round extends one lane, which its prover chooses, by one
+/// [`extend_global_chain_head`]. A prover with several devices gives each device a
+/// lane, so that consecutive rounds of a lane are rounds of one device.
+pub const GLOBAL_CHAIN_LANE_COUNT: usize = 8;
+
+/// The heads of the lanes of the global hash chain.
+pub type GlobalChainHeads<F> = [[F; 8]; GLOBAL_CHAIN_LANE_COUNT];
+
+/// The head `h_0` every lane of the global hash chain starts at, sampled
+/// from `challenger`: the machine's challenger after it has observed the
+/// verifying key.
 pub fn global_digest<F, C>(mut challenger: C) -> [F; 8]
 where
     F: p3_field::Field,
@@ -143,6 +157,44 @@ where
 {
     challenger.observe(F::from_u32(GLOBAL_DIGEST_DOMAIN));
     core::array::from_fn(|_| challenger.sample())
+}
+
+/// The value of the global hash chain whose lane heads are `lanes`: their
+/// digest. `challenger` must be a fresh challenger of the machine's
+/// configuration.
+///
+/// The digest is collision resistant, so a chain value fixes every lane
+/// head, and its domain keeps it apart from a [`extend_global_chain_head`].
+pub fn global_chain_heads_digest<F, C>(mut challenger: C, lanes: &GlobalChainHeads<F>) -> [F; 8]
+where
+    F: p3_field::Field,
+    C: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u32(GLOBAL_CHAIN_HEADS_DOMAIN));
+    for head in lanes {
+        challenger.observe_slice(head);
+    }
+    core::array::from_fn(|_| challenger.sample())
+}
+
+/// The lane of each shard's global round when the rounds take the lanes in
+/// turn, in shard order: `committed` says of each shard whether it commits a
+/// round. A shard without one is given lane 0, which nothing reads.
+pub fn round_robin_global_chain_lanes(
+    committed: impl IntoIterator<Item = bool>,
+) -> alloc::vec::Vec<u8> {
+    let mut next = 0usize;
+    committed
+        .into_iter()
+        .map(|committed| {
+            if !committed {
+                return 0;
+            }
+            let lane = next as u8;
+            next = (next + 1) % GLOBAL_CHAIN_LANE_COUNT;
+            lane
+        })
+        .collect()
 }
 
 /// `log2` of the global lookups one unit of a proof's count stands for.
@@ -180,10 +232,177 @@ pub struct GlobalRoundBinding<F> {
     pub chips: alloc::vec::Vec<(alloc::string::String, usize)>,
 }
 
-/// One step of the global hash chain: `h_prev` extended by a shard's global
-/// round, `None` for a shard without one. `challenger` must be a fresh
-/// challenger of the machine's configuration.
-pub fn global_chain_step<F, C>(
+/// The most global rounds one global proof opens: each in a table slot of its
+/// own, committed as one of the proof's trace rounds.
+pub const MAX_GLOBAL_ROUNDS_PER_PROOF: usize = 32;
+
+/// The cells the main round of the recursion program that verifies a global
+/// proof commits, at most, by the estimate of [`global_round_leaf_cells`],
+/// unless the proof opens a single round: four fifths of the main area of
+/// the largest recursion pin class (`crate::jagged::RECURSION_PIN_CLASSES`).
+///
+/// That program has to fit a pin class, or the proof cannot enter the
+/// recursion, and its main round is the one that fills first. The fifth left
+/// free covers what the estimate leaves out
+/// ([`GLOBAL_LEAF_WIDE_ROUND_CELLS`]).
+pub const GLOBAL_LEAF_CELLS: usize = crate::jagged::RECURSION_PINS.main.area / 5 * 4;
+
+/// What a round may add to that main round beyond the estimate of
+/// [`global_round_leaf_cells`] in a proof whose rounds commit more than 256
+/// stacking blocks together: the program then decomposes the offset of each
+/// column into 31 bits, which costs it more than fewer bits do, measured at
+/// up to 320,000 cells for a round of every global-round chip. The estimate
+/// counts a round from above by more than that, so this is room to spare.
+pub const GLOBAL_LEAF_WIDE_ROUND_CELLS: usize = 300_000;
+
+const _: () = assert!(
+    GLOBAL_LEAF_CELLS + MAX_GLOBAL_ROUNDS_PER_PROOF * GLOBAL_LEAF_WIDE_ROUND_CELLS
+        <= crate::jagged::RECURSION_PINS.main.area
+);
+
+/// The cells of that main round that do not depend on the rounds the proof
+/// opens.
+pub const GLOBAL_LEAF_FIXED_CELLS: usize = 5_100_000;
+
+/// The cells each round adds to it, whatever the round holds.
+pub const GLOBAL_LEAF_ROUND_CELLS: usize = 2_010_000;
+
+/// The cells each stacking block of a round adds to it: every first-round
+/// query of the proof opens one row of each block of each round.
+pub const GLOBAL_LEAF_BLOCK_CELLS: usize = 157_000;
+
+/// The cells each table of a round adds to it, besides its columns.
+pub const GLOBAL_LEAF_CHIP_CELLS: usize = 40_000;
+
+/// The cells each column of a round's tables adds to it.
+pub const GLOBAL_LEAF_COLUMN_CELLS: usize = 2_300;
+
+/// What a global round adds to the main round of the recursion program that
+/// verifies its global proof, in cells, estimated from above: the round
+/// commits `blocks` stacking blocks and holds `chips` tables of `columns`
+/// columns together.
+///
+/// Measured at the 128-bit schedules on proofs of 1 to 32 rounds: the
+/// program commits 4.1 M cells before any round; a round of 8 blocks adds
+/// 2.5 M for the family of MemoryLocal, SyscallCore and SyscallPrecompile
+/// and 2.8 M for the memory shards' family, whether or not a table has rows,
+/// and each further block 119,000. 28 rounds of 8 blocks of the first family
+/// commit 73.8 M cells, counted as 106.0 M, and 13 rounds of 32 blocks of
+/// the second 80.6 M, counted as 106.7 M, where the largest pin class holds
+/// 134.2 M.
+pub const fn global_round_leaf_cells(blocks: usize, chips: usize, columns: usize) -> usize {
+    GLOBAL_LEAF_ROUND_CELLS
+        + blocks * GLOBAL_LEAF_BLOCK_CELLS
+        + chips * GLOBAL_LEAF_CHIP_CELLS
+        + columns * GLOBAL_LEAF_COLUMN_CELLS
+}
+
+/// The rows of the tallest table of the recursion program that verifies a
+/// global proof, before any round, by the estimate of
+/// [`global_round_leaf_rows`].
+pub const GLOBAL_LEAF_FIXED_ROWS: usize = 16_000;
+
+/// The rows each round adds to that table, whatever the round holds.
+pub const GLOBAL_LEAF_ROUND_ROWS: usize = 30_592;
+
+/// The rows each stacking block of a round adds to that table.
+pub const GLOBAL_LEAF_BLOCK_ROWS: usize = 1_040;
+
+/// What a global round of `blocks` stacking blocks adds to the tallest table
+/// of the recursion program that verifies its global proof, in rows,
+/// estimated from above.
+///
+/// Measured on the programs of every enumerated global-round shape: a round
+/// of 8 blocks adds 38,912 rows to `Select` whatever its tables, and a round
+/// of more blocks adds about 22,000 rows plus 1,030 per block to `MemoryVar`.
+/// The programs of 1 round of 8 blocks have 50,024 rows in `Select`.
+pub const fn global_round_leaf_rows(blocks: usize) -> usize {
+    GLOBAL_LEAF_ROUND_ROWS + blocks * GLOBAL_LEAF_BLOCK_ROWS
+}
+
+/// The most rounds of `blocks` stacking blocks one global proof opens so that
+/// every table of the recursion program that verifies it fits the row cube
+/// of the recursion machines
+/// (`crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT`), by
+/// the estimate of [`global_round_leaf_rows`]; at least one.
+pub const fn global_rounds_within_the_row_cube(blocks: usize) -> usize {
+    let rows = 1usize << crate::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
+    let rounds = (rows - GLOBAL_LEAF_FIXED_ROWS) / global_round_leaf_rows(blocks);
+    if rounds == 0 {
+        1
+    } else {
+        rounds
+    }
+}
+
+/// Cuts consecutive global rounds, each given by the stacking blocks it
+/// commits, into groups of at most `per_proof` rounds, and at most
+/// [`MAX_GLOBAL_ROUNDS_PER_PROOF`], that one global proof each opens, in
+/// order. The rounds of a group commit fewer cells together than the area a
+/// verifier accepts in the trace rounds of one proof
+/// ([`crate::jagged::MAX_ROUND_LOG_AREA`]), so a round too large to share is
+/// opened alone.
+pub fn global_round_area_groups(
+    blocks: impl IntoIterator<Item = usize>,
+    per_proof: usize,
+) -> alloc::vec::Vec<core::ops::Range<usize>> {
+    let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+    let max_area = 1usize << crate::jagged::MAX_ROUND_LOG_AREA;
+    let per_proof = per_proof.min(MAX_GLOBAL_ROUNDS_PER_PROOF);
+    let mut groups: alloc::vec::Vec<core::ops::Range<usize>> = alloc::vec::Vec::new();
+    let mut area = 0usize;
+    for (i, blocks) in blocks.into_iter().enumerate() {
+        let cells = blocks << log_stack;
+        match groups.last_mut() {
+            Some(group) if group.len() < per_proof && area.saturating_add(cells) < max_area => {
+                group.end = i + 1;
+                area += cells;
+            }
+            _ => {
+                groups.push(i..i + 1);
+                area = cells;
+            }
+        }
+    }
+    groups
+}
+
+/// Cuts the consecutive global rounds of one lane into the groups that one
+/// global proof each opens, in order. `rounds` holds the shape of each round
+/// and the cells it adds to the program that verifies its proof
+/// ([`global_round_leaf_cells`]). A group holds rounds of one shape, at most
+/// `max_rounds` of them, and its program commits at most
+/// [`GLOBAL_LEAF_CELLS`], [`GLOBAL_LEAF_FIXED_CELLS`] of them whatever it
+/// opens, unless it is a single round.
+pub fn global_round_groups<S: PartialEq>(
+    rounds: &[(S, usize)],
+    max_rounds: usize,
+) -> alloc::vec::Vec<core::ops::Range<usize>> {
+    let mut groups: alloc::vec::Vec<core::ops::Range<usize>> = alloc::vec::Vec::new();
+    let mut cells = 0;
+    for (round, (shape, round_cells)) in rounds.iter().enumerate() {
+        match groups.last_mut() {
+            Some(group)
+                if group.len() < max_rounds
+                    && rounds[group.start].0 == *shape
+                    && cells + round_cells <= GLOBAL_LEAF_CELLS =>
+            {
+                group.end += 1;
+                cells += round_cells;
+            }
+            _ => {
+                groups.push(round..round + 1);
+                cells = GLOBAL_LEAF_FIXED_CELLS + round_cells;
+            }
+        }
+    }
+    groups
+}
+
+/// One step of a lane of the global hash chain: the lane's head `h_prev`
+/// extended by a shard's global round, `None` for a shard without one.
+/// `challenger` must be a fresh challenger of the machine's configuration.
+pub fn extend_global_chain_head<F, C>(
     mut challenger: C,
     h_prev: &[F; 8],
     round: Option<&GlobalRoundBinding<F>>,
@@ -320,40 +539,76 @@ mod tests {
         ch
     }
 
-    /// A chain step binds the previous digest, whether the shard has a global
+    /// The rounds of a large block, as the shape and the cells of each: a
+    /// change of shape starts a proof, the small rounds fill a proof up to
+    /// its cells, the memory shards' rounds of 232 blocks go two to a proof,
+    /// and a round past the whole budget still gets a proof of its own.
+    #[test]
+    fn global_round_groups_bound_what_a_proof_opens() {
+        let small = global_round_leaf_cells(8, 3, 96);
+        let memory = global_round_leaf_cells(232, 2, 300);
+        let huge = global_round_leaf_cells(1024, 2, 300);
+        let fit = |round: usize| (GLOBAL_LEAF_CELLS - GLOBAL_LEAF_FIXED_CELLS) / round;
+        assert!(fit(small) > 16 && fit(small) < MAX_GLOBAL_ROUNDS_PER_PROOF);
+        assert_eq!(fit(memory), 2);
+        assert_eq!(fit(huge), 0);
+
+        let mut rounds: alloc::vec::Vec<(u8, usize)> = alloc::vec![(0, small)];
+        rounds.extend(alloc::vec![(1, small); fit(small) + 3]);
+        rounds.extend([(2, memory); 5]);
+        rounds.extend([(3, huge); 2]);
+        let memory_start = fit(small) + 4;
+        let groups = global_round_groups(&rounds, MAX_GLOBAL_ROUNDS_PER_PROOF);
+        assert_eq!(
+            groups,
+            alloc::vec![
+                0..1,
+                1..fit(small) + 1,
+                fit(small) + 1..memory_start,
+                memory_start..memory_start + 2,
+                memory_start + 2..memory_start + 4,
+                memory_start + 4..memory_start + 5,
+                memory_start + 5..memory_start + 6,
+                memory_start + 6..memory_start + 7,
+            ]
+        );
+        assert_eq!(global_round_groups(&rounds[1..20], 3).len(), 7);
+    }
+
+    /// Extending a chain head binds the previous digest, whether the shard has a global
     /// round, the round's commitment, and every chip's name and height.
     #[test]
-    fn global_chain_step_binds_the_round() {
+    fn extending_a_chain_head_binds_the_round() {
         let fresh = || JaggedChallenger::new(zkm_primitives::poseidon2_init());
         let h0 = [JaggedVal::from_u32(1); 8];
         let round = GlobalRoundBinding {
             commitment: [JaggedVal::from_u32(7); 8],
             chips: alloc::vec![("MemoryLocal".into(), 32), ("SyscallCore".into(), 4)],
         };
-        let base = global_chain_step(fresh(), &h0, Some(&round));
-        assert_eq!(global_chain_step(fresh(), &h0, Some(&round)), base);
+        let base = extend_global_chain_head(fresh(), &h0, Some(&round));
+        assert_eq!(extend_global_chain_head(fresh(), &h0, Some(&round)), base);
 
-        let mut altered = alloc::vec![global_chain_step(fresh(), &h0, None)];
+        let mut altered = alloc::vec![extend_global_chain_head(fresh(), &h0, None)];
         let mut h1 = h0;
         h1[5] = JaggedVal::from_u32(2);
-        altered.push(global_chain_step(fresh(), &h1, Some(&round)));
+        altered.push(extend_global_chain_head(fresh(), &h1, Some(&round)));
         let mut r = round.clone();
         r.commitment[3] = JaggedVal::from_u32(8);
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips[0].1 = 33;
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips[1].0 = "SyscallPrecompile".into();
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let mut r = round.clone();
         r.chips.pop();
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
         let r = GlobalRoundBinding { chips: alloc::vec::Vec::new(), ..round.clone() };
-        altered.push(global_chain_step(fresh(), &h0, Some(&r)));
+        altered.push(extend_global_chain_head(fresh(), &h0, Some(&r)));
 
         for (i, h) in altered.iter().enumerate() {
-            assert_ne!(*h, base, "alteration {i} left the chain step unchanged");
+            assert_ne!(*h, base, "alteration {i} left the extended head unchanged");
         }
     }
 

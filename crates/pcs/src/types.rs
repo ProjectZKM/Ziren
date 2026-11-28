@@ -64,7 +64,7 @@ pub struct ShardOpenedValues<EF> {
 /// The maximum number of elements that can be stored in the public values vec.  Both Ziren and
 /// recursive proofs need to pad their public values vec to this length.  This is required since the
 /// recursion verification program expects the public values vec to be fixed length.
-pub const PROOF_MAX_NUM_PVS: usize = 247;
+pub const PROOF_MAX_NUM_PVS: usize = 248;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -87,6 +87,11 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// payload rather than filling a shell afterwards.
     pub jagged_shard_proof:
         Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>,
+    /// The lane of the global hash chain the shard's global round extends
+    /// ([`crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT`]), chosen by the prover. Zero
+    /// for a shard without a global round and for a global proof.
+    #[serde(default)]
+    pub global_chain_lane: u8,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
@@ -148,8 +153,9 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
 #[serde(bound = "")]
 pub struct MachineProof<SC: StarkGenericConfig> {
     pub shard_proofs: Vec<ShardProof<SC>>,
-    /// The global proofs of a machine that defers its global lookups, one per
-    /// shard that commits a global round, in shard order; empty otherwise.
+    /// The global proofs of a machine that defers its global lookups: each
+    /// opens one or more of the global rounds the shards commit, and every
+    /// such round is opened by exactly one of them; empty otherwise.
     #[serde(default)]
     pub global_proofs: Vec<ShardProof<SC>>,
 }
@@ -222,7 +228,7 @@ mod tests {
 
     type SC = KoalaBearPoseidon2;
     type F = p3_koala_bear::KoalaBear;
-    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+    type EF = p3_field::extension::QuinticTrinomialExtensionField<F>;
 
     /// The layout `ShardProof` had while `jagged_shard_proof` was optional.
     /// Field order and types match it exactly, so serializing this is
@@ -250,7 +256,8 @@ mod tests {
     /// `JaggedShardProof` only take effect in a self-describing format -- and
     /// there the mandatory payload is WIRE-NEUTRAL: rmp encodes `Some(x)` as
     /// `x` itself, with no discriminant, so bytes written under the optional
-    /// layout decode unchanged.
+    /// layout decode unchanged. They name no lane of the global hash chain,
+    /// which decodes as lane zero.
     #[test]
     fn optional_payload_rmp_bytes_decode_as_mandatory() {
         let bytes = rmp_serde::to_vec(&old(Some(payload()))).expect("old layout serializes");
@@ -258,9 +265,14 @@ mod tests {
             rmp_serde::from_slice(&bytes).expect("old rmp bytes decode into the mandatory layout");
         assert_eq!(back.public_values.len(), PROOF_MAX_NUM_PVS);
         assert_eq!(back.jagged_shard_proof.public_values.len(), 16);
+        assert_eq!(back.global_chain_lane, 0);
 
-        let new_bytes = rmp_serde::to_vec(&back).expect("mandatory layout serializes");
-        assert_eq!(bytes, new_bytes, "the optional layout and this one agree byte for byte on rmp");
+        let mut on_a_lane = back;
+        on_a_lane.global_chain_lane = 5;
+        let new_bytes = rmp_serde::to_vec(&on_a_lane).expect("mandatory layout serializes");
+        assert_eq!(new_bytes[1..bytes.len()], bytes[1..], "the lane follows the old layout");
+        let again: ShardProof<SC> = rmp_serde::from_slice(&new_bytes).expect("the lane decodes");
+        assert_eq!(again.global_chain_lane, 5);
     }
 
     /// `None` is the one rmp encoding the mandatory layout cannot accept, and
@@ -288,12 +300,13 @@ mod tests {
         let new_bytes = bincode::serialize(&ShardProof::<SC> {
             public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS],
             jagged_shard_proof: payload(),
+            global_chain_lane: 0,
         })
         .expect("mandatory layout serializes");
         assert_eq!(
             bytes.len(),
-            new_bytes.len() + 1,
-            "the optional layout costs exactly the Some discriminant",
+            new_bytes.len(),
+            "the optional layout costs the Some discriminant, this one the lane",
         );
         assert!(
             bincode::deserialize::<ShardProof<SC>>(&bytes).is_err(),

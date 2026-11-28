@@ -31,6 +31,6 @@
 pub mod jagged_shard_proof;
 
 pub use jagged_shard_proof::{
-    dummy_jagged_shard_proof, dummy_logup_gkr_proof, dummy_partial_sumcheck_proof,
-    dummy_zerocheck_skip_proof,
+    dummy_global_jagged_shard_proof, dummy_jagged_shard_proof, dummy_logup_gkr_proof,
+    dummy_partial_sumcheck_proof, dummy_zerocheck_skip_proof,
 };

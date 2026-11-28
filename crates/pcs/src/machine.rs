@@ -1,5 +1,3 @@
-use core::cmp::Reverse;
-
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
@@ -56,12 +54,31 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// commits `[preprocessed, global, main]`, every other shard
     /// `[preprocessed, main]`. `None` on a machine that never splits.
     global_round: Option<std::collections::BTreeSet<String>>,
+
+    /// The families of global-round chips: a shard's global round commits
+    /// every chip of its family ([`Self::global_family`]). Empty on a machine
+    /// whose global rounds hold the shard's own tables only.
+    global_families: Vec<std::collections::BTreeSet<String>>,
+
+    /// The row cube `2^max_log_row_count` every table of this machine's
+    /// shards is padded to: the zerocheck dimension and the number of row
+    /// variables of the lookup argument.  The prover proves and the verifier
+    /// verifies this machine's shards at it, whatever a proof claims.
+    max_log_row_count: usize,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`].
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, recursion_pins: None, global_round: None }
+        Self {
+            config,
+            chips,
+            num_pv_elts,
+            recursion_pins: None,
+            global_round: None,
+            global_families: Vec::new(),
+            max_log_row_count: crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT,
+        }
     }
 
     /// Marks this machine's shard proofs as committing under `pins` (the
@@ -77,6 +94,19 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         );
         self.recursion_pins = pins;
         self
+    }
+
+    /// Proves and verifies this machine's shards at the row cube
+    /// `2^max_log_row_count` ([`Self::max_log_row_count`]).  Consuming builder.
+    pub const fn with_max_log_row_count(mut self, max_log_row_count: usize) -> Self {
+        self.max_log_row_count = max_log_row_count;
+        self
+    }
+
+    /// The machine's row cube, `log2` of the rows every table is padded to.
+    #[inline]
+    pub const fn max_log_row_count(&self) -> usize {
+        self.max_log_row_count
     }
 
     /// Commits the chips named in `global_round` in a main round of their own.
@@ -100,6 +130,54 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     #[inline]
     pub const fn global_round(&self) -> Option<&std::collections::BTreeSet<String>> {
         self.global_round.as_ref()
+    }
+
+    /// Makes every global round commit a whole family of chips, one of
+    /// `families` ([`Self::global_family`]). Consuming builder.
+    ///
+    /// # Panics
+    /// When a family names a chip outside the machine's global round.
+    pub fn with_global_families(
+        mut self,
+        families: Vec<std::collections::BTreeSet<String>>,
+    ) -> Self {
+        assert!(
+            families.iter().flatten().all(|name| {
+                self.global_round.as_ref().is_some_and(|round| round.contains(name))
+            }),
+            "a family of global-round chips names chips of the machine's global round only"
+        );
+        self.global_families = families;
+        self
+    }
+
+    /// The machine's families of global-round chips, as given.
+    pub fn global_families(&self) -> &[std::collections::BTreeSet<String>] {
+        &self.global_families
+    }
+
+    /// The family of the global round of a shard with the tables `tables`:
+    /// the family with the fewest chips that names every global-round chip
+    /// among them, the first such in the machine's order. `None` for a shard
+    /// without a global-round table, and when no family holds its tables.
+    ///
+    /// A shard commits the chips of the family it lacks as tables without
+    /// rows, so its global round has the chips of the family whatever the
+    /// shard ran, and the program that verifies its global proof depends on
+    /// the family and not on the shard.
+    pub fn global_family<'a>(
+        &self,
+        tables: impl IntoIterator<Item = &'a str>,
+    ) -> Option<&std::collections::BTreeSet<String>> {
+        let round = self.global_round()?;
+        let present = tables.into_iter().filter(|name| round.contains(*name)).collect_vec();
+        if present.is_empty() {
+            return None;
+        }
+        self.global_families
+            .iter()
+            .filter(|family| present.iter().all(|name| family.contains(*name)))
+            .min_by_key(|family| family.len())
     }
 
     /// The area pins this machine's proofs commit under (`None` = natural).
@@ -527,6 +605,24 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .collect()
     }
 
+    /// The chips of the global-round family of a shard with the tables
+    /// `tables` ([`Self::global_family`]), each with its width: the tables a
+    /// shard commits in its global round, the ones it lacks without rows
+    /// ([`crate::prover::pad_to_cluster`]). Empty without a family.
+    pub fn global_family_widths<'a>(
+        &self,
+        tables: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::BTreeMap<String, usize> {
+        self.global_family(tables)
+            .into_iter()
+            .flatten()
+            .filter_map(|name| {
+                let chip = self.chips().iter().find(|chip| chip.name() == *name)?;
+                Some((name.clone(), <A as BaseAir<Val<SC>>>::width(&chip.air)))
+            })
+            .collect()
+    }
+
     /// The pins a proof of a program with these per-chip ROW counts commits
     /// under on this machine: the smallest pin class both rounds fit
     /// (`RecursionPins::class_for_committed`), or `None` on a machine without
@@ -849,22 +945,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     }
 
     /// The cross-shard challenge of a proof whose shards commit the global
-    /// rounds `rounds`, in shard order, under the verifying key
-    /// `vk_challenger` has observed (the machine's challenger after the key),
-    /// with its proof of work ground; `None` for a machine without global
-    /// lookups.
+    /// rounds `rounds`, in shard order, on the lanes `lanes`
+    /// ([`Self::global_chain_heads`]), under the verifying key `vk_challenger` has
+    /// observed (the machine's challenger after the key), with its proof of
+    /// work ground; `None` for a machine without global lookups.
     ///
-    /// Its digest `h_star` ends the hash chain that starts at the key's
-    /// digest and takes one [`crate::logup_gkr::global_chain_step`] per shard.
+    /// Its digest `h_star` is the value of the hash chain after the last
+    /// shard, the last entry of [`Self::global_chain`].
     pub fn global_challenge<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
     ) -> Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>
     where
         Val<SC>: 'a,
     {
-        let chain = self.global_chain(vk_challenger, rounds);
+        let chain = self.global_chain(vk_challenger, rounds, lanes);
         self.global_challenge_at(*chain.last().expect("the chain holds at least its start"))
     }
 
@@ -885,15 +982,19 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     }
 
     /// The global challenge a verifier accepts for a proof whose shards commit
-    /// the global rounds `rounds` under the verifying key `vk_challenger` has
+    /// the global rounds `rounds` on the lanes `lanes`
+    /// ([`Self::global_chain_heads`]) under the verifying key `vk_challenger` has
     /// observed, and whose shards carry the proof-of-work witnesses
-    /// `pow_witnesses`: every shard must carry the same witness, and it must
-    /// pass the proof of work. `Ok(None)` for a machine without global lookups.
+    /// `pow_witnesses`: every round must be on one of the
+    /// [`crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT`] lanes, every shard must carry
+    /// the same witness, and it must pass the proof of work. `Ok(None)` for a
+    /// machine without global lookups.
     #[allow(clippy::type_complexity)]
     pub fn verify_global_challenge<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
         pow_witnesses: impl IntoIterator<Item = Option<Val<SC>>>,
     ) -> Result<
         Option<crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>>,
@@ -913,8 +1014,17 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             }
         }
         let witness = witness.ok_or("a proof without shards")?;
-        let chain = self.global_chain(vk_challenger, rounds);
-        let h_star = *chain.last().expect("the chain holds at least its start");
+        let mut state = self.global_chain_heads_start(vk_challenger);
+        for shard in rounds.into_iter().zip_longest(lanes) {
+            let itertools::EitherOrBoth::Both(round, lane) = shard else {
+                return Err("the shards' global rounds and lanes differ in number".into());
+            };
+            if usize::from(lane) >= crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT {
+                return Err(format!("a shard names lane {lane} of the global hash chain"));
+            }
+            state = self.global_chain_heads_next(&state, round, lane);
+        }
+        let h_star = self.global_chain_value(&state);
         crate::logup_gkr::GlobalChallenge::derive(
             self.config.challenger(),
             h_star,
@@ -925,47 +1035,118 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         .ok_or_else(|| "the global proof-of-work witness fails".into())
     }
 
-    /// The global hash chain of a proof whose shards commit the global rounds
-    /// `rounds`, in shard order, under the verifying key `vk_challenger` has
-    /// observed: its start `h_0`, then its value after each shard. The last
-    /// entry is the `h_star` [`Self::global_challenge`] derives from.
+    /// The lane heads of the global hash chain of a proof whose shards commit
+    /// the global rounds `rounds`, in shard order, under the verifying key
+    /// `vk_challenger` has observed: the heads before the first shard, then
+    /// the heads after each shard. `lanes` names, for each shard, the lane its
+    /// round extends; the entry of a shard without a round is not read.
     ///
-    /// A shard without a global round leaves the chain where it is, so the
-    /// chain is the one over the rounds alone: what the global proofs reopen.
+    /// Every lane starts at the key's digest, and a shard's round extends its
+    /// lane by one [`crate::logup_gkr::extend_global_chain_head`]. A shard without a
+    /// round leaves every lane where it is, so each lane is a hash chain over
+    /// its rounds alone: what the global proofs reopen.
+    ///
+    /// # Panics
+    /// When a round names a lane that does not exist, or `rounds` and `lanes`
+    /// differ in length.
+    pub fn global_chain_heads<'a>(
+        &self,
+        vk_challenger: &SC::Challenger,
+        rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
+    ) -> Vec<crate::logup_gkr::GlobalChainHeads<Val<SC>>>
+    where
+        Val<SC>: 'a,
+    {
+        let mut states = vec![self.global_chain_heads_start(vk_challenger)];
+        for (round, lane) in rounds.into_iter().zip_eq(lanes) {
+            let state = states.last().expect("the chain holds at least its start");
+            states.push(self.global_chain_heads_next(state, round, lane));
+        }
+        states
+    }
+
+    /// The global hash chain of a proof, for the `rounds` and `lanes` of
+    /// [`Self::global_chain_heads`]: its value before the first shard, then its
+    /// value after each shard, each the digest of the lane heads there
+    /// ([`Self::global_chain_value`]). The last entry is the `h_star`
+    /// [`Self::global_challenge`] derives from.
+    ///
+    /// The digest is collision resistant, so a chain value fixes its lane
+    /// heads, and a shard without a round leaves the value where it is.
     pub fn global_chain<'a>(
         &self,
         vk_challenger: &SC::Challenger,
         rounds: impl IntoIterator<Item = Option<&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>>,
+        lanes: impl IntoIterator<Item = u8>,
     ) -> Vec<[Val<SC>; 8]>
     where
         Val<SC>: 'a,
     {
-        let mut chain = vec![self.global_chain_start(vk_challenger)];
-        for round in rounds {
-            let h = chain.last().expect("the chain holds at least its start");
-            chain.push(self.global_chain_next(h, round));
-        }
-        chain
+        self.global_chain_heads(vk_challenger, rounds, lanes)
+            .iter()
+            .map(|state| self.global_chain_value(state))
+            .collect()
     }
 
-    /// The global hash chain before the first shard.
-    pub fn global_chain_start(&self, vk_challenger: &SC::Challenger) -> [Val<SC>; 8] {
-        crate::logup_gkr::global_digest(vk_challenger.clone())
-    }
-
-    /// The global hash chain after a shard whose global round is `round`,
-    /// from its value `h` before the shard. A prover that learns the rounds
-    /// one at a time builds the chain of [`Self::global_chain`] with this.
-    pub fn global_chain_next(
+    /// The lane heads of the global hash chain before the first shard: every
+    /// lane at the digest of the verifying key `vk_challenger` has observed.
+    pub fn global_chain_heads_start(
         &self,
-        h: &[Val<SC>; 8],
+        vk_challenger: &SC::Challenger,
+    ) -> crate::logup_gkr::GlobalChainHeads<Val<SC>> {
+        [crate::logup_gkr::global_digest(vk_challenger.clone());
+            crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT]
+    }
+
+    /// The lane heads of the global hash chain after a shard whose global
+    /// round is `round`, on lane `lane`, from the heads `lanes` before the
+    /// shard. A shard without a round leaves the heads as they are, whatever
+    /// its `lane`. A prover that learns the rounds one at a time builds the
+    /// states of [`Self::global_chain_heads`] with this.
+    ///
+    /// # Panics
+    /// When a round names a lane that does not exist.
+    pub fn global_chain_heads_next(
+        &self,
+        lanes: &crate::logup_gkr::GlobalChainHeads<Val<SC>>,
         round: Option<&crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        lane: u8,
+    ) -> crate::logup_gkr::GlobalChainHeads<Val<SC>> {
+        let mut next = *lanes;
+        if let Some(round) = round {
+            let head = next
+                .get_mut(usize::from(lane))
+                .expect("a global round is on one of the lanes of the hash chain");
+            *head = crate::logup_gkr::extend_global_chain_head(
+                self.config.challenger(),
+                head,
+                Some(round),
+            );
+        }
+        next
+    }
+
+    /// The value of the global hash chain whose lane heads are `lanes`
+    /// ([`crate::logup_gkr::global_chain_heads_digest`]).
+    pub fn global_chain_value(
+        &self,
+        lanes: &crate::logup_gkr::GlobalChainHeads<Val<SC>>,
     ) -> [Val<SC>; 8] {
-        match round {
-            Some(round) => {
-                crate::logup_gkr::global_chain_step(self.config.challenger(), h, Some(round))
-            }
-            None => *h,
+        crate::logup_gkr::global_chain_heads_digest(self.config.challenger(), lanes)
+    }
+
+    /// Puts the global rounds of `proofs`, in shard order, on the lanes of
+    /// the global hash chain in turn
+    /// ([`crate::logup_gkr::round_robin_global_chain_lanes`]). Any lane is valid
+    /// for any round: a prover with several devices sets each proof's
+    /// `global_chain_lane` itself, before it derives the global challenge.
+    pub fn assign_global_chain_lanes(&self, proofs: &mut [ShardProof<SC>]) {
+        let lanes = crate::logup_gkr::round_robin_global_chain_lanes(
+            proofs.iter().map(|proof| self.global_round_binding(proof).is_some()),
+        );
+        for (proof, lane) in proofs.iter_mut().zip(lanes) {
+            proof.global_chain_lane = lane;
         }
     }
 
@@ -978,7 +1159,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     ) -> Option<crate::logup_gkr::GlobalRoundBinding<Val<SC>>> {
         let set = self.global_round()?;
         let shard = &proof.jagged_shard_proof;
-        let commitment = shard.global_commitment?;
+        let commitment = shard.global_round()?.commitment;
         let chips = shard
             .chip_heights
             .iter()
@@ -997,9 +1178,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
     ) -> usize {
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-        let cube = 1usize
-            << crate::shard_level::verifier::JaggedShardVerifier::production_default()
-                .max_log_row_count;
+        let cube = 1usize << self.max_log_row_count;
         let cells: usize = round
             .chips
             .iter()
@@ -1013,6 +1192,202 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .sum();
         crate::jagged::global_round_dense_len(cells, log_stack, cube) >> log_stack
+    }
+
+    /// Groups consecutive global rounds into global proofs of at most
+    /// `per_proof` rounds: the ranges of `rounds` each proof opens, in order.
+    /// The rounds of one group commit fewer cells together than the area a
+    /// verifier accepts in the trace rounds of one proof, so a round too
+    /// large to share is opened alone.
+    pub fn global_proof_groups<'a>(
+        &self,
+        rounds: impl IntoIterator<Item = &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        per_proof: usize,
+    ) -> Vec<core::ops::Range<usize>>
+    where
+        Val<SC>: 'a,
+    {
+        crate::logup_gkr::global_round_area_groups(
+            rounds.into_iter().map(|round| self.global_round_blocks(round)),
+            per_proof,
+        )
+    }
+
+    /// The most rounds of the chips `chips` at `blocks` stacking blocks each
+    /// that [`Self::global_chain_lane_proof_groups`] puts in one global proof: as
+    /// many as the recursion program that verifies the proof can hold
+    /// ([`crate::logup_gkr::global_round_groups`]) with its tables within the
+    /// row cube ([`crate::logup_gkr::global_rounds_within_the_row_cube`]),
+    /// within the area limit ([`crate::logup_gkr::global_round_area_groups`]).
+    pub fn max_global_rounds_per_proof(
+        &self,
+        chips: &std::collections::BTreeSet<String>,
+        blocks: usize,
+    ) -> usize {
+        let most = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF
+            .min(crate::logup_gkr::global_rounds_within_the_row_cube(blocks));
+        let cells = self.global_round_shape_leaf_cells(chips.iter().map(String::as_str), blocks);
+        let held = crate::logup_gkr::global_round_groups(&vec![((), cells); most], most)[0].len();
+        crate::logup_gkr::global_round_area_groups(core::iter::repeat_n(blocks, held), most)[0]
+            .len()
+    }
+
+    /// [`Self::global_round_leaf_cells`] of a round of the chips `chips` at
+    /// `blocks` stacking blocks.
+    fn global_round_shape_leaf_cells<'a>(
+        &self,
+        chips: impl IntoIterator<Item = &'a str>,
+        blocks: usize,
+    ) -> usize {
+        let (mut tables, mut columns) = (0usize, 0usize);
+        for name in chips {
+            tables += 1;
+            columns += self
+                .chips()
+                .iter()
+                .find(|chip| chip.name() == name)
+                .map_or(0, |chip| <A as BaseAir<Val<SC>>>::width(&chip.air));
+        }
+        crate::logup_gkr::global_round_leaf_cells(blocks, tables, columns)
+    }
+
+    /// What the global round `round` adds to the main round of the recursion
+    /// program that verifies its global proof, in cells, by the stacking
+    /// blocks it commits, its tables and their columns
+    /// ([`crate::logup_gkr::global_round_leaf_cells`]).
+    pub fn global_round_leaf_cells(
+        &self,
+        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+    ) -> usize {
+        self.global_round_shape_leaf_cells(
+            round.chips.iter().map(|(name, _)| name.as_str()),
+            self.global_round_blocks(round),
+        )
+    }
+
+    /// Groups the consecutive global rounds of one lane of the global hash
+    /// chain, the earliest first, into the global proofs a prover makes of
+    /// them: the ranges of `rounds` each proof opens, in order. The lane's
+    /// rounds alone decide its groups, so a prover with several devices can
+    /// group each lane where its rounds are.
+    ///
+    /// A group holds rounds of one shape, the same chips at the same number of
+    /// stacking blocks, cut by [`crate::logup_gkr::global_round_groups`] to
+    /// what the recursion program that verifies the proof can hold
+    /// ([`Self::global_round_leaf_cells`]) and, within the area limit, to at
+    /// most `per_proof` rounds and to as many as keep that program's tables
+    /// within the row cube
+    /// ([`crate::logup_gkr::global_rounds_within_the_row_cube`]), by
+    /// [`Self::global_proof_groups`]. The
+    /// rounds of a proof then have one geometry, so proofs of as many rounds
+    /// of one shape are verified by one recursion program.
+    pub fn global_chain_lane_proof_groups<'a>(
+        &self,
+        rounds: impl IntoIterator<Item = &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>>,
+        per_proof: usize,
+    ) -> Vec<core::ops::Range<usize>>
+    where
+        Val<SC>: 'a,
+    {
+        let rounds = rounds.into_iter().collect_vec();
+        let shapes = rounds
+            .iter()
+            .map(|round| {
+                let blocks = self.global_round_blocks(round);
+                let chips = round.chips.iter().map(|(name, _)| name.as_str()).collect_vec();
+                ((chips, blocks), self.global_round_leaf_cells(round))
+            })
+            .collect_vec();
+        let per_proof = per_proof.clamp(1, crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF);
+        let mut groups = Vec::new();
+        let mut run = 0;
+        while run < shapes.len() {
+            let end =
+                (run..shapes.len()).find(|&i| shapes[i].0 != shapes[run].0).unwrap_or(shapes.len());
+            let blocks = shapes[run].0 .1;
+            let per_proof =
+                per_proof.min(crate::logup_gkr::global_rounds_within_the_row_cube(blocks));
+            for group in crate::logup_gkr::global_round_groups(&shapes[run..end], per_proof) {
+                let start = run + group.start;
+                let end = run + group.end;
+                groups.extend(
+                    self.global_proof_groups(rounds[start..end].iter().copied(), per_proof)
+                        .into_iter()
+                        .map(|part| start + part.start..start + part.end),
+                );
+            }
+            run = end;
+        }
+        groups
+    }
+
+    /// Groups the global rounds of a proof into its global proofs. `rounds`
+    /// holds, in shard order, the lane of each round, the round, and what the
+    /// caller keeps with it. A group is the consecutive rounds of one lane
+    /// that one global proof opens, the earliest first
+    /// ([`Self::global_chain_lane_proof_groups`]); the lanes come in order and each
+    /// lane's groups earliest first.
+    ///
+    /// # Panics
+    /// When a round names a lane the chain does not have.
+    #[allow(clippy::type_complexity)]
+    pub fn global_proof_groups_by_lane<'a, T>(
+        &self,
+        rounds: impl IntoIterator<Item = (u8, &'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>, T)>,
+        per_proof: usize,
+    ) -> Vec<Vec<(&'a crate::logup_gkr::GlobalRoundBinding<Val<SC>>, T)>>
+    where
+        Val<SC>: 'a,
+    {
+        let mut lanes: [Vec<_>; crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT] =
+            core::array::from_fn(|_| Vec::new());
+        for (lane, round, kept) in rounds {
+            lanes[usize::from(lane)].push((round, kept));
+        }
+        let mut groups = Vec::new();
+        for of_lane in lanes {
+            let cuts = self
+                .global_chain_lane_proof_groups(of_lane.iter().map(|(round, _)| *round), per_proof);
+            let mut of_lane = of_lane.into_iter();
+            groups
+                .extend(cuts.into_iter().map(|cut| of_lane.by_ref().take(cut.len()).collect_vec()));
+        }
+        groups
+    }
+
+    /// The global rounds the global proof `proof` opens, read off its table
+    /// slots: slot `s` gives the commitment of the proof's trace round `s`,
+    /// the last one its main round, and the heights of the chips whose views
+    /// the proof names in that slot.
+    pub fn global_proof_rounds(
+        &self,
+        proof: &ShardProof<SC>,
+    ) -> Result<Vec<crate::logup_gkr::GlobalRoundBinding<Val<SC>>>, String> {
+        let shard = &proof.jagged_shard_proof;
+        let slots = shard.preceding_rounds.len() + 1;
+        let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        if slots > max {
+            return Err(format!("a global proof opens {slots} rounds, a verifier accepts {max}"));
+        }
+        let mut rounds = shard
+            .preceding_rounds
+            .iter()
+            .map(|round| round.commitment)
+            .chain([shard.main_commitment])
+            .map(|commitment| crate::logup_gkr::GlobalRoundBinding {
+                commitment,
+                chips: Vec::new(),
+            })
+            .collect_vec();
+        for (view, &height) in shard.chip_heights.iter() {
+            let (slot, chip) = crate::air::GlobalView::<A>::slot_and_chip(view)
+                .filter(|(slot, _)| *slot < slots)
+                .ok_or_else(|| {
+                    format!("{view} names no table slot of a global proof of {slots} rounds")
+                })?;
+            rounds[slot].chips.push((chip.to_string(), height));
+        }
+        Ok(rounds)
     }
 
     /// Checks that every chip with a global-scope lookup is committed in
@@ -1118,12 +1493,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
-        let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
-        let mut census_rows: Vec<(String, u128)> = Vec::new();
-        let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
+        let serial = !crate::diagnostics::env_flag("ZIREN_DEPS_PARALLEL", false);
         for record in records.iter_mut() {
             if !serial {
-                let t_par = std::time::Instant::now();
+                let _phase = tracing::debug_span!("parallel dependencies").entered();
                 let included: Vec<&_> = chips
                     .iter()
                     .filter(|c| {
@@ -1131,23 +1504,19 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             && c.included(record)
                     })
                     .collect();
-                let outputs: Vec<Result<(String, A::Record, u128), A::Error>> = included
+                let outputs: Vec<Result<A::Record, A::Error>> = included
                     .par_iter()
                     .map(|chip| {
-                        let t_chip = std::time::Instant::now();
+                        let _span =
+                            tracing::debug_span!("chip dependencies", chip = chip.name()).entered();
                         let mut output = A::Record::default();
                         chip.generate_dependencies(record, &mut output)?;
-                        Ok((chip.name(), output, t_chip.elapsed().as_micros()))
+                        Ok(output)
                     })
                     .collect();
                 for out in outputs {
                     match out {
-                        Ok((name, mut output, us)) => {
-                            record.append(&mut output);
-                            if census {
-                                census_rows.push((name, us));
-                            }
-                        }
+                        Ok(mut output) => record.append(&mut output),
                         Err(e) => {
                             tracing::error!(
                                 "Error generating dependencies (parallel phase): {:?}",
@@ -1156,10 +1525,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             return Err(e);
                         }
                     }
-                }
-                if census {
-                    census_rows
-                        .push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
                 }
             } else {
                 for chip in chips.iter() {
@@ -1171,7 +1536,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     }
                     let span = tracing::debug_span!("chip dependencies", chip = chip.name());
                     let _enter = span.enter();
-                    let t_chip = std::time::Instant::now();
                     let mut output = A::Record::default();
                     if let Err(e) = chip.generate_dependencies(record, &mut output) {
                         tracing::error!(
@@ -1182,22 +1546,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         return Err(e);
                     }
                     record.append(&mut output);
-                    if census {
-                        census_rows.push((chip.name(), t_chip.elapsed().as_micros()));
-                    }
                 }
-            }
-            if census {
-                census_rows.sort_by_key(|r| Reverse(r.1));
-                let total: u128 = census_rows.iter().map(|r| r.1).sum();
-                let top = census_rows
-                    .iter()
-                    .take(12)
-                    .map(|(n, us)| format!("{n}={}us", us))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                tracing::info!(">>> DEPS_CENSUS total_us={total} {top}");
-                census_rows.clear();
             }
         }
         Ok(())
@@ -1249,9 +1598,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// * every shard proof verifies on its own, under no cross-shard
     ///   challenge;
     /// * the challenge is the one the hash chain over the shards' global
-    ///   rounds gives, behind the proof of work the global proofs carry;
-    /// * each shard with a global round has one global proof, which opens
-    ///   that round under the challenge;
+    ///   rounds gives, each round on the lane its shard names, behind the
+    ///   proof of work the global proofs carry;
+    /// * each global proof opens one or more of the shards' global rounds
+    ///   under the challenge, and every round a shard committed is opened by
+    ///   exactly one global proof, in any order and any grouping;
     /// * the global proofs' sums add to zero;
     /// * the rounds hold too few lookups for a sum to cancel by wrapping
     ///   around the field's characteristic
@@ -1298,6 +1649,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             ));
         }
         self.check_global_round().map_err(invalid)?;
+        if let Some(shard) = proof.shard_proofs.iter().find(|shard| {
+            usize::from(shard.global_chain_lane) >= crate::logup_gkr::GLOBAL_CHAIN_LANE_COUNT
+        }) {
+            return Err(invalid(format!(
+                "a shard names lane {} of the global hash chain",
+                shard.global_chain_lane
+            )));
+        }
 
         let mut vk_challenger = challenger.clone();
         vk.observe_into(&mut vk_challenger);
@@ -1308,7 +1667,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let committed = rounds.iter().flatten().collect_vec();
         self.check_global_lookup_count(committed.iter().copied()).map_err(invalid)?;
-        if proof.global_proofs.len() != committed.len() {
+        if committed.is_empty() != proof.global_proofs.is_empty() {
             return Err(invalid(format!(
                 "{} shards commit a global round, the proof carries {} global proofs",
                 committed.len(),
@@ -1322,14 +1681,35 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .verify_global_challenge(
                 &vk_challenger,
                 rounds.iter().map(Option::as_ref),
+                proof.shard_proofs.iter().map(|shard| shard.global_chain_lane),
                 proof.global_proofs.iter().map(|p| p.jagged_shard_proof.global_pow_witness),
             )
             .map_err(invalid)?
             .ok_or_else(|| invalid("the machine has no global lookups".into()))?;
 
+        let mut unopened = committed;
         let mut total = <SC as StarkGenericConfig>::Challenge::ZERO;
-        for (round, global_proof) in committed.into_iter().zip(proof.global_proofs.iter()) {
-            total += self.verify_global_proof(vk, &vk_challenger, round, global_proof, &global)?;
+        for global_proof in proof.global_proofs.iter() {
+            let opened = self.global_proof_rounds(global_proof).map_err(invalid)?;
+            let mut bindings = Vec::with_capacity(opened.len());
+            for round in opened.iter() {
+                let Some(i) = unopened.iter().position(|committed| *committed == round) else {
+                    return Err(invalid(
+                        "a global proof opens a round that no shard committed, or one that \
+                         another global proof opens"
+                            .into(),
+                    ));
+                };
+                bindings.push(unopened.swap_remove(i));
+            }
+            total +=
+                self.verify_global_proof(vk, &vk_challenger, &bindings, global_proof, &global)?;
+        }
+        if !unopened.is_empty() {
+            return Err(invalid(format!(
+                "{} global rounds the shards commit are opened by no global proof",
+                unopened.len(),
+            )));
         }
         if !total.is_zero() {
             tracing::error!("global LogUp sum: {:?}", total);
@@ -1338,19 +1718,21 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         Ok(())
     }
 
-    /// Verifies the global proof of a shard whose global round is `round`,
-    /// under the challenge `global`, in a transcript that starts from
-    /// `vk_challenger` (the machine's challenger after the verifying key).
-    /// Returns the sum of the fractions of the shard's global lookups.
+    /// Verifies the global proof of the shards whose global rounds are
+    /// `rounds`, under the challenge `global`, in a transcript that starts
+    /// from `vk_challenger` (the machine's challenger after the verifying
+    /// key). Returns the sum of the fractions of those shards' global lookups.
     ///
-    /// The proof is a shard proof of the round's chips seen as
-    /// [`crate::air::GlobalView`]s: its only committed round must be the
-    /// round the shard committed, at the same heights.
+    /// The proof is a shard proof of the rounds' chips seen as
+    /// [`crate::air::GlobalView`]s, the chips of `rounds[s]` in the table slot
+    /// `s`: its trace round `s`, the last one its main round, must be the
+    /// round `rounds[s]` a shard committed, at the same heights, and it must
+    /// commit no other round.
     pub fn verify_global_proof(
         &self,
         vk: &StarkVerifyingKey<SC>,
         vk_challenger: &SC::Challenger,
-        round: &crate::logup_gkr::GlobalRoundBinding<Val<SC>>,
+        rounds: &[&crate::logup_gkr::GlobalRoundBinding<Val<SC>>],
         proof: &ShardProof<SC>,
         global: &crate::logup_gkr::GlobalChallenge<Val<SC>, <SC as StarkGenericConfig>::Challenge>,
     ) -> Result<<SC as StarkGenericConfig>::Challenge, MachineVerificationError<SC>>
@@ -1367,26 +1749,56 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 reason,
             ))
         };
-        let chips = self.global_view_chips(round, 0).map_err(reject)?;
+        let max = crate::logup_gkr::MAX_GLOBAL_ROUNDS_PER_PROOF;
+        if rounds.is_empty() || rounds.len() > max {
+            return Err(reject(format!(
+                "a global proof opens between one and {max} rounds, not {}",
+                rounds.len(),
+            )));
+        }
         let shard = &proof.jagged_shard_proof;
         if !proof.public_values.is_empty() {
             return Err(reject("a global proof has no public values".into()));
         }
-        if shard.main_commitment != round.commitment {
+        if shard.preceding_rounds.len() + 1 != rounds.len() {
+            return Err(reject(format!(
+                "the global proof commits {} rounds, its shards committed {}",
+                shard.preceding_rounds.len() + 1,
+                rounds.len(),
+            )));
+        }
+        let opened = shard
+            .preceding_rounds
+            .iter()
+            .map(|round| &round.commitment)
+            .chain([&shard.main_commitment]);
+        if !opened.eq(rounds.iter().map(|round| &round.commitment)) {
             return Err(reject(
                 "the global proof opens another round than the one its shard committed".into(),
             ));
         }
-        let heights: std::collections::BTreeMap<String, usize> = round
-            .chips
-            .iter()
-            .map(|(name, height)| (crate::air::GlobalView::<A>::name_in_slot(0, name), *height))
-            .collect();
-        if shard.chip_heights != heights {
+        let mut chips = Vec::new();
+        let mut heights = std::collections::BTreeMap::new();
+        let mut slot_names = Vec::with_capacity(rounds.len());
+        for (slot, round) in rounds.iter().enumerate() {
+            let views = self.global_view_chips(round, slot).map_err(reject)?;
+            if views.is_empty() {
+                return Err(reject("a global proof opens a round without chips".into()));
+            }
+            slot_names.push(
+                views.iter().map(|view| view.name()).collect::<std::collections::BTreeSet<_>>(),
+            );
+            heights.extend(round.chips.iter().map(|(name, height)| {
+                (crate::air::GlobalView::<A>::name_in_slot(slot, name), *height)
+            }));
+            chips.extend(views);
+        }
+        if heights.len() != chips.len() || shard.chip_heights != heights {
             return Err(reject(
-                "the global proof names other tables than its shard's global round".into(),
+                "the global proof names other tables than its shards' global rounds".into(),
             ));
         }
+        slot_names.pop();
         let mut challenger = vk_challenger.clone();
         Verifier::<SC, crate::air::GlobalView<A>>::verify_shard(
             &self.config,
@@ -1397,8 +1809,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             proof,
             None,
             false,
-            None,
+            &slot_names.iter().collect_vec(),
             Some(global),
+            self.max_log_row_count,
         )
         .map_err(MachineVerificationError::InvalidGlobalProof)
     }
@@ -1450,12 +1863,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             return Err(MachineVerificationError::EmptyProof);
         }
 
-        let num_pv_elts = self.num_pv_elts();
-        if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts) {
+        let expected_pvs = if self.num_pv_elts() == 0 { 0 } else { crate::PROOF_MAX_NUM_PVS };
+        if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() != expected_pvs) {
             return Err(MachineVerificationError::InvalidShardProof(
                 VerificationError::JaggedShardVerifier(
                     JaggedShardVerifyError::PublicValuesLengthMismatch {
-                        expected: num_pv_elts,
+                        expected: expected_pvs,
                         got: p.public_values.len(),
                     }
                     .to_string(),
@@ -1486,8 +1899,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         shard_proof,
                         self.recursion_pins(),
                         has_pv_buses,
-                        self.global_round(),
+                        self.global_round().as_slice(),
                         None,
+                        self.max_log_row_count,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })

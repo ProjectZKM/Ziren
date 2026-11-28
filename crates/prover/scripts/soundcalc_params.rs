@@ -1,8 +1,8 @@
-//! Census of the three machines for the `soundcalc` soundness calculator
-//! (https://github.com/ethereum/soundcalc): per machine, the trace width, the
-//! constraint count, the maximum constraint degree, and the lookup interaction
-//! count and width, followed by the schedule every one of them is opened
-//! under.
+//! The parameters of the three machines for the `soundcalc` soundness
+//! calculator (https://github.com/ethereum/soundcalc): per machine, the trace
+//! width, the constraint count, the maximum constraint degree, and the lookup
+//! interaction count and width, followed by the schedule every one of them is
+//! opened under.
 //!
 //! The point of emitting both from one run is that the published model cannot
 //! then disagree with the code: the machine figures come from the same
@@ -11,7 +11,7 @@
 //! staying true only of the day the model was written by hand.
 //!
 //! Run:
-//!   cargo run --release -p zkm-prover --bin soundcalc_census
+//!   cargo run --release -p zkm-prover --bin soundcalc_params
 
 use p3_air::BaseAir;
 use zkm_core_machine::mips::MipsAir;
@@ -22,7 +22,7 @@ use zkm_pcs::{
 };
 use zkm_prover::{CompressAir, CoreSC, InnerSC, OuterSC, WrapAir};
 
-fn census<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
+fn machine_params<SC, A>(name: &str, machine: &zkm_pcs::StarkMachine<SC, A>)
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>> + p3_air::Air<p3_uni_stark::SymbolicAirBuilder<Val<SC>>>,
@@ -37,41 +37,6 @@ where
     let mut widest_chip = String::new();
     for chip in machine.chips() {
         chips += 1;
-        // `SOUNDCALC_CENSUS_CHIPS=1`: one line per chip, for area-by-chip
-        // arithmetic against the executor's `ZIREN_SHARD_CLOSE_CENSUS` rows.
-        if std::env::var_os("SOUNDCALC_CENSUS_CHIPS").is_some() {
-            let fields: usize =
-                chip.sends().iter().chain(chip.receives().iter()).map(|l| l.values.len()).sum();
-            if let Some(want) = std::env::var_os("SOUNDCALC_CENSUS_LOOKUPS") {
-                if want.to_string_lossy() == chip.name() {
-                    for (dir, l) in chip
-                        .sends()
-                        .iter()
-                        .map(|l| ("send", l))
-                        .chain(chip.receives().iter().map(|l| ("recv", l)))
-                    {
-                        let vals: Vec<String> = l.values.iter().map(|v| format!("{v:?}")).collect();
-                        println!(
-                            "lookup {name} {} {dir} kind={:?} arity={} mult={:?} vals={}",
-                            chip.name(),
-                            l.kind,
-                            l.values.len(),
-                            l.multiplicity,
-                            vals.join(" ")
-                        );
-                    }
-                }
-            }
-            println!(
-                "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
-                chip.name(),
-                BaseAir::width(&chip.air),
-                chip.preprocessed_width(),
-                chip.sends().len(),
-                chip.receives().len(),
-                fields
-            );
-        }
         main_width += BaseAir::width(&chip.air);
         pre_width += chip.preprocessed_width();
         let n = capture_machine_constraints(&chip.air).constraint_counts().base;
@@ -113,15 +78,15 @@ kind column ({widest_chip})",
 /// folds and commits nothing, so its `num_queries` is never read.  The final
 /// queries open the last committed oracle.  The lists below therefore hold
 /// one entry per committed round, and the final phase its own keys.
-/// `query_phase_bits` is `q · bits_per_query(rate) + pow` for each phase under
-/// the profile's accounting, the figure the per-component target is solved
-/// against.
+/// `query_phase_bits` is `q · bits_per_query(oracle, rate) + pow` for each
+/// phase under the accounting of the oracle it opens, the figure the
+/// per-component target is solved against.
 fn whir_schedule(
     name: &str,
     config: &zkm_pcs::whir::config::WhirConfig,
     log_stacking_height: usize,
     accounting: &str,
-    bits_per_query: impl Fn(usize) -> f64,
+    bits_per_query: impl Fn(usize, usize) -> f64,
 ) {
     let rounds = &config.round_parameters;
     let committed = &rounds[..rounds.len() - 1];
@@ -137,7 +102,10 @@ fn whir_schedule(
         .zip(&queried_rates)
         .map(|(r, &rate)| (r.num_queries, rate, r.queries_pow_bits))
         .chain(core::iter::once((config.final_queries, final_rate, config.final_pow_bits)))
-        .map(|(q, rate, pow)| format!("{:.2}", q as f64 * bits_per_query(rate) + pow as f64))
+        .enumerate()
+        .map(|(oracle, (q, rate, pow))| {
+            format!("{:.2}", q as f64 * bits_per_query(oracle, rate) + pow as f64)
+        })
         .collect();
     println!("[{name}.schedule]");
     println!("log_stacking_height = {log_stacking_height}");
@@ -152,13 +120,8 @@ fn whir_schedule(
         join(rounds.iter().map(|r| r.folding_factor.to_string()).collect())
     );
     println!(
-        "grinding_bits_folding = [{}]   # per round, on every folding challenge",
-        join(
-            rounds
-                .iter()
-                .map(|r| r.pow_bits.iter().copied().max().unwrap_or(0).to_string())
-                .collect()
-        )
+        "grinding_bits_folding = [{}]   # per round, one per folding challenge",
+        join(rounds.iter().map(|r| format!("{:?}", r.pow_bits)).collect())
     );
     println!(
         "num_queries = [{}]   # per committed round",
@@ -183,30 +146,42 @@ fn whir_schedule(
 
 fn main() {
     let core = MipsAir::<Val<CoreSC>>::machine(KoalaBearPoseidon2::default());
-    census("core", &core);
+    machine_params("core", &core);
     let compress = CompressAir::<Val<InnerSC>>::compress_machine(InnerSC::default());
-    census("compress", &compress);
+    machine_params("compress", &compress);
     let wrap = WrapAir::<Val<OuterSC>>::wrap_machine(OuterSC::default());
-    census("wrap", &wrap);
+    machine_params("wrap", &wrap);
 
     // Core shards open under the core profile, the root compose (the
     // published compressed proof) under the compress profile; every other
     // recursion node shares the core one.  The wrap opens under its own.
     let lsh = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-    whir_schedule(
-        "core",
-        &zkm_pcs::whir::jagged::core_whir_config(lsh),
-        lsh,
-        "unique_decoding",
-        zkm_pcs::whir::jagged::bits_per_query,
-    );
+    let later_m = zkm_pcs::whir::jagged::later_round_johnson_m();
+    let core_like = |name: &str, config: &zkm_pcs::whir::config::WhirConfig| {
+        whir_schedule(
+            name,
+            config,
+            lsh,
+            &if later_m == 0 {
+                "unique_decoding".to_string()
+            } else {
+                format!("unique_decoding, later oracles johnson_m{later_m}")
+            },
+            |oracle, rate| match zkm_pcs::whir::jagged::core_round_johnson_m(oracle) {
+                0 => zkm_pcs::whir::jagged::bits_per_query(rate),
+                m => zkm_pcs::whir::jagged::bits_per_query_johnson(rate, m),
+            },
+        )
+    };
+    core_like("core", &zkm_pcs::whir::jagged::core_whir_config(lsh));
+    core_like("shrink", &zkm_pcs::whir::jagged::shrink_whir_config(lsh));
     let size_tuned = |name: &str, config: &zkm_pcs::whir::config::WhirConfig, m: usize| {
         whir_schedule(
             name,
             config,
             lsh,
             &if m == 0 { "unique_decoding".to_string() } else { format!("johnson_m{m}") },
-            |rate| {
+            |_, rate| {
                 if m == 0 {
                     zkm_pcs::whir::jagged::bits_per_query(rate)
                 } else {
@@ -234,9 +209,9 @@ fn main() {
     );
 
     // Soundness bounds use what the verifier admits, including its fixed row
-    // cube, rather than an honest shard's area fence or a program's row count.
-    let log_rows =
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
+    // cube, rather than an honest shard's area limit or a program's row count.
+    let log_rows = core.max_log_row_count();
+    let recursion_log_rows = zkm_pcs::stacked_shapes::types::consts::RECURSION_MAX_LOG_ROW_COUNT;
     let width = |name: &str| {
         core.chips().iter().find(|chip| chip.name() == name).unwrap().preprocessed_width()
     };
@@ -249,7 +224,11 @@ fn main() {
     let main_stripes = zkm_pcs::jagged::committed_dense_len(main_cells, lsh) / stripe;
     let pins = zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
     println!("\n[verifier_bounds]");
-    println!("max_log_row_count = {log_rows}   # every stage's fixed zerocheck and LogUp cube");
+    println!("max_log_row_count = {log_rows}   # the core stage's fixed zerocheck and LogUp cube");
+    println!(
+        "recursion_max_log_row_count = {recursion_log_rows}   # the compress stage's fixed zerocheck \
+         and LogUp cube"
+    );
     println!("core_dense_batch = {}   # preprocessed + main stripes", prep_stripes + main_stripes);
     println!("compress_dense_batch = {}", (pins.prep.area + pins.main.area) / stripe);
 }

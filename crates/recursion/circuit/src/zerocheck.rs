@@ -320,6 +320,14 @@ where
                     e.into()
                 })
                 .collect();
+        let skip_suffix_sums: Vec<SymbolicExt<C::F, C::EF>> =
+            crate::univariate_skip::weight_suffix_sums::<C>(&skip_weights)
+                .into_iter()
+                .map(|w| {
+                    let e: Ext<C::F, C::EF> = builder.eval(w);
+                    e.into()
+                })
+                .collect();
         let gkr_point: Vec<SymbolicExt<C::F, C::EF>> =
             gkr_evaluations.point.iter().map(|x| (*x).into()).collect();
         let gkr_hi_anchor: Vec<SymbolicExt<C::F, C::EF>> =
@@ -385,7 +393,7 @@ where
                 let geq_val = crate::univariate_skip::skip_geq::<C>(
                     &degree_symbolic,
                     &z_extended,
-                    &skip_weights,
+                    &skip_suffix_sums,
                 );
                 let padded_row_adjustment = Self::compute_padded_row_adjustment_jagged(
                     builder,

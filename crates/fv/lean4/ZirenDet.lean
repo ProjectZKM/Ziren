@@ -7,6 +7,7 @@ import ZirenDet.Replay
 import ZirenDet.LeadingOne
 import ZirenDet.DivRem
 import ZirenDet.CanonicalWord
+import ZirenDet.CanonicalLimbs
 import ZirenDet.FieldOp
 import ZirenDet.Pratt
 import ZirenDet.Primes
