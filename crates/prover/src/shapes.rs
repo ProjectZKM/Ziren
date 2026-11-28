@@ -1544,6 +1544,38 @@ mod normalize_enumeration_tests {
         assert!(shapes.len() + compose <= 1 << crate::VK_MERKLE_TREE_HEIGHT);
     }
 
+    /// The four normalize shapes of every committed chip set whose rounds
+    /// commit the most stacking blocks build programs that fit a recursion
+    /// pin class. A normalize program grows with the blocks the shard commits,
+    /// so these are the shapes of each chip set nearest the largest class; a
+    /// shape past it would have no key.
+    #[test]
+    fn the_largest_normalize_shapes_fit_a_pin_class() {
+        use rayon::prelude::*;
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let mut by_chips: BTreeMap<BTreeSet<String>, Vec<(usize, Vec<(String, usize)>)>> =
+            BTreeMap::new();
+        for shape in ZKMProofShape::generate_normalize(machine) {
+            let rows = shape_rows(&shape);
+            let (chips, prep, global, main) = ZKMProofShape::normalize_class(machine, &rows);
+            by_chips.entry(chips).or_default().push((prep + global + main, rows));
+        }
+        let largest = by_chips
+            .into_values()
+            .flat_map(|mut shapes| {
+                shapes.sort_by_key(|(blocks, _)| core::cmp::Reverse(*blocks));
+                shapes.into_iter().take(4).map(|(_, rows)| rows)
+            })
+            .collect::<Vec<_>>();
+        largest.par_iter().for_each(|rows| {
+            let input = zkm_recursion_circuit::machine::ZKMCoreWitnessValues::dummy_rows(
+                machine, rows, false,
+            );
+            prover.build_normalize_program_uncached(&input);
+        });
+    }
+
     /// A precompile shard of a mainnet block, as the prover commits it:
     /// `SyscallCore` is a chip of its cluster and has no rows.
     #[test]

@@ -147,6 +147,15 @@ pub fn is_execution_cluster(cluster: &BTreeSet<String>) -> bool {
     core_base_chips().iter().all(|name| cluster.contains(*name))
 }
 
+/// Whether `cluster` names a chip of a precompile family.
+#[must_use]
+pub fn holds_precompile_chip(cluster: &BTreeSet<String>) -> bool {
+    precompile_families()
+        .iter()
+        .flat_map(|(_, chips)| chips.iter())
+        .any(|name| cluster.contains(*name))
+}
+
 fn set_from(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|s| s.to_string()).collect()
 }

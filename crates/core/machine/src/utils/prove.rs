@@ -41,6 +41,8 @@ pub enum ZKMCoreProverError {
     DependenciesGenerationError,
     #[error("the execution has too many cross-shard lookups: {0}")]
     TooManyGlobalLookups(String),
+    #[error("no committed chip set holds the chips of a shard: {0:?}")]
+    NoChipSet(std::collections::BTreeSet<String>),
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -539,9 +541,14 @@ where
                             .map(|(record, prepared)| {
                                 let _span = span.enter();
 
-                                let cluster_widths = shard_clusters.cluster_widths(&record);
+                                let Some(cluster_widths) = shard_clusters.cluster_widths(&record)
+                                else {
+                                    return Err(ZKMCoreProverError::NoChipSet(
+                                        shard_clusters.included_chips(&record),
+                                    ));
+                                };
 
-                                consume_shard(record, prepared, cluster_widths)
+                                consume_shard(record, prepared, Some(cluster_widths))
                             })
                             .collect::<Vec<_>>();
                         outputs.extend(results);

@@ -8,7 +8,8 @@ use zkm_core_executor::ExecutionRecord;
 use zkm_pcs::{
     air::MachineAir,
     stacked_shapes::{
-        build_mips_machine_shape, is_execution_cluster, MachineShape, FIRST_SHARD_CHIP,
+        build_mips_machine_shape, holds_precompile_chip, is_execution_cluster, MachineShape,
+        FIRST_SHARD_CHIP,
     },
     StarkGenericConfig, StarkMachine,
 };
@@ -37,22 +38,39 @@ impl<F: PrimeField32> ShardClusters<F> {
         Self { airs, shape: build_mips_machine_shape(), widths }
     }
 
-    /// Maps chip names to trace widths for the smallest cluster that contains
-    /// every chip `record` includes, restricted to the machine's chip set.
-    /// Returns `None` when no cluster contains them.
+    /// The chips `record` includes, without the first shard's memory image
+    /// ([`FIRST_SHARD_CHIP`]).
+    #[must_use]
+    pub fn included_chips(&self, record: &ExecutionRecord) -> BTreeSet<String> {
+        self.airs
+            .iter()
+            .filter(|air| air.included(record))
+            .map(MachineAir::name)
+            .filter(|name| name != FIRST_SHARD_CHIP)
+            .collect()
+    }
+
+    /// Whether a shard commits `cluster`: every cluster but an execution
+    /// cluster that names a precompile chip ([`Self::committed_chip_sets`]).
+    fn is_committed(cluster: &BTreeSet<String>) -> bool {
+        !(is_execution_cluster(cluster) && holds_precompile_chip(cluster))
+    }
+
+    /// Maps chip names to trace widths for the smallest committed cluster that
+    /// contains every chip `record` includes, restricted to the machine's chip
+    /// set. Returns `None` when no committed cluster contains them.
     ///
     /// The first shard's memory image ([`FIRST_SHARD_CHIP`]) takes no part in
     /// the choice: the first shard commits its cluster and the image.
     #[must_use]
     pub fn cluster_widths(&self, record: &ExecutionRecord) -> Option<BTreeMap<String, usize>> {
-        let present: BTreeSet<String> = self
-            .airs
+        let present = self.included_chips(record);
+        let cluster = self
+            .shape
+            .chip_clusters
             .iter()
-            .filter(|air| air.included(record))
-            .map(MachineAir::name)
-            .filter(|name| name != FIRST_SHARD_CHIP)
-            .collect();
-        let cluster = self.shape.smallest_cluster(&present)?;
+            .filter(|cluster| Self::is_committed(cluster) && present.is_subset(cluster))
+            .min_by_key(|cluster| cluster.len())?;
         // The catalog retains names such as `Cpu` that have no AIR in the machine.
         Some(
             cluster
@@ -67,6 +85,14 @@ impl<F: PrimeField32> ShardClusters<F> {
     /// ([`StarkMachine::global_family`]), and, for the cluster of an
     /// execution shard, the same with the first shard's memory image
     /// ([`FIRST_SHARD_CHIP`]).
+    ///
+    /// An execution cluster that names a precompile chip has no chip set
+    /// here, as no shard commits it. The prover moves every precompile event
+    /// out of each execution record (`ExecutionRecord::defer`), and
+    /// `ExecutionRecord::split` puts them only in records of their own, so an
+    /// execution shard has no precompile rows and its smallest cluster has no
+    /// precompile chip; precompile shards commit the clusters of the
+    /// precompile families.
     #[must_use]
     pub fn committed_chip_sets<SC>(
         &self,
@@ -84,6 +110,9 @@ impl<F: PrimeField32> ShardClusters<F> {
         for cluster in self.shape.chip_clusters.iter() {
             let chips: BTreeSet<String> =
                 cluster.iter().filter(|name| self.widths.contains_key(*name)).cloned().collect();
+            if !Self::is_committed(cluster) {
+                continue;
+            }
             if is_execution_cluster(cluster) {
                 let mut first = chips.clone();
                 first.insert(FIRST_SHARD_CHIP.to_string());
