@@ -1,5 +1,3 @@
-use core::cmp::Reverse;
-
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
@@ -1495,12 +1493,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
-        let timing = std::env::var("ZIREN_DEPS_TIMING").is_ok_and(|v| v != "0");
-        let mut timing_rows: Vec<(String, u128)> = Vec::new();
-        let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
+        let serial = !crate::diagnostics::env_flag("ZIREN_DEPS_PARALLEL", false);
         for record in records.iter_mut() {
             if !serial {
-                let t_par = std::time::Instant::now();
+                let _phase = tracing::debug_span!("parallel dependencies").entered();
                 let included: Vec<&_> = chips
                     .iter()
                     .filter(|c| {
@@ -1508,23 +1504,19 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             && c.included(record)
                     })
                     .collect();
-                let outputs: Vec<Result<(String, A::Record, u128), A::Error>> = included
+                let outputs: Vec<Result<A::Record, A::Error>> = included
                     .par_iter()
                     .map(|chip| {
-                        let t_chip = std::time::Instant::now();
+                        let _span =
+                            tracing::debug_span!("chip dependencies", chip = chip.name()).entered();
                         let mut output = A::Record::default();
                         chip.generate_dependencies(record, &mut output)?;
-                        Ok((chip.name(), output, t_chip.elapsed().as_micros()))
+                        Ok(output)
                     })
                     .collect();
                 for out in outputs {
                     match out {
-                        Ok((name, mut output, us)) => {
-                            record.append(&mut output);
-                            if timing {
-                                timing_rows.push((name, us));
-                            }
-                        }
+                        Ok(mut output) => record.append(&mut output),
                         Err(e) => {
                             tracing::error!(
                                 "Error generating dependencies (parallel phase): {:?}",
@@ -1533,10 +1525,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             return Err(e);
                         }
                     }
-                }
-                if timing {
-                    timing_rows
-                        .push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
                 }
             } else {
                 for chip in chips.iter() {
@@ -1548,7 +1536,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     }
                     let span = tracing::debug_span!("chip dependencies", chip = chip.name());
                     let _enter = span.enter();
-                    let t_chip = std::time::Instant::now();
                     let mut output = A::Record::default();
                     if let Err(e) = chip.generate_dependencies(record, &mut output) {
                         tracing::error!(
@@ -1559,22 +1546,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         return Err(e);
                     }
                     record.append(&mut output);
-                    if timing {
-                        timing_rows.push((chip.name(), t_chip.elapsed().as_micros()));
-                    }
                 }
-            }
-            if timing {
-                timing_rows.sort_by_key(|r| Reverse(r.1));
-                let total: u128 = timing_rows.iter().map(|r| r.1).sum();
-                let top = timing_rows
-                    .iter()
-                    .take(12)
-                    .map(|(n, us)| format!("{n}={}us", us))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                tracing::info!(">>> DEPS_TIMING total_us={total} {top}");
-                timing_rows.clear();
             }
         }
         Ok(())

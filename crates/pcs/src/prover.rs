@@ -672,22 +672,41 @@ where
             .map_err(|_| CpuProverError)?;
 
         pk.observe_into(challenger);
-        if self.machine().defers_global_lookups() {
-            let proved = tracing::info_span!("prove_shards").in_scope(|| {
+        let defers = self.machine().defers_global_lookups();
+        let vk_challenger: &SC::Challenger = challenger;
+        let prove_shard = |shard: usize, record: A::Record| {
+            let phase = |phase: &'static str| {
+                tracing::debug_span!(
+                    target: crate::diagnostics::TIMING_TARGET,
+                    "shard phase",
+                    shard,
+                    phase,
+                    device = "host"
+                )
+            };
+            let _total = phase("total").entered();
+            let named_traces =
+                phase("trace_gen").in_scope(|| self.generate_traces(&record)).map_err(|e| {
+                    tracing::error!("generate traces error: {:?}", e);
+                    CpuProverError
+                })?;
+            let shard_data = phase("commit").in_scope(|| self.commit(&record, named_traces, None));
+            let tables = defers.then(|| self.global_round_tables(&shard_data)).flatten();
+            let proof =
+                phase("open").in_scope(|| self.open(pk, shard_data, &mut vk_challenger.clone()))?;
+            Ok((proof, tables))
+        };
+        let prove_shards = |records: Vec<A::Record>| {
+            tracing::info_span!("prove_shards").in_scope(|| {
                 records
                     .into_par_iter()
-                    .map(|record| {
-                        let named_traces = self.generate_traces(&record).map_err(|e| {
-                            tracing::error!("generate traces error: {:?}", e);
-                            CpuProverError
-                        })?;
-                        let shard_data = self.commit(&record, named_traces, None);
-                        let tables = self.global_round_tables(&shard_data);
-                        let proof = self.open(pk, shard_data, &mut challenger.clone())?;
-                        Ok((proof, tables))
-                    })
+                    .enumerate()
+                    .map(|(shard, record)| prove_shard(shard, record))
                     .collect::<Result<Vec<_>, ShardPcsError<SC, Self::Pcs>>>()
-            })?;
+            })
+        };
+        if defers {
+            let proved = prove_shards(records)?;
             let (mut shard_proofs, tables): (Vec<_>, Vec<_>) = proved.into_iter().unzip();
             self.machine().assign_global_chain_lanes(&mut shard_proofs);
 
@@ -742,37 +761,7 @@ where
             return Err(CpuProverError);
         }
 
-        let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
-            records
-                .into_par_iter()
-                .map(|record| {
-                    let t0 = std::time::Instant::now();
-                    let named_traces = self.generate_traces(&record).map_err(|e| {
-                        tracing::error!("generate traces error: {:?}", e);
-                        CpuProverError
-                    })?;
-                    let trace_gen_ms = t0.elapsed().as_millis();
-
-                    let t1 = std::time::Instant::now();
-                    let shard_data = self.commit(&record, named_traces, None);
-                    let commit_ms = t1.elapsed().as_millis();
-
-                    let t2 = std::time::Instant::now();
-                    let proof = self.open(pk, shard_data, &mut challenger.clone())?;
-                    let open_ms = t2.elapsed().as_millis();
-
-                    tracing::info!(
-                        ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",
-                        trace_gen_ms,
-                        commit_ms,
-                        open_ms,
-                        trace_gen_ms + commit_ms + open_ms
-                    );
-
-                    Ok(proof)
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })?;
+        let shard_proofs = prove_shards(records)?.into_iter().map(|(proof, _)| proof).collect();
 
         Ok(MachineProof::from_shards(shard_proofs))
     }

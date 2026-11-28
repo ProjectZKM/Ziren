@@ -991,7 +991,7 @@ impl<const P: u8>
 
     /// One line naming every component [`Self::shape_key`] hashes.
     ///
-    /// Diagnostic only (call sites gate on `ZIREN_SHAPE_KEY_DIAG`).  The
+    /// Diagnostic only (call sites run it only when the shape events are on).  The
     /// compose pre-warm builds a key per (band, arity) yet real nodes still
     /// miss, and the hash alone cannot say which component diverged.
     pub fn shape_diag(&self) -> String {

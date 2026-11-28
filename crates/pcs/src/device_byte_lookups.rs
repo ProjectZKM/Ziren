@@ -34,7 +34,7 @@ where
 /// check mode is off.
 #[must_use]
 pub fn chip_byte_lookups_on_device(name: &str) -> bool {
-    if std::env::var_os("ZIREN_BYTE_HIST_CHECK").is_some() {
+    if crate::diagnostics::env_flag("ZIREN_BYTE_HIST_CHECK", false) {
         return false;
     }
     chips().read().expect("device byte-lookup registry poisoned").contains(name)

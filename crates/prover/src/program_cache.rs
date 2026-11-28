@@ -17,10 +17,7 @@
 /// into a checked assertion.  It doubles the program-build work by
 /// construction, so it is a bring-up / CI tool and never on by default.
 pub fn program_cache_audit_enabled() -> bool {
-    match std::env::var("ZIREN_VERIFY_PROGRAM_CACHE") {
-        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
-        Err(_) => false,
-    }
+    zkm_pcs::diagnostics::env_flag("ZIREN_VERIFY_PROGRAM_CACHE", false)
 }
 
 // Cross-block / cross-process disk cache.

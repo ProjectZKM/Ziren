@@ -85,8 +85,7 @@ where
 
     let n_chips = chips.len();
 
-    let _t_first = std::time::Instant::now();
-    let _first_span = tracing::info_span!("logup_gkr_first_layer").entered();
+    let _first_span = tracing::info_span!("logup_gkr_first_layer", chips = n_chips).entered();
     let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
         chips,
         preprocessed_traces,
@@ -99,13 +98,6 @@ where
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
     drop(_first_span);
-    let _dt_first_us = _t_first.elapsed().as_micros() as u64;
-    tracing::info!(
-        elapsed_ms = _dt_first_us / 1000,
-        chips = n_chips,
-        sub_phase = "first_layer",
-        "logup_gkr sub-phase done"
-    );
 
     for &n in output.numerator.iter() {
         for basis in n.as_basis_coefficients_slice() {
@@ -142,8 +134,12 @@ where
     let mut round_proofs = Vec::with_capacity(circuit.layers.len());
     circuit.layers.reverse();
 
-    let _t_layers = std::time::Instant::now();
-    let _layers_span = tracing::info_span!("logup_gkr_layer_transitions").entered();
+    let _layers_span = tracing::info_span!(
+        "logup_gkr_layer_transitions",
+        chips = n_chips,
+        layers = tracing::field::Empty
+    )
+    .entered();
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
@@ -173,20 +169,10 @@ where
         eval_point = next_eval_point;
         round_proofs.push(round_proof);
     }
-    let n_layers = round_proofs.len();
-
+    _layers_span.record("layers", round_proofs.len());
     drop(_layers_span);
-    let _dt_layers_us = _t_layers.elapsed().as_micros() as u64;
-    tracing::info!(
-        elapsed_ms = _dt_layers_us / 1000,
-        chips = n_chips,
-        layers = n_layers,
-        sub_phase = "layer_transitions",
-        "logup_gkr sub-phase done"
-    );
 
-    let _t_extract = std::time::Instant::now();
-    let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
+    let _extract_span = tracing::info_span!("logup_gkr_output_extract", chips = n_chips).entered();
     use p3_maybe_rayon::prelude::*;
 
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
@@ -229,13 +215,6 @@ where
         })
         .collect();
     drop(_extract_span);
-    let _dt_extract_us = _t_extract.elapsed().as_micros() as u64;
-    tracing::info!(
-        elapsed_ms = _dt_extract_us / 1000,
-        chips = n_chips,
-        sub_phase = "output_extract",
-        "logup_gkr sub-phase done"
-    );
 
     let mut trace_dim_point = if eval_point.len() >= num_row_variables {
         eval_point[eval_point.len() - num_row_variables..].to_vec()

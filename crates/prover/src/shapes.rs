@@ -898,7 +898,7 @@ mod tests {
     /// must itself fit the shape.  Prints the organic rows per chip against
     /// the caps, plus committed cells, so the caps can be re-sized from
     /// measurement (the leaf side is surveyed in production with
-    /// `ZIREN_FIXSHAPE_DIAG=1`; see the shape's comment).
+    /// the `fix_shape` shape events, `RUST_LOG=ziren::shape=debug`).
     ///
     /// `cargo test -r -p zkm-prover single_shape_fixed_point -- --ignored --nocapture`
     #[test]

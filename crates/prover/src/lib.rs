@@ -799,7 +799,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect(),
             Err(_) => (0..bands.len()).collect(),
         };
-        let mixed = !matches!(env::var("ZIREN_PREWARM_MIXED").as_deref(), Ok("0") | Ok("false"));
+        let mixed = zkm_pcs::diagnostics::env_flag("ZIREN_PREWARM_MIXED", true);
         let mut pairs: Vec<(Vec<usize>, bool)> = Vec::new();
         for arity in 1..=REDUCE_BATCH_SIZE {
             let tuples: Vec<Vec<usize>> = if mixed {
@@ -837,52 +837,63 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .num_threads(prewarm_threads)
             .build()
             .expect("compose pre-warm pool");
-        pool.install(|| pairs.into_par_iter().for_each(|(tuple, is_complete)| {
-            let arity = tuple.len();
-            let band_index = format!("{tuple:?}");
-            let child_shapes: Vec<_> = tuple
-                .iter()
-                .map(|b| {
-                    RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(
-                        &bands[*b],
-                    )
-                })
-                .collect();
-            let compress_shape = ZKMCompressShape::from(child_shapes);
-            let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
-            let mut witness = ZKMCompressWitnessValues::<InnerSC>::dummy(
-                self.compress_prover.machine(),
-                &shape,
-            );
-            witness.is_complete = is_complete;
-            if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
-                let own = self.compose_band_for(&witness);
-                let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
-                let keys: Vec<String> = (own.unwrap_or(0)..=last)
-                    .map(|b| format!("{b}:{:016x}", self.band_keyed(witness.shape_key(), Some(b))))
+        pool.install(|| {
+            pairs.into_par_iter().for_each(|(tuple, is_complete)| {
+                let arity = tuple.len();
+                let band_index = format!("{tuple:?}");
+                let child_shapes: Vec<_> = tuple
+                    .iter()
+                    .map(|b| {
+                        RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(
+                            &bands[*b],
+                        )
+                    })
                     .collect();
-                tracing::info!(
-                    "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} shape_key={:016x} keys=[{}] {}",
-                    witness.shape_key(),
-                    keys.join(","),
-                    witness.shape_diag()
+                let compress_shape = ZKMCompressShape::from(child_shapes);
+                let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
+                let mut witness = ZKMCompressWitnessValues::<InnerSC>::dummy(
+                    self.compress_prover.machine(),
+                    &shape,
                 );
-            }
-            let per_pair_start = std::time::Instant::now();
-            let own = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
-            let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
-            let mut digest = [0u8; 32];
-            for band in own.unwrap_or(0)..=last {
-                let (_program, d) = self.compose_program_at(&witness, Some(band));
-                digest = d;
-            }
-            self.pin_recursion_pk(digest);
-            tracing::debug!(
-                "compose pre-warm: band={band_index} arity={arity} is_complete={is_complete} \
+                witness.is_complete = is_complete;
+                if zkm_pcs::diagnostics::shape_events_enabled() {
+                    let own = self.compose_band_for(&witness);
+                    let last =
+                        self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
+                    let keys: Vec<String> = (own.unwrap_or(0)..=last)
+                        .map(|b| {
+                            format!("{b}:{:016x}", self.band_keyed(witness.shape_key(), Some(b)))
+                        })
+                        .collect();
+                    tracing::debug!(
+                        target: zkm_pcs::diagnostics::SHAPE_TARGET,
+                        stage = "prewarm",
+                        shape_key = format_args!("{:016x}", witness.shape_key()),
+                        class = ?own,
+                        band = band_index,
+                        arity,
+                        keys = keys.join(","),
+                        components = witness.shape_diag(),
+                        "program shape"
+                    );
+                }
+                let per_pair_start = std::time::Instant::now();
+                let own = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
+                let last =
+                    self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
+                let mut digest = [0u8; 32];
+                for band in own.unwrap_or(0)..=last {
+                    let (_program, d) = self.compose_program_at(&witness, Some(band));
+                    digest = d;
+                }
+                self.pin_recursion_pk(digest);
+                tracing::debug!(
+                    "compose pre-warm: band={band_index} arity={arity} is_complete={is_complete} \
                  snapped onto {own:?}..={last} in {:?}",
-                per_pair_start.elapsed()
-            );
-        }));
+                    per_pair_start.elapsed()
+                );
+            })
+        });
         tracing::debug!("compose pre-warm: {n_pairs} (band, arity) pairs");
         tracing::debug!(
             "compose pre-warm: arity 1..={} done in {:?}",
@@ -1091,7 +1102,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCoreWitnessValues<CoreSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        if log_normalize_key_enabled() {
+        if zkm_pcs::diagnostics::shape_events_enabled() {
             let mut names: Vec<&str> = input
                 .shard_proofs
                 .iter()
@@ -1156,18 +1167,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     .join(" ")
                 })
                 .collect();
-            tracing::warn!(
-                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={} \
-                 PACK[{}] STRIPES[{}] DIMS[{}] heights={}",
-                input.shape_key(),
-                band,
-                input.is_first_shard,
-                names.len(),
-                names.join(","),
-                packing.join(" | "),
-                rounds.join(" | "),
-                dims.join(" | "),
-                heights.join(","),
+            tracing::debug!(
+                target: zkm_pcs::diagnostics::SHAPE_TARGET,
+                stage = "normalize",
+                shape_key = format_args!("{:016x}", input.shape_key()),
+                class = ?band,
+                first = input.is_first_shard,
+                chips = names.join(","),
+                packing = packing.join(" | "),
+                stripes = rounds.join(" | "),
+                dims = dims.join(" | "),
+                heights = heights.join(","),
+                "program shape"
             );
         }
         self.cached_program(
@@ -1435,12 +1446,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCompressWitnessValues<InnerSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
-        if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
-            tracing::info!(
-                "SHAPEDIAG runtime band={band:?} shape_key={:016x} key={:016x} {}",
-                input.shape_key(),
-                self.band_keyed(input.shape_key(), band),
-                input.shape_diag()
+        if zkm_pcs::diagnostics::shape_events_enabled() {
+            tracing::debug!(
+                target: zkm_pcs::diagnostics::SHAPE_TARGET,
+                stage = "compose",
+                shape_key = format_args!("{:016x}", input.shape_key()),
+                class = ?band,
+                key = format_args!("{:016x}", self.band_keyed(input.shape_key(), band)),
+                components = input.shape_diag(),
+                "program shape"
             );
         }
         self.cached_program(
@@ -2682,15 +2696,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
     }
-}
-
-/// Whether to log one `NORMALIZE_KEY` line per normalize program request.
-/// Read once; off unless `ZIREN_LOG_NORMALIZE_KEY` is `1`/`true`.
-fn log_normalize_key_enabled() -> bool {
-    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FLAG.get_or_init(|| {
-        matches!(std::env::var("ZIREN_LOG_NORMALIZE_KEY").ok().as_deref(), Some("1") | Some("true"))
-    })
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ mod chip;
 mod config;
 mod debug;
 pub mod device_byte_lookups;
+pub mod diagnostics;
 pub mod folder;
 #[cfg(test)]
 mod global_lookup_tests;

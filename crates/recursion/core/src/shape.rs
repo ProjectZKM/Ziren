@@ -93,7 +93,7 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
         } else {
             own
         };
-        if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
+        if zkm_pcs::diagnostics::shape_events_enabled() {
             let (mw, pw) = Self::round_widths();
             let cells: u128 = shape
                 .iter()
@@ -106,7 +106,16 @@ impl<F: PrimeField32 + QuinticTrinomialExtendable, const DEGREE: usize>
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
             organic.sort();
             let rows: Vec<(String, usize)> = shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            tracing::info!("FIXSHAPE kind={kind} band_index={class} cells={cells} organic={organic:?} -> band={rows:?}");
+            tracing::debug!(
+                target: zkm_pcs::diagnostics::SHAPE_TARGET,
+                stage = "fix_shape",
+                class,
+                kind,
+                cells = cells as u64,
+                organic = ?organic,
+                rows = ?rows,
+                "program shape"
+            );
         }
         *program.shape_mut() = Some(RecursionShape {
             inner: shape,
