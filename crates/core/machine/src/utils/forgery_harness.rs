@@ -720,6 +720,44 @@ fn forge_logup_opening_lengths_fibonacci() {
     }
 }
 
+/// Move one row between two padding columns of the main round, or shorten the
+/// round's one padding column by a row.
+fn forge_padding_split(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let EvaluationProof::Bundle(bundle) = &mut sp.jagged_shard_proof.as_mut().evaluation_proof
+    else {
+        panic!("a core shard proof carries its opening as a bundle");
+    };
+    let packing = &mut bundle.packing;
+    let columns = packing.offsets.len() - 1;
+    let pads = packing.padding_heights.last_mut().expect("the main round has padding columns");
+    let first = pads.iter().position(|h| *h > 0).expect("the main round has a padding row");
+    pads[first] -= 1;
+    if first + 1 < pads.len() {
+        pads[first + 1] += 1;
+        packing.offsets[columns - pads.len() + first + 1] -= 1;
+    } else {
+        packing.offsets[columns] -= 1;
+        packing.total_values -= 1;
+    }
+}
+
+/// The padding columns of a round are split one way, fixed by the round's
+/// cells: a proof with another split is rejected by that check.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_padding_split_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/padding-split",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_padding_split,
+    );
+    assert!(tag.contains("padding columns are not the split"), "rejected elsewhere: {tag}");
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
