@@ -25,7 +25,6 @@ use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     env,
-    num::NonZeroUsize,
     path::Path,
     sync::{mpsc::sync_channel, Arc, Mutex, OnceLock},
     thread,
@@ -236,7 +235,6 @@ const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
 
-const CORE_CACHE_SIZE: usize = 5;
 /// Tree-reduce arity for the compress stage. The reduction merges adjacent
 /// shard ranges and emits a run the moment it reaches this size, or when the
 /// run covers the whole chain with nothing left in flight, so any arity ≥ 2
@@ -673,14 +671,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let root_machine = CompressAir::compress_machine(CompressedSC::default());
         let root_prover = C::RootProver::new(root_machine);
 
-        let core_cache_size = NonZeroUsize::new(
-            env::var("PROVER_CORE_CACHE_SIZE")
-                .unwrap_or_else(|_| CORE_CACHE_SIZE.to_string())
-                .parse()
-                .unwrap_or(CORE_CACHE_SIZE),
-        )
-        .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
-
         let recursion_shape_config = env::var("FIX_RECURSION_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(true)
@@ -722,8 +712,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
         leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
         let (root, merkle_tree) = MerkleTree::commit(leaves);
-
-        let _ = core_cache_size;
 
         Self {
             core_prover,
