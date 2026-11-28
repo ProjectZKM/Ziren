@@ -743,6 +743,22 @@ where
         }
         let cube = 1usize << shared_eval_point.len();
         let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let pins = match claimed_prep_pad_columns {
+            Some(_) if expected_preceding == 1 => {
+                let claimed = bundle.packing.padding_heights.first().map_or(0, |p| p.len());
+                let Some(class) = crate::jagged::RECURSION_PIN_CLASSES
+                    .iter()
+                    .position(|c| c.prep.pad_columns == claimed)
+                else {
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
+                        "outer preprocessed round: {claimed} padding columns name no pin class",
+                    )));
+                };
+                Some(crate::jagged::RecursionPins::class(class))
+            }
+            _ => None,
+        };
+        let rounds = bundle.packing.round_counts.len();
         let mut main_area = 0usize;
         for (r, (round, pads)) in bundle
             .packing
@@ -753,7 +769,8 @@ where
         {
             let total =
                 round.iter().fold(0usize, |a, (h, w)| a.saturating_add(h.saturating_mul(*w)));
-            if round_padding_heights(total, None, log_stack, cube).as_ref() != Some(pads) {
+            let pin = pins.map(|pins| if r + 1 == rounds { pins.main } else { pins.prep });
+            if expected_round_padding(total, pin, log_stack, cube).as_ref() != Some(pads) {
                 return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "outer round {r}: the {} padding columns are not the split its {total} cells \
                      determine",
@@ -1143,7 +1160,8 @@ where
             pin_class.map(|class| crate::jagged::RecursionPins::class(class).main)
         };
         let claimed: Vec<usize> = chip_infos[main_end..].iter().map(|i| i.row_count).collect();
-        if round_padding_heights(main_total, main_pin, log_stack, cube).as_ref() != Some(&claimed) {
+        if expected_round_padding(main_total, main_pin, log_stack, cube).as_ref() != Some(&claimed)
+        {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "main round: the {} padding columns are not the split its {main_total} cells \
                  determine",
@@ -1299,33 +1317,28 @@ where
     Ok(())
 }
 
-/// The stacking-padding column heights of a round of `total` real cells: the
-/// gap to the round's committed area, split the one way the prover splits it
-/// (`AreaPin::split_padding`).  A pinned round takes its area and column count
-/// from the pin; any other round commits `committed_dense_len(total)` cells and
-/// splits the gap into `unpinned_pad_columns` columns.  `None` when the cells
-/// do not fit the area or the gap does not fit the columns.
+/// The stacking-padding column heights a proof must carry for a round of
+/// `total` real cells: the prover's split ([`crate::jagged::round_padding_heights`])
+/// at the round's area, which is its pin's or, without a pin,
+/// `committed_dense_len(total)`.
 ///
 /// Every input is fixed by the verifying key or by heights the transcript
 /// observed, so a proof has no choice in the split.
-fn round_padding_heights(
+fn expected_round_padding(
     total: usize,
     pin: Option<crate::jagged::AreaPin>,
     log_stack: usize,
     cube: usize,
 ) -> Option<Vec<usize>> {
-    let (area, columns) = match pin {
-        Some(pin) => (pin.area, pin.pad_columns),
-        None => (
-            crate::jagged::committed_dense_len(total, log_stack),
-            crate::jagged::unpinned_pad_columns(total, log_stack, cube),
-        ),
-    };
-    let pad = area.checked_sub(total)?;
-    if columns == 0 || pad > columns.saturating_mul(cube) {
-        return None;
-    }
-    Some(crate::jagged::AreaPin::split_padding(pad, columns, cube))
+    let area =
+        pin.map_or_else(|| crate::jagged::committed_dense_len(total, log_stack), |pin| pin.area);
+    crate::jagged::round_padding_heights(
+        total,
+        area,
+        pin.map(|pin| pin.pad_columns),
+        log_stack,
+        cube,
+    )
 }
 
 /// Host-side `full_geq`: padded-row mask used by the zerocheck

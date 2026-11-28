@@ -341,6 +341,30 @@ pub fn unpinned_pad_columns(total_values: usize, log_stacking_height: usize, cub
     (step * block).div_ceil(cube).max(1)
 }
 
+/// The stacking-padding column heights of a round of `total_values` real cells
+/// committed at `area` cells: the gap, split by [`AreaPin::split_padding`] into
+/// the round's fixed column count, or into [`unpinned_pad_columns`] columns
+/// when it has none.
+///
+/// The prover splits a round's gap with this function and the verifier
+/// compares a proof's heights with it. `None` when the cells exceed the area
+/// or the gap does not fit the columns.
+pub fn round_padding_heights(
+    total_values: usize,
+    area: usize,
+    fixed_pad_columns: Option<usize>,
+    log_stacking_height: usize,
+    cube: usize,
+) -> Option<Vec<usize>> {
+    let columns = fixed_pad_columns
+        .unwrap_or_else(|| unpinned_pad_columns(total_values, log_stacking_height, cube));
+    let pad = area.checked_sub(total_values)?;
+    if columns == 0 || pad > columns.saturating_mul(cube) {
+        return None;
+    }
+    Some(AreaPin::split_padding(pad, columns, cube))
+}
+
 impl<F> JaggedPacking<F> {
     /// `log2` of the hypercube the jagged sumcheck runs over: the dense length
     /// rounded up to a power of two.  The gap is an IMPLICIT zero tail — it is

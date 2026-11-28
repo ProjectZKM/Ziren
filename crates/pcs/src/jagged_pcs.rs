@@ -1019,19 +1019,16 @@ pub mod jagged {
             r_row_per_chip.extend(r.r_row_per_chip.iter().cloned());
 
             let area = r.precomputed.prover_data.area;
-            let pad = area - pk.total_values;
             {
                 let cube = 1usize << z_row.len();
-                let pad_heights: Vec<usize> = {
-                    let k = r.precomputed.fixed_pad_columns.unwrap_or_else(|| {
-                        crate::jagged::unpinned_pad_columns(
-                            pk.total_values,
-                            DEFAULT_LOG_STACKING_HEIGHT as usize,
-                            cube,
-                        )
-                    });
-                    crate::jagged::AreaPin::split_padding(pad, k, cube)
-                };
+                let pad_heights: Vec<usize> = crate::jagged::round_padding_heights(
+                    pk.total_values,
+                    area,
+                    r.precomputed.fixed_pad_columns,
+                    DEFAULT_LOG_STACKING_HEIGHT as usize,
+                    cube,
+                )
+                .expect("a round's padding gap fits its padding columns");
                 let mut pad_off = base + pk.total_values;
                 let mut this_round_pads: Vec<usize> = Vec::new();
                 for h in pad_heights {
