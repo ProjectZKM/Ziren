@@ -470,6 +470,17 @@ impl RecursionPkCache {
     }
 }
 
+/// A recursion node ready to prove, as the trace workers hand it to the
+/// provers.
+struct RecursionJob {
+    range: crate::compress_tree::ShardRange,
+    /// Whether the node is the root, which the root prover proves.
+    is_root: bool,
+    program: Arc<RecursionProgram<KoalaBear>>,
+    record: ExecutionRecord<KoalaBear>,
+    traces: zkm_pcs::Traces<KoalaBear>,
+}
+
 /// What a SNARK wrap of a shrink proof proves: the outer witness and its
 /// three public inputs.
 struct SnarkWrapInput {
@@ -1821,14 +1832,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 });
             }
 
-            let (record_and_trace_tx, record_and_trace_rx) =
-                sync_channel::<(
-                    crate::compress_tree::ShardRange,
-                    bool,
-                    Arc<RecursionProgram<KoalaBear>>,
-                    ExecutionRecord<KoalaBear>,
-                    zkm_pcs::Traces<KoalaBear>,
-                )>(opts.recursion_opts.records_and_traces_channel_capacity);
+            let (record_and_trace_tx, record_and_trace_rx) = sync_channel::<RecursionJob>(
+                opts.recursion_opts.records_and_traces_channel_capacity,
+            );
             let record_and_trace_tx = Arc::new(Mutex::new(record_and_trace_tx));
             let record_and_trace_rx = Arc::new(Mutex::new(record_and_trace_rx));
             let input_rx = Arc::new(Mutex::new(input_rx));
@@ -1845,104 +1851,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 &input,
                                 ZKMCircuitWitness::ComposeJagged(w) if w.is_complete
                             );
-                            let (program, witness_stream) = tracing::debug_span!(
-                                "get program and witness stream"
-                            )
-                            .in_scope(|| match input {
-                                ZKMCircuitWitness::CoreJagged(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.recursion_program(&input).0, witness_stream)
-                                }
-                                ZKMCircuitWitness::GlobalJagged(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.global_round_program(&input).0, witness_stream)
-                                }
-                                ZKMCircuitWitness::ComposeJagged(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (
-                                        self.compose_program(&input).0,
-                                        witness_stream,
-                                    )
-                                }
-                                ZKMCircuitWitness::DeferredJagged(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (
-                                        self.deferred_program(&input),
-                                        witness_stream,
-                                    )
-                                }
-                            });
-
-                            let n_instructions = program.instruction_count();
-                            let _t_run = std::time::Instant::now();
-                            let record = tracing::info_span!(
-                                "execute_runtime",
-                                instructions = n_instructions,
-                            ).in_scope(|| {
-                                let mut runtime =
-                                    RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
-                                        program.clone(),
-                                        self.compress_prover.machine().config().perm.clone(),
-                                    );
-                                runtime.witness_stream = witness_stream.into();
-                                runtime
-                                    .run()
-                                    .map_err(|e| {
-                                        ZKMRecursionProverError::RuntimeError(e.to_string())
-                                    })
-                                    .unwrap();
-                                runtime.record
-                            });
-                            tracing::info!(
-                                event = "execute_runtime_done",
-                                elapsed_ms = _t_run.elapsed().as_millis() as u64,
-                                instructions = n_instructions,
-                                "compose-call runtime wall"
-                            );
-
-                            let mut records = vec![record];
-                            tracing::debug_span!("generate dependencies").in_scope(|| -> Result<(), ZKMRecursionProverError> {
-                                match self.compress_prover.machine().generate_dependencies(
-                                    &mut records,
-                                    &opts.recursion_opts,
-                                    None,
-                                ) {
-                                    Ok(_) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Failed to generate dependencies for recursion proof: {}",
-                                            e
-                                        );
-                                        Err(ZKMRecursionProverError::DependenciesGenerationError)
-                                    }
-                                }
-                            })?;
-
-                            let record = records.into_iter().next().unwrap();
-                            let traces = tracing::debug_span!("generate traces")
-                                .in_scope(|| self.compress_prover.generate_traces(&record));
-                            let traces = match traces {
-                                Ok(traces) => traces,
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to generate traces for recursion proof: {}",
-                                        e
-                                    );
-                                    return Err(ZKMRecursionProverError::TracesGenerationError);
-                                }
-                            };
-
+                            let (program, witness_stream) = self.prepare_recursion_job(input);
+                            let (record, traces) =
+                                self.execute_and_generate_traces(&program, witness_stream, opts)?;
                             record_and_trace_tx
                                 .lock()
                                 .unwrap()
-                                .send((range, is_root, program, record, traces))
+                                .send(RecursionJob { range, is_root, program, record, traces })
                                 .unwrap();
                         } else {
-                            break Ok(());
+                            break Ok::<(), ZKMRecursionProverError>(());
                         }
                     }
                 });
@@ -1964,65 +1882,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let _span = span.enter();
                     loop {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
-                        if let Ok((range, is_root, program, record, traces)) = received {
-                            if is_root {
-                                drop(traces);
-                                let (vk, proof) = self.prove_root_node(&program, record, opts);
-                                proofs_tx
-                                    .lock()
-                                    .unwrap()
-                                    .send((
-                                        range,
-                                        zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
-                                        zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
-                                    ))
-                                    .unwrap();
-                                continue;
-                            }
-                            tracing::debug_span!("batch").in_scope(|| {
-                                let keys =
-                                    tracing::debug_span!("Setup compress program").in_scope(|| {
-                                        self.recursion_pk_cached(&program, || {
-                                            let (pk, vk) = self.compress_prover.setup(&program);
-                                            (self.compress_prover.pk_to_host(&pk), vk)
-                                        })
-                                    });
-                                let pk = self.compress_prover.pk_to_device(&keys.0);
-                                let vk = keys.1.clone();
-
-                                let mut challenger =
-                                    self.compress_prover.machine().config().challenger();
-                                tracing::debug_span!("observe proving key").in_scope(|| {
-                                    pk.observe_into(&mut challenger);
-                                });
-
-                                #[cfg(feature = "debug")]
-                                self.compress_prover.machine().debug_constraints(
-                                    &self.compress_prover.pk_to_host(&pk),
-                                    vec![record.clone()],
-                                    &mut challenger.clone(),
-                                );
-
-                                let data = tracing::debug_span!("commit").in_scope(|| {
-                                    self.compress_prover.commit(&record, traces, None)
-                                });
-
-                                let proof = tracing::debug_span!("open").in_scope(|| {
-                                    self.compress_prover.open(&pk, data, &mut challenger).unwrap()
-                                });
-
-                                #[cfg(feature = "debug")]
-                                self.compress_prover
-                                    .machine()
-                                    .verify(
-                                        &vk,
-                                        &zkm_pcs::MachineProof::from_shards(vec![proof.clone()]),
-                                        &mut self.compress_prover.machine().config().challenger(),
-                                    )
-                                    .unwrap();
-
-                                proofs_tx.lock().unwrap().send((range, vk, proof)).unwrap();
-                            });
+                        if let Ok(job) = received {
+                            let proved = self.prove_recursion_job(job, opts);
+                            proofs_tx.lock().unwrap().send(proved).unwrap();
                         } else {
                             break;
                         }
@@ -2105,6 +1967,157 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof {
             vk: zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
             proof: zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
+        })
+    }
+
+    /// The program of a recursion node and the witness stream it reads.
+    fn prepare_recursion_job(
+        &self,
+        input: ZKMCircuitWitness,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, Vec<zkm_recursion_core::air::Block<KoalaBear>>) {
+        tracing::debug_span!("get program and witness stream").in_scope(|| {
+            let mut witness_stream = Vec::new();
+            let program = match input {
+                ZKMCircuitWitness::CoreJagged(input) => {
+                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                    self.recursion_program(&input).0
+                }
+                ZKMCircuitWitness::GlobalJagged(input) => {
+                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                    self.global_round_program(&input).0
+                }
+                ZKMCircuitWitness::ComposeJagged(input) => {
+                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                    self.compose_program(&input).0
+                }
+                ZKMCircuitWitness::DeferredJagged(input) => {
+                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                    self.deferred_program(&input)
+                }
+            };
+            (program, witness_stream)
+        })
+    }
+
+    /// Runs `program` over `witness_stream`, then builds its dependencies and
+    /// its traces under the compress machine.
+    fn execute_and_generate_traces(
+        &self,
+        program: &Arc<RecursionProgram<KoalaBear>>,
+        witness_stream: Vec<zkm_recursion_core::air::Block<KoalaBear>>,
+        opts: ZKMProverOpts,
+    ) -> Result<(ExecutionRecord<KoalaBear>, zkm_pcs::Traces<KoalaBear>), ZKMRecursionProverError>
+    {
+        let n_instructions = program.instruction_count();
+        let run_start = std::time::Instant::now();
+        let record = tracing::info_span!("execute_runtime", instructions = n_instructions)
+            .in_scope(|| {
+                let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                    program.clone(),
+                    self.compress_prover.machine().config().perm.clone(),
+                );
+                runtime.witness_stream = witness_stream.into();
+                runtime
+                    .run()
+                    .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))
+                    .unwrap();
+                runtime.record
+            });
+        tracing::info!(
+            event = "execute_runtime_done",
+            elapsed_ms = run_start.elapsed().as_millis() as u64,
+            instructions = n_instructions,
+            "compose-call runtime wall"
+        );
+
+        let mut records = vec![record];
+        tracing::debug_span!("generate dependencies").in_scope(
+            || -> Result<(), ZKMRecursionProverError> {
+                match self.compress_prover.machine().generate_dependencies(
+                    &mut records,
+                    &opts.recursion_opts,
+                    None,
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to generate dependencies for recursion proof: {}",
+                            e
+                        );
+                        Err(ZKMRecursionProverError::DependenciesGenerationError)
+                    }
+                }
+            },
+        )?;
+
+        let record = records.into_iter().next().unwrap();
+        let traces = tracing::debug_span!("generate traces")
+            .in_scope(|| self.compress_prover.generate_traces(&record));
+        match traces {
+            Ok(traces) => Ok((record, traces)),
+            Err(e) => {
+                tracing::error!("Failed to generate traces for recursion proof: {}", e);
+                Err(ZKMRecursionProverError::TracesGenerationError)
+            }
+        }
+    }
+
+    /// Proves one recursion node: the root under the compress schedule, every
+    /// other node with the cached compress key.
+    fn prove_recursion_job(
+        &self,
+        job: RecursionJob,
+        opts: ZKMProverOpts,
+    ) -> (crate::compress_tree::ShardRange, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>) {
+        let RecursionJob { range, is_root, program, record, traces } = job;
+        if is_root {
+            drop(traces);
+            let (vk, proof) = self.prove_root_node(&program, record, opts);
+            return (
+                range,
+                zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
+                zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
+            );
+        }
+        tracing::debug_span!("batch").in_scope(|| {
+            let keys = tracing::debug_span!("Setup compress program").in_scope(|| {
+                self.recursion_pk_cached(&program, || {
+                    let (pk, vk) = self.compress_prover.setup(&program);
+                    (self.compress_prover.pk_to_host(&pk), vk)
+                })
+            });
+            let pk = self.compress_prover.pk_to_device(&keys.0);
+            let vk = keys.1.clone();
+
+            let mut challenger = self.compress_prover.machine().config().challenger();
+            tracing::debug_span!("observe proving key").in_scope(|| {
+                pk.observe_into(&mut challenger);
+            });
+
+            #[cfg(feature = "debug")]
+            self.compress_prover.machine().debug_constraints(
+                &self.compress_prover.pk_to_host(&pk),
+                vec![record.clone()],
+                &mut challenger.clone(),
+            );
+
+            let data = tracing::debug_span!("commit")
+                .in_scope(|| self.compress_prover.commit(&record, traces, None));
+
+            let proof = tracing::debug_span!("open")
+                .in_scope(|| self.compress_prover.open(&pk, data, &mut challenger).unwrap());
+
+            #[cfg(feature = "debug")]
+            self.compress_prover
+                .machine()
+                .verify(
+                    &vk,
+                    &zkm_pcs::MachineProof::from_shards(vec![proof.clone()]),
+                    &mut self.compress_prover.machine().config().challenger(),
+                )
+                .unwrap();
+
+            (range, vk, proof)
         })
     }
 
