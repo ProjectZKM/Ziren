@@ -55,7 +55,7 @@ The program is fixed by the shape of the proofs it verifies. A normalize program
 
 ### Verifying-key set
 
-Programs are generated, not written by hand, so the set of valid recursion keys is enumerated in advance: the normalize programs for every shard shape, the compose programs of every arity, and the deferred programs. Their hashes form a Merkle tree of height 14 (`VK_MERKLE_TREE_HEIGHT`) whose root, `vk_root`, is a public value of every recursion proof and a public input of the SNARK. The enumeration ships with the prover as `vk_map.bin`. The compose and deferred programs check a Merkle proof that the key of each proof they verify is in the set, and the shrink program checks it for the compressed proof. Without this check, a prover could verify a proof of an arbitrary program in place of a normalize proof.
+Programs are generated, not written by hand, so the set of valid recursion keys is enumerated in advance: the normalize programs for every shard shape, the compose programs of every arity, and the deferred programs. Their hashes form a Merkle tree of height 19 (`VK_MERKLE_TREE_HEIGHT`) whose root, `vk_root`, is a public value of every recursion proof and a public input of the SNARK. The enumeration ships with the prover as `vk_map.bin`. The compose and deferred programs check a Merkle proof that the key of each proof they verify is in the set, and the shrink program checks it for the compressed proof. Without this check, a prover could verify a proof of an arbitrary program in place of a normalize proof.
 
 ### Compression
 
