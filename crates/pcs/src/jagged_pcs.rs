@@ -1429,10 +1429,18 @@ pub mod jagged {
             z_row,
             challenger,
         );
-        let Some((z_star, q_at_z, _w_at_z)) = red_result else {
+        let Some((z_star, q_at_z, w_at_z)) = red_result else {
             tracing::warn!("[jagged verify] jagged sumcheck reduction rejected");
             return false;
         };
+        if let Err(why) = crate::jagged_eval_sumcheck::check_jagged_evaluation_claim(
+            &bundle.jagged_eval,
+            &packing.offsets,
+            w_at_z,
+        ) {
+            tracing::warn!("[jagged verify] {why}");
+            return false;
+        }
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
             &bundle.jagged_eval,
             challenger,
