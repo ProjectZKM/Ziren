@@ -37,10 +37,10 @@ fn recursion_pk_cache_matches_a_fresh_setup() {
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec = prover.compress_shape_config.as_ref().expect("recursion shape config");
     let shape = ZKMProofShape::generate(rec, REDUCE_BATCH_SIZE).next().expect("a shape");
-    let program = prover.program_from_shape(
-        ZKMCompressProgramShape::from_proof_shape(shape, VK_MERKLE_TREE_HEIGHT),
-        None,
-    );
+    let program = prover.program_from_shape(ZKMCompressProgramShape::from_proof_shape(
+        shape,
+        VK_MERKLE_TREE_HEIGHT,
+    ));
     let fresh = prover.compress_prover.setup(&program).1.hash_koalabear();
     let first = prover.recursion_pk_cached(&program, || {
         let (pk, vk) = prover.compress_prover.setup(&program);
@@ -1576,10 +1576,10 @@ fn real_proofs_use_enumerated_programs() -> Result<()> {
     let enumerated =
         ZKMProofShape::generate_all(config, REDUCE_BATCH_SIZE, machine).collect::<BTreeSet<_>>();
     let program_of = |prover: &ZKMProver<DefaultProverComponents>, shape: &ZKMProofShape| {
-        prover.program_from_shape(
-            ZKMCompressProgramShape::from_proof_shape(shape.clone(), VK_MERKLE_TREE_HEIGHT),
-            None,
-        )
+        prover.program_from_shape(ZKMCompressProgramShape::from_proof_shape(
+            shape.clone(),
+            VK_MERKLE_TREE_HEIGHT,
+        ))
     };
     let key_of = |program: &RecursionProgram<KoalaBear>| {
         ZKMProver::<DefaultProverComponents>::recursion_pk_cache_key(program)

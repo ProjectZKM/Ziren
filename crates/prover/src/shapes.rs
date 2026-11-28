@@ -21,10 +21,7 @@ use zkm_recursion_circuit::machine::{
     ZKMCompressWithVkeyShape, ZKMCompressWitnessValues, ZKMCoreWitnessValues, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMGlobalRoundShape, ZKMRecursionShape, ZKMWrapWitnessValues,
 };
-use zkm_recursion_core::{
-    shape::{RecursionShape, RecursionShapeConfig},
-    RecursionProgram,
-};
+use zkm_recursion_core::{shape::RecursionShapeConfig, RecursionProgram};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
 
@@ -127,9 +124,8 @@ pub fn check_shapes<C: ZKMProverComponents>(
             s.spawn(move || {
                 while let Ok(shape) = shape_rx.lock().unwrap().recv() {
                     tracing::info!("shape is {:?}", shape);
-                    let program = catch_unwind(AssertUnwindSafe(|| {
-                        prover.program_from_shape(shape.clone(), None)
-                    }));
+                    let program =
+                        catch_unwind(AssertUnwindSafe(|| prover.program_from_shape(shape.clone())));
                     match program {
                         Ok(_) => {}
                         Err(e) => {
@@ -222,7 +218,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         tracing::info!("shape {i} is {shape:?}");
                         let compile_start = Instant::now();
                         let program = catch_unwind(AssertUnwindSafe(|| {
-                            prover.program_from_shape(shape.clone(), None)
+                            prover.program_from_shape(shape.clone())
                         }));
                         let compile_ns = compile_start.elapsed().as_nanos() as u64;
                         compile_total_ns.fetch_add(compile_ns, Ordering::Relaxed);
@@ -783,23 +779,12 @@ impl ZKMCompressProgramShape {
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
-    pub fn program_from_shape(
-        &self,
-        shape: ZKMCompressProgramShape,
-        shrink_shape: Option<RecursionShape>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let _ = shrink_shape;
-        self.program_from_shape_jagged(shape)
-    }
-
-    /// WHIR companion to [`Self::program_from_shape`]. Builds a
-    /// recursion program from a cached shape using the jagged-pipeline
-    /// program builders (`recursion_program`,
-    /// `compose_program`, etc.).
+    /// The recursion program of an enumerated shape, built by the builders
+    /// a proof of that shape reaches (`recursion_program`, `compose_program`,
+    /// and so on) over a dummy input, so both give the same program.
     ///
-    /// Used by `build_compress_vks` to regenerate `vk_map.bin` against the
-    /// whir compress programs.
-    pub fn program_from_shape_jagged(
+    /// Used by `build_compress_vks` to regenerate `vk_map.bin`.
+    pub fn program_from_shape(
         &self,
         shape: ZKMCompressProgramShape,
     ) -> Arc<RecursionProgram<KoalaBear>> {
@@ -867,10 +852,10 @@ mod tests {
             .collect();
         assert!(!roots.is_empty(), "the enumeration emits closing composes");
         for (i, shape) in roots.into_iter().enumerate() {
-            let program = prover.program_from_shape(
-                ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT),
-                None,
-            );
+            let program = prover.program_from_shape(ZKMCompressProgramShape::from_proof_shape(
+                shape,
+                crate::VK_MERKLE_TREE_HEIGHT,
+            ));
             let heights = CompressAir::<KoalaBear>::heights(&program);
             let organic =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::organic_shape(&heights);
@@ -1871,7 +1856,7 @@ mod shape_program_dump {
             let shape = shape.clone();
             let program_shape =
                 ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT);
-            let program = prover.program_from_shape(program_shape, None);
+            let program = prover.program_from_shape(program_shape);
             let heights =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
                     &program,

@@ -99,10 +99,6 @@ path = "scripts/check_vk_coverage.rs"
 name = "prove_dump"
 path = "scripts/prove_dump.rs"
 
-[[bin]]
-name = "find_recursion_shapes"
-path = "scripts/find_recursion_shapes.rs"
-
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
