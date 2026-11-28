@@ -5,13 +5,20 @@ use crate::*;
 
 /// A recursion node ready to prove, as the trace workers hand it to the
 /// provers.
-struct RecursionJob {
-    range: crate::compress_tree::ShardRange,
-    /// Whether the node is the root, which the root prover proves.
-    is_root: bool,
-    program: Arc<RecursionProgram<KoalaBear>>,
-    record: ExecutionRecord<KoalaBear>,
-    traces: zkm_pcs::Traces<KoalaBear>,
+enum RecursionJob {
+    /// A node below the root, with its traces under the compress machine.
+    Node {
+        range: crate::compress_tree::ShardRange,
+        program: Arc<RecursionProgram<KoalaBear>>,
+        record: ExecutionRecord<KoalaBear>,
+        traces: zkm_pcs::Traces<KoalaBear>,
+    },
+    /// The root. The root prover generates the traces from the record.
+    Root {
+        range: crate::compress_tree::ShardRange,
+        program: Arc<RecursionProgram<KoalaBear>>,
+        record: ExecutionRecord<KoalaBear>,
+    },
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
@@ -407,13 +414,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 ZKMCircuitWitness::ComposeJagged(w) if w.is_complete
                             );
                             let (program, witness_stream) = self.prepare_recursion_job(input);
-                            let (record, traces) =
-                                self.execute_and_generate_traces(&program, witness_stream, opts)?;
-                            record_and_trace_tx
-                                .lock()
-                                .unwrap()
-                                .send(RecursionJob { range, is_root, program, record, traces })
-                                .unwrap();
+                            let job = self.execute_and_generate_traces(
+                                range,
+                                is_root,
+                                program,
+                                witness_stream,
+                                opts,
+                            )?;
+                            record_and_trace_tx.lock().unwrap().send(job).unwrap();
                         } else {
                             break Ok::<(), ZKMRecursionProverError>(());
                         }
@@ -554,15 +562,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         })
     }
 
-    /// Runs `program` over `witness_stream`, then builds its dependencies and
-    /// its traces under the compress machine.
+    /// Runs `program` over `witness_stream` and builds its dependencies, then,
+    /// for a node below the root, its traces under the compress machine.
     fn execute_and_generate_traces(
         &self,
-        program: &Arc<RecursionProgram<KoalaBear>>,
+        range: crate::compress_tree::ShardRange,
+        is_root: bool,
+        program: Arc<RecursionProgram<KoalaBear>>,
         witness_stream: Vec<zkm_recursion_core::air::Block<KoalaBear>>,
         opts: ZKMProverOpts,
-    ) -> Result<(ExecutionRecord<KoalaBear>, zkm_pcs::Traces<KoalaBear>), ZKMRecursionProverError>
-    {
+    ) -> Result<RecursionJob, ZKMRecursionProverError> {
         let n_instructions = program.instruction_count();
         let run_start = std::time::Instant::now();
         let record = tracing::info_span!("execute_runtime", instructions = n_instructions)
@@ -606,10 +615,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )?;
 
         let record = records.into_iter().next().unwrap();
+        if is_root {
+            return Ok(RecursionJob::Root { range, program, record });
+        }
         let traces = tracing::debug_span!("generate traces")
             .in_scope(|| self.compress_prover.generate_traces(&record));
         match traces {
-            Ok(traces) => Ok((record, traces)),
+            Ok(traces) => Ok(RecursionJob::Node { range, program, record, traces }),
             Err(e) => {
                 tracing::error!("Failed to generate traces for recursion proof: {}", e);
                 Err(ZKMRecursionProverError::TracesGenerationError)
@@ -624,16 +636,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         job: RecursionJob,
         opts: ZKMProverOpts,
     ) -> (crate::compress_tree::ShardRange, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>) {
-        let RecursionJob { range, is_root, program, record, traces } = job;
-        if is_root {
-            drop(traces);
-            let (vk, proof) = self.prove_root_node(&program, record, opts);
-            return (
-                range,
-                zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
-                zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
-            );
-        }
+        let (range, program, record, traces) = match job {
+            RecursionJob::Root { range, program, record } => {
+                let (vk, proof) = self.prove_root_node(&program, record, opts);
+                return (
+                    range,
+                    zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
+                    zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
+                );
+            }
+            RecursionJob::Node { range, program, record, traces } => {
+                (range, program, record, traces)
+            }
+        };
         tracing::debug_span!("batch").in_scope(|| {
             let keys = tracing::debug_span!("Setup compress program").in_scope(|| {
                 self.recursion_pk_cached(&program, || {
@@ -680,7 +695,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///
     /// Every other node of the tree is proved by the compress prover under the
     /// core schedule; the root's proof is the published one, so it alone pays
-    /// for the size-tuned schedule.  Its traces are regenerated by the root
+    /// for the size-tuned schedule.  Its traces are generated by the root
     /// prover, since the two provers' trace types need not agree.
     pub fn prove_root_node(
         &self,
