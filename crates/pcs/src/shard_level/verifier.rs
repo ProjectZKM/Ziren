@@ -1977,6 +1977,11 @@ where
         })
         .collect();
     let columns = numerator.len() / 2;
+    if columns == 0 {
+        return Err(JaggedShardVerifyError::LogupGkr(
+            "circuit_output holds no lookup column".into(),
+        ));
+    }
     if lookups.len() > columns {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "circuit_output holds {columns} lookup columns, the chips have {}",
