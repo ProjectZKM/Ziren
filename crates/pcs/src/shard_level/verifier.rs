@@ -11,7 +11,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing,
 use super::constraint_folder::{
     compute_padded_row_adjustment_shard_host, eval_constraints_shard_host, ShardConstraintFolder,
 };
-use super::shard_proof::{FoldOrientation, JaggedShardProof};
+use super::shard_proof::JaggedShardProof;
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::lookup::LookupKind;
@@ -321,7 +321,6 @@ impl JaggedShardVerifier {
             &proof.opened_values,
             max_log_row_count,
             beta_seed_dim,
-            proof.fold_orientation,
             &proof.public_values,
             machine_has_pv_buses,
             global_challenge,
@@ -1819,7 +1818,6 @@ fn verify_logup_gkr_host<SC, A>(
     opened_values: &ShardOpenedValues<Challenge<SC>>,
     max_log_row_count: usize,
     beta_seed_dim: usize,
-    fold_orientation: FoldOrientation,
     public_values: &[Val<SC>],
     machine_has_pv_buses: bool,
     global: Option<&crate::logup_gkr::GlobalChallenge<Val<SC>, Challenge<SC>>>,
@@ -1958,14 +1956,7 @@ where
 
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
-        let eq_val = match fold_orientation {
-            FoldOrientation::Msb => eq_eval_host(sumcheck_point, &eval_point),
-            FoldOrientation::Lsb => {
-                let mut rev = eval_point.clone();
-                rev.reverse();
-                eq_eval_host(sumcheck_point, &rev)
-            }
-        };
+        let eq_val = eq_eval_host(sumcheck_point, &eval_point);
         let n0 = round_proof.numerator_0;
         let n1 = round_proof.numerator_1;
         let d0 = round_proof.denominator_0;

@@ -6,17 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::shard_level::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::ShardOpenedValues;
 
-/// Fold direction for the per-shard LogUp-GKR proof; the verifier
-/// reverses `eval_point` for `Lsb`. `serde(default)` falls back to
-/// `Msb` for older proof bytes.
+/// Fold direction of the per-shard LogUp-GKR proof. There is one, so the
+/// verifier checks one equation whatever a proof carries: the type keeps the
+/// field in the proof bytes (variant index 0) and no other value decodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FoldOrientation {
     /// High-order variable folded first.
     #[default]
     Msb,
-    /// Low-order variable folded first; known broken at round 1+,
-    /// retained only as a forensics opt-in.
-    Lsb,
 }
 
 /// Per-shard jagged-PCS opening. Exactly one variant is populated by
@@ -81,8 +78,8 @@ pub struct JaggedShardProof<F, EF> {
     /// paths. See [`EvaluationProof`] for the variants.
     #[serde(default)]
     pub evaluation_proof: EvaluationProof,
-    /// Fold orientation tag read by the verifier in place of an
-    /// env-var the CpuProver binary cannot see.
+    /// The fold orientation tag, a constant kept for the proof format: the
+    /// verifier does not read it.
     #[serde(default)]
     pub fold_orientation: FoldOrientation,
     /// Height-agnostic jagged-verifier groundwork:
@@ -244,17 +241,37 @@ mod tests {
         assert_eq!(proof.public_values.len(), 231);
     }
 
+    /// The orientation tag of an honest proof is the bytes it always was
+    /// (variant index 0 under bincode, the variant name under rmp), and a
+    /// proof carrying the tag of the removed `Lsb` variant does not decode.
     #[test]
-    fn jagged_shard_proof_fold_orientation_roundtrip() {
-        for orientation in [FoldOrientation::Msb, FoldOrientation::Lsb] {
-            let mut proof: JaggedShardProof<F, EF> =
-                JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 4);
-            proof.fold_orientation = orientation;
-            let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
-            let back: JaggedShardProof<F, EF> =
-                rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
-            assert_eq!(back.fold_orientation, orientation);
-        }
+    fn a_proof_with_another_fold_orientation_does_not_decode() {
+        let proof: JaggedShardProof<F, EF> =
+            JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 4);
+
+        let bytes = bincode::serialize(&proof).expect("serializes via bincode");
+        let tag = (bincode::serialized_size(&proof.public_values).unwrap()
+            + bincode::serialized_size(&proof.main_commitment).unwrap()
+            + bincode::serialized_size(&proof.logup_gkr_proof).unwrap()
+            + bincode::serialized_size(&proof.zerocheck_proof).unwrap()
+            + bincode::serialized_size(&proof.opened_values).unwrap()
+            + bincode::serialized_size(&proof.chip_heights).unwrap()
+            + bincode::serialized_size(&proof.evaluation_proof).unwrap())
+            as usize;
+        assert_eq!(bytes[tag..tag + 4], 0u32.to_le_bytes());
+        assert!(bincode::deserialize::<JaggedShardProof<F, EF>>(&bytes).is_ok());
+        let mut lsb = bytes.clone();
+        lsb[tag..tag + 4].copy_from_slice(&1u32.to_le_bytes());
+        assert!(bincode::deserialize::<JaggedShardProof<F, EF>>(&lsb).is_err());
+
+        let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
+        let at: Vec<usize> =
+            bytes.windows(3).enumerate().filter(|(_, w)| w == b"Msb").map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "the tag is the variant name, once");
+        assert!(rmp_serde::from_slice::<JaggedShardProof<F, EF>>(&bytes).is_ok());
+        let mut lsb = bytes.clone();
+        lsb[at[0]..at[0] + 3].copy_from_slice(b"Lsb");
+        assert!(rmp_serde::from_slice::<JaggedShardProof<F, EF>>(&lsb).is_err());
     }
 
     #[test]

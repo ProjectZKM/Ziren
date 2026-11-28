@@ -261,7 +261,6 @@ where
         global_challenge,
         max_log_row_count,
     } = data;
-    let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
     debug_assert!(
         main_traces.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "prove_shard_with_data: main_traces padded to a cube != the fixed \
@@ -458,7 +457,6 @@ where
         opened_values,
         chip_heights,
         evaluation_proof,
-        orientation,
     );
     proof.global_pow_witness = global_challenge.map(|g| g.pow_witness);
     proof
@@ -931,7 +929,6 @@ pub fn assemble_jagged_shard_proof<SC>(
     opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
-    orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -945,7 +942,6 @@ where
         opened_values,
         chip_heights,
         evaluation_proof,
-        orientation,
     )
 }
 
@@ -963,7 +959,6 @@ pub fn assemble_jagged_shard_proof_with_global<SC>(
     opened_values: ShardOpenedValues<Challenge<SC>>,
     chip_heights: std::collections::BTreeMap<String, usize>,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
-    orientation: FoldOrientation,
 ) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -1064,7 +1059,7 @@ where
         opened_values,
         chip_heights,
         evaluation_proof,
-        fold_orientation: orientation,
+        fold_orientation: FoldOrientation::Msb,
         row_counts,
         padding_column_counts,
         main_original_commitment,
