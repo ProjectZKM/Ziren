@@ -92,16 +92,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .collect()
     }
 
-    /// Wrap each batch of `ShardProof`s into a
-    /// `ZKMCoreWitnessValues`, taking the `JaggedShardProof` each
-    /// one carries, with the lane heads of the global hash chain before the
+    /// Wrap each `ShardProof` into its own `ZKMCoreWitnessValues` (a
+    /// normalize program verifies one shard), taking the `JaggedShardProof`
+    /// it carries, with the lane heads of the global hash chain before the
     /// shard, taken from `chain`, the context of these `shard_proofs`.
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
         shard_proofs: &[ShardProof<CoreSC>],
         chain: &GlobalChainContext,
-        batch_size: usize,
         is_complete: bool,
     ) -> Vec<ZKMCoreWitnessValues<CoreSC>> {
         let lanes = chain.heads_before_and_after_shards();
@@ -110,26 +109,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             shard_proofs.len() + 1,
             "the global chain context is of another proof"
         );
-        let mut core_inputs = Vec::new();
-        for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
-            assert_eq!(
-                batch.len(),
-                1,
-                "normalize is single-shard: get_recursion_core_inputs \
-                 must be called with batch_size=1 (one core shard per normalize); \
-                 got a batch of {} shards",
-                batch.len()
-            );
-            core_inputs.push(self.get_recursion_core_input(
-                vk,
-                &batch[0],
-                batch_idx == 0,
-                is_complete,
-                lanes[batch_idx],
-            ));
-        }
-
-        core_inputs
+        shard_proofs
+            .iter()
+            .enumerate()
+            .map(|(shard, proof)| {
+                self.get_recursion_core_input(vk, proof, shard == 0, is_complete, lanes[shard])
+            })
+            .collect()
     }
 
     /// The normalize input of one core shard proof: `global_chain_heads` holds the
@@ -348,6 +334,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// exactly the open normalize classes, one per `(chip set, preprocessed
     /// bucket, global class, main bucket)`, and the global-round shapes, and
     /// no leaf is snapped to the root geometry.
+    ///
+    /// `batch_size` is the number of deferred proofs one deferred program
+    /// verifies; a normalize program always verifies one shard.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -370,8 +359,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         inputs.extend(global_inputs.into_iter().map(ZKMCircuitWitness::GlobalJagged));
 
-        let jagged_inputs =
-            self.get_recursion_core_inputs(&vk.vk, shard_proofs, &chain, batch_size, false);
+        let jagged_inputs = self.get_recursion_core_inputs(&vk.vk, shard_proofs, &chain, false);
         tracing::debug!("emitting {} CoreJagged witness(es)", jagged_inputs.len());
         inputs.extend(jagged_inputs.into_iter().map(ZKMCircuitWitness::CoreJagged));
 

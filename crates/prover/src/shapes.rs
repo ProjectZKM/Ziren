@@ -28,23 +28,21 @@ use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
     /// A single-shard normalize/recursion shape.  Carries exactly ONE
-    /// per-shard shape: the production normalize is arity-1 (`compress` →
-    /// `get_first_layer_inputs` with first_layer_batch_size=1 →
-    /// `get_recursion_core_inputs` chunks(1) → one core shard per
-    /// `ZKMCoreWitnessValues`, hard-asserted
-    /// there).  Arity≥2 Recursion shapes would be a PHANTOM
+    /// per-shard shape: the production normalize is arity-1
+    /// (`get_recursion_core_inputs` gives one `ZKMCoreWitnessValues` per core
+    /// shard).  Arity≥2 Recursion shapes would be a PHANTOM
     /// VK class no real proof produces; cross-shard aggregation lives in
     /// COMPRESS.  The `Vec` is retained for wire-format/serde stability but
     /// the enumerator emits only `vec![one]` and the dummy/in-circuit
     /// verifier asserts len==1.
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
-    /// Deferred proofs are batched `REDUCE_BATCH_SIZE` at a time
-    /// (`get_recursion_deferred_inputs` chunks by the reduce batch
-    /// size), so the deferred program — and its VK — is a function of the
-    /// BATCH ARITY exactly like `Compress`.  Enumerating only arity 1 left
-    /// every multi-proof deferred node out of the allowlist ("vk not allowed"
-    /// in `test_e2e_with_deferred_proofs`).
+    /// A deferred program verifies one batch of deferred proofs
+    /// (`get_recursion_deferred_inputs` chunks by its `batch_size`), so the
+    /// program — and its VK — is a function of the BATCH ARITY exactly like
+    /// `Compress`.  `compress` passes a batch size of 1, one deferred proof
+    /// per program; the enumeration covers the arities
+    /// `1..=REDUCE_BATCH_SIZE`.
     Deferred(Vec<OrderedShape>),
     Shrink(OrderedShape),
     /// The compose that closes the tree: the same children as `Compress`

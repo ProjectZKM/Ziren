@@ -1183,7 +1183,6 @@ fn two_pc_lookahead_is_pinned_per_shard() -> Result<()> {
                 &vk.vk,
                 &proof.0[..1],
                 &prover.global_chain_context(&vk.vk, &proof.0[..1]),
-                1,
                 false,
             )
             .into_iter()
@@ -1341,7 +1340,6 @@ fn global_round_program_opens_the_committed_round() -> Result<()> {
         &vk.vk,
         &core.proof.0,
         &prover.global_chain_context(&vk.vk, &core.proof.0),
-        1,
         false,
     );
     for (shard, input) in shard_inputs.iter().enumerate() {
