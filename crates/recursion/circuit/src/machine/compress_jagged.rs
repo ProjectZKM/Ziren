@@ -173,6 +173,10 @@ pub fn verify_compress_jagged<C, SC, A>(
             proof_opened_values,
             rounds_witness,
         ) = proof_tuple;
+        assert!(
+            rounds_witness.preceding.is_empty(),
+            "a recursion shard proof commits no trace round before its main round"
+        );
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
         let chip_names: Vec<String> =

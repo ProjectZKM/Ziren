@@ -183,6 +183,10 @@ pub fn verify_deferred_jagged<C, SC, A>(
             proof_opened_values,
             rounds_witness,
         ) = proof_tuple;
+        assert!(
+            rounds_witness.preceding.is_empty(),
+            "a recursion shard proof commits no trace round before its main round"
+        );
 
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();

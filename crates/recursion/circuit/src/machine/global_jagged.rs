@@ -224,9 +224,8 @@ pub fn verify_global_round_jagged<C, SC, A>(
             "every table slot of a global proof holds a round with a chip",
         );
         assert!(
-            shard.round_areas.iter().sum::<usize>()
-                <= 1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA,
-            "the rounds of a global proof commit no more cells than the area a verifier accepts",
+            shard.round_areas.iter().sum::<usize>() < 1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA,
+            "the rounds of a global proof commit fewer cells than the area a verifier accepts",
         );
 
         let commitments = shard.preceding_commitments.iter().chain([&shard.main_commitment]);
