@@ -337,12 +337,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// **Key**: `ZKMGlobalRoundWitnessValues::shape_key`.
     pub global_programs_cache: Mutex<RecursionProgramCache>,
 
-    /// Built-but-unsnapped Normalize / Compose programs, so a band can be
-    /// chosen for a node AFTER its program exists — which is what deciding a
-    /// band by SIBLING agreement requires.
-    pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
-    pub compose_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
-
     /// Per-shape cache for the Compose recursion program — every
     /// interior node of the recursion tree.
     ///
@@ -496,50 +490,9 @@ impl<C: ZKMProverComponents> Drop for InFlightGuard<'_, C> {
 /// A recursion tree walks its layers in order and never returns to an
 /// earlier one, so insertion order is also least-likely-to-be-asked-again
 /// order and is what the eviction uses.
-/// Built-but-unsnapped recursion programs, keyed by input shape.
 ///
-/// A program's INSTRUCTIONS do not depend on which band it is snapped onto —
-/// `fix_shape` only sets `program.shape`.  So the expensive half (the build)
-/// can be shared across bands, and choosing a band later costs a clone rather
-/// than a rebuild.  That is what lets a node's band be decided by its SIBLINGS,
-/// which is knowable only after the program exists.
-///
-/// No `setup_digest` here: it describes the bytes of a SHAPED program, and
-/// hashing one is ~291 ms.
-#[derive(Default)]
-pub struct UnsnappedProgramCache {
-    entries: BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>,
-    order: std::collections::VecDeque<u64>,
-}
-
-impl UnsnappedProgramCache {
-    fn capacity() -> usize {
-        16
-    }
-
-    fn get(&self, key: u64) -> Option<Arc<RecursionProgram<KoalaBear>>> {
-        self.entries.get(&key).map(Arc::clone)
-    }
-
-    fn insert(
-        &mut self,
-        key: u64,
-        program: Arc<RecursionProgram<KoalaBear>>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        if let Some(v) = self.entries.get(&key) {
-            return Arc::clone(v);
-        }
-        self.entries.insert(key, Arc::clone(&program));
-        self.order.push_back(key);
-        while self.order.len() > Self::capacity() {
-            if let Some(old) = self.order.pop_front() {
-                self.entries.remove(&old);
-            }
-        }
-        program
-    }
-}
-
+/// Each entry is a program with its shape and pins set, beside its setup
+/// digest.
 #[derive(Default)]
 pub struct RecursionProgramCache {
     /// The cached program AND its `setup_digest`.  Hashing a program is not
@@ -723,8 +676,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             wrap_programs_cache: Mutex::new(RecursionProgramCache::default()),
             normalize_programs_cache: Mutex::new(RecursionProgramCache::default()),
             global_programs_cache: Mutex::new(RecursionProgramCache::default()),
-            normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
-            compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_cache: Mutex::new(RecursionPkCache::default()),
             recursion_pk_cache_ready: std::sync::Condvar::new(),
@@ -1131,13 +1082,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &self.normalize_programs_cache,
             self.verification_keyed(input.shape_key()),
             "normalize",
-            || {
-                let program = self.normalize_program_unsnapped(input);
-                self.snapped(
-                    &program,
-                    if input.is_complete { "normalize-root" } else { "normalize" },
-                )
-            },
+            || self.build_normalize_program_uncached(input),
         )
     }
 
@@ -1151,16 +1096,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &self.global_programs_cache,
             self.verification_keyed(input.shape_key()),
             "global",
-            || {
-                let program =
-                    Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
-                        self.core_prover.machine(),
-                        input,
-                        self.core_prover.machine().max_log_row_count(),
-                    ));
-                self.snapped(&program, "normalize")
-            },
+            || self.build_global_round_program_uncached(input),
         )
+    }
+
+    /// Uncached body of [`Self::global_round_program`]: the program with its
+    /// shape and pins set, which the cache audit also rebuilds.
+    fn build_global_round_program_uncached(
+        &self,
+        input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let mut program = zkm_recursion_circuit::machine::programs::build_global_round_program(
+            self.core_prover.machine(),
+            input,
+            self.core_prover.machine().max_log_row_count(),
+        );
+        self.fix_recursion_shape_kind(&mut program, "normalize");
+        Arc::new(program)
     }
 
     /// The program that verifies a global proof of `shape`, built from the
@@ -1180,7 +1132,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// `shape_key` with the prover's `vk_verification` folded in, the key
-    /// every program cache (snapped, unsnapped and on disk) is addressed by:
+    /// every program cache (in memory and on disk) is addressed by:
     /// `vk_verification` selects the instructions the program emits
     /// (`value_assertions`), so a program built under one setting is a
     /// different program, with a different verifying key, from the same shape
@@ -1193,53 +1145,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
     }
 
-    /// Clone an unsnapped program and fix its shape.
-    fn snapped(
-        &self,
-        program: &Arc<RecursionProgram<KoalaBear>>,
-        kind: &str,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut owned = (**program).clone();
-        self.fix_recursion_shape_kind(&mut owned, kind);
-        Arc::new(owned)
-    }
-
-    fn normalize_program_unsnapped(
-        &self,
-        input: &ZKMCoreWitnessValues<CoreSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let key = self.verification_keyed(input.shape_key());
-        if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
-            return p;
-        }
-        let max_log_row_count = self.core_prover.machine().max_log_row_count();
-        let program =
-            Arc::new(build_normalize_program(self.core_prover.machine(), input, max_log_row_count));
-        self.normalize_programs_unsnapped_cache.lock().unwrap().insert(key, program)
-    }
-
-    fn compose_program_unsnapped(
-        &self,
-        input: &ZKMCompressWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let key = self.verification_keyed(input.shape_key());
-        if let Some(p) = self.compose_programs_unsnapped_cache.lock().unwrap().get(key) {
-            return p;
-        }
-        let max_log_row_count = self.compress_prover.machine().max_log_row_count();
-        let program = Arc::new(build_compose_program(
-            self.compress_prover.machine(),
-            input,
-            max_log_row_count,
-            self.vk_verification,
-            PublicValuesOutputDigest::Reduce,
-        ));
-        self.compose_programs_unsnapped_cache.lock().unwrap().insert(key, program)
-    }
-
-    /// Uncached body of [`Self::recursion_program`] — separate so the
-    /// cache audit can rebuild and assert byte-equality.
-    #[cfg(test)]
+    /// Uncached body of [`Self::recursion_program`]: the program with its
+    /// shape and pins set, which the cache audit also rebuilds.
     fn build_normalize_program_uncached(
         &self,
         input: &ZKMCoreWitnessValues<CoreSC>,
@@ -1257,7 +1164,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Shared cache wrapper for the shape-keyed recursion program caches.
     ///
     /// Sound exactly when `shape_key` is injective on program bytes; under
-    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every hit rebuilds and bincode
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every hit, in memory or on disk,
+    /// rebuilds the program through no cache at all and bincode
     /// byte-compares, which turns that condition into a checked assertion.
     fn cached_program(
         &self,
@@ -1291,7 +1199,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 assert_eq!(
                     bincode::serialize(&*program).expect("serialize disk-loaded"),
                     bincode::serialize(&*fresh).expect("serialize fresh"),
-                    "{stage} DISK cache divergence at shape_key={cache_key:#018x}: a cached                      file does not match a fresh build — the binary fingerprint should have                      prevented this",
+                    "{stage} DISK cache divergence at shape_key={cache_key:#018x}: a cached \
+                     file does not match a fresh build — the binary fingerprint should have \
+                     prevented this",
                 );
             }
             return cache.lock().unwrap().insert(cache_key, program);
@@ -1301,8 +1211,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         cache.lock().unwrap().insert(cache_key, program)
     }
 
-    /// Hits and misses of both shape-keyed program caches, for the stage
-    /// report: `(normalize_hits, normalize_misses, compose_hits, compose_misses)`.
     /// `(disk_hits, disk_stores)` for the cross-process program cache.
     pub fn recursion_program_disk_counts(&self) -> (u64, u64) {
         use std::sync::atomic::Ordering;
@@ -1320,6 +1228,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         (n.dup_builds, c.dup_builds)
     }
 
+    /// Hits and misses of the normalize and compose program caches, for the
+    /// stage report: `(normalize_hits, normalize_misses, compose_hits, compose_misses)`.
     pub fn recursion_program_cache_counts(&self) -> (u64, u64, u64, u64) {
         let n = self.normalize_programs_cache.lock().unwrap();
         let c = self.compose_programs_cache.lock().unwrap();
@@ -1349,17 +1259,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &self.compose_programs_cache,
             self.verification_keyed(input.shape_key()),
             "compose",
-            || {
-                let program = self.compose_program_unsnapped(input);
-                self.snapped(&program, if input.is_complete { "compose-root" } else { "compose" })
-            },
+            || self.build_compose_program_uncached(input),
         )
     }
 
-    /// Uncached body of [`Self::compose_program`] — exposed so the
-    /// cache wrapper can rebuild under the cache audit to
-    /// assert byte-equality.
-    #[cfg(test)]
+    /// Uncached body of [`Self::compose_program`]: the program with its
+    /// shape and pins set, which the cache audit also rebuilds.
     fn build_compose_program_uncached(
         &self,
         input: &ZKMCompressWitnessValues<InnerSC>,
@@ -4155,13 +4060,7 @@ pub mod tests {
         );
         let vk_of =
             |input: &zkm_recursion_circuit::machine::ZKMGlobalRoundWitnessValues<CoreSC>| {
-                let program =
-                    Arc::new(zkm_recursion_circuit::machine::programs::build_global_round_program(
-                        machine,
-                        input,
-                        machine.max_log_row_count(),
-                    ));
-                let program = prover.snapped(&program, "normalize");
+                let program = prover.build_global_round_program_uncached(input);
                 prover.compress_prover.setup(&program).1.hash_koalabear()
             };
         assert_eq!(
