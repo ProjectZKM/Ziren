@@ -1863,12 +1863,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             return Err(MachineVerificationError::EmptyProof);
         }
 
-        let num_pv_elts = self.num_pv_elts();
-        if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts) {
+        let expected_pvs = if self.num_pv_elts() == 0 { 0 } else { crate::PROOF_MAX_NUM_PVS };
+        if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() != expected_pvs) {
             return Err(MachineVerificationError::InvalidShardProof(
                 VerificationError::JaggedShardVerifier(
                     JaggedShardVerifyError::PublicValuesLengthMismatch {
-                        expected: num_pv_elts,
+                        expected: expected_pvs,
                         got: p.public_values.len(),
                     }
                     .to_string(),

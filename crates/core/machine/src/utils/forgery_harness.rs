@@ -785,6 +785,28 @@ fn forge_committed_area_fibonacci() {
     assert!(tag.contains("the round's area is"), "rejected elsewhere: {tag}");
 }
 
+/// Append one public value to the shard, in both places the proof carries
+/// them.
+fn forge_extra_public_value(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    sp.public_values.push(Val::ZERO);
+    sp.jagged_shard_proof.as_mut().public_values.push(Val::ZERO);
+}
+
+/// A shard has exactly the machine's public value slots.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_extra_public_value_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/extra-public-value",
+        fibonacci_program(),
+        fib_stdin(),
+        true,
+        forge_extra_public_value,
+    );
+    assert!(tag.contains("public_values length mismatch"), "rejected elsewhere: {tag}");
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
