@@ -241,6 +241,29 @@ impl JaggedShardVerifier {
                     got: opening.preprocessed.local.len(),
                 });
             }
+            let name = chip.name();
+            let logup = proof.logup_gkr_proof.logup_evaluations.chip_openings.get(name.as_str());
+            let logup_main =
+                logup.and_then(|o| o.main_trace_evaluations_full.as_deref()).map_or(0, <[_]>::len);
+            if logup_main != expected_main {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
+                    chip: name,
+                    round: "LogUp-GKR main",
+                    expected: expected_main,
+                    got: logup_main,
+                });
+            }
+            let logup_prep = logup
+                .and_then(|o| o.preprocessed_trace_evaluations_full.as_deref())
+                .map_or(0, <[_]>::len);
+            if logup_prep != expected_prep {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
+                    chip: name,
+                    round: "LogUp-GKR preprocessed",
+                    expected: expected_prep,
+                    got: logup_prep,
+                });
+            }
         }
 
         let layout = super::round_layout::TraceRoundLayout::for_rounds(chips, preceding_rounds);

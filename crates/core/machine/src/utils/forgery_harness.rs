@@ -673,6 +673,53 @@ fn forge_short_zerocheck_point_fibonacci() {
     }
 }
 
+/// Append a chip's preprocessed LogUp-GKR opening to its main one, so the two
+/// vectors still concatenate to the committed columns but split elsewhere.
+fn forge_logup_opening_split(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    let openings = &mut sp.jagged_shard_proof.as_mut().logup_gkr_proof.logup_evaluations;
+    let opening = openings
+        .chip_openings
+        .values_mut()
+        .find(|o| o.preprocessed_trace_evaluations_full.as_ref().is_some_and(|p| !p.is_empty()))
+        .expect("a shard has a chip with preprocessed columns");
+    let preprocessed = opening.preprocessed_trace_evaluations_full.clone().unwrap();
+    opening.main_trace_evaluations_full.as_mut().unwrap().extend(preprocessed);
+}
+
+/// Drop a chip's preprocessed LogUp-GKR opening.
+fn forge_logup_opening_missing(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    let openings = &mut sp.jagged_shard_proof.as_mut().logup_gkr_proof.logup_evaluations;
+    let opening = openings
+        .chip_openings
+        .values_mut()
+        .find(|o| o.preprocessed_trace_evaluations_full.as_ref().is_some_and(|p| !p.is_empty()))
+        .expect("a shard has a chip with preprocessed columns");
+    opening.preprocessed_trace_evaluations_full = None;
+}
+
+/// The LogUp-GKR openings of a chip are as wide as its columns: the width
+/// check rejects any other length before the openings are used.
+#[test]
+#[ignore = "proves a real core proof (multi-second); run with --ignored"]
+fn forge_logup_opening_lengths_fibonacci() {
+    setup_logger();
+    for (label, forge, expected) in [
+        (
+            "fibonacci/logup-opening-split",
+            forge_logup_opening_split as fn(&mut _, _, &_),
+            "LogUp-GKR main opening is",
+        ),
+        (
+            "fibonacci/logup-opening-missing",
+            forge_logup_opening_missing,
+            "LogUp-GKR preprocessed opening is 0 columns",
+        ),
+    ] {
+        let tag = run_forgery(label, fibonacci_program(), fib_stdin(), true, forge);
+        assert!(tag.contains(expected), "[{label}] rejected elsewhere: {tag}");
+    }
+}
+
 // ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
