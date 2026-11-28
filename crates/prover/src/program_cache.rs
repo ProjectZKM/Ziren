@@ -32,7 +32,8 @@ pub fn program_cache_audit_enabled() -> bool {
 // SOUNDNESS: a stale program served for a shape_key whose emitted ops changed
 // would be a forged-circuit bug.  The files therefore live under a subdirectory
 // named by a fingerprint of the RUNNING EXECUTABLE — any recompile changes the
-// binary, hence the fingerprint, hence a cold directory.  A file can thus only
+// binary, hence the fingerprint, hence a cold directory.  A process that
+// cannot read its executable has no fingerprint and runs without the disk cache.  A file can thus only
 // be reused by the exact build that wrote it, which is precisely the
 // cross-block/cross-process reuse we want and nothing wider.  `ZIREN_VERIFY_
 // PROGRAM_CACHE=1` still byte-checks every in-memory hit, disk-loaded included.
@@ -49,17 +50,16 @@ pub static DISK_STORES: AtomicU64 = AtomicU64::new(0);
 /// A fingerprint of the running executable — cheap and rebuild-sensitive: any
 /// recompile rewrites the binary, changing (len, hash-of-bytes).  Non-crypto is
 /// fine; it only has to CHANGE on a code change, not resist forgery.
-fn binary_fingerprint() -> u64 {
+///
+/// An error when the executable cannot be read: a constant in its place
+/// would let different builds share one directory.
+fn binary_fingerprint() -> std::io::Result<u64> {
     use std::hash::{Hash, Hasher};
+    let bytes = std::env::current_exe().and_then(std::fs::read)?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    match std::env::current_exe().and_then(std::fs::read) {
-        Ok(bytes) => {
-            bytes.len().hash(&mut h);
-            bytes.hash(&mut h);
-        }
-        Err(_) => 0u64.hash(&mut h),
-    }
-    h.finish()
+    bytes.len().hash(&mut h);
+    bytes.hash(&mut h);
+    Ok(h.finish())
 }
 
 /// The fingerprinted directory, or `None` when the disk cache is disabled.
@@ -68,7 +68,16 @@ pub fn disk_cache_dir() -> Option<&'static PathBuf> {
     static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
     DIR.get_or_init(|| {
         let base = std::env::var_os("ZIREN_PROGRAM_CACHE_DIR")?;
-        let dir = PathBuf::from(base).join(format!("fp-{:016x}", binary_fingerprint()));
+        let fingerprint = match binary_fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(e) => {
+                tracing::warn!(
+                    "program disk cache disabled: cannot read the running executable: {e}"
+                );
+                return None;
+            }
+        };
+        let dir = PathBuf::from(base).join(format!("fp-{fingerprint:016x}"));
         if let Err(e) = std::fs::create_dir_all(&dir) {
             tracing::warn!("program disk cache: cannot create {}: {e}", dir.display());
             return None;
@@ -89,7 +98,14 @@ pub fn disk_load<F: serde::de::DeserializeOwned>(
     stage: &str,
     key: u64,
 ) -> Option<zkm_recursion_core::RecursionProgram<F>> {
-    let dir = disk_cache_dir()?;
+    load_from(disk_cache_dir()?, stage, key)
+}
+
+fn load_from<F: serde::de::DeserializeOwned>(
+    dir: &std::path::Path,
+    stage: &str,
+    key: u64,
+) -> Option<zkm_recursion_core::RecursionProgram<F>> {
     let path = entry_path(dir, stage, key);
     let bytes = std::fs::read(&path).ok()?;
     match bincode::deserialize::<zkm_recursion_core::RecursionProgram<F>>(&bytes) {
@@ -114,16 +130,28 @@ pub fn disk_load<F: serde::de::DeserializeOwned>(
 /// Write a program to disk atomically (tmp + rename), so a concurrent reader
 /// never sees a partial file.  Best-effort: a write failure is logged, not
 /// fatal — the in-memory cache still holds the program.
+///
+/// The caller stores after a load that gave nothing, so an entry already at
+/// the path is one the load rejected, or one another process of this build
+/// wrote meanwhile: the rename replaces it either way.
 pub fn disk_store<F: serde::Serialize>(
     stage: &str,
     key: u64,
     program: &zkm_recursion_core::RecursionProgram<F>,
 ) {
-    let Some(dir) = disk_cache_dir() else { return };
-    let path = entry_path(dir, stage, key);
-    if path.exists() {
-        return;
+    if let Some(dir) = disk_cache_dir() {
+        store_into(dir, stage, key, program);
     }
+}
+
+fn store_into<F: serde::Serialize>(
+    dir: &std::path::Path,
+    stage: &str,
+    key: u64,
+    program: &zkm_recursion_core::RecursionProgram<F>,
+) {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let path = entry_path(dir, stage, key);
     let bytes = match bincode::serialize(program) {
         Ok(b) => b,
         Err(e) => {
@@ -131,7 +159,11 @@ pub fn disk_store<F: serde::Serialize>(
             return;
         }
     };
-    let tmp = dir.join(format!("{stage}-{key:016x}.{}.tmp", std::process::id()));
+    let tmp = dir.join(format!(
+        "{stage}-{key:016x}.{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
     if std::fs::write(&tmp, &bytes).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
         DISK_STORES.fetch_add(1, Ordering::Relaxed);
     } else {
@@ -549,5 +581,33 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         self.fix_recursion_shape_kind(&mut program, "deferred");
         Arc::new(program)
+    }
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::{entry_path, load_from, store_into};
+    use p3_koala_bear::KoalaBear;
+    use zkm_recursion_core::RecursionProgram;
+
+    /// A store after a rejected load replaces the entry: the next load gives
+    /// the stored program again, and no tmp file is left behind.
+    #[test]
+    fn store_replaces_a_corrupt_entry() {
+        let dir = std::env::temp_dir().join(format!("zkm-program-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = RecursionProgram::<KoalaBear> { total_memory: 7, ..Default::default() };
+        let stored = bincode::serialize(&program).unwrap();
+        store_into(&dir, "compose", 5, &program);
+        let path = entry_path(&dir, "compose", 5);
+        assert_eq!(std::fs::read(&path).unwrap(), stored);
+
+        std::fs::write(&path, &stored[..stored.len() / 2]).unwrap();
+        assert!(load_from::<KoalaBear>(&dir, "compose", 5).is_none());
+        store_into(&dir, "compose", 5, &program);
+        let loaded = load_from::<KoalaBear>(&dir, "compose", 5).expect("the replaced entry loads");
+        assert_eq!(bincode::serialize(&loaded).unwrap(), stored);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
