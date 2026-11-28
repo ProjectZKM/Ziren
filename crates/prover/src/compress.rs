@@ -405,22 +405,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 _ => 0,
             })
             .sum();
-        let mut chain = crate::compress_tree::ShardChain::with_global_rounds(global_rounds as u64);
+        let mut ranges =
+            crate::compress_tree::ProofRangeAllocator::with_global_rounds(global_rounds as u64);
         let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
             first_layer_inputs
                 .into_iter()
                 .map(|input| {
                     let range = match &input {
-                        ZKMCircuitWitness::DeferredJagged(_) => chain.deferred(),
+                        ZKMCircuitWitness::DeferredJagged(_) => ranges.deferred(),
                         ZKMCircuitWitness::GlobalJagged(input) => {
-                            chain.global_rounds(input.rounds() as u64)
+                            ranges.global_rounds(input.rounds() as u64)
                         }
-                        _ => chain.core(),
+                        _ => ranges.core(),
                     };
                     (range, input)
                 })
                 .collect();
-        let full_range = chain.full_range();
+        let full_range = ranges.full_range();
 
         let span = tracing::Span::current().clone();
         let (vk, proof) = thread::scope(|s| -> Result<_, VkNotAllowed> {

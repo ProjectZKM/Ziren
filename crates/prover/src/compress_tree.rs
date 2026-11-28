@@ -31,7 +31,6 @@ use std::collections::{BTreeMap, VecDeque};
 ///   precompile   (shard 1, nothing else)   <- degenerate: start == end
 ///   deferred     advances `deferred_proof`
 ///   core         advances `shard`
-///   memory       advances `init_addr` / `finalize_addr`
 /// ```
 ///
 /// Precompile shards all share ONE degenerate range, which is what guarantees
@@ -53,10 +52,6 @@ pub struct ShardBoundary {
     pub global_round: u64,
     /// The core shard index: the time coordinate of the range.
     pub shard: u64,
-    /// MemoryInit address reached.
-    pub init_addr: u64,
-    /// MemoryFinalize address reached.
-    pub finalize_addr: u64,
     /// How many deferred proofs have been absorbed.
     pub deferred_proof: u64,
 }
@@ -67,13 +62,7 @@ impl ShardBoundary {
     /// Shard numbering starts at 1, so a precompile range `[initial, initial]`
     /// is degenerate but still ordered ahead of every core shard.
     pub fn initial() -> Self {
-        Self {
-            global_round: Self::GLOBAL_ROUNDS_UNWOUND,
-            shard: 1,
-            init_addr: 0,
-            finalize_addr: 0,
-            deferred_proof: 0,
-        }
+        Self { global_round: Self::GLOBAL_ROUNDS_UNWOUND, shard: 1, deferred_proof: 0 }
     }
 
     /// [`Self::global_round`] once every global proof is behind.
@@ -142,107 +131,65 @@ impl ShardRange {
     }
 }
 
-/// Hands out the first level's ranges in execution order, so the chain they
-/// form is contiguous by construction.
+/// Hands each first-level proof job of `compress` the next consecutive range,
+/// so that the tree, which merges neighbours and never asks what a proof is,
+/// reduces the jobs in their logical order.
 ///
-/// This is the piece that lets one tree reduce proofs of DIFFERENT KINDS. The
-/// tree merges neighbours and nothing else; it never asks what a proof is. That
-/// only works if every first-level proof's range starts exactly where the
-/// previous one ended, across precompile, deferred, core and memory alike —
-/// which is easy to get wrong by hand and impossible to get wrong here, because
-/// each call advances one coordinate from the cursor and returns the span it
-/// just crossed.
+/// The ranges are scheduling metadata assigned by the host. They are never
+/// read from a proof's public values and they hash nothing: this is not the
+/// global hash chain. That consecutive proofs continue one another is enforced
+/// by the recursion circuit, not by these ranges.
 ///
-/// The resulting order is:
+/// `compress` asks for the ranges in the order of its first-layer inputs:
 ///
 /// ```text
-///   global | precompile | deferred | core | memory
+///   global rounds | core shards | deferred proofs
 /// ```
 ///
-/// Precompiles come first because their range is DEGENERATE — every one of them
-/// is `[cursor, cursor]`, so any two are mutually adjacent and a batch of them
-/// can always start reducing. Give them a nonzero span and a lone precompile
-/// proof could sit forever with no neighbour.
+/// Each call advances one coordinate from where the previous call ended and
+/// returns the span it crossed.
 #[derive(Debug)]
-pub struct ShardChain {
+pub struct ProofRangeAllocator {
     start: ShardBoundary,
-    cursor: ShardBoundary,
+    next: ShardBoundary,
 }
 
-impl Default for ShardChain {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ShardChain {
-    pub fn new() -> Self {
-        Self::with_global_rounds(0)
-    }
-
-    /// A chain that starts with the global proofs of `rounds` global rounds.
+impl ProofRangeAllocator {
+    /// An allocator whose first ranges are the global proofs of `rounds`
+    /// global rounds.
     pub fn with_global_rounds(rounds: u64) -> Self {
         let start = ShardBoundary::before_global_rounds(rounds);
-        Self { start, cursor: start }
+        Self { start, next: start }
     }
 
     /// The global proofs of the next `count` rounds down.
     pub fn global_rounds(&mut self, count: u64) -> ShardRange {
-        let start = self.cursor;
+        let start = self.next;
         debug_assert!(
             count <= ShardBoundary::GLOBAL_ROUNDS_UNWOUND - start.global_round,
-            "the chain holds more global proofs than global rounds"
+            "more global proofs are allocated than global rounds"
         );
-        self.cursor.global_round += count;
-        ShardRange::new(start, self.cursor)
-    }
-
-    /// Where the chain currently stands.
-    pub fn cursor(&self) -> ShardBoundary {
-        self.cursor
-    }
-
-    /// A precompile proof: no coordinate advances.
-    pub fn precompile(&mut self) -> ShardRange {
-        ShardRange::new(self.cursor, self.cursor)
+        self.next.global_round += count;
+        ShardRange::new(start, self.next)
     }
 
     /// One deferred proof.
     pub fn deferred(&mut self) -> ShardRange {
-        let start = self.cursor;
-        self.cursor.deferred_proof += 1;
-        ShardRange::new(start, self.cursor)
+        let start = self.next;
+        self.next.deferred_proof += 1;
+        ShardRange::new(start, self.next)
     }
 
     /// One core shard.
     pub fn core(&mut self) -> ShardRange {
-        let start = self.cursor;
-        self.cursor.shard += 1;
-        ShardRange::new(start, self.cursor)
+        let start = self.next;
+        self.next.shard += 1;
+        ShardRange::new(start, self.next)
     }
 
-    /// A memory-init shard reaching address `addr`.
-    pub fn memory_init(&mut self, addr: u64) -> ShardRange {
-        let start = self.cursor;
-        debug_assert!(addr >= self.cursor.init_addr, "memory init addresses must not go backwards");
-        self.cursor.init_addr = addr;
-        ShardRange::new(start, self.cursor)
-    }
-
-    /// A memory-finalize shard reaching address `addr`.
-    pub fn memory_finalize(&mut self, addr: u64) -> ShardRange {
-        let start = self.cursor;
-        debug_assert!(
-            addr >= self.cursor.finalize_addr,
-            "memory finalize addresses must not go backwards"
-        );
-        self.cursor.finalize_addr = addr;
-        ShardRange::new(start, self.cursor)
-    }
-
-    /// The span the whole chain covers — what the root proof must attest to.
+    /// The span of every range handed out: what the root proof covers.
     pub fn full_range(&self) -> ShardRange {
-        ShardRange::new(self.start, self.cursor)
+        ShardRange::new(self.start, self.next)
     }
 }
 
@@ -517,20 +464,20 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_of_mixed_kinds_reduces_as_one_run() {
-        let mut chain = ShardChain::new();
+    fn ranges_of_mixed_kinds_reduce_as_one_run() {
+        let mut allocator = ProofRangeAllocator::with_global_rounds(3);
         let ranges = [
-            chain.precompile(),
-            chain.precompile(),
-            chain.deferred(),
-            chain.core(),
-            chain.core(),
-            chain.memory_init(4096),
+            allocator.global_rounds(2),
+            allocator.global_rounds(1),
+            allocator.core(),
+            allocator.core(),
+            allocator.deferred(),
+            allocator.deferred(),
         ];
-        let full = chain.full_range();
+        let full = allocator.full_range();
 
         for pair in ranges.windows(2) {
-            assert_eq!(pair[0].end, pair[1].start, "chain broken at {:?}", pair[0]);
+            assert_eq!(pair[0].end, pair[1].start, "ranges not consecutive at {:?}", pair[0]);
         }
 
         let mut tree = CompressTree::<usize>::new(2);
@@ -550,14 +497,13 @@ mod tests {
                 queue.push_back((proofs.range(), 0));
             }
         }
-        assert_eq!(root, Some(full), "the mixed chain must reduce to the full range");
+        assert_eq!(root, Some(full), "the mixed ranges must reduce to the full range");
     }
 
     #[test]
     fn precompiles_are_mutually_adjacent() {
-        let mut chain = ShardChain::new();
-        let a = chain.precompile();
-        let b = chain.precompile();
+        let a = ShardRange::precompile();
+        let b = ShardRange::precompile();
         assert_eq!(a, b);
         assert_eq!(a.start, a.end);
 
@@ -571,9 +517,9 @@ mod tests {
 
     #[test]
     fn deferred_sorts_ahead_of_every_core_shard() {
-        let mut chain = ShardChain::new();
-        let deferred = chain.deferred();
-        let core = chain.core();
+        let mut allocator = ProofRangeAllocator::with_global_rounds(0);
+        let deferred = allocator.deferred();
+        let core = allocator.core();
         assert!(deferred.start < core.start, "deferred must sort before core");
         assert_eq!(deferred.end, core.start, "and hand straight over to it");
     }
